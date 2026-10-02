@@ -445,11 +445,34 @@ def test_picking_a_past_session_moves_its_step_onto_the_picker_and_disables_live
     assert panel._read_btn.isEnabled()
 
 
-def test_the_session_picker_is_never_narrower_than_the_id_it_shows(monkeypatch):
+def _rounds(live_round: bool) -> list:
+    """A capture task with two rounds taken; the live entry a round of its own (`cap_003 ●`) or
+    the next one, not opened yet («next round ●»)."""
+    from autosound_tcc.state.models import MeasSession
+
+    live = (MeasSession(id="cap_003", version={"en": "live"}, groups=(), series="3",
+                        round_id="cap_003") if live_round
+            else MeasSession(id="v3", version={"en": "live"}, groups=(), series="3"))
+    return [live,
+            MeasSession(id="cap_002", version={"en": "past"}, groups=(), series="2",
+                        round_id="cap_002"),
+            MeasSession(id="cap_001", version={"en": "past"}, groups=(), series="1",
+                        round_id="cap_001")]
+
+
+def _is_round_id(text: str) -> bool:
+    import re
+
+    return re.fullmatch(r"cap_\d+( ●)?", text) is not None
+
+
+@pytest.mark.parametrize("live_round", [True, False], ids=["round-open", "next-round"])
+def test_the_session_picker_is_never_narrower_than_the_id_it_shows(monkeypatch, live_round):
     """`minimumContentsLength` is counted in `x` widths and a round id is not made of `x`: the
-    picker's floor is its widest row, measured off the rows, and at that floor every id draws
-    whole -- refilled in another language too, where Qt's own cached minimum kept the first
-    rows' width (VM-15, Ruling 30: the rounds must be told apart). Under the window's sheet."""
+    picker's floor is its widest round id, measured off the rows, and at that floor every id
+    draws whole -- refilled in another language too, where Qt's own cached minimum kept the
+    first rows' width (VM-15, Ruling 30). The live phrase («next round ●») is not an id and may
+    give way to «…» (Ruling 30 (c)). Under the window's sheet."""
     from tests import _windows
 
     _app()
@@ -459,14 +482,20 @@ def test_the_session_picker_is_never_narrower_than_the_id_it_shows(monkeypatch):
     try:
         for lang in ("en", "de"):
             i18n.set_language(lang)
-            panel.set_sessions(MEAS_SESSIONS)
+            panel.set_sessions(_rounds(live_round))
             combo.ensurePolished()
             combo.resize(combo.minimumSizeHint())
             for index in range(combo.count()):
-                if combo.itemText(index):
-                    combo.setCurrentIndex(index)
-                    assert combo.fit_text() == combo.itemText(index), (
-                        lang, combo.width(), combo.fit_text())
+                text = combo.itemText(index)
+                if not text:
+                    continue
+                combo.setCurrentIndex(index)
+                shown = combo.fit_text()
+                if _is_round_id(text):
+                    assert shown == text, (lang, combo.width(), shown)
+                else:
+                    assert shown == text or (shown.endswith("…") and text.startswith(shown[:-1])
+                                             and len(shown) > 1), (lang, shown)
     finally:
         i18n.set_language("en")
 
@@ -1342,15 +1371,17 @@ def _head_row(panel) -> list:
 
 
 @pytest.mark.parametrize("lang, stretch", [("en", 100), ("en", 141), ("de", 141)])
+@pytest.mark.parametrize("live_round", [True, False], ids=["round-open", "next-round"])
 def test_nothing_in_the_head_row_overlaps_and_the_round_select_is_never_cut(monkeypatch, lang,
-                                                                          stretch):
+                                                                          stretch, live_round):
     """VM-15 (the Windows VM, English): «Protection» was drawn over the round select «next round ●»
     («Захист» fitted): the right column went down to a flat 200 px, below what the row's widgets
     held as theirs, and the layout put one on the other. The Arbiter: «можна назву на кнопці
     скоротити до Prot...». The button gives way, elided by its font's metrics down to «…», and
-    while cut its hover names it; the select keeps its widest id whole -- his own rule, «rounds
+    while cut its hover names it; the select keeps its round ids whole -- his own rule, «rounds
     must be told apart» (2026-08-11, 2026-08-21) -- and the right column is never narrower than
-    that row (Ruling 30). And the select's OPEN list read «next…nd ●», cut in the middle: a row
+    that row (Ruling 30); the live phrase, «next round ●», is no id and may give way (Ruling 30
+    (c)). And the select's OPEN list read «next…nd ●», cut in the middle: a row
     of the list reads whole. In the real window under its sheet, at its own minimum and with the
     right column dragged to its floor, in the Mac's font and stretched to the Windows runner's."""
     from PySide6.QtGui import QFont, QFontDatabase
@@ -1378,7 +1409,7 @@ def test_nothing_in_the_head_row_overlaps_and_the_round_select_is_never_cut(monk
         if lang != "en":
             window._on_language_selected(lang)
         panel = window._meas_panel
-        panel.set_sessions(MEAS_SESSIONS)
+        panel.set_sessions(_rounds(live_round))
         window.resize(window.minimumSizeHint().width(), 820)
         settle()
         combo, button = panel._session_combo, panel._protective_btn
@@ -1397,16 +1428,24 @@ def test_nothing_in_the_head_row_overlaps_and_the_round_select_is_never_cut(monk
                     f"{left.geometry().right()} runs into {type(right).__name__} from "
                     f"{right.geometry().left()}")
             for index in range(combo.count()):
-                if combo.itemText(index):
-                    combo.setCurrentIndex(index)
-                    assert combo.fit_text() == combo.itemText(index), (said, combo.fit_text())
+                text = combo.itemText(index)
+                if not text:
+                    continue
+                combo.setCurrentIndex(index)
+                shown = combo.fit_text()
+                if _is_round_id(text):
+                    assert shown == text, (said, shown)
+                else:
+                    assert shown == text or (shown.endswith("…") and text.startswith(shown[:-1])
+                                             and len(shown) > 1), (said, shown)
             # The button gives way first, and never to nothing: whole or cut with «…», and
             # while cut its hover names it in full.
             shown, whole = button.fit_text(), i18n.t("protBtn")
             assert shown and (shown == whole or (
                 shown.endswith("…") and whole.startswith(shown[:-1]))), (said, shown)
             button.grab()
-            assert (whole in button.hover_tip.text()) == (shown != whole), (
+            # The bold label, not the word: German's tip says «Schutzfilter» (the re-review, N2).
+            assert (f"<b>{whole}</b>" in button.hover_tip.text()) == (shown != whole), (
                 said, shown, button.hover_tip.text())
 
         combo.showPopup()

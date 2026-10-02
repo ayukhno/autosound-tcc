@@ -4014,6 +4014,54 @@ def test_the_full_window_at_its_minimum_reads_the_output_table_and_its_tabs(
         i18n.set_language("en")
 
 
+# The stretched font in both languages: there the header holds the window's floor (1317-1328 px),
+# and the tabs elide at it with the flat 200-px column too -- tcc#106's own test skips that font.
+@pytest.mark.parametrize(("stretch", "lang"), [(100, "uk"), (100, "de"), (141, "uk"), (141, "de")])
+def test_a_round_open_on_two_thirds_of_a_1512_screen_leaves_the_centre_its_tabs(
+        tmp_path, monkeypatch, stretch, lang):
+    """VM-15's re-review (N1): the right column's floor follows the measurement panel's head row,
+    and on a 1512 screen the window's floor sits at two thirds of it (tcc#106), so every pixel the
+    column gained came out of the centre: 588 -> 499-536 px, and the detail tabs read «Табли…»,
+    «Ріве…» at the width the Arbiter signed off on (finding 114). Ruling 30 (c): only the round
+    ids are held whole, the live phrase may give way, and the row gives up the room it did not
+    use. With the Arbiter's rig open and a round open in the capture task, at the window's own
+    floor: the floor is still two thirds of the screen, the tabs read whole, every round id reads
+    whole, and nothing in the panel's head row overlaps."""
+    from tests.test_measurement_panel import _head_row, _is_round_id, _rounds
+
+    app = _app()
+    before = QFont(app.font())
+    if stretch != 100:
+        wide = QFont(before)
+        wide.setStretch(stretch)
+        app.setFont(wide)
+    try:
+        window = _open_the_arbiters_rig(tmp_path, monkeypatch, screen=1512)
+        monkeypatch.setattr(window, "_refresh_cli_catalogue", lambda force=False: None)
+        window._on_language_selected(lang)
+        panel = window._meas_panel
+        panel.set_sessions(_rounds(live_round=True))
+        _settle_at(window, 200)
+        assert window.width() == window.minimumSizeHint().width(), "at the window's floor"
+        said = f"{lang} at {stretch}: window {window.width()} px, centre {window._center.width()}"
+        if stretch == 100:
+            assert window.width() <= 1512 * 2 // 3, said
+            tabs = [cut for cut in _what_does_not_read(window) if " reads " in cut]
+            assert not tabs, f"{said}: {tabs}"
+        combo = panel._session_combo
+        for index in range(combo.count()):
+            if _is_round_id(combo.itemText(index)):
+                combo.setCurrentIndex(index)
+                assert combo.fit_text() == combo.itemText(index), (said, combo.fit_text())
+        row = _head_row(panel)
+        for left, right in zip(row, row[1:]):
+            assert left.geometry().right() < right.geometry().left(), (
+                f"{said}: {type(left).__name__} runs into {type(right).__name__}")
+    finally:
+        app.setFont(before)
+        i18n.set_language("en")
+
+
 def test_control_mode_leaves_the_full_window_its_own_minimum(tmp_path, monkeypatch):
     """tcc#106: the full window's floor belongs to the full window. Control mode (a layout of its
     own, #107) is not held to it, and coming back gives the full window its floor again."""

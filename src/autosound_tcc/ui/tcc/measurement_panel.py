@@ -518,13 +518,18 @@ def _picker_label(session, live: bool = False) -> str:
     «не розумію ідеї "серія х" — навіщо вона, як є cap_xxx»). The live entry with no round open yet
     is the next round; the series `_N` goes to the hover, where it explains the titles' number.
     A session with neither (an older journal, the fixture) keeps its series name."""
-    round_id = getattr(session, "round_id", "") or ("" if _SERIES_ID.match(session.id) else session.id)
+    round_id = _round_id(session)
     if round_id:
         return round_id
     if live:
         return i18n.t("measNextRound")
     series = _series_of(session)
     return i18n.t("seriesItem").format(v=series) if series else session.id
+
+
+def _round_id(session) -> str:
+    """The round a session names, `cap_NNN`, or nothing: a series (`_N`) is not one."""
+    return getattr(session, "round_id", "") or ("" if _SERIES_ID.match(session.id) else session.id)
 
 
 def _series_of(session) -> str:
@@ -616,10 +621,10 @@ class MeasurementPanel(QWidget):
         layout.addWidget(self._status_label)
 
         head_row = QHBoxLayout()
-        # 6, not 8: at the right column's 200-px floor, in the Windows runner's wider font, the
-        # four controls' floors and the gaps between them came to a few pixels more than the row
-        # (VM-15).
-        head_row.setSpacing(6)
+        # 4, not 8: the right column's floor is this row's (VM-15, Ruling 30), and at two thirds of
+        # a 1512 screen every pixel of it comes out of the full window's centre, whose detail tabs
+        # read «Табли…» with the wider gaps (Ruling 30 (c)).
+        head_row.setSpacing(4)
         # Session picker (user request 2026-07-28): a dropdown, ~1/5 of the row, a gap, then the
         # title banner taking the rest -- picking a past series switches that banner from "what to
         # capture" to "which step it was used for" (see `show_session`). Stretch 1:4 (not a fixed
@@ -627,17 +632,17 @@ class MeasurementPanel(QWidget):
         # A `MiniCombo` (VM-15): its open list as wide as its widest row — a plain combo's list is
         # the closed box's width, and read «next…nd ●», cut in the middle.
         self._session_combo = mini_combo()
+        self._session_combo.setProperty("class", "mini-select round-select")
         self._fill_session_combo()
         self._session_combo.currentIndexChanged.connect(
             lambda _idx: self.show_session(self._session_combo.currentData())
         )
         # A round id is `cap_001` plus the live-marker dot, and at stretch 1 against the banner's
         # 4 it was eliding to "cap_00…" — a picker whose entries cannot be told apart (user,
-        # 2026-08-11 and again 2026-08-21). Its floor is its widest row whole: `AdjustToContents`
-        # measures the rows themselves, where `minimumContentsLength` counted `x` widths and came
-        # to less than `cap_002 ●`. Never cut, then: «Protection» gives way, and the right column
-        # is never narrower than this row needs (`floorChanged`, VM-15, Ruling 30).
-        self._session_combo.holds_its_widest_row()
+        # 2026-08-11 and again 2026-08-21). Its floor is its widest round id whole, measured off
+        # the rows (`minimumContentsLength` counted `x` widths, less than `cap_002 ●`). Never cut,
+        # then: «Protection» gives way, and the right column is never narrower than this row needs
+        # (`floorChanged`, VM-15, Ruling 30). The live phrase is not an id and may give way.
         self._session_tip = attach_tip(self._session_combo)
         head_row.addWidget(self._session_combo)
 
@@ -849,16 +854,24 @@ class MeasurementPanel(QWidget):
         """What is being taken now, a separator, then what was taken before (finding 33) -- the
         two kinds in one list used to sit together with nothing between them."""
         self._session_combo.clear()
+        ids = []
         for index, session in enumerate(self._sessions):
             if index == 1:
                 self._session_combo.insertSeparator(self._session_combo.count())
             marker = " ●" if index == 0 else ""
-            self._session_combo.addItem(_picker_label(session, live=index == 0) + marker, session.id)
+            label = _picker_label(session, live=index == 0) + marker
+            self._session_combo.addItem(label, session.id)
+            if _round_id(session):
+                ids.append(label)
             series = _series_of(session)
             if series:
                 self._session_combo.setItemData(
                     self._session_combo.count() - 1,
                     i18n.t("measRoundSeriesTip").format(v=series), Qt.ItemDataRole.ToolTipRole)
+        # Only the round ids are held whole (Ruling 30 (c)): «next round ●» / «новий раунд ●»
+        # / «nächste Runde ●» is a phrase no id can be taken for, and held whole it took the full
+        # window's centre's room at two thirds of a 1512 screen.
+        self._session_combo.holds_whole(ids)
 
     def viewing_session_id(self) -> str:
         """Which capture series the grid is showing. The curve window scopes its delay bank by

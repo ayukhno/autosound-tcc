@@ -51,6 +51,8 @@ class MiniCombo(QComboBox):
         self._cap: int | None = None
         #: Whether the floor is the ask itself, the widest row whole (`holds_its_widest_row`).
         self._holds_widest = False
+        #: The rows the floor holds whole when only some are held (`holds_whole`), or None.
+        self._held_rows: list[str] | None = None
 
     def holds_its_widest_row(self) -> None:
         """Make the floor the box's own ask, its widest row whole (`AdjustToContents`).
@@ -62,10 +64,25 @@ class MiniCombo(QComboBox):
         self._holds_widest = True
         self.updateGeometry()
 
+    def holds_whole(self, rows: list[str]) -> None:
+        """Make the floor the widest of `rows` whole, and let any other row the box shows elide
+        below it -- «…» where the floor would leave none. The round select holds its round ids
+        whole and lets the live phrase, «новий раунд ●», which no id can be taken for, give way:
+        held whole too, it took 37 px more of the right column, and the full window's centre
+        lost them at two thirds of a 1512 screen (VM-15, Ruling 30 (c))."""
+        self._held_rows = list(rows)
+        self.updateGeometry()
+
     def minimumSizeHint(self) -> QSize:  # noqa: N802 (Qt override)
         hint = super().minimumSizeHint()
         if self._holds_widest:
             hint.setWidth(self._own_ask().width())
+        elif self._held_rows is not None:
+            asks = self._own_ask()
+            metrics = QFontMetricsF(self.font())
+            widest = max((max(metrics.horizontalAdvance(row), metrics.boundingRect(row).right())
+                          for row in self._held_rows), default=metrics.horizontalAdvance("…"))
+            hint.setWidth(asks.width() - self._room(asks) + math.ceil(widest))
         return hint
 
     def takes_spare_room(self) -> None:
@@ -580,6 +597,14 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         padding here squeezed the closed box's own text against the arrow */
         padding: 4px 22px 4px 9px;
         font-size: 12px;
+    }}
+    /* .round-select — the measurement panel's round select. The drop-down's own 18 px is already
+    taken out of the edit field (VM-6's measure), and the 22 px of right padding above reserves
+    them a second time: 18 px no round id can use, carried by the right column's floor, which
+    holds that select's widest id whole -- and at two thirds of a 1512 screen the full window's
+    centre paid for them (VM-15, Ruling 30 (c)). */
+    QComboBox[class~="round-select"] {{
+        padding-right: 4px;
     }}
     QComboBox[class~="mini-select"]:hover {{
         border-color: {t.accent_dim};
