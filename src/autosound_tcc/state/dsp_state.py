@@ -489,8 +489,10 @@ class ProjectView:
                     status = str(row_raw.get("status") or "proposed")
                     statuses[status] = statuses.get(status, 0) + 1
             tier_key = "channels" if gid == "physical_outputs" else gid
+            # A row's channel as the method's own sheet finds it: the key as written, else its
+            # reading in the one notation (hub #233) -- an old `tw_R` row is the `tw-R` channel.
             rows = [
-                _build_row(name, row_raw, identities.get(name, {}), hw_controls)
+                _build_row(name, row_raw, project_view.channel_of(identities, name), hw_controls)
                 for name, row_raw in (row_source or {}).items()
             ]
             # A slot the rig HAS but nothing is wired to has no ledger row -- there is no tuning
@@ -508,7 +510,8 @@ class ProjectView:
             # fourteen outputs where the car has eight. Deduplicate by the code, which is the one
             # name a channel has exactly one of, and build the row under the code rather than
             # under whichever alias came first alphabetically.
-            seen_codes = {str(identities.get(row.id, {}).get("code") or row.id) for row in rows}
+            seen_codes = {str(project_view.channel_of(identities, row.id).get("code") or row.id)
+                          for row in rows}
             for key, entry in sorted(identities.items()):
                 code = str(entry.get("code") or key)
                 if key in seen or code in seen_codes or entry.get("tier") != tier_key:

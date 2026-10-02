@@ -598,6 +598,43 @@ def test_a_row_the_method_banked_under_the_hyphen_is_the_channel_not_a_second_on
     assert [(r.id, r.name, r.slot) for r in rows] == [("w-L", "w_L", "C")]
 
 
+def test_a_ledger_row_binds_to_the_channel_the_methods_own_sheet_binds_it_to(tmp_path):
+    """hub #233 (TCC-045), the method's v3.1.0: its DSP sheet joins a channel and a ledger row in
+    both notations — `project_channels` keys a `w_L` channel by `w-L` too, and a row the literal
+    key misses is looked up in the one notation, so an old `tw_R` row finds a `tw-R` channel. TCC
+    binds each row to the channel the method's sheet does, and to no other. A `sw-f` row v3.0.65
+    banked for the channel `sw_f` binds to none in either (v3.0.66 reads only a driver's side,
+    hub #232): its values stay on a row of their own and the channel is drawn beside it with no
+    values, while `contract.py check` names the row as that version's spelling."""
+    import re
+
+    from autosound_tcc.core import vendor_loader
+    from autosound_tcc.state import project_view
+
+    (tmp_path / "project.json").write_text(json.dumps({"channels": [
+        {"code": "w_L", "id": "w_L", "slot": "B", "tier": "channels"},
+        {"code": "tw-R", "slot": "D", "tier": "channels"},
+        {"code": "sw_f", "slot": "K", "tier": "channels"},
+    ]}), encoding="utf-8")
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output", "fields": ["gain_db"]},
+    ]}}
+    ledger = {"preset": "x", "sample_rate": 96000, "channels": {
+        "w-L": {"gain_db": -3.0}, "tw_R": {"gain_db": -1.0}, "sw-f": {"gain_db": 0.0}}}
+    vstate = vendor_loader.load_dsp_state()
+    sheet = vstate.render_state(ledger, channels=vstate.project_channels(str(tmp_path)))
+    by_method = {row: re.search(rf"^\| {re.escape(row)} \| (\S+) \|", sheet, re.M).group(1)
+                 for row in ledger["channels"]}
+
+    view = ProjectView.from_dict(ledger, profile, channels=project_view.load_channels(tmp_path))
+
+    rows = view.groups[0].rows
+    by_tcc = {r.id: r.slot or "—" for r in rows if r.id in ledger["channels"]}
+    assert by_tcc == by_method == {"w-L": "B", "tw_R": "D", "sw-f": "—"}, (by_tcc, by_method)
+    assert [(r.id, r.slot) for r in rows] == [
+        ("w-L", "B"), ("tw_R", "D"), ("sw-f", None), ("sw_f", "K")]
+
+
 def test_the_project_file_is_read_as_utf8_and_not_as_the_machines_locale(tmp_path, monkeypatch):
     """A Ukrainian project blanked the DSP panel and the target curve on Windows (autosound-tcc#4).
 

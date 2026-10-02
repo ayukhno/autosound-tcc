@@ -1,6 +1,6 @@
 """Reading the skill's `project.json` into the left panel's System/Project-params shapes
 (state/project_view.py, SCR-015/016). No vendored submodule needed -- this is plain JSON reading,
-except the one-notation names `load_channels` asks the method for (#126), tested both ways.
+except the channel map `load_channels` takes from the method (#126, hub #233), tested both ways.
 """
 
 from __future__ import annotations
@@ -132,6 +132,8 @@ def test_load_channels_with_no_method_keeps_the_literal_names(tmp_path, monkeypa
     def missing():
         raise vendor_loader.VendorNotInitializedError("no skill here")
 
+    # No method at all: neither its channel map (hub #233) nor its notation can be asked.
+    monkeypatch.setattr(vendor_loader, "load_dsp_state", missing)
     monkeypatch.setattr(vendor_loader, "load_naming", missing)
     _write(tmp_path, {"channels": [{"code": "w_L", "slot": "C"}]})
 
