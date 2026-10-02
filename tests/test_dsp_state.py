@@ -577,6 +577,27 @@ def test_a_renamed_channel_is_one_row_in_the_rig_not_three():
     assert [r.name for r in rows] == ["w-L"], "one channel, under the name it goes by now"
 
 
+def test_a_row_the_method_banked_under_the_hyphen_is_the_channel_not_a_second_one(tmp_path):
+    """#126 (#112's review, Minor 4): a channel written `w_L` in `project.json` — code and id —
+    and banked by the method as `w-L` (from v3.0.65 a channel with no row yet gets one under the
+    hyphen, `apply._row_key`). Joined literally, the `w-L` row had no identity, and the rig drew
+    the channel again from `project.json`: two rows for one output."""
+    from autosound_tcc.state import project_view
+
+    (tmp_path / "project.json").write_text(json.dumps({"channels": [
+        {"code": "w_L", "slot": "C", "tier": "channels", "role": "woofer"},
+    ]}), encoding="utf-8")
+    profile = {"dsp_profile": {"name": "X", "vendor": "Y", "groups": [
+        {"id": "physical_outputs", "label": "Output", "fields": ["gain_db"]},
+    ]}}
+    ledger = {"preset": "x", "sample_rate": 96000, "channels": {"w-L": {"gain_db": -3.0}}}
+
+    view = ProjectView.from_dict(ledger, profile, channels=project_view.load_channels(tmp_path))
+
+    rows = view.groups[0].rows
+    assert [(r.id, r.name, r.slot) for r in rows] == [("w-L", "w_L", "C")]
+
+
 def test_the_project_file_is_read_as_utf8_and_not_as_the_machines_locale(tmp_path, monkeypatch):
     """A Ukrainian project blanked the DSP panel and the target curve on Windows (autosound-tcc#4).
 

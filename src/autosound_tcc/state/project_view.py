@@ -251,11 +251,20 @@ def load_channels(project_dir_: Optional[Path] = None) -> dict[str, dict]:
     immutable and an old REW title cannot be edited at all. A live code always wins over another
     channel's history, so a name handed on resolves to whoever holds it now rather than to whoever
     happens to come first in the file.
+
+    **Each name in the method's one notation too** (#126, #112's review Minor 4): from the method's
+    v3.0.65 a channel with no ledger row yet gets one under the hyphen (`apply._row_key`, S-079),
+    so a channel whose code and id are both `w_L` is banked as `w-L`, a name none of its own is.
+    The method's own `canonical_code` says what that name is — since v3.0.66 a driver's side only
+    (hub #232), so `sw_f` stays `sw_f`. It fills a gap and never takes a name a channel holds as
+    written; with no method to ask, the literal names stand, as before.
     """
     channels = _load(project_dir_).get("channels") or []
     if not isinstance(channels, list):
         return {}
     out: dict[str, dict] = {}
+    codes: list[tuple[str, dict]] = []
+    others: list[tuple[str, dict]] = []
     for entry in channels:
         if not isinstance(entry, dict) or not entry.get("code"):
             continue
@@ -265,7 +274,28 @@ def load_channels(project_dir_: Optional[Path] = None) -> dict[str, dict]:
         for key in keys:
             if key and (str(key) not in out or key == entry.get("code")):
                 out[str(key)] = entry
+        codes.append((str(entry["code"]), entry))
+        others += [(str(key), entry) for key in keys if key and key != entry.get("code")]
+    one = _one_notation()
+    if one is not None:
+        # Every code before any other name, so a live code's reading wins over another channel's
+        # history here as well.
+        for key, entry in codes + others:
+            out.setdefault(str(one(key)), entry)
     return out
+
+
+def _one_notation():
+    """The method's `naming.canonical_code` (v3.0.65 on), or None: an older method writes no row
+    under a name it reads, and no method at all leaves `load_channels` the plain JSON reader it
+    was. Asked of the method rather than copied: which `_` it reads as `-` already changed once
+    (v3.0.66, hub #232)."""
+    from autosound_tcc.core import vendor_loader
+
+    try:
+        return getattr(vendor_loader.load_naming(), "canonical_code", None)
+    except Exception:  # noqa: BLE001 — a method that cannot be read leaves the literal names
+        return None
 
 
 def driver_label(entry: dict) -> Optional[str]:

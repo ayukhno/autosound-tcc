@@ -416,12 +416,18 @@ def _channel_aliases(project_dir: Optional[Path] = None) -> dict[str, tuple[str,
     Built from `project.json`'s `channels[]`, which is the only place that knows a rename happened.
     A project with no renames maps each code to just itself, which is what every caller assumed
     before this existed.
+
+    Every key `load_channels` gives the channel counts, the key asked by first (#126): it also
+    keys a channel by its names in the method's one notation (`w_L` answers to `w-L`), and a key
+    that is none of the literal names must still be one of the names it is matched as.
     """
+    channels = project_view.load_channels(project_dir)
     out: dict[str, tuple[str, ...]] = {}
-    for key, entry in project_view.load_channels(project_dir).items():
+    for key, entry in channels.items():
         previous = entry.get("previous_names")
-        names = [entry.get("id"), entry.get("code")]
+        names = [key, entry.get("id"), entry.get("code")]
         names += list(previous) if isinstance(previous, list) else []
+        names += [other for other, same in channels.items() if same is entry]
         out[key] = tuple(dict.fromkeys(str(n) for n in names if n))
     return out
 

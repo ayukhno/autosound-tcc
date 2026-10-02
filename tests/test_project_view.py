@@ -1,5 +1,6 @@
 """Reading the skill's `project.json` into the left panel's System/Project-params shapes
-(state/project_view.py, SCR-015/016). No vendored submodule needed -- this is plain JSON reading.
+(state/project_view.py, SCR-015/016). No vendored submodule needed -- this is plain JSON reading,
+except the one-notation names `load_channels` asks the method for (#126), tested both ways.
 """
 
 from __future__ import annotations
@@ -104,6 +105,52 @@ def test_load_channels_lets_a_live_code_win_over_another_channels_history(tmp_pa
     channels = project_view.load_channels(tmp_path)
 
     assert channels["m-L"]["descr"] == "a genuinely new mid"
+
+
+def test_load_channels_reaches_a_channel_by_its_name_in_the_one_notation(tmp_path):
+    """#126 (#112's review, Minor 4): from the method's v3.0.65 a channel with no ledger row yet
+    gets one under the hyphen (`apply._row_key`, S-079), so a channel whose code and id are both
+    `w_L` is banked as `w-L` — a name none of its own is, and the rig drew it as a second row with
+    no identity. Since v3.0.66 only a driver's side is read that way (hub #232): `sw_f` is banked
+    as itself, and no `sw-f` is made up for it. Needs the vendored method; without it the literal
+    names stand, as before."""
+    _write(tmp_path, {"channels": [
+        {"code": "w_L", "slot": "C"},
+        {"code": "sw_f", "slot": "A"},
+    ]})
+
+    channels = project_view.load_channels(tmp_path)
+
+    assert channels["w-L"] is channels["w_L"]
+    assert project_view.channel_name(channels["w-L"]) == "w_L", "the label is the code as written"
+    assert set(channels) == {"w_L", "w-L", "sw_f"}
+
+
+def test_load_channels_with_no_method_keeps_the_literal_names(tmp_path, monkeypatch):
+    from autosound_tcc.core import vendor_loader
+
+    def missing():
+        raise vendor_loader.VendorNotInitializedError("no skill here")
+
+    monkeypatch.setattr(vendor_loader, "load_naming", missing)
+    _write(tmp_path, {"channels": [{"code": "w_L", "slot": "C"}]})
+
+    assert set(project_view.load_channels(tmp_path)) == {"w_L"}
+
+
+def test_load_channels_never_lets_the_one_notation_take_an_exact_name(tmp_path):
+    """The one notation fills a gap and nothing more: a name some channel holds as written stays
+    that channel's. The method refuses this file (`project.py.validate`: a previous name that reads
+    as another channel's live code), so it only arrives hand-edited."""
+    _write(tmp_path, {"channels": [
+        {"code": "w-L", "descr": "the woofer"},
+        {"code": "m-L", "previous_names": ["w_L"], "descr": "the mid"},
+    ]})
+
+    channels = project_view.load_channels(tmp_path)
+
+    assert channels["w-L"]["descr"] == "the woofer"
+    assert channels["w_L"]["descr"] == "the mid"
 
 
 def test_load_channels_tolerates_a_missing_or_malformed_key(tmp_path):

@@ -261,6 +261,28 @@ def test_a_done_step_evidenced_under_the_old_name_is_still_re_chipped(project, p
     assert step.tag["en"] == "recheck", step
 
 
+@pytest.mark.parametrize("said, title", [
+    ("w-L", "w-L_10 (sw)"),  # the change in the one notation, the capture too
+    ("w_L", "w-L_10 (sw)"),  # the change as the project writes it, the capture renamed (S-079)
+    ("w-L", "w_L_10 (sw)"),  # the capture as typed, read by the method as `w-L`
+])
+def test_a_channel_written_with_underscore_answers_to_both_notations(project, process, said, title):
+    """#126: a channel `project.json` writes `w_L` answers to `w-L` too (`load_channels`, the
+    method's one notation), so a change and the capture that answers it meet whichever of the two
+    each was written in. The first case cleared before `w-L` had a channel behind it and must
+    still clear now that it has one."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    proj = vendor_loader.load_project().Project(str(project))
+    data = proj.load()
+    data["channels"] = [{"code": "w_L", "slot": "C"}]  # as an older session wrote it
+    proj.save(data)
+    _record_change(project, process, f"remeasure: [{said}]")
+    process.finish_step("2.1", [title])
+
+    assert process_view.stale_channels(project) == {}
+
+
 def test_a_capture_from_before_the_change_does_not_clear_it(project, process):
     process.enter_phase("2")
     process.add_step("2.1", "sweep the fronts")
