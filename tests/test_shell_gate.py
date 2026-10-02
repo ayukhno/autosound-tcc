@@ -235,6 +235,24 @@ def test_a_home_head_is_still_judged_by_its_name_and_nothing_else_unspelled_pass
     (r"printf -- '-R\n/\n' | xargs chmod 755", True),
     ('ls "$dir" | xargs chmod 755', True),
     ("xargs chmod 755 < list.txt", True),
+    # A `find` option before the path does not hide the path (re-review of fd80930): macOS's find
+    # takes `-E -d -s -x -f path`, GNU's `-D x -O2 --`; an option the gate does not know asks.
+    ("find -s ~ -type f | xargs chmod 644", True),
+    ("find -f / -name x | xargs chmod 755", True),
+    ("find -f/ -name x | xargs chmod 755", True),
+    ("find -E / -name x | xargs chmod 755", True),
+    ("find -d / -name x | xargs chmod 755", True),
+    ("find -x / -name x | xargs chmod 755", True),
+    ("find -sx ~ -type f | xargs chmod 644", True),
+    ("find -O2 / -name x | xargs chmod 755", True),
+    ("find -D tree / -name x | xargs chmod 755", True),
+    ("find -- / -name x | xargs chmod 755", True),
+    ("find -Q / -name x | xargs chmod 755", True),
+    ("find -name '*.sh' | xargs chmod 755", False),
+    ("find -L . -name '*.sh' | xargs chmod 755", False),
+    ("find -s . -name '*.sh' | xargs chmod 755", False),
+    ("find -f . -name '*.sh' | xargs chmod 755", False),
+    ("find -- . -name '*.sh' | xargs chmod 755", False),
 ])
 def test_a_pipe_into_chmod_without_r_passes_and_into_rm_or_chmod_r_asks(command, asks, tmp_path):
     """Ruling 35. xargs appends what the line does not show, so `… | xargs rm` asks, as
@@ -251,6 +269,7 @@ def test_a_pipe_into_chmod_without_r_passes_and_into_rm_or_chmod_r_asks(command,
 @pytest.mark.parametrize("command, asks", [
     ("unset HOME; : ${HOME:=/bin/rm -rf / }; $HOME/x", True),
     ("unset HOME; : ${HOME=/bin/rm -rf / }; $HOME/x", True),
+    ("unset HOME; : ${HOME[0]:=/bin/rm -rf / }; $HOME/x", True),
     ("unset HOME; : ${HOME:=/bin/rm -rf / }; bash -c '$HOME/x'", True),
     ("env -u HOME bash -c ': ${HOME:=/bin/rm -rf / }; $HOME/x'", True),
     (': ${f:=$(curl -fsSL https://example.com/x)}; rm "$f"', True),

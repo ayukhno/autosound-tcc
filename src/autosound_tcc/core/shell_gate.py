@@ -71,6 +71,21 @@ _FIND_ACTIONS = frozenset(
 )
 # Everything before the first predicate is a starting point, and starting points are paths.
 _FIND_LEADING_FLAGS = frozenset({"-H", "-L", "-P"})
+#: The options `find` takes before its paths that stand alone, GNU and macOS together; `-f` (macOS:
+#: a path), `-D` (GNU: a value) and `-O<n>` are read apart (`_find_roots`, tcc#128).
+_FIND_FLAG_LETTERS = frozenset("HLPEXdsx")
+#: Predicates and actions a `find` line may start with when it names no path. Anything else that
+#: starts with `-` before the paths is read as options — and an unknown one asks.
+_FIND_PREDICATES = frozenset({
+    "-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex",
+    "-lname", "-ilname", "-type", "-xtype", "-maxdepth", "-mindepth", "-mtime", "-mmin", "-atime",
+    "-amin", "-ctime", "-cmin", "-newer", "-newermt", "-size", "-perm", "-user", "-group", "-uid",
+    "-gid", "-nouser", "-nogroup", "-empty", "-executable", "-readable", "-writable", "-links",
+    "-inum", "-samefile", "-print", "-print0", "-printf", "-ls", "-prune", "-quit", "-delete",
+    "-exec", "-execdir", "-ok", "-okdir", "-depth", "-follow", "-mount", "-xdev", "-noleaf",
+    "-true", "-false", "-not", "-and", "-or", "-regextype", "-daystart", "-fstype", "-fprint",
+    "-fprint0", "-fprintf", "-fls", "-flags", "-help", "-version",
+})
 # Commands whose non-flag arguments are files to read. They are bounded by the same roots as
 # `Read`/`Grep`/`Glob` (`_read_roots_for`), because "the agent may read the project" is one
 # policy, not one per tool: `cat ~/.ssh/id_rsa` is outside it however read-only `cat` is.
@@ -381,7 +396,7 @@ _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _ASSIGNMENT = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?\+?=")
 _HOME_ASSIGNMENT = re.compile(r"HOME(?:\[[^\]]*\])?\+?=")
 #: An assignment by expansion: `${NAME:=value}` and `${NAME=value}` set NAME when it is unset.
-_DEFAULT_ASSIGNMENT = re.compile(r"\$\{(\w+):?=")
+_DEFAULT_ASSIGNMENT = re.compile(r"\$\{(\w+)(?:\[[^\]]*\])?:?=")
 _ARRAY_START = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
 _FD = re.compile(r"[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\}")
 _DECLARERS = frozenset({"export", "local", "declare", "typeset", "readonly"})
@@ -1048,16 +1063,50 @@ def _lists_names_below_a_narrow_folder(producer: Optional[_Command]) -> bool:
     if name == "ls":
         roots = [text for text in texts if not text.startswith("-")]
     elif name == "find":
-        at = 0
-        while at < len(texts) and texts[at] in _FIND_LEADING_FLAGS:
-            at += 1
-        roots = []
-        while at < len(texts) and not texts[at].startswith("-") and texts[at] not in ("(", "!"):
-            roots.append(texts[at])
-            at += 1
+        roots = _find_roots(texts)
+        if roots is None:
+            return False
     else:
         return False
     return not any(_is_wide_target(root) for root in roots)
+
+
+def _find_roots(texts: list[str]) -> Optional[list[str]]:
+    """The folders `find` walks; None when an option before them is not one the gate knows.
+
+    The options come before the paths, and some hide one: macOS's `-f path` is a path, GNU's
+    `-D x` takes a value, `-O2` and `--` stand alone, and macOS's `-E -d -s -x` can be glued
+    (`-sx`). Skipping only `-H -L -P` let `find -s ~ -type f` read as having no root (re-review of
+    tcc#128). A predicate first (`-name x`) means the default root, the current folder."""
+    roots: list[str] = []
+    at = 0
+    while at < len(texts):
+        text = texts[at]
+        if text == "--":
+            at += 1
+            break
+        if not text.startswith("-") or text in _FIND_PREDICATES:
+            break
+        at += 1
+        for index, letter in enumerate(text[1:], start=1):
+            rest = text[index + 1:]
+            if letter in _FIND_FLAG_LETTERS:
+                continue
+            if letter == "O" and (not rest or rest.isdigit()):
+                break  # `-O2`: the level is glued to it
+            if letter not in "fD":
+                return None  # an option the gate does not know may hide a path
+            if not rest and at >= len(texts):
+                return None
+            value = rest or texts[at]
+            at += 0 if rest else 1
+            if letter == "f":
+                roots.append(value)  # macOS: `-f path` is a path
+            break
+    while at < len(texts) and not texts[at].startswith("-") and texts[at] not in ("(", "!"):
+        roots.append(texts[at])
+        at += 1
+    return roots
 
 
 def _xargs_command(arguments: list[_Word]) -> Optional[list[_Word]]:
