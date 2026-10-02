@@ -2053,14 +2053,15 @@ every screen in about two minutes.
 
 Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
-### F-092 — W-6's pool: what W-5's VM look found
+### F-092 — W-6 is collecting: findings go to this pool, the milestone opens when the list is complete
 
-**Статус**: open · recorded 2026-10-02 at the Arbiter's word «Випускати як є» (v0.1.46 released without them)
+**Статус**: open · W-6 — ЗБІР from 2026-10-02 evening (the Arbiter: «починай» after v0.1.46): the Arbiter tests, the session only records; the milestone (and whether it is one wave with the skill's `W-6 · v3.1.0`) is his word after «збір закінчено» · started with what W-5 left: recorded at «Випускати як є» (v0.1.46 released without them)
 
 - finding 137 — the reviewer-key window squeezes the rows' «Delete the key» buttons after a save that leaves a copy;
 - finding 138 — the key window joins the places with «;» (→ «and» / «і», four languages);
 - finding 139 — hover sticks after switching to another app and back (Qt, app-wide; older than W-5);
 - a flaky serial run: `make ship REAL=1`'s first suite (2026-10-02, 849458d) failed 6 tests — three in `test_main_window` (the reviewer footer's red, a launch failure's refusal), three in `test_mcp_server` (a reviewer pick «ready») — with `availability.status` answering `not_checked` for an agy pick; alone, in the first 49 files serially, and on the re-run (3550 passed) they pass. Candidates: MCP calls on `_DaemonCalls` threads are no longer joined by `asyncio.run` at a test's end (db534cc) and can outlive their test; or the machine changing under the run (the skill's W-6 was changing agy's login). Find the leak, join or drain the calls in the tests;
+- hub #235 HUB-072 (from hub, to:tcc) — agy through ADC (the Google Cloud free trial): a TCC started from the Dock or Finder never reads `~/.zshrc`, so its `agy models` and every reviewer run go without `AGY_ADC_AUTH`; and the recommended Critic is a model ADC does not offer (the skill's half is hub HUB-071; the skill is changing agy's login in its W-6);
 - the method's own route setting (hub #236, TCC-046): once it lands, TCC sets it for the sessions it starts, so a
   session's own run of the method stops reading the stored key.
 
