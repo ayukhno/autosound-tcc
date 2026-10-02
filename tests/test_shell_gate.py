@@ -513,3 +513,51 @@ def test_a_bracket_the_gate_cannot_spell_out_is_not_read_as_narrow(command, asks
     bracket with does not, so `/[^x]tc` read as a name it cannot be — and it is `/etc`. A bracket
     with a negation or a POSIX class is not read as narrow."""
     assert bash_is_dangerous(command, [tmp_path]) is asks, command
+
+
+@pytest.mark.parametrize("command, asks", [
+    # A `cd` to somewhere wide, unknown, or out of the project, then a recursive delete there.
+    ('cd "$dir" && rm -rf *', True),
+    ("cd && rm -rf *", True),
+    ("cd / && rm -rf *", True),
+    ("cd ~ && rm -rf *", True),
+    ("pushd / && rm -rf *", True),
+    ("cd / && chmod -R 777 *", True),
+    ("cd / && rd /s /q .", True),
+    ("cd /; rm -rf ./*", True),
+    ("cd / || rm -rf *", True),
+    ("cd /\nrm -rf *", True),
+    ("cd .. && rm -rf *", True),
+    ("cd - && rm -rf *", True),
+    ('cd "$(dirname "$f")" && rm -rf *', True),
+    ("(cd / && rm -rf *)", True),
+    ("if true; then cd /; fi; rm -rf *", True),
+    ("cd / && bash -c 'rm -rf *'", True),
+    ("cd / && ls | xargs chmod 755", True),
+    ('cd / && cmd /c "rd /s /q ."', True),
+    (r"cmd /c 'cd /d C:\ && rd /s /q .'", True),
+    ("powershell -c 'Set-Location ~; Remove-Item -Recurse .'", True),
+    (r"powershell -c 'sl C:\; ri -r *'", True),
+    # Near misses: a `cd` that stays narrow, one in a subshell, one after the delete, one piped,
+    # one with nothing recursive after it.
+    ("cd build && rm -rf *", False),
+    ("cd ./dist && rm -rf tmp", False),
+    ("(cd / && ls); rm -rf *", False),
+    ('cd "$PROJECT_SUBDIR"', False),
+    ('cd "$PROJECT_SUBDIR" && ls -la', False),
+    ("cd ~ && rm -rf .cache", False),
+    ("cd / && rm -rf tmp/x", False),
+    ("cd /tmp && rm -rf *", False),
+    ("rm -rf *; cd /", False),
+    ("echo $(cd /; pwd); rm -rf *", False),
+    ("cd / | true; rm -rf *", False),
+    ("cd build; cd ..; rm -rf *", False),
+    ("cmd /c 'cd build && rd /s /q out'", False),
+    ("powershell -c 'Set-Location build; Remove-Item -Recurse *'", False),
+])
+def test_a_cd_carries_to_the_recursive_delete_after_it(command, asks, tmp_path):
+    """Ruling 49 (I1 of the final review): `cd "$dir" && rm -rf *` passed while `rm -rf "$dir"`
+    asked. A `cd` or `pushd` moves where a relative operand lands for the rest of the line — into
+    a wide folder, or one the line does not spell, and `*` or `.` there is that folder. A subshell's
+    `cd` stays in the subshell; cmd's `cd /d` and PowerShell's `Set-Location` are followed too."""
+    assert bash_is_dangerous(command, [tmp_path]) is asks, command

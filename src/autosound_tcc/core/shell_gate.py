@@ -16,6 +16,7 @@ moved here unchanged.
 from __future__ import annotations
 
 import fnmatch
+import itertools
 import posixpath
 import re
 import shlex
@@ -281,6 +282,9 @@ _PS_KEYWORDS = frozenset({"if", "elseif", "else", "foreach", "for", "while", "do
                           "switch", "try", "catch", "finally", "function", "filter", "param",
                           "begin", "process", "end", "return", "break", "continue", "exit",
                           "throw"})
+#: The commands that move the folder a line runs in, by the shell that reads them.
+_CD_COMMANDS = {"bash": ("cd", "pushd", "chdir"), "cmd": ("cd", "chdir", "pushd"),
+                "powershell": ("cd", "chdir", "sl", "set-location", "pushd", "push-location")}
 #: What a word the line does not spell starts with when nothing spelled stands before it: `$x`,
 #: `` `…` ``, `{a,b}`, `$'\x2d'`, cmd's `%x%`, and the word `xargs` appends (`_xargs_command`).
 _EXPANSION_STARTS = ("$", "`", "{", "\\", "%", "…")
@@ -479,6 +483,11 @@ class _Command:
     compound: bool = False
     #: The command whose output this one reads in a pipeline: `ls` in `ls | xargs chmod 755`.
     producer: Optional[_Command] = None
+    #: The subshells it runs in, outermost first: a `cd` in one does not move the line outside it.
+    scope: tuple[int, ...] = ()
+    #: Where it runs, as `_follow_cd` reads the line: "" the project, a path (relative to the
+    #: project, or absolute, or under `~`), None a folder the line does not spell (Ruling 49).
+    cwd: Optional[str] = ""
 
     def is_empty(self) -> bool:
         return not (self.words or self.redirects or self.stdin or self.compound)
@@ -493,17 +502,86 @@ class _Heredoc:
     depth: int
 
 
-def _script_is_dangerous(text: str, depth: int, inherited: Iterable[str] = ()) -> bool:
+def _script_is_dangerous(text: str, depth: int, inherited: Iterable[str] = (),
+                         cwd: Optional[str] = "") -> bool:
     """`inherited`: the names the line around this script has already made unknown. A script body —
     `bash -c '…'`, a heredoc fed to a shell, `trap`, `alias` — runs with the variables of the line
-    that holds it, so `HOME='…' bash -c '$HOME/x'` is `HOME='…'; $HOME/x` (review of tcc#128)."""
+    that holds it, so `HOME='…' bash -c '$HOME/x'` is `HOME='…'; $HOME/x` (review of tcc#128).
+    `cwd`: where it runs — `cd / && bash -c 'rm -rf *'` deletes `/*` (Ruling 49)."""
     try:
         commands: list[_Command] = []
         _Reader(text, commands, depth).read()
+        _follow_cd(commands, cwd)
         tainted = _tainted(commands, inherited)
         return any(_command_is_dangerous(command, tainted, depth) for command in commands)
     except (_Unreadable, RecursionError):
         return True  # unknown is not safe
+
+
+#: Ids for subshells, so a `cd` in one is known not to move the commands outside it.
+_SUBSHELLS = itertools.count(1)
+
+
+def _follow_cd(commands: list[_Command], cwd: Optional[str]) -> None:
+    """Set each command's `cwd` — where it runs — by the `cd`, `pushd` and `chdir` before it on the
+    line, in order. A subshell starts where its parent stood and keeps its own `cd`s; a piped `cd`
+    runs in a subshell of its own and moves nothing. Every separator counts alike — `;`, `&&`, `||`,
+    a newline: what runs after `cd x || …` is not known to run where it started (Ruling 49)."""
+    where: dict[tuple[int, ...], Optional[str]] = {(): cwd}
+    for command in commands:
+        scope = command.scope
+        while scope not in where:
+            scope = scope[:-1]
+        command.cwd = here = where[scope]
+        if command.piped:
+            continue
+        for words in _segments(command):
+            moved, target = _cd_target(words, here, shell="bash")
+            if moved:
+                here = where[command.scope] = target
+
+
+def _cd_target(words: list[_Word], here: Optional[str], shell: str) -> tuple[bool, Optional[str]]:
+    """(whether `words` change the folder, where to: a path, or None when the line does not spell
+    it). bash's `cd` alone is the home and `cd -` the last folder; cmd's `cd` alone only prints."""
+    while words and _ASSIGNMENT.match(words[0].text):
+        words = words[1:]
+    if not words:
+        return False, here
+    name = _command_name(words[0].text)
+    if name not in _CD_COMMANDS.get(shell, ()):
+        return False, here
+    arguments = words[1:]
+    if shell == "powershell":
+        arguments = [word for word in arguments if not word.text.startswith("-")
+                     or word.quoted]  # `-Path`, `-LiteralPath`: the path is the word after
+    else:
+        while arguments and (arguments[0].text in ("-L", "-P", "-e", "-@", "-n", "--")
+                             or shell == "cmd" and _is_windows_switch(arguments[0].text)):
+            arguments = arguments[1:]
+    if not arguments:
+        return (False, here) if shell == "cmd" else (True, None if name == "pushd" else "~")
+    target = arguments[0]
+    if target.dynamic or target.output or target.text in ("-", "") or target.text[:1] in "+-%!":
+        return True, None
+    if _is_absolute(target.text) or here == "":
+        return True, target.text
+    return True, None if here is None else posixpath.join(here, target.text.replace("\\", "/"))
+
+
+def _is_absolute(text: str) -> bool:
+    """A path that does not depend on the folder a command runs in: `/x`, `\\x`, `~`, `C:\\x`."""
+    return text.startswith(("/", "\\", "~")) or bool(re.match(r"[A-Za-z]:", text))
+
+
+def _is_wide_here(text: str, cwd: Optional[str]) -> bool:
+    """`_is_wide_target` of an operand where its command runs: a relative one joined to the
+    folder a `cd` moved to, and wide outright when that folder is not spelled (Ruling 49)."""
+    if cwd == "" or _is_absolute(text):
+        return _is_wide_target(text)
+    if cwd is None:
+        return True
+    return _is_wide_target(posixpath.join(cwd.replace("\\", "/"), text.replace("\\", "/")))
 
 
 class _Reader:
@@ -517,7 +595,8 @@ class _Reader:
     lands in `commands`. Anything else raises `_Unreadable`, and unreadable is dangerous.
     """
 
-    def __init__(self, text: str, commands: list[_Command], depth: int) -> None:
+    def __init__(self, text: str, commands: list[_Command], depth: int,
+                 scope: tuple[int, ...] = ()) -> None:
         if depth > _MAX_DEPTH:
             raise _Unreadable
         self.text = text
@@ -525,6 +604,16 @@ class _Reader:
         self.commands = commands
         self.depth = depth
         self.heredocs: list[_Heredoc] = []
+        self.scope = scope
+
+    def _subshell(self, depth: int) -> None:
+        """`( … )`, `$( … )`, `<( … )`: commands of a subshell, whose `cd` stays inside it."""
+        outer = self.scope
+        self.scope = outer + (next(_SUBSHELLS),)
+        try:
+            self._list(")", depth)
+        finally:
+            self.scope = outer
 
     def read(self) -> None:
         self._list(None, self.depth)
@@ -557,13 +646,13 @@ class _Reader:
             raise _Unreadable
         text = self.text
         pipeline: list[_Command] = []
-        command = _Command()
+        command = _Command(scope=self.scope)
 
         def end_command() -> None:
             nonlocal command
             if not command.is_empty():
                 pipeline.append(command)
-            command = _Command()
+            command = _Command(scope=self.scope)
 
         def end_pipeline() -> None:
             end_command()
@@ -619,7 +708,7 @@ class _Reader:
                 if not _at_command_start(command):
                     raise _Unreadable  # `f()`, `for ((…))`: not taken apart here
                 self.i += 1
-                self._list(")", depth + 1)
+                self._subshell(depth + 1)
                 command.compound = True
             elif ch in "<>" and nxt == "(":
                 command.words.append(self._process_substitution(depth))
@@ -753,7 +842,7 @@ class _Reader:
                 body.append(ch)
                 at += 1
         self.i = at + 1
-        _Reader("".join(body), self.commands, depth + 1).read()
+        _Reader("".join(body), self.commands, depth + 1, self.scope + (next(_SUBSHELLS),)).read()
         word.text += text[start:self.i]
         word.started = word.dynamic = word.output = True
 
@@ -763,7 +852,7 @@ class _Reader:
         word.started = True
         if nxt == "(":
             self.i += 2
-            self._list(")", depth + 1)  # `$((…))` too: an arithmetic body reads as a subshell
+            self._subshell(depth + 1)  # `$((…))` too: an arithmetic body reads as a subshell
             word.dynamic = word.output = True
         elif nxt == "{":
             self.i += 2
@@ -843,7 +932,7 @@ class _Reader:
         """`<( … )` or `>( … )`: a command whose output is a file name on the line."""
         start = self.i
         self.i += 2
-        self._list(")", depth + 1)
+        self._subshell(depth + 1)
         return _Word(text=self.text[start:self.i], started=True, dynamic=True, output=True)
 
     def _redirect(self, command: _Command, depth: int) -> None:
@@ -894,7 +983,7 @@ class _Reader:
             body = _Word(text="".join(line + "\n" for line in lines), started=True,
                          quoted=doc.quoted)
             if not doc.quoted:
-                _Reader(body.text, self.commands, depth + 1).expand(body)
+                _Reader(body.text, self.commands, depth + 1, self.scope).expand(body)
             doc.command.stdin.append(body)
 
 
@@ -1037,7 +1126,7 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
             return _stdin_script_is_dangerous(command, tainted, depth)
         return any(argument.dynamic or _runs(argument, tainted) for argument in arguments)
     if name in ("trap", "alias"):
-        return _code_arguments_are_dangerous(name, arguments, tainted, depth)
+        return _code_arguments_are_dangerous(name, arguments, tainted, depth, command.cwd)
     if name == "xargs":
         tail = _xargs_command(arguments)
         return tail is None or bool(tail) and _words_are_dangerous(tail, command, tainted, depth,
@@ -1054,18 +1143,20 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
     if name in ("powershell", "pwsh"):
         return _powershell_is_dangerous(arguments, command, tainted, depth)
     if name in ("remove-item", "ri"):
-        return _remove_item_is_dangerous(arguments, command.piped)
+        return _remove_item_is_dangerous(arguments, command.piped, command.cwd)
     if name in _INTERPRETERS or name.startswith("python"):
         return _interpreter_is_dangerous(name, arguments, command, tainted)
     if name in ("rm", "find", "dd", "chmod") and any(_runs(a, tainted) for a in arguments):
         return True  # its arguments decide, and one is another command's output: `rm $(echo -rf /)`
     if name == "rm":
-        return _rm_is_dangerous(arguments)
+        return _rm_is_dangerous(arguments, command.cwd)
     if name in _WINDOWS_DELETES:
         # cmd's `rd /s`, and PowerShell's aliases of Remove-Item: `rd -Recurse ~` (Ruling 41).
         return _reach_is_dangerous(arguments, _is_windows_switch,
-                                   lambda text: "s" in _switch_letters(text), bare=False
-                                   ) or _remove_item_is_dangerous(arguments, command.piped)
+                                   lambda text: "s" in _switch_letters(text), bare=False,
+                                   cwd=command.cwd
+                                   ) or _remove_item_is_dangerous(arguments, command.piped,
+                                                                  command.cwd)
     if name == "find":
         return _find_is_dangerous(arguments, command, tainted, depth)
     if name == "dd":
@@ -1077,7 +1168,7 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
         arguments = [replace(a, quoted=True) if a.dynamic and a.text == "…" else a for a in arguments]
     if name == "chmod":
         return _reach_is_dangerous(arguments, lambda text: text.startswith("-"), _is_recursive_flag,
-                                   bare=False)
+                                   bare=False, cwd=command.cwd, mode_first=True)
     if name == "git":
         return _git_is_dangerous(arguments, tainted)
     if name in _FETCHERS and command.piped:
@@ -1113,7 +1204,7 @@ def _lists_names_below_a_narrow_folder(producer: Optional[_Command]) -> bool:
             return False
     else:
         return False
-    return not any(_is_wide_target(root) for root in roots)
+    return not any(_is_wide_here(root, producer.cwd) for root in roots or ["."])
 
 
 def _keeps_names(command: _Command) -> bool:
@@ -1264,15 +1355,16 @@ def _xargs_command(arguments: list[_Word]) -> Optional[list[_Word]]:
     return [*tail, _Word(text="…", started=True, dynamic=True)]
 
 
-def _rm_is_dangerous(arguments: list[_Word]) -> bool:
+def _rm_is_dangerous(arguments: list[_Word], cwd: Optional[str] = "") -> bool:
     """`rm` is judged by its arguments rather than by its name: `rm build/tmp.json` is a Tuesday.
     With no target it is fed by `xargs` or a pipe, and deletes what is not on the line."""
     return _reach_is_dangerous(arguments, lambda text: text.startswith("-"), _is_recursive_flag,
-                               bare=True)
+                               bare=True, cwd=cwd)
 
 
 def _reach_is_dangerous(arguments: list[_Word], is_option: Callable[[str], bool],
-                        is_recursive: Callable[[str], bool], bare: bool) -> bool:
+                        is_recursive: Callable[[str], bool], bare: bool, cwd: Optional[str] = "",
+                        mode_first: bool = False) -> bool:
     """A recursive delete (`rm -r`, `rd /s`) or `chmod -R`, judged by what it reaches.
 
     A target the line does not spell — `"$f"` in `for f in *`, `$(cat list)` — is unknown, and a
@@ -1284,6 +1376,9 @@ def _reach_is_dangerous(arguments: list[_Word], is_option: Callable[[str], bool]
     several words, the flag and the target at once (`x='-rf ~'; rm $x`); a quoted one is one word,
     either the flag or the target, so it takes another unknown or wide word beside it to be both.
     `rm "$tmp"` stays a delete of one file.
+
+    A relative operand is judged where the command runs (`cwd`, `_follow_cd`); chmod's mode — its
+    first operand (`mode_first`) — is not a path and is judged as it is written.
     """
     options: list[_Word] = []
     operands: list[_Word] = []
@@ -1298,15 +1393,20 @@ def _reach_is_dangerous(arguments: list[_Word], is_option: Callable[[str], bool]
             operands.append(argument)
             if not options_over and _could_be_an_option(argument):
                 could_be_options.append(argument)
+    def wide(operand: _Word) -> bool:
+        if mode_first and operands and operand is operands[0]:
+            return _is_wide_target(operand.text)
+        return _is_wide_here(operand.text, cwd)
+
     if any(option.dynamic or is_recursive(option.text) for option in options):
         if not operands:
             return bare
-        return any(operand.dynamic or _is_wide_target(operand.text) for operand in operands)
+        return any(operand.dynamic or wide(operand) for operand in operands)
     if not could_be_options:
         return False
     return (any(_may_be_several_words(word) for word in could_be_options)
             or sum(operand.dynamic for operand in operands) > 1
-            or any(not operand.dynamic and _is_wide_target(operand.text) for operand in operands))
+            or any(not operand.dynamic and wide(operand) for operand in operands))
 
 
 def _is_recursive_flag(text: str) -> bool:
@@ -1435,12 +1535,13 @@ def _cmd_is_dangerous(arguments: list[_Word], command: _Command, tainted: set[st
                 return True  # the line cmd runs is not written here
             texts = [glued.group(1)] if glued else []
             return _cmd_line_is_dangerous(" ".join(texts + [rest.text for rest in line]), tainted,
-                                          depth + 1)
+                                          depth + 1, command.cwd)
     return command.piped or bool(command.stdin) or any(
         operator in ("<", "<>", "<&") for operator, _ in command.redirects)
 
 
-def _cmd_line_is_dangerous(line: str, tainted: set[str], depth: int) -> bool:
+def _cmd_line_is_dangerous(line: str, tainted: set[str], depth: int,
+                           cwd: Optional[str] = "") -> bool:
     """A cmd line, read closely enough to judge: `&`, `|`, `(` and `)` part commands, a double quote
     holds spaces, `^` escapes, and `%NAME%` or `!NAME!` is a value the line does not spell. Each
     command is judged by the same rules as a shell one — `rd /s` among them (tcc#128) — and one on
@@ -1505,9 +1606,12 @@ def _cmd_line_is_dangerous(line: str, tainted: set[str], depth: int) -> bool:
             # cmd runs the command after `if exist x`, `if not … ==…`, `else` and `for … do`; where
             # the condition ends is cmd's to say, so every tail is read as that command (Ruling 41).
             readings.extend(words[at:] for at in range(1, len(words)))
-        if any(_words_are_dangerous(reading, _Command(piped=in_pipe), tainted, depth)
+        if any(_words_are_dangerous(reading, _Command(piped=in_pipe, cwd=cwd), tainted, depth)
                for reading in readings):
             return True
+        moved, target = _cd_target(words, cwd, shell="cmd")  # `cd /d C:\ && rd /s /q .`
+        if moved and not in_pipe:
+            cwd = target
     return False
 
 
@@ -1541,11 +1645,12 @@ def _powershell_is_dangerous(arguments: list[_Word], command: _Command, tainted:
     if any(_runs(word, tainted) or word.dynamic and word.refs != {"HOME"} for word in line):
         return True
     # An option the walk took for a switch may have taken a value: every tail is read as the line.
-    return any(_powershell_line_is_dangerous(" ".join(word.text for word in line[start:]), depth + 1)
+    return any(_powershell_line_is_dangerous(" ".join(word.text for word in line[start:]), depth + 1,
+                                             command.cwd)
                for start in range(len(line)))
 
 
-def _powershell_line_is_dangerous(line: str, depth: int) -> bool:
+def _powershell_line_is_dangerous(line: str, depth: int, cwd: Optional[str] = "") -> bool:
     """A PowerShell line, read closely enough to judge Remove-Item: `;`, `|`, `&`, braces and
     parentheses part statements, `'…'` is literal, `"…"` and a backtick escape, `$HOME` and
     `$env:USERPROFILE` are the home, any other `$…` is a value the line does not spell. A statement
@@ -1617,12 +1722,19 @@ def _powershell_line_is_dangerous(line: str, depth: int) -> bool:
     if quote:
         return True  # a quote that never closes: unknown is not safe
     finish()
-    return any(_powershell_statement_is_dangerous(words, in_pipe, call, depth)
-               for words, in_pipe, call in zip(statements, piped, called) if words)
+    for words, in_pipe, call in zip(statements, piped, called):
+        if not words:
+            continue
+        if _powershell_statement_is_dangerous(words, in_pipe, call, depth, cwd):
+            return True
+        moved, target = _cd_target(words, cwd, shell="powershell")  # `Set-Location ~; ri -r .`
+        if moved and not in_pipe:
+            cwd = target
+    return False
 
 
 def _powershell_statement_is_dangerous(words: list[_Word], piped: bool, called: bool,
-                                       depth: int) -> bool:
+                                       depth: int, cwd: Optional[str] = "") -> bool:
     if words[0].text.startswith("$"):
         if len(words) > 1 and words[1].text in ("=", "+=", "-=", "*=", "/="):
             words = words[2:]  # `$p = Get-Location`: what is assigned is the statement
@@ -1640,11 +1752,11 @@ def _powershell_statement_is_dangerous(words: list[_Word], piped: bool, called: 
     if name in ("iex", "invoke-expression"):
         return True  # PowerShell's `eval`
     if name in _PS_REMOVERS:
-        return _remove_item_is_dangerous(words[1:], piped)
-    return _words_are_dangerous(words, _Command(piped=piped), set(), depth)
+        return _remove_item_is_dangerous(words[1:], piped, cwd)
+    return _words_are_dangerous(words, _Command(piped=piped, cwd=cwd), set(), depth)
 
 
-def _remove_item_is_dangerous(arguments: list[_Word], piped: bool) -> bool:
+def _remove_item_is_dangerous(arguments: list[_Word], piped: bool, cwd: Optional[str] = "") -> bool:
     """PowerShell's `Remove-Item -Recurse` (`-r`, `-rec`, `-Recurse:$true`, any case, any order) on
     a wide target: a drive root, the home, `C:\\Users`, a climb, `*` — or one it does not spell, or
     none when a pipe feeds it (`gci C:\\ | Remove-Item -Recurse`). Every word that is not a
@@ -1667,8 +1779,8 @@ def _remove_item_is_dangerous(arguments: list[_Word], piped: bool) -> bool:
         return False
     if not targets:
         return piped
-    return any(target.dynamic or _is_wide_target(target.text)
-               or posixpath.normpath(target.text.replace("\\", "/")) in ("*", "*.*")
+    return any(target.dynamic or _is_wide_here(target.text, cwd)
+               or cwd == "" and posixpath.normpath(target.text.replace("\\", "/")) in ("*", "*.*")
                for target in targets)
 
 
@@ -1735,7 +1847,7 @@ def _shell_is_dangerous(arguments: list[_Word], command: _Command, tainted: set[
     if command_string:
         if not operands or operands[0].dynamic:
             return True  # the script is not written on the line
-        return _script_is_dangerous(operands[0].text, depth + 1, tainted)
+        return _script_is_dangerous(operands[0].text, depth + 1, tainted, command.cwd)
     if operands and not from_stdin and not _is_stdin_path(operands[0].text):
         return False  # a script file: not read here, as before tcc#115
     return _stdin_script_is_dangerous(command, tainted, depth)
@@ -1751,7 +1863,7 @@ def _stdin_script_is_dangerous(command: _Command, tainted: set[str], depth: int)
     if command.piped:
         return True
     for body in command.stdin:
-        if body.dynamic or _script_is_dangerous(body.text, depth + 1, tainted):
+        if body.dynamic or _script_is_dangerous(body.text, depth + 1, tainted, command.cwd):
             return True
     return any(operator in ("<", "<>", "<&") and (target.dynamic or _runs(target, tainted))
                for operator, target in command.redirects)
@@ -1793,13 +1905,13 @@ def _interpreter_is_dangerous(name: str, arguments: list[_Word], command: _Comma
 
 
 def _code_arguments_are_dangerous(name: str, arguments: list[_Word], tainted: set[str],
-                                  depth: int) -> bool:
+                                  depth: int, cwd: Optional[str] = "") -> bool:
     """`trap 'rm -rf ~' EXIT` and `alias x='rm -rf ~'` hold a script for later — it is read now."""
     for argument in arguments:
         if name == "trap" and argument.text in ("-p", "-l", "--"):
             continue
         code = argument.text.partition("=")[2] if name == "alias" else argument.text
-        if argument.dynamic or _script_is_dangerous(code, depth + 1, tainted):
+        if argument.dynamic or _script_is_dangerous(code, depth + 1, tainted, cwd):
             return True
         if name == "trap":
             return False  # the rest are signal names
