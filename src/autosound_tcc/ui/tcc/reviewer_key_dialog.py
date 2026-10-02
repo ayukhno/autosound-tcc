@@ -73,7 +73,7 @@ def _fit_tinted(button: QPushButton) -> None:
 
 
 def _place(export: dict) -> str:
-    """Where an exported copy sits, in words: `~/.zshrc, line 3`, or the Windows environment."""
+    """Where an exported copy sits, in words: `~/.zshrc (line 3)`, or the Windows environment."""
     file = export.get("file", "?")
     # The registry has no line: the method marks it `line: None` (finding 125, tcc#117).
     if export.get("line") is None:
@@ -195,10 +195,10 @@ class ReviewerKeyDialog(QDialog):
         result — and when the window shows, it fits that content (`_fit`)."""
         handled = super().event(event)
         if event.type() in (QEvent.Type.LayoutRequest, QEvent.Type.Show):
-            self._fit()
+            self._fit(opening=event.type() == QEvent.Type.Show)
         return handled
 
-    def _fit(self) -> None:
+    def _fit(self, *, opening: bool = False) -> None:
         """No shorter than the content at the window's narrowest (finding 137, tcc#136).
 
         A dialog's own minimum counts a word-wrapped label as one line. When a save left a copy,
@@ -206,10 +206,19 @@ class ReviewerKeyDialog(QDialog):
         minimum only, and the layout took the rest from the rows: «Видалити ключ» was squeezed
         until its words could not be read, and only a resize brought it back. The content's height
         at the minimum width is enough at every wider one, so as the minimum it grows the window,
-        and no drag squeezes the rows again."""
+        and no drag squeezes the rows again.
+
+        And down again: a window nobody dragged taller (at its minimum, or just opening) takes its
+        content's height. Otherwise a blank band stays once the copy line goes, and at opening,
+        where Qt sized it for a narrower width than the window got (review of #136, I1). A size
+        the Arbiter dragged is his, and stays."""
         layout = self.layout()
-        self.setMinimumHeight(max(layout.totalMinimumSize().height(),
-                                  layout.totalHeightForWidth(self.minimumWidth())))
+        fit = max(layout.totalMinimumSize().height(),
+                  layout.totalHeightForWidth(self.minimumWidth()))
+        follow = opening or self.height() == self.minimumHeight()
+        self.setMinimumHeight(fit)
+        if follow and self.isVisible():
+            self.resize(self.width(), fit)
 
     def refresh(self, *, ask: bool = False) -> None:
         """Show what the method says now. `ask` re-runs `key status` instead of the kept answer.

@@ -572,7 +572,7 @@ def test_an_older_method_is_never_sent_the_drop(monkeypatch):
     assert asked == []
     assert not any(args[:2] == ["key", "move-shell"] for args, _ in method.calls)
     assert i18n.t("rkDropUpdate").format(
-        var="GEMINI_API_KEY", place="~/.zshrc, рядок 3") in dialog._result.text()
+        var="GEMINI_API_KEY", place="~/.zshrc (рядок 3)") in dialog._result.text()
     dialog.close()
 
 
@@ -1194,7 +1194,7 @@ def test_an_older_method_with_a_copy_deletes_nothing(monkeypatch):
     dialog._removes["google"].click()
     assert method.changes() == []
     assert i18n.t("rkDropUpdate").format(
-        var="GEMINI_API_KEY", place="~/.zshrc, рядок 3") in dialog._result.text()
+        var="GEMINI_API_KEY", place="~/.zshrc (рядок 3)") in dialog._result.text()
     dialog.close()
 
 
@@ -1216,6 +1216,13 @@ def test_a_copy_the_window_cannot_remove_is_named_before_and_after(monkeypatch):
         i18n.t("rkRmDone").format(provider=name, places=i18n.t("rkPlaceStore")),
         i18n.t("rkRmLeft").format(where=where)))
     assert i18n.t("rkRmFree").format(provider=name) not in dialog._result.text()
+    # One key, wherever it is: «Копія у файлі … і змінній …» read as one copy in two places
+    # (review of #136, M3).
+    both = "у файлі critic-env і змінній середовища, з якою запущено TCC:"
+    assert f"Ключ лишиться {both}" in asked[0]
+    assert f"Але ключ ще є {both}" in dialog._result.text()
+    assert i18n.T["en"]["rkRmAskKept"].startswith("The key stays in {where}:")
+    assert i18n.T["en"]["rkRmLeft"].startswith("But the key is still in {where}:")
     dialog.close()
 
 
@@ -1422,14 +1429,58 @@ def test_a_save_that_leaves_a_copy_keeps_every_row_s_height(monkeypatch):
     dialog.close()
 
 
-def test_the_window_opens_no_shorter_than_its_content(monkeypatch):
-    """The same minimum from the moment it shows, before anything changes in it: the copy line
-    already there at opening, a drag cannot squeeze the rows under it."""
-    status = _with(keystore="dpapi", exports=[_REGISTRY],
-                   google={"used": "keystore", "keystore": True})
-    dialog, _ = _dialog(monkeypatch, _Method(status=status))
+def test_the_window_follows_its_content_down_when_the_copy_goes(monkeypatch):
+    """Save → the copy line → «Видалити копію …» → no line: no blank band where it was (review of
+    #136, I1). A window that only grew left 140 px spread over the very rows of finding 137."""
+    before = _with(keystore="dpapi", exports=[], openai={"used": "keystore", "keystore": True})
+    after = _with(before, exports=[_REGISTRY], google={"used": "keystore", "keystore": True})
+    method = _Saving(after, status=before, after_move=_with(after, exports=[]))
+    dialog, _ = _dialog(monkeypatch, method, answer=False)
     dialog.show()
-    assert dialog.minimumHeight() >= dialog.layout().totalHeightForWidth(dialog.minimumWidth())
+    QApplication.processEvents()
+    dialog._field.setText("AIza" + "v" * 35)
+    dialog._save.click()
+    QApplication.processEvents()
+    monkeypatch.setattr(type(dialog), "_confirm", lambda self, text, yes, **_kw: True)
+    dialog._drops["google"].click()
+    QApplication.processEvents()
+    assert dialog._shell.isHidden()
+    assert dialog.height() == dialog.layout().totalHeightForWidth(dialog.width())
+    for button in _buttons(dialog):
+        assert button.height() >= button.sizeHint().height(), button.text()
+    dialog.close()
+
+
+@pytest.mark.parametrize("lang", ["uk", "en", "pl", "de"])
+def test_the_window_opens_at_its_content_s_height(monkeypatch, lang):
+    """No blank band at opening — Qt sizes the window for its narrower hint width, then the
+    minimum width widens it — and a drag cannot squeeze the rows, with a copy already there."""
+    windows = _with(keystore="dpapi", exports=[_REGISTRY],
+                    google={"used": "keystore", "keystore": True})
+    for method in (_Method(status=windows), _Method()):
+        dialog, _ = _dialog(monkeypatch, method, lang=lang)
+        dialog.show()
+        QApplication.processEvents()
+        assert dialog.height() == dialog.layout().totalHeightForWidth(dialog.width())
+        dialog.resize(dialog.width(), 1)
+        QApplication.processEvents()
+        for button in _buttons(dialog):
+            assert button.height() >= button.sizeHint().height(), button.text()
+        dialog.close()
+
+
+def test_a_size_the_arbiter_dragged_is_kept(monkeypatch):
+    """The window follows its content only where nobody dragged it: a size he chose stays."""
+    dialog, _ = _dialog(monkeypatch, _Method())
+    dialog.show()
+    QApplication.processEvents()
+    dialog.resize(700, 650)
+    QApplication.processEvents()
+    dialog._result.setText("x " * 400)
+    QApplication.processEvents()
+    dialog._result.setText("")
+    QApplication.processEvents()
+    assert (dialog.width(), dialog.height()) == (700, 650)
     dialog.close()
 
 
@@ -1440,12 +1491,12 @@ _ZPROFILE = {"var": "GEMINI_API_KEY", "file": "~/.zprofile", "line": 2}
 #: out for the two languages read here; Polish and German take their word from the Advisor, so
 #: their test is the shape (`_and`).
 _PLACES_AND = {
-    "uk": {"two": "захищеного сховища і ~/.zshrc, рядок 3",
-           "three": "захищеного сховища, ~/.zshrc, рядок 3 і ~/.zprofile, рядок 2",
-           "copies": "~/.zshrc, рядок 3 і ~/.zprofile, рядок 2"},
-    "en": {"two": "the secure store and ~/.zshrc, line 3",
-           "three": "the secure store, ~/.zshrc, line 3 and ~/.zprofile, line 2",
-           "copies": "~/.zshrc, line 3 and ~/.zprofile, line 2"},
+    "uk": {"two": "захищеного сховища і ~/.zshrc (рядок 3)",
+           "three": "захищеного сховища, ~/.zshrc (рядок 3) і ~/.zprofile (рядок 2)",
+           "copies": "~/.zshrc (рядок 3) і ~/.zprofile (рядок 2)"},
+    "en": {"two": "the secure store and ~/.zshrc (line 3)",
+           "three": "the secure store, ~/.zshrc (line 3) and ~/.zprofile (line 2)",
+           "copies": "~/.zshrc (line 3) and ~/.zprofile (line 2)"},
 }
 
 
@@ -1484,7 +1535,7 @@ def test_the_delete_names_two_and_three_places_with_and(monkeypatch, lang):
 @pytest.mark.parametrize("lang", ["uk", "en", "pl", "de"])
 def test_the_copies_after_a_save_are_named_with_and(monkeypatch, lang):
     """The same rule for the question after a save, and for its done line: the two copies of one
-    variable read «~/.zshrc, рядок 3 і ~/.zprofile, рядок 2»."""
+    variable read «~/.zshrc (рядок 3) і ~/.zprofile (рядок 2)»."""
     from autosound_tcc.ui.tcc import i18n
 
     exports = [_STATUS["shell_exports"][0], _ZPROFILE]
