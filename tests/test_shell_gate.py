@@ -332,3 +332,119 @@ def test_the_closed_gaps_add_no_question_about_ordinary_work(command, tmp_path):
     """A gate that fires on ordinary work teaches the Arbiter to click through (finding 123): each
     gap is closed for what it reaches, not for the command's name."""
     assert bash_is_dangerous(command, [tmp_path]) is False, command
+
+
+# --- Ruling 41: the last pooled leftovers of tcc#128 -------------------------------------------
+
+
+@pytest.mark.parametrize("command, asks", [
+    ("ls | grep sh | xargs chmod 755", False),
+    ("find . -name '*.sh' | grep -v vendor | xargs chmod +x", False),
+    ("ls | sort | uniq | head -5 | xargs chmod 755", False),
+    ("git ls-files | tail -n 3 | xargs chmod 644", False),
+    # Near misses: a filter that can rewrite a name, one that reads a file instead of the pipe, a
+    # producer that is not a listing, a wide root, and `-R`.
+    ("ls | sed 's|.*|-R /|' | xargs chmod 755", True),
+    ("ls | grep -o / | xargs chmod 755", True),
+    ("ls | grep -r x | xargs chmod 755", True),
+    ("ls | grep sh list.txt | xargs chmod 755", True),
+    ("ls | tr a-z A-Z | xargs chmod 755", True),
+    ("ls | cut -c1 | xargs chmod 755", True),
+    ("echo '-R /' | grep R | xargs chmod 755", True),
+    ("find ~ -type f | grep x | xargs chmod 644", True),
+    ("ls | grep sh | xargs chmod -R 755", True),
+])
+def test_a_listing_through_a_filter_that_keeps_names_is_still_a_listing(command, asks, tmp_path):
+    """Ruling 41, item 1: `grep` (without `-o`, `-r`), `head`, `tail`, `sort` and `uniq` pass the
+    listing's names on unchanged, so the chmod exception walks back through them to the listing.
+    `sed`, `awk`, `tr`, `cut` can turn a name into `-R /`, and are never walked through."""
+    assert bash_is_dangerous(command, [tmp_path]) is asks, command
+
+
+@pytest.mark.parametrize("command, asks", [
+    ("rm -rf ~/[.]config", False),
+    ("rm -rf ~/.config/[a]pp", False),
+    ("rm -rf /tmp/[x]yz", False),
+    ("chmod -R 755 ~/[b]in", False),
+    # Near misses: a glob that reaches every name, or a bracket that can spell a wide one.
+    ("rm -rf ~/[.]*", True),
+    ("rm -rf /[a-z]*", True),
+    ("rm -rf /[e]tc", True),
+    ("rm -rf /[U]sers", True),
+    ("rm -rf /Users/[s]omeone", True),
+    ("rm -rf ~/[.][.]", True),
+    ("rm -rf 'C:/[W]indows'", True),
+])
+def test_a_bracket_glob_in_one_part_is_as_narrow_as_the_names_it_can_spell(command, asks,
+                                                                           tmp_path):
+    """Ruling 41, item 2: `~/[.]config` spells one name under the home, as narrow as `~/.config`.
+    A bracket that can spell `etc`, `Users`, `..` or anybody's home is as wide as that name, and
+    `*` still reaches the whole folder."""
+    assert bash_is_dangerous(command, [tmp_path]) is asks, command
+
+
+@pytest.mark.parametrize("command, asks", [
+    (r"cmd /c 'if exist C:\x rd /s /q C:\'", True),
+    (r"cmd /c 'IF EXIST C:\x RD /S /Q C:\Users'", True),
+    (r"cmd /c 'if not exist x del /s /q C:\*'", True),
+    (r"cmd /c 'if exist x (echo a) ELSE rd /s /q C:\Users'", True),
+    (r"cmd /c 'if exist x echo a && rd /s /q C:\'", True),
+    (r"cmd /c 'dir || rd /s /q C:\Windows'", True),
+    # Near misses: the same shapes over the project's own folder.
+    ("cmd /c 'if exist build rd /s /q build'", False),
+    ("cmd /c 'if exist out.json del /q out.json'", False),
+])
+def test_a_wide_windows_delete_behind_if_in_a_cmd_line_asks(command, asks, tmp_path):
+    """Ruling 41, item 3: cmd's `if exist … <command>` runs the command after its condition; the
+    reader skipped `if` as a shell keyword and judged `exist` as the command."""
+    assert bash_is_dangerous(command, [tmp_path]) is asks, command
+
+
+@pytest.mark.parametrize("command, asks", [
+    ("rm -rf ../..", True),
+    ("rm -rf ..", True),
+    ("rm -rf ./..", True),
+    ("rm -rf ../*", True),
+    ("rm -rf ../../x", True),
+    ("rm -rf ../build/..", True),
+    ("chmod -R 777 ..", True),
+    (r"rd /s /q '..\..'", True),
+    # Near misses: one climb that comes back down into a sibling, or one that is undone.
+    ("rm -rf ../build", False),
+    ("rm -rf ../tcc-build/out", False),
+    ("rm -rf build/../dist", False),
+])
+def test_a_relative_climb_out_of_the_project_is_wide(command, asks, tmp_path):
+    """Ruling 41, item 4: a session runs in the project, so `..` is the folder that holds it and
+    `../..` the one above. Two leading `..`, or a `..` the path does not come back down from, is
+    wide; `../build` is one sibling, as narrow as before."""
+    assert bash_is_dangerous(command, [tmp_path]) is asks, command
+
+
+@pytest.mark.parametrize("command, asks", [
+    ("powershell -c 'Remove-Item -Recurse -Force ~'", True),
+    ('powershell -NoProfile -Command "rm -r -fo $HOME"', True),
+    (r"pwsh -c 'ri -r C:\'", True),
+    ("powershell -Command 'Remove-Item -Path $env:USERPROFILE -Recurse'", True),
+    (r"powershell -c 'del -Recurse C:\Users'", True),
+    ("powershell 'rd -rec ${env:USERPROFILE}'", True),
+    ("powershell -c 'erase -r *'", True),
+    ("powershell.exe -c 'Remove-Item -LiteralPath C: -Recurse'", True),
+    ("powershell -c 'RMDIR -RECURSE ~'", True),
+    ("powershell -c 'if (Test-Path ~) { Remove-Item -Recurse ~ }'", True),
+    ("powershell -c 'Get-ChildItem C:\\ | Remove-Item -Recurse'", True),
+    ("powershell -EncodedCommand AAAA", True),
+    ('cmd /c "powershell -c Remove-Item -Recurse ~"', True),
+    # Near misses: the project's own folder, no -Recurse, a read, -Recurse switched off.
+    ("powershell -c 'Remove-Item -Recurse -Force build'", False),
+    (r"pwsh -c 'Remove-Item .\out -Recurse'", False),
+    (r"powershell -c 'Remove-Item ~\x.txt'", False),
+    ("powershell -c 'Get-ChildItem ~'", False),
+    ("powershell -c 'Remove-Item -Recurse:$false ~'", False),
+    ("powershell -NoProfile -c 'Write-Output ok'", False),
+])
+def test_a_powershell_recursive_remove_of_a_wide_target_asks(command, asks, tmp_path):
+    """Ruling 41, item 5: `Remove-Item -Recurse` and its aliases (`rm`, `ri`, `del`, `rd`, `rmdir`,
+    `erase`), `-r`/`-Recurse` in any case and order, on a drive root, the home (`~`, `$HOME`,
+    `$env:USERPROFILE`), `C:\\Users` or `*`. An encoded command is not readable, so it asks."""
+    assert bash_is_dangerous(command, [tmp_path]) is asks, command

@@ -15,6 +15,7 @@ moved here unchanged.
 
 from __future__ import annotations
 
+import fnmatch
 import posixpath
 import re
 import shlex
@@ -244,6 +245,38 @@ _SYSTEM_DIRS = frozenset({"/etc", "/usr", "/bin", "/sbin", "/system", "/library"
 #: the folder the homes live in, and one home.
 _WINDOWS_WIDE = re.compile(r"(?:[a-z]:|/[a-z]|/mnt/[a-z]|/cygdrive/[a-z])"
                            r"(?:/(?:windows|program files(?: \(x86\))?|programdata|users(?:/[^/]+)?))?")
+#: The names that make a path wide under some folder, for a bracket glob to be tried against:
+#: `/[e]tc`, `C:/[W]indows`, `~/[.][.]`, `/[c]` (a drive, as Git Bash spells it).
+_WIDE_NAMES = (".", "..", *sorted(name.lstrip("/") for name in _SYSTEM_DIRS), "windows",
+               "program files", "program files (x86)", "programdata", *"abcdefghijklmnopqrstuvwxyz")
+#: Filters that pass on lines unchanged, for `_keeps_names`: (options alone, options with a value,
+#: long options → whether they take a value, whether the first operand is a pattern).
+_NAME_FILTERS: dict[str, tuple[str, str, dict[str, bool], bool]] = {
+    "grep": ("vEFGPiwxsyz", "efm", {"--invert-match": False, "--ignore-case": False,
+                                     "--extended-regexp": False, "--fixed-strings": False,
+                                     "--basic-regexp": False, "--perl-regexp": False,
+                                     "--word-regexp": False, "--line-regexp": False,
+                                     "--no-messages": False, "--null-data": False,
+                                     "--regexp": True, "--file": True, "--max-count": True}, True),
+    "head": ("q", "n", {"--lines": True, "--quiet": False, "--silent": False}, False),
+    "tail": ("qr", "n", {"--lines": True, "--quiet": False, "--silent": False}, False),
+    "sort": ("bdfghiMnrRsuVz", "ktST", {"--reverse": False, "--unique": False,
+                                         "--ignore-case": False, "--numeric-sort": False,
+                                         "--version-sort": False, "--key": True,
+                                         "--field-separator": True}, False),
+    "uniq": ("diuDz", "fsw", {"--repeated": False, "--unique": False, "--ignore-case": False,
+                              "--skip-fields": True, "--skip-chars": True,
+                              "--check-chars": True}, False),
+}
+#: PowerShell's names for Remove-Item, its home spelled as a variable, and its keywords — whose
+#: conditions and bodies `_powershell_line_is_dangerous` reads as statements of their own.
+_PS_REMOVERS = frozenset({"remove-item", "ri", "rm", "del", "rd", "rmdir", "erase"})
+_PS_HOME = re.compile(r"\$(?:home|\{home\}|env:userprofile|\{env:userprofile\})(?![\w:])",
+                      re.IGNORECASE)
+_PS_KEYWORDS = frozenset({"if", "elseif", "else", "foreach", "for", "while", "do", "until",
+                          "switch", "try", "catch", "finally", "function", "filter", "param",
+                          "begin", "process", "end", "return", "break", "continue", "exit",
+                          "throw"})
 #: What a word the line does not spell starts with when nothing spelled stands before it: `$x`,
 #: `` `…` ``, `{a,b}`, `$'\x2d'`, cmd's `%x%`, and the word `xargs` appends (`_xargs_command`).
 _EXPANSION_STARTS = ("$", "`", "{", "\\", "%", "…")
@@ -1014,6 +1047,10 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
         return _shell_is_dangerous(arguments, command, tainted, depth)
     if name == "cmd":
         return _cmd_is_dangerous(arguments, command, tainted, depth)
+    if name in ("powershell", "pwsh"):
+        return _powershell_is_dangerous(arguments, command, tainted, depth)
+    if name in ("remove-item", "ri"):
+        return _remove_item_is_dangerous(arguments, command.piped)
     if name in _INTERPRETERS or name.startswith("python"):
         return _interpreter_is_dangerous(name, arguments, command, tainted)
     if name in ("rm", "find", "dd", "chmod") and any(_runs(a, tainted) for a in arguments):
@@ -1021,8 +1058,10 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
     if name == "rm":
         return _rm_is_dangerous(arguments)
     if name in _WINDOWS_DELETES:
+        # cmd's `rd /s`, and PowerShell's aliases of Remove-Item: `rd -Recurse ~` (Ruling 41).
         return _reach_is_dangerous(arguments, _is_windows_switch,
-                                   lambda text: "s" in _switch_letters(text), bare=False)
+                                   lambda text: "s" in _switch_letters(text), bare=False
+                                   ) or _remove_item_is_dangerous(arguments, command.piped)
     if name == "find":
         return _find_is_dangerous(arguments, command, tainted, depth)
     if name == "dd":
@@ -1047,6 +1086,8 @@ def _lists_names_below_a_narrow_folder(producer: Optional[_Command]) -> bool:
     whole home or system: `ls`, `find`, `git ls-files`, every word spelled (Ruling 37). `echo` and
     `printf` print what they are told — `echo '-R /' | xargs chmod 755` is `chmod 755 -R /` to GNU
     chmod — and `find ~` reaches what `chmod -R 644 ~` does."""
+    while producer is not None and _keeps_names(producer):
+        producer = producer.producer  # `ls | grep sh | xargs …`: grep passes ls's names on
     if producer is None or producer.compound or producer.redirects or producer.stdin:
         return False
     segments = _segments(producer)
@@ -1069,6 +1110,58 @@ def _lists_names_below_a_narrow_folder(producer: Optional[_Command]) -> bool:
     else:
         return False
     return not any(_is_wide_target(root) for root in roots)
+
+
+def _keeps_names(command: _Command) -> bool:
+    """Whether a pipe member only passes on some of the lines it reads, unchanged: `grep` (not
+    `-o`, `-r`, `-c`, `-n`, … — only the options in `_NAME_FILTERS`), `head`, `tail`, `sort`,
+    `uniq`, reading the pipe and no file. Never `sed`, `awk`, `tr`, `cut`: they can turn a name
+    into `-R /` (Ruling 41)."""
+    if command.compound or command.redirects or command.stdin:
+        return False
+    segments = _segments(command)
+    if len(segments) != 1:
+        return False
+    words = segments[0]
+    while words and _ASSIGNMENT.match(words[0].text):
+        words = words[1:]
+    if not words or any(word.dynamic or word.output for word in words):
+        return False
+    rule = _NAME_FILTERS.get(_command_name(words[0].text))
+    if rule is None:
+        return False
+    flags, valued, longs, takes_pattern = rule
+    operands: list[str] = []
+    texts = [word.text for word in words[1:]]
+    at = 0
+    while at < len(texts):
+        text = texts[at]
+        at += 1
+        if text == "--":
+            operands.extend(texts[at:])
+            break
+        if text.startswith("--"):
+            option, has_value, _ = text.partition("=")
+            if option not in longs:
+                return False
+            if longs[option]:
+                at += 0 if has_value else 1
+                takes_pattern &= option not in ("--regexp", "--file")
+            continue
+        if not text.startswith("-") or len(text) < 2:
+            operands.append(text)
+            continue
+        if text[1:].isdigit() or text.startswith("-n+"):
+            continue  # `head -5`
+        for index, letter in enumerate(text[1:], start=1):
+            if letter in flags:
+                continue
+            if letter not in valued:
+                return False  # an option that may rewrite what it prints
+            at += 0 if text[index + 1:] else 1
+            takes_pattern &= letter not in "ef"
+            break
+    return len(operands) <= (1 if takes_pattern else 0)  # a file operand reads the file, not the pipe
 
 
 def _find_roots(texts: list[str]) -> Optional[list[str]]:
@@ -1248,17 +1341,38 @@ def _is_wide_target(text: str) -> bool:
         path = posixpath.normpath(path)
     # A glob reaches the folder it stands in, wherever it stands: `~/*`, `~/.[!.]*`, and
     # `/Users/*/Library`, which is in every home. One in the first part of a relative path is the
-    # folder the command runs in — the project's own (`rm -rf *.tmp`).
+    # folder the command runs in — the project's own (`rm -rf *.tmp`). A bracket alone spells a
+    # few names, and is as narrow as they are: `~/[.]config` is `~/.config` (Ruling 41).
     parts = path.split("/")
     for at, part in enumerate(parts):
         if any(ch in part for ch in "*?["):
             if at == 0:
                 return False
+            if "*" not in part and "?" not in part and _spells_narrow_names("/".join(parts[:at]),
+                                                                             part):
+                continue
             parts = parts[:at]
             break
     path = "/".join(parts).rstrip("/")
+    if path and not path.startswith("/") and not _WINDOWS_WIDE.match(path):
+        # A session runs in the project, so `..` is the folder that holds it: a climb that does
+        # not come back down — `..`, `../*` — or that climbs twice — `../..`, `../../x` — leaves
+        # the project for something wider. `../build` is one sibling (Ruling 41).
+        climbs = path.split("/")
+        return climbs == [".."] or climbs[:2] == ["..", ".."]
     return (path == "" or path in _SYSTEM_DIRS or bool(re.fullmatch(r"/(?:users|home)/[^/]+", path))
             or bool(_WINDOWS_WIDE.fullmatch(path)))
+
+
+def _spells_narrow_names(parent: str, part: str) -> bool:
+    """Whether a bracket glob — `[.]config`, no `*` or `?` — can spell only names that are narrow
+    under `parent`: none of the names that make a path wide there (a system folder, a drive's,
+    `.` or `..`), and `parent` not a folder where every name is somebody's home (Ruling 41)."""
+    if _is_wide_target(f"{parent}/\0"):
+        return False  # `/Users/[s]omeone`: whatever it spells is a home
+    spelled = re.compile(fnmatch.translate(part))
+    return not any(spelled.match(name) and _is_wide_target(f"{parent}/{name}")
+                   for name in _WIDE_NAMES)
 
 
 def _is_windows_switch(text: str) -> bool:
@@ -1378,10 +1492,175 @@ def _cmd_line_is_dangerous(line: str, tainted: set[str], depth: int) -> bool:
             # judged by its last part, as cmd reads it by its first.
             readings.append([replace(words[0], text=glued.group(1)),
                              _Word(text=glued.group(2), started=True), *words[1:]])
+        if _command_name(words[0].text) in ("if", "else", "do"):
+            # cmd runs the command after `if exist x`, `if not … ==…`, `else` and `for … do`; where
+            # the condition ends is cmd's to say, so every tail is read as that command (Ruling 41).
+            readings.extend(words[at:] for at in range(1, len(words)))
         if any(_words_are_dangerous(reading, _Command(piped=in_pipe), tainted, depth)
                for reading in readings):
             return True
     return False
+
+
+def _powershell_is_dangerous(arguments: list[_Word], command: _Command, tainted: set[str],
+                             depth: int) -> bool:
+    """`powershell -Command …` (or its first word that is not an option, Windows PowerShell's
+    default) runs a line in PowerShell's language: read by `_powershell_line_is_dangerous`. An
+    `-EncodedCommand` is base64, unreadable here, so it asks; `-File` runs a script that is not on
+    the line, as `bash x.sh` does; `-Command -` and no command at all read stdin (Ruling 41)."""
+    at = 0
+    while at < len(arguments):
+        word = arguments[at]
+        if _runs(word, tainted):
+            return True
+        text = word.text.lower()
+        if not text.startswith("-") or text == "-":
+            break
+        at += 1
+        if text == "-c" or len(text) > 3 and "-command".startswith(text):
+            break
+        if text in ("-e", "-ec") or len(text) > 2 and "-encodedcommand".startswith(text):
+            return True
+        if text == "-f" or len(text) > 2 and "-file".startswith(text):
+            if at < len(arguments) and arguments[at].text == "-":
+                return command.piped or bool(command.stdin)
+            return at < len(arguments) and _runs(arguments[at], tainted)
+    line = arguments[at:]
+    if not line or line[0].text == "-":
+        return command.piped or bool(command.stdin)
+    # bash expands what is not in single quotes before PowerShell sees it; only the home is known.
+    if any(_runs(word, tainted) or word.dynamic and word.refs != {"HOME"} for word in line):
+        return True
+    # An option the walk took for a switch may have taken a value: every tail is read as the line.
+    return any(_powershell_line_is_dangerous(" ".join(word.text for word in line[start:]), depth + 1)
+               for start in range(len(line)))
+
+
+def _powershell_line_is_dangerous(line: str, depth: int) -> bool:
+    """A PowerShell line, read closely enough to judge Remove-Item: `;`, `|`, `&`, braces and
+    parentheses part statements, `'…'` is literal, `"…"` and a backtick escape, `$HOME` and
+    `$env:USERPROFILE` are the home, any other `$…` is a value the line does not spell. A statement
+    that is not PowerShell's own is judged by the shell rules (`cmd /c …`, `git push --force`)."""
+    if depth > _MAX_DEPTH:
+        return True
+    statements: list[list[_Word]] = [[]]
+    piped: list[bool] = [False]
+    called: list[bool] = [False]  # after a lone `&`, PowerShell's call operator
+    word: Optional[_Word] = None
+    quote = ""
+
+    def finish() -> None:
+        nonlocal word
+        if word is not None:
+            text = _PS_HOME.sub("~", word.text)
+            word = replace(word, text=text, dynamic=word.dynamic or "$" in text
+                           or text.startswith("@"))
+            statements[-1].append(word)
+            word = None
+
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == quote and quote == "'" and line[i + 1:i + 2] == "'":
+                word.text += "'"
+                i += 1
+            elif ch == quote:
+                quote = ""
+            elif ch == "`" and quote == '"' and i + 1 < len(line):
+                word.text += line[i + 1]
+                i += 1
+            else:
+                word.text += ch
+        elif ch in "'\"":
+            word = word or _Word(started=True)
+            word.quoted = True
+            quote = ch
+        elif ch == "`" and i + 1 < len(line):
+            word = word or _Word(started=True)
+            word.text += line[i + 1]
+            i += 1
+        elif ch == "$" and line[i + 1:i + 2] == "{":
+            end = line.find("}", i)
+            word = word or _Word(started=True)
+            word.text += line[i:] if end < 0 else line[i:end + 1]
+            i = len(line) if end < 0 else end
+        elif ch == "#" and word is None:
+            end = line.find("\n", i)
+            i = len(line) if end < 0 else end
+            continue
+        elif ch in " \t":
+            finish()
+        elif ch in ";\n{}()|&":
+            if ch == "(" and statements[-1]:
+                finish()
+                statements[-1].append(_Word(text="(…)", started=True, dynamic=True))
+            finish()
+            pipe = ch == "|" and "|" not in (line[i - 1:i], line[i + 1:i + 2])
+            piped[-1] |= pipe
+            statements.append([])
+            piped.append(pipe)
+            called.append(ch == "&" and "&" not in (line[i - 1:i], line[i + 1:i + 2]))
+        else:
+            word = word or _Word(started=True)
+            word.text += ch
+        i += 1
+    if quote:
+        return True  # a quote that never closes: unknown is not safe
+    finish()
+    return any(_powershell_statement_is_dangerous(words, in_pipe, call, depth)
+               for words, in_pipe, call in zip(statements, piped, called) if words)
+
+
+def _powershell_statement_is_dangerous(words: list[_Word], piped: bool, called: bool,
+                                       depth: int) -> bool:
+    if words[0].text.startswith("$"):
+        if len(words) > 1 and words[1].text in ("=", "+=", "-=", "*=", "/="):
+            words = words[2:]  # `$p = Get-Location`: what is assigned is the statement
+            if not words:
+                return False
+        else:
+            # An expression — `$p`, `$_.Name -like '*.tmp'` — runs nothing; `& $cmd` runs what
+            # the line does not spell.
+            return called
+    name = _command_name(words[0].text)
+    if words[0].dynamic:
+        return True  # what runs is not written on the line
+    if name in _PS_KEYWORDS:
+        return False  # its condition and its body are statements of their own
+    if name in ("iex", "invoke-expression"):
+        return True  # PowerShell's `eval`
+    if name in _PS_REMOVERS:
+        return _remove_item_is_dangerous(words[1:], piped)
+    return _words_are_dangerous(words, _Command(piped=piped), set(), depth)
+
+
+def _remove_item_is_dangerous(arguments: list[_Word], piped: bool) -> bool:
+    """PowerShell's `Remove-Item -Recurse` (`-r`, `-rec`, `-Recurse:$true`, any case, any order) on
+    a wide target: a drive root, the home, `C:\\Users`, a climb, `*` — or one it does not spell, or
+    none when a pipe feeds it (`gci C:\\ | Remove-Item -Recurse`). Every word that is not a
+    parameter is taken as a target, and a `-Path:x` value too: a parameter's value read as a target
+    can only add a question, never hide one (Ruling 41)."""
+    recurse = False
+    targets: list[_Word] = []
+    for word in arguments:
+        text = word.text
+        if text.startswith("-") and len(text) > 1 and not word.quoted:
+            name, has_value, value = text[1:].partition(":")
+            if name and "recurse".startswith(name.lower()):
+                recurse |= value.lower() != "$false"
+            elif has_value and value:
+                targets.append(_Word(text=value, started=True, dynamic="$" in value))
+            continue
+        targets.append(word)
+    splat = any(target.text.startswith("@") for target in targets)  # `@args` may hold -Recurse
+    if not (recurse or splat):
+        return False
+    if not targets:
+        return piped
+    return any(target.dynamic or _is_wide_target(target.text)
+               or posixpath.normpath(target.text.replace("\\", "/")) in ("*", "*.*")
+               for target in targets)
 
 
 def _git_is_dangerous(arguments: list[_Word], tainted: set[str]) -> bool:
