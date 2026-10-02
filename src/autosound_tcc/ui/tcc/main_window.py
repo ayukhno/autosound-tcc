@@ -1369,6 +1369,9 @@ class MainWindow(QMainWindow):
         self._models_btn.setProperty("class", "btn")
         self._models_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._models_btn.clicked.connect(self._open_model_config)
+        # «OMP» says nothing to whoever does not know omp (VM-16): the hover names what it opens,
+        # the dialog's own title.
+        self._models_tip = attach_tip(self._models_btn, i18n.t("configureModelsTitle"))
         layout.addWidget(self._models_btn)
 
         # The three keys of this row stay plain QLabels, and so stay rigid. Making them
@@ -6172,6 +6175,7 @@ class MainWindow(QMainWindow):
         self._feedback_btn.setText("💬 " + i18n.t("fbBig"))
         self._feedback_tip.set_text(i18n.t("fbBigTip"))
         self._coffee_btn.setText(i18n.t("coffeeBtn"))
+        self._models_tip.set_text(i18n.t("configureModelsTitle"))
         self._project_section.set_title(i18n.t("projectParams"))
         self._system_section.set_title(i18n.t("systemParams"))
         self._rebuild_system_params()

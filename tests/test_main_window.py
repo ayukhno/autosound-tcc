@@ -3565,7 +3565,7 @@ def test_copy_the_car_opens_the_dialog_already_copying(monkeypatch):
     assert seeds == [True, False]
 
 
-def test_the_footer_s_omp_button_reads_omp_in_every_language():
+def test_the_footer_s_omp_button_reads_omp_in_every_language(monkeypatch):
     """VM-16: the footer's «models…» read on the VM as a word cut short. The Arbiter: «OMP», the
     same in all four languages -- what it opens is omp's catalogue. Drawn whole: the window's
     own button, as wide as its word."""
@@ -3573,12 +3573,20 @@ def test_the_footer_s_omp_button_reads_omp_in_every_language():
         "en": "OMP", "uk": "OMP", "pl": "OMP", "de": "OMP"}
     app = _app()
     window = MainWindow()
+    # Shown, a window reads omp's catalogue on a thread that outlives the test (the review, M4).
+    monkeypatch.setattr(window, "_refresh_cli_catalogue", lambda force=False: None)
     window.show()
     try:
         app.processEvents()
         assert window._models_btn.text() == "OMP"
         assert window._models_btn.width() >= window._models_btn.sizeHint().width()
+        # Three letters say nothing to whoever does not know omp: the hover names what it opens
+        # (the review, M6), in the window's language.
+        assert window._models_btn.hover_tip.text() == i18n.t("configureModelsTitle")
+        window._on_language_selected("uk")
+        assert window._models_btn.hover_tip.text() == i18n.t("configureModelsTitle")
     finally:
+        i18n.set_language("en")
         window.hide()
 
 

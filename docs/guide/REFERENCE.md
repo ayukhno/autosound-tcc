@@ -357,7 +357,7 @@ GitHub issue, and send. The version line at the bottom goes with your message.
 
 At the bottom of the [main window](#the-window):
 
-- **models…**: the same dialog as *Configure models* in the menu.
+- **OMP**: the same dialog as *Configure models* in the menu.
 - **AI main** and **Effort**: the Generator and how hard it thinks. *x-high* is the default and
   suits almost every step.
 - **AI critic**: the reviewer, and its status next to it.
