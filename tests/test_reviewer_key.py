@@ -885,22 +885,33 @@ def test_remove_key_names_the_provider_and_nothing_else(monkeypatch):
 
 
 _RM_ANSWERS = {
-    # (exit, out, err, status after, what happened, the copy left)
+    # (exit, out, err, status after, what happened, the copies left)
     "removed": (0, "GEMINI_API_KEY: прибрано зі сховища ключів", "", _GONE,
-                reviewer_key.REMOVED, ""),
+                reviewer_key.REMOVED, ()),
     "removed, the file still has one": (
         0, "GEMINI_API_KEY: прибрано зі сховища ключів; лишився: файл ~/.config/autosound/critic-env",
         "", _with(_GONE, google={"used": "file", "file": {"path": "critic-env", "line": 2,
                                                           "blank": False}}),
-        reviewer_key.REMOVED, "file"),
+        reviewer_key.REMOVED, ("file",)),
     "removed, the environment still has one": (
         0, "GEMINI_API_KEY: прибрано зі сховища ключів; лишився: змінна середовища", "",
-        _with(_GONE, google={"used": "env", "env": True}), reviewer_key.REMOVED, "env"),
+        _with(_GONE, google={"used": "env", "env": True}), reviewer_key.REMOVED, ("env",)),
+    # Both, though the method uses the file's: each is a copy (review I2).
+    "removed, the file and the environment": (
+        0, "GEMINI_API_KEY: прибрано зі сховища ключів; лишився: файл, змінна середовища", "",
+        _with(_GONE, google={"used": "file", "env": True, "file": {
+            "path": "critic-env", "line": 2, "blank": False}}),
+        reviewer_key.REMOVED, ("file", "env")),
+    # A blank line in the file is the machine's choice of the CLI, not a copy of the key.
+    "removed, the file blanks it": (
+        0, "GEMINI_API_KEY: прибрано зі сховища ключів", "",
+        _with(_GONE, google={"file": {"path": "critic-env", "line": 2, "blank": True}}),
+        reviewer_key.REMOVED, ()),
     # The Keychain refused and the method said «не було»: the store answers, not the words.
-    "the store kept it": (0, _NOT_THERE, "", None, reviewer_key.NOT_REMOVED, ""),
-    "a crash, the store kept it": (1, "", _RM_TRACEBACK, None, reviewer_key.NOT_REMOVED, ""),
-    "a crash after the delete": (1, "", _RM_TRACEBACK, _GONE, reviewer_key.REMOVED, ""),
-    "no answer": (None, "", "", _GONE, None, ""),
+    "the store kept it": (0, _NOT_THERE, "", None, reviewer_key.NOT_REMOVED, ()),
+    "a crash, the store kept it": (1, "", _RM_TRACEBACK, None, reviewer_key.NOT_REMOVED, ()),
+    "a crash after the delete": (1, "", _RM_TRACEBACK, _GONE, reviewer_key.REMOVED, ()),
+    "no answer": (None, "", "", _GONE, None, ()),
 }
 
 
@@ -925,7 +936,7 @@ def test_what_happened_is_read_from_the_store_after_key_rm(monkeypatch, case):
 def test_a_key_that_was_never_stored_is_nothing_removed(monkeypatch):
     method = _Method(status=_with(_GONE, google={"used": "env", "env": True}), rm_out=_NOT_THERE)
     _use(monkeypatch, method)
-    assert reviewer_key.remove_key("google")[:2] == (reviewer_key.NOT_STORED, "env")
+    assert reviewer_key.remove_key("google")[:2] == (reviewer_key.NOT_STORED, ("env",))
 
 
 def test_no_status_after_the_delete_is_no_answer(monkeypatch):
@@ -934,17 +945,21 @@ def test_no_status_after_the_delete_is_no_answer(monkeypatch):
     assert reviewer_key.remove_key("google")[0] is None
 
 
-def test_a_removal_forgets_the_api_rows(monkeypatch):
-    """What the API rows learned on the key goes with it — the refusal and the green both (the
-    save's own rule, finding 128): a deleted key answers nothing. AGY's own refusal stays."""
+def test_a_removal_forgets_only_that_provider_s_api_rows(monkeypatch):
+    """What the provider's API rows learned on the key goes with it — the refusal and the green
+    both (the save's own rule, finding 128): a deleted key answers nothing. Another vendor's API
+    row answered on its own key, and AGY's refusal is its login's: both stay (review M3)."""
     from autosound_tcc.core import availability
 
     api, agy, state = _api_refused()
+    gpt = "api:gpt-5.5"
     availability.succeeded(api.key)
+    availability.succeeded(gpt)
     availability.refused(agy.key, availability.REFUSED, "its own login")
     _use(monkeypatch, _Method(status=_with(exports=[]), after_rm=_GONE))
     assert reviewer_key.remove_key("google")[0] == reviewer_key.REMOVED
     assert state(api).ready and not availability.answered(api.key)
+    assert availability.answered(gpt)
     assert state(agy).reason == availability.REFUSED
 
 
@@ -998,25 +1013,118 @@ def test_a_stored_key_has_a_delete_on_its_row(monkeypatch):
 
 
 def test_delete_asks_first_naming_the_provider_and_what_stops(monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
     method = _Method(status=_with(exports=[]), after_rm=_GONE)
     dialog, asked = _rm_dialog(monkeypatch, method, answer=False)
     dialog._removes["google"].click()
     assert len(asked) == 1 and "Google (Gemini)" in asked[0] and "API" in asked[0]
+    assert i18n.t("rkPlaceStore") in asked[0]
     assert method.changes() == []
     dialog.close()
 
 
-def test_delete_removes_the_key_and_the_button_goes_with_it(monkeypatch):
+def test_delete_from_the_store_only_says_nothing_is_charged(monkeypatch):
     from autosound_tcc.ui.tcc import i18n
 
     method = _Method(status=_with(exports=[]), after_rm=_GONE)
     dialog, _ = _rm_dialog(monkeypatch, method)
     dialog._removes["google"].click()
     assert method.changes() == [(["key", "rm", "google"], None)]
-    assert dialog._result.text() == i18n.t("rkRmDone").format(provider="Google (Gemini)")
+    name = "Google (Gemini)"
+    assert dialog._result.text() == " ".join((
+        i18n.t("rkRmDone").format(provider=name, places=i18n.t("rkPlaceStore")),
+        i18n.t("rkRmFree").format(provider=name)))
     assert "прибрано" in dialog._result.toolTip(), "the method's own words on hover"
     assert dialog._removes["google"].isHidden()
     assert dialog._where["google"].text() == i18n.t("rkUsed_none")
+    dialog.close()
+
+
+def test_an_exported_copy_is_dropped_before_the_key_leaves_the_store(monkeypatch):
+    """Review I2: `--drop` refuses once the store no longer holds the key — the copy would be the
+    only one — and the window would be left with `move-shell`, which stores the key again. So the
+    question names both places, the copy goes first, then `key rm`; and TCC's own copy of the
+    variable, whose source is gone, goes with it."""
+    from autosound_tcc.ui.tcc import i18n
+
+    monkeypatch.setenv("GEMINI_API_KEY", "a-copy-tcc-was-started-with")
+    method = _Method(after_move=_with(exports=[]), after_rm=_GONE)
+    dialog, asked = _rm_dialog(monkeypatch, method)
+    dialog._removes["google"].click()
+    place = i18n.t("rkPlaceFile").format(file="~/.zshrc", line=3)
+    places = f"{i18n.t('rkPlaceStore')}; {place}"
+    assert len(asked) == 1 and places in asked[0]
+    assert method.changes() == [(["key", "move-shell", "google", "--drop", "--yes"], None),
+                                (["key", "rm", "google"], None)]
+    assert "GEMINI_API_KEY" not in os.environ
+    name = "Google (Gemini)"
+    assert dialog._result.text() == " ".join((
+        i18n.t("rkRmDone").format(provider=name, places=places),
+        i18n.t("rkRmFree").format(provider=name)))
+    dialog.close()
+
+
+_STOPS = {
+    "refused": (3, "rkNotRemoved"),
+    "a crash": (1, "rkNotRemoved"),
+    "no answer": (None, "rkDropNoAnswer"),
+}
+
+
+@pytest.mark.parametrize("case", list(_STOPS))
+def test_a_copy_that_was_not_dropped_stops_the_delete(monkeypatch, case):
+    """Without the copy gone, `key rm` would strand it: the delete stops there and says so, and
+    the key stays in the store — and TCC's own variable stays too."""
+    from autosound_tcc.ui.tcc import i18n
+
+    monkeypatch.setenv("GEMINI_API_KEY", "a-copy-tcc-was-started-with")
+    code, key = _STOPS[case]
+    method = _Method(move_rc=code, move_out="✗ the method's words", after_rm=_GONE)
+    dialog, _ = _rm_dialog(monkeypatch, method)
+    dialog._removes["google"].click()
+    assert method.changes() == [(["key", "move-shell", "google", "--drop", "--yes"], None)]
+    place = i18n.t("rkPlaceFile").format(file="~/.zshrc", line=3)
+    assert dialog._result.text() == " ".join((
+        i18n.t("rkRmStopped").format(provider="Google (Gemini)"),
+        i18n.t(key).format(var="GEMINI_API_KEY", place=place)))
+    assert os.environ.get("GEMINI_API_KEY") == "a-copy-tcc-was-started-with"
+    assert not dialog._removes["google"].isHidden(), "the key is still there to delete"
+    dialog.close()
+
+
+def test_an_older_method_with_a_copy_deletes_nothing(monkeypatch):
+    """v3.0.64 would move and store every export for `--drop` (hub #230): no drop is sent, and no
+    `key rm` either, since it would strand the copy."""
+    from autosound_tcc.ui.tcc import i18n
+
+    method = _Method(drops=False, after_rm=_GONE)
+    dialog, _ = _rm_dialog(monkeypatch, method)
+    dialog._removes["google"].click()
+    assert method.changes() == []
+    assert i18n.t("rkDropUpdate").format(
+        var="GEMINI_API_KEY", place="~/.zshrc, рядок 3") in dialog._result.text()
+    dialog.close()
+
+
+def test_a_copy_the_window_cannot_remove_is_named_before_and_after(monkeypatch):
+    """A key line in critic-env, and the environment TCC was started with when no export explains
+    it: no command here removes them. The question says they stay; the line after names them and
+    never says «нічого не списується»."""
+    from autosound_tcc.ui.tcc import i18n
+
+    copies = {"file": {"path": "critic-env", "line": 2, "blank": False}, "env": True}
+    method = _Method(status=_with(exports=[], google=copies),
+                     after_rm=_with(_GONE, google=copies))
+    dialog, asked = _rm_dialog(monkeypatch, method)
+    dialog._removes["google"].click()
+    where = f"{i18n.t('rkLeft_file')}; {i18n.t('rkLeft_env')}"
+    assert i18n.t("rkRmAskKept").format(where=where) in asked[0]
+    name = "Google (Gemini)"
+    assert dialog._result.text() == " ".join((
+        i18n.t("rkRmDone").format(provider=name, places=i18n.t("rkPlaceStore")),
+        i18n.t("rkRmLeft").format(where=where)))
+    assert i18n.t("rkRmFree").format(provider=name) not in dialog._result.text()
     dialog.close()
 
 
@@ -1025,13 +1133,14 @@ def test_delete_removes_the_key_and_the_button_goes_with_it(monkeypatch):
     ("removed", "rkRmDone"),
     ("removed, the file still has one", "rkRmDone"),
     ("removed, the environment still has one", "rkRmDone"),
+    ("removed, the file and the environment", "rkRmDone"),
     ("the store kept it", "rkRmFailed"),
     ("a crash, the store kept it", "rkRmFailed"),
     ("no answer", "rkRmNoAnswer"),
 ])
 def test_the_line_after_a_delete_is_true_on_every_answer(monkeypatch, lang, case, line):
-    """No false «видалено»: a store that kept the key, a crash, or no answer each says its own
-    line, and a copy left in the file or the environment is named after the deletion."""
+    """No false «видалено» and no false «нічого не списується»: a store that kept the key, a crash
+    or no answer each says its own line, and a copy left anywhere is named in place of the claim."""
     from autosound_tcc.ui.tcc import i18n
 
     code, out, err, after, _happened, left = _RM_ANSWERS[case]
@@ -1041,11 +1150,14 @@ def test_the_line_after_a_delete_is_true_on_every_answer(monkeypatch, lang, case
     i18n.set_language(lang)
     dialog._removes["google"].click()
     text = dialog._result.text()
-    assert text.startswith(i18n.t(line).format(provider="Google (Gemini)")), (case, text)
-    done = i18n.t("rkRmDone").format(provider="Google (Gemini)")
-    assert (done in text) == (line == "rkRmDone"), case
+    name = "Google (Gemini)"
+    assert text.startswith(i18n.t(line).format(provider=name, places=i18n.t("rkPlaceStore"))), \
+        (case, text)
+    free = i18n.t("rkRmFree").format(provider=name)
+    assert (free in text) == (line == "rkRmDone" and not left), case
     if left:
-        assert i18n.t("rkRmLeft").format(where=i18n.t(f"rkLeft_{left}")) in text, case
+        where = "; ".join(i18n.t(f"rkLeft_{w}") for w in left)
+        assert i18n.t("rkRmLeft").format(where=where) in text, case
     else:
         assert i18n.t("rkRmLeft").split("{")[0] not in text, case
     dialog.close()
@@ -1065,6 +1177,18 @@ def test_delete_key_waits_with_the_buttons_off_and_says_so(monkeypatch):
 
     commands = [command for command, *_ in method.seen]
     assert commands[0] == "key rm" and "key status" in commands
+    for command, shape, on, line in method.seen:
+        assert (shape, on, line) == (Qt.CursorShape.WaitCursor, [], i18n.t("rkBusyRm")), command
+    _settled(dialog)
+    dialog.close()
+
+    # And with a copy to drop first: the drop, `key rm` and the re-reads, one wait.
+    method = _Slow(after_move=_with(exports=[]), after_rm=_GONE)
+    dialog, _ = _slow_dialog(monkeypatch, method)
+    method.seen.clear()
+    dialog._removes["google"].click()
+    commands = [command for command, *_ in method.seen]
+    assert commands.index("key move-shell") < commands.index("key rm")
     for command, shape, on, line in method.seen:
         assert (shape, on, line) == (Qt.CursorShape.WaitCursor, [], i18n.t("rkBusyRm")), command
     _settled(dialog)

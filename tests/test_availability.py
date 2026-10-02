@@ -71,15 +71,21 @@ def test_forgetting_one_routes_refusals_keeps_the_others():
     assert _status(agy).reason == availability.REFUSED
 
 
-def test_forgetting_one_routes_answers_keeps_the_others():
-    """A key deleted in «Ключ рецензента» takes the API rows' green with it (tcc#127): what
-    answered on that key cannot again. The agy row answered on its own login and stays green."""
-    api, agy = _choice(harness="api", model="gemini-pro-latest"), _choice()
-    availability.succeeded(api.key)
-    availability.succeeded(agy.key)
-    availability.forget_answers("api")
-    assert not availability.answered(api.key)
-    assert availability.answered(agy.key)
+def test_forgetting_some_rows_keeps_the_others():
+    """A key deleted in «Ключ рецензента» takes its own API rows' red and green with it (tcc#127,
+    review M3): what answered on that key cannot again. Another vendor's API row, and the agy row
+    on its own login, keep theirs."""
+    gemini = _choice(harness="api", model="gemini-pro-latest")
+    gpt = _choice(harness="api", model="gpt-5.5")
+    agy = _choice()
+    for choice in (gemini, gpt, agy):
+        availability.succeeded(choice.key)
+    availability.refused(gemini.key, availability.REFUSED, "a rejected key")
+    availability.refused(agy.key, availability.REFUSED, "its own login")
+    availability.forget_rows(lambda key: key == gemini.key)
+    assert _status(gemini).ready and not availability.answered(gemini.key)
+    assert availability.answered(gpt.key)
+    assert _status(agy).reason == availability.REFUSED
 
 
 def test_a_harness_still_being_read_is_not_checked():

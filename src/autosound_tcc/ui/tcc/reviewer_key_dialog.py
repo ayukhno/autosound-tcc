@@ -13,9 +13,10 @@ the OS keystore holds has «Видалити копію …» (finding 127, tcc#
 `key move-shell <provider> --drop` (v3.0.65, hub #230), which removes that one export without
 storing it — never TCC's own edit, and no pasted key held across the question.
 
-A key the OS keystore holds has «Видалити ключ» on its row (finding 136, tcc#127): the method's
-own `key rm <provider>`, after a yes that names the provider and the API route it stops. The line
-after it is read from the store, not from the exit.
+A key the OS keystore holds has «Видалити ключ» on its row (finding 136, tcc#127): after a yes
+that names every place the key is, an exported copy goes first (`move-shell <provider> --drop`,
+while the store still holds the key), then the method's own `key rm <provider>`. The line after it
+is read from the store, not from the exit, and names any copy still left.
 
 A signed-in CLI (`agy`, `claude`, `codex`) needs no key at all; the screen says so, because the
 subscription route is the first one, not the fallback.
@@ -29,6 +30,7 @@ before that question; a worker would have to carry both across.
 
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 
 from PySide6.QtCore import QEventLoop, Qt
@@ -398,28 +400,92 @@ class ReviewerKeyDialog(QDialog):
         self._result.setToolTip(tip)
 
     def _on_remove(self, provider) -> None:
-        """«Видалити ключ»: the stored key out of the OS keystore, after a yes that names the
-        provider and what stops — the API route (finding 136, tcc#127). The method's `key rm`
-        under the wait (VM-2), and the line from the store it left, never from the exit
-        (`reviewer_key.remove_key`): still held, crashed or unanswered is never «видалено»."""
+        """«Видалити ключ»: the key out of every place the window can take it from, after a yes that
+        names each of them, the provider and what stops — the API route (finding 136, tcc#127).
+
+        In this order, under the wait (VM-2): an exported copy first, by the method's `move-shell
+        <provider> --drop`, while the store still holds the key — `--drop` refuses once it does not,
+        the copy being the only one, and the window would be left with no way to remove it but
+        `move-shell`, which stores the key again (review I2). A drop that fails stops the delete
+        there, and says so. Then the method's `key rm`; then the line from the store it left, never
+        from the exit (`reviewer_key.remove_key`): «нічого не списується» only when no copy is
+        left anywhere the window sees, and what is left named otherwise."""
         name = _NAMES[provider]
-        if not self._confirm(i18n.t("rkRmAsk").format(provider=name, save=i18n.t("rkSave")),
-                             i18n.t("rkDropYes"), default_yes=False):
+        var = self._entry(provider).get("var") or "?"
+        exports = [e for e in reviewer_key.shell_exports() if e.get("var") == var]
+        places = "; ".join([i18n.t("rkPlaceStore")] + [_place(e) for e in exports])
+        ask = i18n.t("rkRmAsk").format(provider=name, places=places, save=i18n.t("rkSave"))
+        kept = self._kept(provider, exports)
+        if kept:
+            ask += "\n\n" + i18n.t("rkRmAskKept").format(where="; ".join(kept))
+        if not self._confirm(ask, i18n.t("rkDropYes"), default_yes=False):
             return
+        tips: list[str] = []
+        stop = ""
         with self._busy("rkBusyRm"):
-            happened, left, said = reviewer_key.remove_key(provider)
-            # The rows, under the same wait: the kept answer is the one the removal re-read, and
-            # after no answer this read asks again.
+            if exports:
+                stop = self._drop_first(provider, var, exports, tips)
+            if not stop:
+                happened, left, said = reviewer_key.remove_key(provider)
+                tips.append(said)
+            # The rows, under the same wait: the kept answer is the one the last command re-read,
+            # and after no answer this read asks again.
             self.refresh()
-        line = i18n.t({reviewer_key.REMOVED: "rkRmDone", reviewer_key.NOT_STORED: "rkRmNone",
-                       reviewer_key.NOT_REMOVED: "rkRmFailed"}.get(happened, "rkRmNoAnswer")
-                      ).format(provider=name)
-        if left and happened in (reviewer_key.REMOVED, reviewer_key.NOT_STORED):
-            # `key rm` leaves the file and the environment alone, and the API still has a key.
-            line += " " + i18n.t("rkRmLeft").format(where=i18n.t(f"rkLeft_{left}"))
+        if stop:
+            line = f"{i18n.t('rkRmStopped').format(provider=name)} {stop}"
+        else:
+            line = self._removed_line(name, var, happened, left, places)
         self._result.setText(line)
-        # The method's own sentence is Ukrainian whatever the window speaks (finding 42).
-        self._result.setToolTip(said)
+        # The method's own sentences are Ukrainian whatever the window speaks (finding 42).
+        self._result.setToolTip("\n".join(tip for tip in tips if tip))
+
+    def _kept(self, provider, exports: list[dict]) -> list[str]:
+        """The copies of `provider`'s key no command here removes: a line in the critic-env file,
+        and the environment TCC was started with when no export it can drop explains it."""
+        entry = self._entry(provider)
+        file_ = entry.get("file")
+        kept = []
+        if isinstance(file_, dict) and not file_.get("blank"):
+            kept.append(i18n.t("rkLeft_file"))
+        if entry.get("env") is True and not exports:
+            kept.append(i18n.t("rkLeft_env"))
+        return kept
+
+    def _drop_first(self, provider, var: str, exports: list[dict], tips: list[str]) -> str:
+        """The exported copies dropped before the key leaves the store (review I2): "" to go on,
+        or the line that says why the delete stopped here."""
+        place = "; ".join(_place(e) for e in exports)
+        if not reviewer_key.drops_exports():
+            # An older method would move and store every export for this (hub #230).
+            return i18n.t("rkDropUpdate").format(var=var, place=place)
+        happened, said = reviewer_key.drop_export(provider)
+        tips.append(said)
+        if happened == reviewer_key.DROPPED:
+            # And TCC's own copy of what it was started with — on Windows the HKCU value, from a
+            # terminal the profile's — whose source is now gone: the reviewer runs TCC starts
+            # would carry it until a restart.
+            os.environ.pop(var, None)
+            return ""
+        if happened == reviewer_key.NOTHING:
+            return ""
+        return i18n.t("rkDropNoAnswer" if happened is None else "rkNotRemoved").format(
+            var=var, place=place)
+
+    @staticmethod
+    def _removed_line(name: str, var: str, happened, left: tuple, places: str) -> str:
+        """The line after `key rm`, from the store it left and the copies still there."""
+        still = [i18n.t(f"rkLeft_{where}") for where in left] + [
+            _place(e) for e in reviewer_key.shell_exports() if e.get("var") == var]
+        left_line = i18n.t("rkRmLeft").format(where="; ".join(still)) if still else ""
+        if happened == reviewer_key.REMOVED:
+            return " ".join((i18n.t("rkRmDone").format(provider=name, places=places),
+                             left_line or i18n.t("rkRmFree").format(provider=name)))
+        if happened == reviewer_key.NOT_STORED:
+            return " ".join(part for part in (i18n.t("rkRmNone").format(provider=name), left_line)
+                            if part)
+        if happened == reviewer_key.NOT_REMOVED:
+            return i18n.t("rkRmFailed").format(provider=name)
+        return i18n.t("rkRmNoAnswer")
 
     def _confirm(self, text: str, yes: str, *, default_yes: bool) -> bool:
         """A yes or a no, in the window's language. Its own method, so a test can answer it."""

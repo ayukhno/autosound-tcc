@@ -107,11 +107,14 @@ def forget_refusals(harness: Optional[str] = None) -> None:
             del _refusals[key]
 
 
-def forget_answers(harness: str) -> None:
-    """Forget which of one route's rows answered this launch: a key deleted in «Ключ рецензента»
-    takes the API rows' green with it — what answered on that key cannot again (tcc#127)."""
+def forget_rows(belongs: Callable[[str], bool]) -> None:
+    """Forget what the rows `belongs` picks out learned this launch, the refusal and the answer
+    both: a key deleted in «Ключ рецензента» takes its own API rows' red and green with it, and
+    nobody else's (tcc#127, review M3)."""
     with _lock:
-        for key in [key for key in _answered if key.startswith(f"{harness}:")]:
+        for key in [key for key in _refusals if belongs(key)]:
+            del _refusals[key]
+        for key in [key for key in _answered if belongs(key)]:
             _answered.discard(key)
 
 
