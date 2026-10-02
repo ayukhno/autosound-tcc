@@ -1436,7 +1436,9 @@ class MainWindow(QMainWindow):
         # German window it gave all of them: the longer «KI MAIN», «AUFWAND» and «KI CRITIC» left
         # it «…» (VM-13). The Arbiter: never narrower than its widest value; the model pickers,
         # which may elide, give way instead. Its hint is the same number, so a roomy row is as
-        # before, and the full window's floor stays the header's in every font measured.
+        # before, and the full window's floor stays the header's in every font measured. Held as
+        # the box's live ask, not Qt's minimum hint, which is cached once and not re-measured.
+        ai_effort.holds_its_widest_row()
         self._ai_effort_combo = ai_effort
         ai_effort.currentIndexChanged.connect(self._on_effort_changed)
         layout.addWidget(ai_effort)

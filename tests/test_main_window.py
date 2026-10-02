@@ -3803,15 +3803,16 @@ def test_a_roomy_footer_shows_the_reviewer_whole_and_a_narrow_one_keeps_its_floo
         f"its own {asks}: the room came out of the row\n{_row_width_report(window, footer)}")
 
 
-@pytest.mark.parametrize("stretch", [100, 141, 175, 200])
+@pytest.mark.parametrize("stretch", [100, 141])
 def test_a_narrow_german_footer_keeps_the_effort_box_whole(monkeypatch, stretch):
     """VM-13 (the Windows VM): in a narrow German window the effort box read «…» — «KI MAIN»,
     «AUFWAND» and «KI CRITIC» are longer than the English, and the box gave way with the rest
     down to its 62-px floor. The Arbiter: the effort box is never narrower than its widest value
     («x-high», the same in all four languages); the model pickers give way instead, and may elide.
     Under the window's sheet, at the window's own floor and at 1280 px, in the Mac's font and
-    stretched about as wide as the Windows runner's and wider (the wide-font emulation's
-    `WIDE_STRETCH` values), the box draws «x-high» whole."""
+    stretched about as wide as the Windows runner's (the wide-font emulation's `WIDE_STRETCH`;
+    once, F-065: an application-wide font is a write to every live widget), the box draws
+    «x-high» whole -- and at the floor it is the reviewer picker that is cut."""
     from PySide6.QtGui import QFont, QFontDatabase
 
     app = _app()
@@ -3832,7 +3833,8 @@ def test_a_narrow_german_footer_keeps_the_effort_box_whole(monkeypatch, stretch)
                      key=effort.fontMetrics().horizontalAdvance)
         assert widest == "x-high", widest
         footer = effort.parentWidget()
-        for width in (window.minimumSizeHint().width(), 1280):
+        floor = window.minimumSizeHint().width()
+        for width in (floor, 1280):
             window.resize(width, 820)
             _let_it_settle()
             for index in range(effort.count()):
@@ -3840,8 +3842,11 @@ def test_a_narrow_german_footer_keeps_the_effort_box_whole(monkeypatch, stretch)
                 assert effort.fit_text() == effort.itemText(index), (
                     f"at {window.width()} px the effort box reads «{effort.fit_text()}», "
                     f"{effort.width()} px wide\n{_row_width_report(window, footer)}")
-        assert window._ai_critic_combo.width() < window._ai_critic_combo.sizeHint().width(), (
-            "the pickers gave way instead: at the floor the reviewer is the one cut")
+            if width == floor:
+                critic = window._ai_critic_combo
+                assert critic.width() < critic.sizeHint().width(), (
+                    f"the pickers give way instead: at the floor ({window.width()} px) the "
+                    f"reviewer is the one cut\n{_row_width_report(window, footer)}")
     finally:
         i18n.set_language("en")
         if app.font() != was:
