@@ -3482,3 +3482,25 @@ a leave when the window loses activation.
 
 **Task.** For the next wave — on the window's deactivation, send the hovered widget its leave (and on activation
 re-read what is under the cursor), app-wide; a VM look.
+
+### 140. After «Update all» the tools say «already the newest», and Re-check takes it back
+
+**What.** The Arbiter on the Windows VM, 2026-10-02, v0.1.46, diagnostics → «Updates». Before: «Claude Code 2.1.286 →
+unknown: its source cannot tell without installing», «omp 18.4.8 → 18.4.12», «agy 1.2.15 → unknown: …». «Update all»
+updated Claude Code to 2.1.287 and omp to 18.4.12; at once every row and button went grey, Claude Code and agy reading
+«2.1.287: already the newest» / «1.2.15: already the newest». After «Re-check» both are back to «→ unknown: its source
+cannot tell without installing» with «Update» live again — what the update just learned is forgotten, and a tool whose
+source cannot tell its newest version offers «Update» for ever.
+
+**Weight.** Low–medium: no harm, but the window contradicts itself and invites a needless update.
+
+**Task.** For W-6's collection (record only).
+
+### 141. The method's update row reads oddly (the Arbiter: «кнопка не нажимається, але надпис дивний»)
+
+**What.** The same tab: «The method 3.0.66 — up to date» with a greyed «Update the method». The Arbiter finds the
+wording odd; what he expected is to be asked (recorded as said).
+
+**Weight.** Low.
+
+**Task.** For W-6's collection (record only).
