@@ -279,11 +279,13 @@ def test_a_reviewer_refused_by_region_turns_the_closed_picker_red(tmp_path, monk
     window, _ = _window(tmp_path, monkeypatch)
     combo = main_window.QComboBox()
     combo.addItem("AGY · Gemini 3.1 Pro (High)", choice.key)
+    # `reviewer=` as the window passes it since #127 (a reviewer's Claude row is signed in by its
+    # login alone); the fake answers the same either way, which is all this test needs.
     monkeypatch.setattr(availability, "status",
-                        lambda c: availability.Status(False, availability.LOCATION))
+                        lambda c, reviewer=False: availability.Status(False, availability.LOCATION))
     main_window._mark_missing(combo, [choice])
     assert "is-missing" in combo.property("class")
     monkeypatch.setattr(availability, "status",
-                        lambda c: availability.Status(False, availability.NOT_CHECKED))
+                        lambda c, reviewer=False: availability.Status(False, availability.NOT_CHECKED))
     main_window._mark_missing(combo, [choice])
     assert "is-missing" not in combo.property("class"), "not checked is not refused"
