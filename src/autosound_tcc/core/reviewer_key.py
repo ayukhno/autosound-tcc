@@ -46,6 +46,9 @@ _TIMEOUT_S = 20
 _LOCK = threading.Lock()
 #: `False` = not asked yet; `None` = asked, and the method cannot answer; a dict = its answer.
 _STATUS: object = False
+#: What every method that has `key` prints in its usage line, `--drop` or not (since the first
+#: `key`, v3.0.59+): the sign the probe was answered.
+_USAGE = "key move-shell"
 #: `drops_exports`' answer and the script file it was asked of — `((path, mtime, size), bool)` —
 #: or None before the first question.
 _DROPS: Optional[tuple[tuple, bool]] = None
@@ -183,12 +186,13 @@ def drops_exports() -> Optional[bool]:
     seen = (str(script), stat.st_mtime_ns, stat.st_size)
     if _DROPS is None or _DROPS[0] != seen:
         proc = _run(["key", "help"])
-        if proc is None or "Traceback (most recent call last)" in (proc.stderr or ""):
-            # No answer — the timeout, or a crash before the usage line — is not «no `--drop`»:
-            # read as one, it said «update the method» to a method that may have it (tcc#129).
-            # Not kept: asked again next time.
+        said = f"{proc.stdout or ''}\n{proc.stderr or ''}" if proc is not None else ""
+        if _USAGE not in said:
+            # No usage line is no answer — the timeout, a crash, a child killed or gone before a
+            # word — and not «no `--drop`»: read as one, it said «update the method» to a method
+            # that may have it (tcc#129, and its review). Not kept: asked again next time.
             return None
-        _DROPS = (seen, "--drop" in f"{proc.stdout or ''}\n{proc.stderr or ''}")
+        _DROPS = (seen, "--drop" in said)
     return _DROPS[1]
 
 

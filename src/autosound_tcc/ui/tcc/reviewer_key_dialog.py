@@ -181,13 +181,12 @@ class ReviewerKeyDialog(QDialog):
         self._field.setFocus()
 
     def refresh(self, *, ask: bool = False) -> None:
-        """Show what the method says now. `ask` re-runs `key status` instead of the kept answer."""
-        if ask:
-            # The re-read is the method's command too, and waits like one (VM-2).
-            with self._busy("rkBusyRead"):
-                self._show(reviewer_key.status(refresh=True))
-            return
-        self._show(reviewer_key.status())
+        """Show what the method says now. `ask` re-runs `key status` instead of the kept answer.
+
+        Under the wait either way (VM-2, ruling 42): the re-read is the method's command, and so is
+        a read of the kept answer once a change forgot it — the repaint after a save among them."""
+        with self._busy("rkBusyRead" if ask else None):
+            self._show(reviewer_key.status(refresh=ask))
 
     def _show(self, answer) -> None:
         supported = answer is not None
@@ -241,34 +240,44 @@ class ReviewerKeyDialog(QDialog):
 
         A click made meanwhile is dropped, not queued: the OS holds it until the event loop runs,
         so the loop runs here once more while the controls are still off.
+
+        Whatever the call does — answers, or raises past `_run`'s own catch — the cursor comes back
+        and the controls go on again (ruling 42): everything after the cursor is set is inside the
+        `try`, and its restore in a `finally` of its own.
         """
         outer = self._busy_depth == 0
         self._busy_depth += 1
         covered = (self._result.text(), self._result.toolTip())
         # A control turned off loses the focus; the key field, say, gets it back (Enter saves).
         focused = self.focusWidget()
-        if line:
-            self._result.setText(i18n.t(line))
-            self._result.setToolTip("")
-        if outer:
-            self._settle()
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        if self.isVisible():
-            QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+        waiting = False
         try:
+            if line:
+                self._result.setText(i18n.t(line))
+                self._result.setToolTip("")
+            if outer:
+                self._settle()
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                waiting = True
+            if self.isVisible():
+                QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
             yield
         finally:
             self._busy_depth -= 1
-            if line and self._result.text() == i18n.t(line):
-                self._result.setText(covered[0])
-                self._result.setToolTip(covered[1])
-            if outer:
-                if self.isVisible():
+            try:
+                if line and self._result.text() == i18n.t(line):
+                    self._result.setText(covered[0])
+                    self._result.setToolTip(covered[1])
+                if outer and self.isVisible():
                     QApplication.processEvents()
-                QApplication.restoreOverrideCursor()
-                self._settle()
-                if focused in (self._field, self._provider, self._save) and focused.isEnabled():
-                    focused.setFocus()
+            finally:
+                if waiting:
+                    QApplication.restoreOverrideCursor()
+                if outer:
+                    self._settle()
+                    if focused in (self._field, self._provider, self._save) and \
+                            focused.isEnabled():
+                        focused.setFocus()
 
     def _takes_drop(self) -> bool | None:
         """`reviewer_key.drops_exports()` — True, False, or None for no answer — asked at most once
@@ -285,8 +294,9 @@ class ReviewerKeyDialog(QDialog):
         """«Видалити копію …» for each exported key the OS keystore also holds (finding 127).
 
         That is the method's own condition for `--drop`: without the key in the keystore the export
-        is the only copy, and the method refuses (hub #230). None from a method without the form —
-        it would move and store every export instead (`reviewer_key.drops_exports`).
+        is the only copy, and the method refuses (hub #230). And only where the method said it
+        takes the form (`_takes_drop()` True): one without it would move and store every export
+        instead, and one that did not answer is sent nothing it may read that way (tcc#129).
         """
         for button in self._drops.values():
             self._drop_rows.removeWidget(button)
@@ -404,9 +414,12 @@ class ReviewerKeyDialog(QDialog):
 
     def _on_drop(self, provider) -> None:
         """«Видалити копію …»: the exported copy out, the key in the keystore kept (finding 127)."""
-        var = self._entry(provider).get("var") or "?"
-        place = "; ".join(
-            _place(e) for e in reviewer_key.shell_exports() if e.get("var") == var) or "—"
+        # The reads for the question wait too: a change that forgot the kept answer makes each a
+        # `key status` (ruling 42).
+        with self._busy():
+            var = self._entry(provider).get("var") or "?"
+            place = "; ".join(
+                _place(e) for e in reviewer_key.shell_exports() if e.get("var") == var) or "—"
         if not self._confirm(i18n.t("rkDropAsk").format(var=var, place=place,
                                                         save=i18n.t("rkSave")),
                              i18n.t("rkDropYes"), default_yes=False):
@@ -427,11 +440,13 @@ class ReviewerKeyDialog(QDialog):
         from the exit (`reviewer_key.remove_key`): «нічого не списується» only when no copy is
         left anywhere the window sees, and what is left named otherwise."""
         name = _NAMES[provider]
-        var = self._entry(provider).get("var") or "?"
-        exports = [e for e in reviewer_key.shell_exports() if e.get("var") == var]
+        # The reads for the question wait too (ruling 42), as in `_on_drop`.
+        with self._busy():
+            var = self._entry(provider).get("var") or "?"
+            exports = [e for e in reviewer_key.shell_exports() if e.get("var") == var]
+            kept = self._kept(provider, exports)
         places = "; ".join([i18n.t("rkPlaceStore")] + [_place(e) for e in exports])
         ask = i18n.t("rkRmAsk").format(provider=name, places=places, save=i18n.t("rkSave"))
-        kept = self._kept(provider, exports)
         if kept:
             ask += "\n\n" + i18n.t("rkRmAskKept").format(where="; ".join(kept))
         if not self._confirm(ask, i18n.t("rkDropYes"), default_yes=False):
@@ -447,11 +462,12 @@ class ReviewerKeyDialog(QDialog):
             # The rows, under the same wait: the kept answer is the one the last command re-read,
             # and after no answer this read asks again.
             self.refresh()
-        if stop:
-            line = f"{i18n.t('rkRmStopped').format(provider=name)} {stop}"
-        else:
-            line = self._removed_line(name, var, happened, left, places)
-        self._result.setText(line)
+            # And the line, which reads what is left, while the wait still holds (ruling 42).
+            if stop:
+                shown = f"{i18n.t('rkRmStopped').format(provider=name)} {stop}"
+            else:
+                shown = self._removed_line(name, var, happened, left, places)
+        self._result.setText(shown)
         # The method's own sentences are Ukrainian whatever the window speaks (finding 42).
         self._result.setToolTip("\n".join(tip for tip in tips if tip))
 

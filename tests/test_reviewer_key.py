@@ -600,6 +600,20 @@ def test_the_probe_has_three_answers(monkeypatch):
     _use(monkeypatch, crashed)
     assert reviewer_key.drops_exports() is None
 
+    # A child that printed nothing — killed by a signal, or gone before a word — said nothing about
+    # `--drop` either: no answer, not «too old», and not kept (review of #129, Minor 2).
+    for code in (-9, 2, 0):
+        calls = []
+
+        def silent(args, *, stdin=None, code=code):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, code, "", "")
+
+        _use(monkeypatch, silent)
+        assert reviewer_key.drops_exports() is None, code
+        assert reviewer_key.drops_exports() is None, code
+        assert len(calls) == 2, "asked again: no answer is not kept"
+
     from pathlib import Path
 
     _use(monkeypatch, _Method())
@@ -658,6 +672,10 @@ def test_no_answer_is_not_called_too_old(lang):
     said = i18n.T[lang]["rkDropProbeNoAnswer"]
     assert any(word in said for word in ("не відповів", "did not answer")), said
     assert not any(word in said for word in ("Онови", "Update")), said
+    # It sits under «Збережено: …»: «nothing was touched» read as if the save had not happened
+    # either (review of #129, Minor 3). The copy is what was left.
+    assert not any(word in said for word in ("нічого", "nothing")), said
+    assert any(word in said for word in ("копію не чіпали", "the copy was left")), said
 
 
 def test_the_fake_usage_and_nothing_found_are_the_vendored_method_s_own():
@@ -1265,4 +1283,83 @@ def test_delete_key_waits_with_the_buttons_off_and_says_so(monkeypatch):
     for command, shape, on, line in method.seen:
         assert (shape, on, line) == (Qt.CursorShape.WaitCursor, [], i18n.t("rkBusyRm")), command
     _settled(dialog)
+    dialog.close()
+
+
+# ── Ruling 42 (W-5, #129 review): every key call waits, and a call that raises gives it all back ──
+
+
+class _Raising(_Method):
+    """`_Method`, with one command that raises instead of answering — past `_run`'s own catch."""
+
+    def __init__(self, raises: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self.raises = raises
+
+    def __call__(self, args, *, stdin=None):
+        if self.raises and " ".join(args[:2]) == self.raises:
+            raise RuntimeError("the method's child blew up")
+        return super().__call__(args, stdin=stdin)
+
+
+def test_opening_on_a_call_that_raises_gives_the_cursor_back(monkeypatch):
+    from autosound_tcc.ui.tcc.reviewer_key_dialog import ReviewerKeyDialog
+
+    _dialog(monkeypatch, _Raising())[0].close()
+    _use(monkeypatch, _Raising(raises="key status"))
+    with pytest.raises(RuntimeError):
+        ReviewerKeyDialog()
+    assert QApplication.overrideCursor() is None
+
+
+@pytest.mark.parametrize("act,raises,status", [
+    ("re-read", "key status", _STATUS),
+    ("save", "key set", _STATUS),
+    ("save, the probe", "key help", _STATUS),
+    ("delete the copy", "key move-shell", _STATUS),
+    ("delete the key, its copy first", "key move-shell", _STATUS),
+    ("delete the key", "key rm", _with(exports=[])),
+])
+def test_a_key_call_that_raises_gives_the_cursor_and_the_buttons_back(monkeypatch, act, raises,
+                                                                      status):
+    """Ruling 42: the key calls stay on the window's thread, under the wait cursor with every
+    button off — and whatever the call does, the cursor comes back and the buttons go on again."""
+    method = _Raising(status=status)
+    dialog, _ = _dialog(monkeypatch, method, answer=True)
+    dialog.show()
+    QApplication.processEvents()
+    if raises == "key help":
+        reviewer_key._DROPS = None
+    method.raises = raises
+    with pytest.raises(RuntimeError):
+        if act == "re-read":
+            dialog.refresh(ask=True)
+        elif act.startswith("save"):
+            dialog._field.setText("AIza" + "r" * 35)
+            dialog._on_save()
+        elif act == "delete the copy":
+            dialog._on_drop("google")
+        else:
+            dialog._on_remove("google")
+    _settled(dialog)
+    dialog.close()
+
+
+def test_a_read_the_kept_answer_cannot_give_waits_too(monkeypatch):
+    """A read of the kept answer starts the method's `key status` when something forgot the answer:
+    then it is a key call like any other, and waits — the repaint after a save, and the reads
+    before a delete's question."""
+    from PySide6.QtCore import Qt
+
+    method = _Slow()
+    dialog, _ = _slow_dialog(monkeypatch, method, answer=False)
+    for act in (dialog.refresh, lambda: dialog._on_drop("google"),
+                lambda: dialog._on_remove("google")):
+        reviewer_key.forget()
+        method.seen.clear()
+        act()
+        assert [c for c, *_ in method.seen] == ["key status"]
+        assert all((shape, on) == (Qt.CursorShape.WaitCursor, [])
+                   for _c, shape, on, _l in method.seen), method.seen
+        _settled(dialog)
     dialog.close()
