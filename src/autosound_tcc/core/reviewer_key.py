@@ -15,7 +15,9 @@ So TCC asks the one reader of all three stores, the method's own script:
   every process on the machine (`ps`), stdin is not;
 * `autosound_ai.py key move-shell` moves an exported key into the store, reading it where it is
   exported — no value from TCC (tcc#117); `key move-shell <provider> --drop` (v3.0.65, hub #230)
-  removes one provider's exported copy without storing it, for a key the keystore already holds.
+  removes one provider's exported copy without storing it, for a key the keystore already holds;
+* `autosound_ai.py key rm <provider>` deletes the stored key, and with it the reviewer's API route
+  on that key (finding 136, tcc#127).
 
 A vendored method older than these commands answers neither. Then `status()` is None and the
 reachability question falls back to `critic_env`, exactly as before — so TCC works with the method
@@ -53,6 +55,8 @@ _DROPS: Optional[tuple[tuple, bool]] = None
 _NOTHING_FOUND = "у профілях оболонки не знайдено"
 #: What `drop_export` makes of the method's answer.
 DROPPED, NOTHING, NOT_DROPPED = "dropped", "nothing", "not_dropped"
+#: What `remove_key` makes of the store after `key rm`.
+REMOVED, NOT_STORED, NOT_REMOVED = "removed", "not_stored", "not_removed"
 
 
 def script_path():
@@ -221,6 +225,55 @@ def drop_export(provider: str) -> tuple[Optional[str], str]:
     if proc.returncode == 1 and _NOTHING_FOUND in out and not crashed:
         return NOTHING, words
     return NOT_DROPPED, words
+
+
+def _stored(answer: Optional[dict], provider: str) -> dict:
+    """`provider`'s line in a `key status` answer, or {} without one."""
+    entry = ((answer or {}).get("providers") or {}).get(provider)
+    return entry if isinstance(entry, dict) else {}
+
+
+def remove_key(provider: str) -> tuple[Optional[str], str, str]:
+    """The method's `key rm <provider>`: the STORED key out of the OS keystore (finding 136,
+    tcc#127) — the Arbiter: «краще видаляти ключ, щоб користувач не переживав що будуть списувати
+    гроші». (what happened, where the API still finds a key for `provider` — `file`, `env` or "" —,
+    the method's words); what happened is None when there is no answer to read it from.
+
+    Read from the store, not from the exit: `key rm` exits 0 whether it removed the key, found
+    none, or the Keychain refused the delete — that one in the words «його не було». So the
+    method's `key status` after it decides: the store still holding the key is `NOT_REMOVED`
+    whatever was said or whatever the exit; gone, it is `REMOVED` when the store held it before.
+    The copies in the machine file and the environment `key rm` leaves alone, and while one is
+    there the API route still has a key: it is named, never folded into «видалено».
+
+    Only the provider goes on argv, nothing on stdin; the method prints no key either way.
+    """
+    if provider not in PROVIDERS:
+        return NOT_REMOVED, "", f"unknown provider {provider!r}"
+    held = _stored(status(), provider).get("keystore") is True
+    proc = _run(["key", "rm", provider])
+    forget()
+    if proc is None:
+        return None, "", ""
+    app_log.logger().info("reviewer key: rm %s -> exit %s", provider, proc.returncode)
+    out, err = (proc.stdout or "").strip(), (proc.stderr or "").strip()
+    if "Traceback (most recent call last)" in err:
+        err = err.splitlines()[-1].strip()
+    words = "\n".join(part for part in (out, err) if part)
+    after = status(refresh=True)
+    if after is None:
+        return None, "", words
+    entry = _stored(after, provider)
+    left = entry.get("used") if entry.get("used") in ("file", "env") else ""
+    if entry.get("keystore") is True:
+        return NOT_REMOVED, left, words
+    if not held:
+        return NOT_STORED, left, words
+    # What the API rows learned on that key goes with it: a refusal and an answer both — as a
+    # save lifts the refusals (finding 128). A CLI's own state is its login's, not the key's.
+    availability.forget_refusals("api")
+    availability.forget_answers("api")
+    return REMOVED, left, words
 
 
 def move_shell_line() -> str:

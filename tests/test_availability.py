@@ -71,6 +71,17 @@ def test_forgetting_one_routes_refusals_keeps_the_others():
     assert _status(agy).reason == availability.REFUSED
 
 
+def test_forgetting_one_routes_answers_keeps_the_others():
+    """A key deleted in «Ключ рецензента» takes the API rows' green with it (tcc#127): what
+    answered on that key cannot again. The agy row answered on its own login and stays green."""
+    api, agy = _choice(harness="api", model="gemini-pro-latest"), _choice()
+    availability.succeeded(api.key)
+    availability.succeeded(agy.key)
+    availability.forget_answers("api")
+    assert not availability.answered(api.key)
+    assert availability.answered(agy.key)
+
+
 def test_a_harness_still_being_read_is_not_checked():
     availability.begin_reading(["agy"])
     assert _status(_choice()).reason == availability.NOT_CHECKED

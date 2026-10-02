@@ -13,6 +13,10 @@ the OS keystore holds has «Видалити копію …» (finding 127, tcc#
 `key move-shell <provider> --drop` (v3.0.65, hub #230), which removes that one export without
 storing it — never TCC's own edit, and no pasted key held across the question.
 
+A key the OS keystore holds has «Видалити ключ» on its row (finding 136, tcc#127): the method's
+own `key rm <provider>`, after a yes that names the provider and the API route it stops. The line
+after it is read from the store, not from the exit.
+
 A signed-in CLI (`agy`, `claude`, `codex`) needs no key at all; the screen says so, because the
 subscription route is the first one, not the fallback.
 
@@ -105,12 +109,22 @@ class ReviewerKeyDialog(QDialog):
         self._grid = QGridLayout()
         self._grid.setHorizontalSpacing(16)
         self._where: dict[str, QLabel] = {}
+        #: «Видалити ключ» on each provider's row, shown while the OS keystore holds its key (`_show`).
+        self._removes: dict[str, QPushButton] = {}
         for row, provider in enumerate(reviewer_key.PROVIDERS):
             self._grid.addWidget(QLabel(_NAMES[provider]), row, 0)
             where = QLabel("")
             where.setProperty("class", "kv-val")
             self._grid.addWidget(where, row, 1)
             self._where[provider] = where
+            remove = QPushButton(i18n.t("rkRm"))
+            # Never the dialog's default: Enter in the key field saves (see below).
+            remove.setAutoDefault(False)
+            remove.clicked.connect(lambda _checked=False, p=provider: self._on_remove(p))
+            _fit_tinted(remove)
+            remove.setVisible(False)
+            self._grid.addWidget(remove, row, 2, Qt.AlignmentFlag.AlignLeft)
+            self._removes[provider] = remove
         self._grid.setColumnStretch(2, 1)
         layout.addLayout(self._grid)
 
@@ -185,6 +199,8 @@ class ReviewerKeyDialog(QDialog):
             used = entry.get("used", "none") if supported else ""
             label.setText(i18n.t(f"rkUsed_{used}") if used in ("keystore", "file", "env", "none")
                           else "—")
+            # The key `key rm` deletes is the one in the OS keystore, wherever else a copy is.
+            self._removes[provider].setVisible(supported and entry.get("keystore") is True)
         exports = reviewer_key.shell_exports()
         self._shell.setVisible(bool(exports))
         self._move.setVisible(bool(exports))
@@ -380,6 +396,30 @@ class ReviewerKeyDialog(QDialog):
         line, tip = self._drop(provider, var, place)
         self._result.setText(line)
         self._result.setToolTip(tip)
+
+    def _on_remove(self, provider) -> None:
+        """«Видалити ключ»: the stored key out of the OS keystore, after a yes that names the
+        provider and what stops — the API route (finding 136, tcc#127). The method's `key rm`
+        under the wait (VM-2), and the line from the store it left, never from the exit
+        (`reviewer_key.remove_key`): still held, crashed or unanswered is never «видалено»."""
+        name = _NAMES[provider]
+        if not self._confirm(i18n.t("rkRmAsk").format(provider=name, save=i18n.t("rkSave")),
+                             i18n.t("rkDropYes"), default_yes=False):
+            return
+        with self._busy("rkBusyRm"):
+            happened, left, said = reviewer_key.remove_key(provider)
+            # The rows, under the same wait: the kept answer is the one the removal re-read, and
+            # after no answer this read asks again.
+            self.refresh()
+        line = i18n.t({reviewer_key.REMOVED: "rkRmDone", reviewer_key.NOT_STORED: "rkRmNone",
+                       reviewer_key.NOT_REMOVED: "rkRmFailed"}.get(happened, "rkRmNoAnswer")
+                      ).format(provider=name)
+        if left and happened in (reviewer_key.REMOVED, reviewer_key.NOT_STORED):
+            # `key rm` leaves the file and the environment alone, and the API still has a key.
+            line += " " + i18n.t("rkRmLeft").format(where=i18n.t(f"rkLeft_{left}"))
+        self._result.setText(line)
+        # The method's own sentence is Ukrainian whatever the window speaks (finding 42).
+        self._result.setToolTip(said)
 
     def _confirm(self, text: str, yes: str, *, default_yes: bool) -> bool:
         """A yes or a no, in the window's language. Its own method, so a test can answer it."""

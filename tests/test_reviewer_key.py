@@ -41,17 +41,23 @@ class _Method:
     `after_move` is what `key status` says once `key move-shell` ran; `move_rc` is the exit code
     `move-shell` answers with (hub #230: 0 removed, 1 nothing to do, 3 refused, 2 usage), and None
     is that child killed at `_run`'s timeout — `_run` returns None — after it changed whatever it
-    changed. `drops` is a method that has `move-shell <provider> --drop` (v3.0.65)."""
+    changed. `drops` is a method that has `move-shell <provider> --drop` (v3.0.65). `after_rm`,
+    `rm_rc`, `rm_out` and `rm_err` are the same for `key rm` (tcc#127); `mute_after_rm` is a
+    `key status` with no answer once it ran."""
 
     def __init__(self, status=_STATUS, set_rc=0, set_out="stored in the Keychain",
                  after_move=None, move_rc=0, move_out="✓ HKCU\\Environment: прибрано",
-                 move_err="", drops=True, mute_after_move=False):
+                 move_err="", drops=True, mute_after_move=False, after_rm=None, rm_rc=0,
+                 rm_out="GEMINI_API_KEY: прибрано зі сховища ключів", rm_err="",
+                 mute_after_rm=False):
         self.calls: list[tuple[list[str], object]] = []
         self.status, self.set_rc, self.set_out = status, set_rc, set_out
         self.after_move, self.move_rc, self.move_out, self.move_err, self.drops = (
             after_move, move_rc, move_out, move_err, drops)
         #: `key status` gives no answer once `move-shell` ran (review of #112, minor 3).
         self.mute_after_move = mute_after_move
+        self.after_rm, self.rm_rc, self.rm_out, self.rm_err, self.mute_after_rm = (
+            after_rm, rm_rc, rm_out, rm_err, mute_after_rm)
 
     def __call__(self, args, *, stdin=None):
         self.calls.append((list(args), stdin))
@@ -71,6 +77,14 @@ class _Method:
             if self.move_rc is None:
                 return None
             return subprocess.CompletedProcess(args, self.move_rc, self.move_out, self.move_err)
+        if args[:2] == ["key", "rm"]:
+            if self.after_rm is not None:
+                self.status = self.after_rm
+            if self.mute_after_rm:
+                self.status = None
+            if self.rm_rc is None:
+                return None
+            return subprocess.CompletedProcess(args, self.rm_rc, self.rm_out, self.rm_err)
         if args == ["key", "help"]:
             if self.drops is None:
                 return None  # the probe killed at `_run`'s timeout
@@ -847,4 +861,211 @@ def test_an_older_method_still_keeps_the_entry_off_after_the_wait(monkeypatch):
     assert QApplication.overrideCursor() is None
     assert not dialog._save.isEnabled() and not dialog._field.isEnabled()
     assert not dialog._provider.isEnabled()
+    dialog.close()
+
+
+# ── tcc#127: the stored key deleted (finding 136) ─────────────────────────────────────────────────
+
+#: `key status` once the key left the store: nothing keeps one for Google any more.
+_GONE = _with(exports=[], google={"used": "none", "keystore": False, "shape": None})
+#: The method's words when the Keychain refused the delete: `_keychain_delete` is `returncode == 0`,
+#: so a refusal reads «його не було» — exit 0 all the same.
+_NOT_THERE = "GEMINI_API_KEY: у сховищі ключів його не було"
+_RM_TRACEBACK = ('Traceback (most recent call last):\n  File "autosound_ai.py", line 491, in '
+                 '_dpapi_delete\nPermissionError: [Errno 13] Permission denied: \'keys.dpapi\'')
+
+
+def test_remove_key_names_the_provider_and_nothing_else(monkeypatch):
+    method = _Method(status=_with(exports=[]), after_rm=_GONE)
+    _use(monkeypatch, method)
+    assert reviewer_key.remove_key("google")[0] == reviewer_key.REMOVED
+    assert method.changes() == [(["key", "rm", "google"], None)]
+    assert reviewer_key.remove_key("nobody")[0] == reviewer_key.NOT_REMOVED
+    assert len(method.changes()) == 1, "an unknown provider never reaches the method"
+
+
+_RM_ANSWERS = {
+    # (exit, out, err, status after, what happened, the copy left)
+    "removed": (0, "GEMINI_API_KEY: прибрано зі сховища ключів", "", _GONE,
+                reviewer_key.REMOVED, ""),
+    "removed, the file still has one": (
+        0, "GEMINI_API_KEY: прибрано зі сховища ключів; лишився: файл ~/.config/autosound/critic-env",
+        "", _with(_GONE, google={"used": "file", "file": {"path": "critic-env", "line": 2,
+                                                          "blank": False}}),
+        reviewer_key.REMOVED, "file"),
+    "removed, the environment still has one": (
+        0, "GEMINI_API_KEY: прибрано зі сховища ключів; лишився: змінна середовища", "",
+        _with(_GONE, google={"used": "env", "env": True}), reviewer_key.REMOVED, "env"),
+    # The Keychain refused and the method said «не було»: the store answers, not the words.
+    "the store kept it": (0, _NOT_THERE, "", None, reviewer_key.NOT_REMOVED, ""),
+    "a crash, the store kept it": (1, "", _RM_TRACEBACK, None, reviewer_key.NOT_REMOVED, ""),
+    "a crash after the delete": (1, "", _RM_TRACEBACK, _GONE, reviewer_key.REMOVED, ""),
+    "no answer": (None, "", "", _GONE, None, ""),
+}
+
+
+@pytest.mark.parametrize("case", list(_RM_ANSWERS))
+def test_what_happened_is_read_from_the_store_after_key_rm(monkeypatch, case):
+    """`key rm` exits 0 whether it removed the key, found none, or the Keychain refused the delete
+    — that last one in the words «його не було». So what happened is the method's `key status`
+    after it: still in the store is never «видалено», and a copy in the file or the environment
+    — which `key rm` leaves alone — is named, since the API still has a key while it is there."""
+    code, out, err, after, happened, left = _RM_ANSWERS[case]
+    method = _Method(status=_with(exports=[]), after_rm=after, rm_rc=code, rm_out=out,
+                     rm_err=err)
+    _use(monkeypatch, method)
+    got = reviewer_key.remove_key("google")
+    assert got[:2] == (happened, left), case
+    if case.startswith("a crash"):
+        assert got[2] == "PermissionError: [Errno 13] Permission denied: 'keys.dpapi'", case
+    elif code is not None:
+        assert got[2] == out, case
+
+
+def test_a_key_that_was_never_stored_is_nothing_removed(monkeypatch):
+    method = _Method(status=_with(_GONE, google={"used": "env", "env": True}), rm_out=_NOT_THERE)
+    _use(monkeypatch, method)
+    assert reviewer_key.remove_key("google")[:2] == (reviewer_key.NOT_STORED, "env")
+
+
+def test_no_status_after_the_delete_is_no_answer(monkeypatch):
+    method = _Method(status=_with(exports=[]), mute_after_rm=True)
+    _use(monkeypatch, method)
+    assert reviewer_key.remove_key("google")[0] is None
+
+
+def test_a_removal_forgets_the_api_rows(monkeypatch):
+    """What the API rows learned on the key goes with it — the refusal and the green both (the
+    save's own rule, finding 128): a deleted key answers nothing. AGY's own refusal stays."""
+    from autosound_tcc.core import availability
+
+    api, agy, state = _api_refused()
+    availability.succeeded(api.key)
+    availability.refused(agy.key, availability.REFUSED, "its own login")
+    _use(monkeypatch, _Method(status=_with(exports=[]), after_rm=_GONE))
+    assert reviewer_key.remove_key("google")[0] == reviewer_key.REMOVED
+    assert state(api).ready and not availability.answered(api.key)
+    assert state(agy).reason == availability.REFUSED
+
+
+def test_a_key_the_store_kept_forgets_nothing(monkeypatch):
+    from autosound_tcc.core import availability
+
+    api, _agy, state = _api_refused()
+    _use(monkeypatch, _Method(status=_with(exports=[]), rm_out=_NOT_THERE))
+    assert reviewer_key.remove_key("google")[0] == reviewer_key.NOT_REMOVED
+    assert state(api).reason == availability.REFUSED
+
+
+def test_the_fake_key_rm_is_the_vendored_method_s_own():
+    """`key rm <provider>`, one provider and nothing else on argv, exit 0 with one line — and the
+    Keychain's refusal read as «не було». Pinned to the vendored source so they cannot drift."""
+    from pathlib import Path
+
+    script = (Path(__file__).resolve().parents[1] / "vendor" / "autosound-tuning-skill" / "skills"
+              / "autosound-tuning" / "scripts" / "autosound_ai.py")
+    if not script.is_file():
+        pytest.skip("the method's submodule is not checked out")
+    source = script.read_text(encoding="utf-8")
+    assert 'if sub == "rm" and len(args) == 2 and args[1] in _PROVIDERS:' in source
+    assert "print(key_rm(args[1]))\n        return 0" in source
+    assert '"прибрано зі сховища ключів" if gone else "у сховищі ключів його не було"' in source
+    assert "return r.returncode == 0" in source
+
+
+def _rm_dialog(monkeypatch, method, *, answer=True):
+    return _dialog(monkeypatch, method, answer=answer)
+
+
+def test_a_stored_key_has_a_delete_on_its_row(monkeypatch):
+    """«краще видаляти ключ, щоб користувач не переживав що будуть списувати гроші» (the Arbiter,
+    finding 136): one per provider whose key the OS store holds — the one `key rm` deletes —
+    never the window's default."""
+    from autosound_tcc.ui.tcc import i18n
+
+    dialog, _ = _rm_dialog(monkeypatch, _Method(status=_with(
+        exports=[], openai={"used": "keystore", "keystore": True})))
+    shown = [p for p, button in dialog._removes.items() if not button.isHidden()]
+    assert shown == ["google", "openai"]
+    button = dialog._removes["google"]
+    assert button.text() == i18n.t("rkRm") and not button.autoDefault()
+    dialog.close()
+
+    dialog, _ = _rm_dialog(monkeypatch, _Method(status=_with(
+        exports=[], google={"used": "file", "keystore": False})))
+    assert all(button.isHidden() for button in dialog._removes.values()), "nothing stored"
+    dialog.close()
+
+
+def test_delete_asks_first_naming_the_provider_and_what_stops(monkeypatch):
+    method = _Method(status=_with(exports=[]), after_rm=_GONE)
+    dialog, asked = _rm_dialog(monkeypatch, method, answer=False)
+    dialog._removes["google"].click()
+    assert len(asked) == 1 and "Google (Gemini)" in asked[0] and "API" in asked[0]
+    assert method.changes() == []
+    dialog.close()
+
+
+def test_delete_removes_the_key_and_the_button_goes_with_it(monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
+    method = _Method(status=_with(exports=[]), after_rm=_GONE)
+    dialog, _ = _rm_dialog(monkeypatch, method)
+    dialog._removes["google"].click()
+    assert method.changes() == [(["key", "rm", "google"], None)]
+    assert dialog._result.text() == i18n.t("rkRmDone").format(provider="Google (Gemini)")
+    assert "прибрано" in dialog._result.toolTip(), "the method's own words on hover"
+    assert dialog._removes["google"].isHidden()
+    assert dialog._where["google"].text() == i18n.t("rkUsed_none")
+    dialog.close()
+
+
+@pytest.mark.parametrize("lang", ["uk", "en"])
+@pytest.mark.parametrize("case,line", [
+    ("removed", "rkRmDone"),
+    ("removed, the file still has one", "rkRmDone"),
+    ("removed, the environment still has one", "rkRmDone"),
+    ("the store kept it", "rkRmFailed"),
+    ("a crash, the store kept it", "rkRmFailed"),
+    ("no answer", "rkRmNoAnswer"),
+])
+def test_the_line_after_a_delete_is_true_on_every_answer(monkeypatch, lang, case, line):
+    """No false «видалено»: a store that kept the key, a crash, or no answer each says its own
+    line, and a copy left in the file or the environment is named after the deletion."""
+    from autosound_tcc.ui.tcc import i18n
+
+    code, out, err, after, _happened, left = _RM_ANSWERS[case]
+    method = _Method(status=_with(exports=[]), after_rm=after, rm_rc=code, rm_out=out,
+                     rm_err=err)
+    dialog, _ = _rm_dialog(monkeypatch, method, answer=True)
+    i18n.set_language(lang)
+    dialog._removes["google"].click()
+    text = dialog._result.text()
+    assert text.startswith(i18n.t(line).format(provider="Google (Gemini)")), (case, text)
+    done = i18n.t("rkRmDone").format(provider="Google (Gemini)")
+    assert (done in text) == (line == "rkRmDone"), case
+    if left:
+        assert i18n.t("rkRmLeft").format(where=i18n.t(f"rkLeft_{left}")) in text, case
+    else:
+        assert i18n.t("rkRmLeft").split("{")[0] not in text, case
+    dialog.close()
+
+
+def test_delete_key_waits_with_the_buttons_off_and_says_so(monkeypatch):
+    """VM-2's wait for `key rm` and the re-read after it: the wait cursor, every control off, and
+    the line saying what runs."""
+    from PySide6.QtCore import Qt
+
+    from autosound_tcc.ui.tcc import i18n
+
+    method = _Slow(status=_with(exports=[]), after_rm=_GONE)
+    dialog, _ = _slow_dialog(monkeypatch, method)
+    method.seen.clear()
+    dialog._removes["google"].click()
+
+    commands = [command for command, *_ in method.seen]
+    assert commands[0] == "key rm" and "key status" in commands
+    for command, shape, on, line in method.seen:
+        assert (shape, on, line) == (Qt.CursorShape.WaitCursor, [], i18n.t("rkBusyRm")), command
+    _settled(dialog)
     dialog.close()

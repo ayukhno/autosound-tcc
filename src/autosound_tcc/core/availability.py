@@ -107,6 +107,14 @@ def forget_refusals(harness: Optional[str] = None) -> None:
             del _refusals[key]
 
 
+def forget_answers(harness: str) -> None:
+    """Forget which of one route's rows answered this launch: a key deleted in «Ключ рецензента»
+    takes the API rows' green with it — what answered on that key cannot again (tcc#127)."""
+    with _lock:
+        for key in [key for key in _answered if key.startswith(f"{harness}:")]:
+            _answered.discard(key)
+
+
 def reset() -> None:
     """Everything back to a fresh launch. For tests."""
     global _startup
