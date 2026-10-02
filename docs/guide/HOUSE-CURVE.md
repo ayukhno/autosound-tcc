@@ -5,9 +5,9 @@ tool, and what each button in that tool does.
 
 A target (house) curve is the tonal shape a tune aims for. What it is, how to choose and build one
 is in the method's
-[target-curve guide](https://github.com/ayukhno/autosound-tuning-skill/blob/main/skills/autosound-tuning/references/patterns/target-curves/target_curves_guide.md),
+[target-curve guide](https://github.com/ayukhno/autosound-tuning-skill/blob/v3.0.66/skills/autosound-tuning/references/patterns/target-curves/target_curves_guide.md),
 and how to finish it by ear is in
-[voicing by ear](https://github.com/ayukhno/autosound-tuning-skill/blob/main/skills/autosound-tuning/references/patterns/voicing-by-ear.md).
+[voicing by ear](https://github.com/ayukhno/autosound-tuning-skill/blob/v3.0.66/skills/autosound-tuning/references/patterns/voicing-by-ear.md).
 This page covers only the buttons.
 
 The screenshots show a real car: two MMM measurements of a VW Passat B8 read against the bundled
@@ -33,7 +33,7 @@ in the project folder and does one of these, and the status line says which:
 - **Selects the file in your file manager.** Drag it onto the page.
 - **Finds no file.** The page opens with its own curves, and the status line names the folder to
   export the curve into. Where a project keeps its curves is in the method's
-  [target-curves README](https://github.com/ayukhno/autosound-tuning-skill/blob/main/skills/autosound-tuning/references/patterns/target-curves/README.md).
+  [target-curves README](https://github.com/ayukhno/autosound-tuning-skill/blob/v3.0.66/skills/autosound-tuning/references/patterns/target-curves/README.md).
 
 Without TCC, open `curves.html` in your project folder, or the
 [published page](https://ayukhno.github.io/autosound-tuning-skill/skills/autosound-tuning/references/patterns/target-curves/target_curves_visualizer.html).
@@ -108,7 +108,7 @@ Hover a row to find it on the chart. Bands within ±1.5 dB of the target are cou
 **Overall verdict** grades the match: **Coverage ±1.5 dB**, **Broad tonal**, **Narrow structure**
 and **Tilt**. Hover a grade to see how it is worked out. **Read honestly** lists the limits of
 this kind of reading. How far the numbers can be trusted is in the method's
-[deviation-analysis audit](https://github.com/ayukhno/autosound-tuning-skill/blob/main/skills/autosound-tuning/references/patterns/target-curves/deviation-analysis-audit.md).
+[deviation-analysis audit](https://github.com/ayukhno/autosound-tuning-skill/blob/v3.0.66/skills/autosound-tuning/references/patterns/target-curves/deviation-analysis-audit.md).
 
 ## Instruments on the chart
 

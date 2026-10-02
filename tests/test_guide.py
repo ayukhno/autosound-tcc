@@ -100,20 +100,29 @@ def test_the_methods_guide_is_where_the_link_says():
 _VENDORED = Path(__file__).parents[1] / "vendor" / "autosound-tuning-skill"
 
 
-def test_the_reference_links_the_methods_guide_at_the_tag_this_tcc_ships_with(monkeypatch):
+def test_every_method_link_in_the_guide_is_at_the_tag_this_tcc_ships_with(monkeypatch):
     """tcc#132: REFERENCE.md linked the method's target-curve guide at `main`, while the «?» it
-    describes opens it at the installed method's tag. A Markdown page cannot ask which method is
-    installed, so it names the tag of the method this TCC vendors -- read here the way the «?»
-    reads it, so the next move of the submodule fails this until the link moves with it."""
+    describes opens it at the installed method's tag -- and HOUSE-CURVE.md, a page the menu opens
+    at TCC's own tag, linked the same guide and three more of the method's pages at `main` too
+    (the review of #132, I4). A Markdown page cannot ask which method is installed, so every link
+    into the method, on every page of the guide, names the tag of the method this TCC vendors --
+    read here the way the «?» reads it -- and a file that is there at that tag. The next move of
+    the submodule fails this until the links move with it."""
     if not (_VENDORED / ".claude-plugin" / "plugin.json").is_file():
-        pytest.skip("the method's submodule is not checked out: no pin to hold the link to")
+        pytest.skip("the method's submodule is not checked out: no pin to hold the links to")
     monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV,
                        str(_VENDORED / "skills" / vendor_loader.SKILL_NAME))
     assert vendor_loader.skill_repo_root() == _VENDORED.resolve(), "the vendored method, no other"
     expected = guide.method_target_guide_url()
     assert "/blob/main/" not in expected, f"the vendored manifest names no release: {expected}"
+    tag = expected.split("/blob/", 1)[1].split("/", 1)[0]
 
-    text = (_GUIDE_DIR / guide.REFERENCE).read_text(encoding="utf-8")
-    links = re.findall(r"\]\((https://github\.com/ayukhno/autosound-tuning-skill/[^)\s]*"
-                       + re.escape(Path(guide.METHOD_TARGET_GUIDE).name) + r")\)", text)
-    assert links == [expected]
+    links = [(page.name, ref, path)
+             for page in sorted(_GUIDE_DIR.glob("*.md"))
+             for ref, path in re.findall(
+                 r"github\.com/ayukhno/autosound-tuning-skill/(?:blob|tree)/([^/\s)]+)/([^)\s#]+)",
+                 page.read_text(encoding="utf-8"))]
+    assert ("REFERENCE.md", tag, guide.METHOD_TARGET_GUIDE) in links, "the «?»'s own link"
+    assert [link for link in links if link[1] != tag] == [], f"not at {tag}"
+    assert [link for link in links if not (_VENDORED / link[2]).exists()] == [], \
+        "not in the method at that tag"
