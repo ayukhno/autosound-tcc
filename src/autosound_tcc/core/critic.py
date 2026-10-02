@@ -297,9 +297,20 @@ def critic_bin_override(*, harness: str = "", environ=None, which=None) -> dict:
     #
     # `which`, because a pick naming a CLI this machine does not have is worse than no override:
     # it would replace one dead name with another.
-    wanted = _HARNESS_CLIS.get((harness or "").strip().lower())
+    route = (harness or "").strip().lower()
+    wanted = _HARNESS_CLIS.get(route)
     if wanted and which(wanted):
         return {"AUTOSOUND_CRITIC_BIN": wanted}
+    if route == "sdk":
+        # The `claude` the footer found, by its path: a Dock-launched TCC has no `~/.local/bin` on
+        # PATH, so the method's own search found none and an «SDK · …» review went to the clipboard
+        # once it went by the CLI (review of tcc#127, M1). The method reads the flavour from the
+        # file's name.
+        from autosound_tcc.core import claude_sdk
+
+        found = claude_sdk.cli_path()
+        if found:
+            return {"AUTOSOUND_CRITIC_BIN": found}
     inherited = environ.get("GEMINI_BIN")
     if not inherited or which(inherited):
         return {}
@@ -406,7 +417,11 @@ PROVIDERS = ("google", "anthropic", "openai")
 
 #: The API key that makes the reviewer take the API instead of the CLI a person picked — per CLI
 #: route (the reviewer's own provider table: `agy` is Google's CLI, `codex` OpenAI's).
-_CLI_REROUTING_KEYS = {"agy": ("GEMINI_API_KEY",), "codex": ("OPENAI_API_KEY",)}
+_CLI_REROUTING_KEYS = {"agy": ("GEMINI_API_KEY",), "codex": ("OPENAI_API_KEY",),
+                       # And the SDK's: the method runs `claude -p` for it, and `claude -p` bills an
+                       # `ANTHROPIC_API_KEY` in its environment over the subscription (review of
+                       # tcc#127, I1).
+                       "sdk": ("ANTHROPIC_API_KEY",)}
 #: The picks that run on a login rather than a key — the routes `model_choices.ROUTES` bills to
 #: a subscription: agy's, codex's, and the SDK's Claude login, which the method reaches through
 #: the `claude` CLI. Each run goes as `--via cli` (tcc#127).

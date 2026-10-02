@@ -1241,6 +1241,10 @@ mod.list_gemini_models = refuse
 
 def cli(provider, binary, model, prompt, timeout=None):
     print(f"PROBE cli {os.path.basename(binary)}", file=sys.stderr)
+    # The NAMES of the vendor keys the CLI would be started with, by the method's own `child_env`.
+    keys = [var for var in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+            if mod.child_env(binary).get(var)]
+    print("PROBE-ENV " + ",".join(keys), file=sys.stderr)
     return "an answer through the CLI", None, None
 
 mod.call_cli = cli
@@ -1253,9 +1257,11 @@ _STORED = ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")
 
 
 def _route_taken(tmp_path, monkeypatch, *, harness, model, provider, via="",
-                 stored=_STORED) -> str:
+                 stored=_STORED, clis=("agy", "codex", "claude"), seen_keys=None,
+                 exported=()) -> str:
     """`api <vendor> stored` or `cli <binary>`: where the vendored method sent TCC's call, with
-    `stored` in its OS key store and agy, codex and claude on PATH."""
+    `stored` in its OS key store, `exported` in TCC's environment and `clis` on PATH. `seen_keys`,
+    a list, gets the names of the vendor keys the CLI would have been started with."""
     import subprocess
 
     if not critic.is_available():
@@ -1270,11 +1276,12 @@ def _route_taken(tmp_path, monkeypatch, *, harness, model, provider, via="",
     for var in (*_STORED, "AUTOSOUND_CRITIC_BIN", "GEMINI_BIN", "AUTOSOUND_CRITIC_MODEL",
                 "GEMINI_CRITIC_MODEL", "AUTOSOUND_CRITIC_PROVIDER", "AUTOSOUND_KEYSTORE"):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("PROBE_CLIS", "agy,codex,claude")
+    for var in exported:
+        monkeypatch.setenv(var, "env-key-0123456789abcdef")
+    monkeypatch.setenv("PROBE_CLIS", ",".join(clis))
     monkeypatch.setenv("PROBE_STORED", ",".join(stored))
     monkeypatch.setattr(critic.shutil, "which",
-                        lambda name, *a, **k: f"/probe/bin/{name}" if name in ("agy", "codex", "claude")
-                        else None)
+                        lambda name, *a, **k: f"/probe/bin/{name}" if name in clis else None)
     real_run, seen = subprocess.run, {}
 
     def through_the_probe(argv, **kwargs):
@@ -1288,9 +1295,13 @@ def _route_taken(tmp_path, monkeypatch, *, harness, model, provider, via="",
     result = critic.run("# a question", project_dir=project, role=critic.ASK, model=model,
                         harness=harness, provider=provider, via=via)
     said = seen.get("stderr", "")
-    assert "probe-" not in " ".join(seen.get("argv", [])) + said + result.text, "a key in sight"
+    shown = " ".join(seen.get("argv", [])) + said + result.text
+    assert "probe-" not in shown and "env-key-" not in shown, "a key in sight"
     routes = [line.split(" ", 1)[1] for line in said.splitlines() if line.startswith("PROBE ")]
     assert len(routes) == 1, (result.mode, said)
+    if seen_keys is not None:
+        seen_keys.extend(name for line in said.splitlines() if line.startswith("PROBE-ENV ")
+                         for name in line.split(" ", 1)[1].split(",") if name)
     return routes[0]
 
 
@@ -1310,6 +1321,40 @@ def test_a_cli_pick_goes_to_its_cli_with_a_key_in_the_os_store(tmp_path, monkeyp
     pick that said «subscription». The route of a CLI pick is its CLI."""
     assert _route_taken(tmp_path, monkeypatch, harness=harness, model=model,
                         provider=provider) == f"cli {cli}"
+
+
+@pytest.mark.parametrize("harness,model,provider,var", [
+    ("sdk", "claude-sonnet-5", "anthropic", "ANTHROPIC_API_KEY"),
+    ("codex", "gpt-5.2-codex", "openai", "OPENAI_API_KEY"),
+    ("agy", "gemini-3.1-pro-high", "google", "GEMINI_API_KEY"),
+])
+def test_a_cli_pick_never_hands_its_cli_the_vendor_key(tmp_path, monkeypatch, harness, model,
+                                                       provider, var):
+    """`claude -p` bills an `ANTHROPIC_API_KEY` in its environment over the subscription, as the
+    other vendors' CLIs may: a key in the shell that started TCC reached the CLI of an «SDK · …»
+    pick through the method's own environment (review of tcc#127, I1). Every login pick's child
+    leaves its vendor's key out, as finding 32 did for agy and codex."""
+    keys: list = []
+    assert _route_taken(tmp_path, monkeypatch, harness=harness, model=model, provider=provider,
+                        stored=(), exported=(var,), seen_keys=keys).startswith("cli ")
+    assert var not in keys, keys
+
+
+def test_an_sdk_pick_finds_the_claude_the_footer_found(tmp_path, monkeypatch):
+    """A Dock-launched TCC has no `~/.local/bin` on PATH, so the method's PATH search found no
+    `claude` where the footer had (`claude_sdk.cli_path`), and an «SDK · …» review went to the
+    clipboard (review of tcc#127, M1). The pick's own CLI goes by its path."""
+    from autosound_tcc.core import claude_sdk
+
+    monkeypatch.setattr(claude_sdk, "cli_path", lambda: "/probe/home/.local/bin/claude")
+    assert _route_taken(tmp_path, monkeypatch, harness="sdk", model="claude-sonnet-5",
+                        provider="anthropic", clis=("agy", "codex")) == "cli claude"
+    assert critic.critic_bin_override(harness="sdk", environ={}, which=lambda _n: None) == {
+        "AUTOSOUND_CRITIC_BIN": "/probe/home/.local/bin/claude"}
+    monkeypatch.setattr(claude_sdk, "cli_path", lambda: None)
+    assert critic.critic_bin_override(harness="sdk", environ={}, which=lambda _n: None) == {}
+    assert critic.critic_bin_override(harness="sdk", environ={"AUTOSOUND_CRITIC_BIN": "mine"},
+                                      which=lambda _n: None) == {}, "the person's own choice"
 
 
 def test_an_api_pick_still_goes_through_the_stored_key(tmp_path, monkeypatch):
