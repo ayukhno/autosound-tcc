@@ -98,12 +98,15 @@ class _AskRow(QWidget):
 
     ask = Signal(str)
 
-    def __init__(self, subject: str, issue: str, asked_at: Optional[float]) -> None:
+    def __init__(self, subject: str, issue: str, asked_at: Optional[float],
+                 shown: Optional[str] = None) -> None:
+        """`shown` is the line the Arbiter reads when TCC words it in his language (#126); the
+        session is still sent the checker's own `issue`, which is what lets it answer with a write."""
         super().__init__()
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 1, 12, 1)
         layout.setSpacing(8)
-        text = _note(str(issue))
+        text = _note(str(shown or issue))
         layout.addWidget(text, stretch=1)
         if asked_at is not None:
             # Still here, and we already asked. Saying WHEN is the whole verification: a button
@@ -1474,8 +1477,8 @@ class DiagnosticsDialog(QDialog):
         self._refresh_btn.setEnabled(report is not None)
         self._render()
 
-    def _ask_row(self, subject: str, issue: str) -> QWidget:
-        row = _AskRow(subject, issue, self._asked.get(f"{subject}::{issue}"))
+    def _ask_row(self, subject: str, issue: str, shown: Optional[str] = None) -> QWidget:
+        row = _AskRow(subject, issue, self._asked.get(f"{subject}::{issue}"), shown)
         row.ask.connect(lambda text, key=f"{subject}::{issue}": self._on_ask(key, text))
         return row
 
@@ -1617,7 +1620,15 @@ class DiagnosticsDialog(QDialog):
         self._body_layout.addWidget(_section_title(i18n.t("diagCross")))
         for note in cross_notes:
             self._body_layout.addWidget(self._ask_row(i18n.t("diagCross"), note))
-        if not cross_notes:
+        # A ▶️ CONTINUE block behind the ledger (#126; the method's S-084, hub #227). A warning the
+        # checker keeps out of `ok`, so out of the headline too -- but the block is what a person
+        # opens first and what the next session reads beside the ledger, and the panel never said
+        # it was stale. Forwardable like the rest.
+        drift = report.continue_head()
+        if drift:
+            self._body_layout.addWidget(self._ask_row(
+                "tuning-changelog", str(drift.get("warning") or ""), _continue_head_line(drift)))
+        if not cross_notes and not drift:
             self._body_layout.addWidget(_note(i18n.t("diagNoIssues")))
         self._body_layout.addWidget(_note(_rew_line(report)))
 
@@ -1651,6 +1662,17 @@ class DiagnosticsDialog(QDialog):
                 self._body_layout.addWidget(_note(question))
 
         self._body_layout.addStretch(1)
+
+
+def _continue_head_line(drift: dict) -> Optional[str]:
+    """`continue_head` in the Arbiter's words, from its fields: which versions the block names,
+    and where the ledger stands, slot by slot. None when the fields are not the shape the method's
+    v3.0.65 gives, and the row shows the checker's own sentence instead."""
+    stale, heads = drift.get("stale"), drift.get("heads")
+    if not (isinstance(stale, list) and stale and isinstance(heads, dict) and heads):
+        return None
+    at = ", ".join(f"{head} ({slot})" for slot, head in sorted(heads.items()))
+    return i18n.t("diagContinueHead").format(named=", ".join(map(str, stale)), at=at)
 
 
 def _rew_line(report: ContractReport) -> str:

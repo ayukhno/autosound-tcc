@@ -110,6 +110,17 @@ class ContractReport:
     def rew(self) -> dict:
         return (self.cross_checks or {}).get("rew") or {}
 
+    def continue_head(self) -> Optional[dict]:
+        """`{named, heads, stale, warning}` when `tuning-changelog`'s ▶️ CONTINUE block names a
+        HEAD the ledger is not at, else None (the method's v3.0.65, S-084, hub #227).
+
+        A warning, never a defect: the checker keeps it out of `ok`, and so `issues()` keeps it
+        out of the count. None also for a method that does not say, and for "no opinion" -- no
+        changelog, or a block that names no version.
+        """
+        drift = (self.cross_checks or {}).get("continue_head")
+        return drift if isinstance(drift, dict) and drift else None
+
 
 def script_path() -> Path:
     """The vendored checker. Absent when the submodule hasn't been checked out."""

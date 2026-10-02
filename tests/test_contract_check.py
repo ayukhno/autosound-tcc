@@ -150,6 +150,25 @@ def test_a_2x_project_is_reported_as_the_wrong_format(tmp_path):
     assert any("migrate.py" in issue for issue in report.issues()), report.issues()
 
 
+def test_a_stale_continue_block_is_carried_and_counted_nowhere(tmp_path):
+    """#126: the method's `continue_head` (S-084, hub #227) -- a ▶️ CONTINUE block naming a HEAD
+    the ledger is not at. A warning: not an issue and not in `ok`, as the checker has it."""
+    from tests import _intake
+
+    _intake.seed(tmp_path)
+    plain = contract_check.run(tmp_path, skip_rew=True)
+    (tmp_path / "tuning-changelog.md").write_text(
+        "# Tuning changelog\n\n## ▶️ CONTINUE\n- HEAD: v_009 (FULL)\n", encoding="utf-8")
+
+    report = contract_check.run(tmp_path, skip_rew=True)
+
+    assert plain.continue_head() is None, "no changelog is no opinion"
+    drift = report.continue_head()
+    assert drift["stale"] == ["v_009"] and drift["heads"] == {"FULL": "v_001"}, drift
+    assert "v_009" in drift["warning"]
+    assert (report.ok, report.issues()) == (plain.ok, plain.issues())
+
+
 def test_the_report_carries_inherited_facts_and_gone_sources():
     """hub #154 §3: top-level `inherited` and `sources_gone` since the method's v3.0.53."""
     report = contract_check.report_from_json({

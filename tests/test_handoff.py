@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import subprocess
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
@@ -90,3 +92,75 @@ def test_a_refused_handoff_shows_what_is_missing(tmp_path, monkeypatch):
     window._on_handoff()
     assert shown and "a step left todo: s3" in shown[0]
     assert opened == []
+
+
+# ---- the method's warnings (#126; S-084, hub #227) -----------------------------------------------
+# `handoff --json` carries `warnings` since the method's v3.0.65: a ▶️ CONTINUE block naming a HEAD
+# the ledger is not at. They never move `ok`, and TCC showed none of them.
+
+_STALE = ("`tuning-changelog`'s ▶️ CONTINUE block names HEAD v_009, and the ledger's HEAD is v_001 "
+          "(FULL) — the block was written before the ledger moved. The ledger is what resume "
+          "trusts; bring the block up to it")
+
+
+def test_the_methods_warnings_come_with_its_answer(tmp_path):
+    """The real method, not a fake: its `warnings` key, as TCC reads it."""
+    from autosound_tcc.core import vendor_loader
+    from tests import _intake
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _intake.seed(tmp_path)
+    (tmp_path / "tuning-changelog.md").write_text(
+        "# Tuning changelog\n\n## ▶️ CONTINUE\n- HEAD: v_009 (FULL)\n", encoding="utf-8")
+
+    got = handoff.check(tmp_path)
+
+    assert got is not None and len(got["warnings"]) == 1, got
+    assert "HEAD v_009" in got["warnings"][0] and "v_001 (FULL)" in got["warnings"][0]
+
+
+def test_an_answer_with_no_warnings_key_reads_as_none(tmp_path, monkeypatch):
+    """A method before v3.0.65 says nothing of warnings: none, not an error."""
+    script = tmp_path / "process.py"
+    answer = {"ok": True, "missing": [], "phase": "1", "resume": "", "next_message": "продовжуй"}
+    script.write_text(f"import json; print(json.dumps({answer!r}))", encoding="utf-8")
+    monkeypatch.setattr(process_writer, "script_path", lambda: script)
+
+    assert handoff.check(tmp_path)["warnings"] == []
+
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_the_handoff_box_names_the_methods_warnings(tmp_path, monkeypatch, ok):
+    """Said either way, as the method prints it either way: on a ready answer and on a refusal."""
+    from autosound_tcc.ui.tcc import i18n
+
+    window = _window(tmp_path, monkeypatch)
+    monkeypatch.setattr(handoff, "check", lambda p: {
+        "ok": ok, "missing": [] if ok else ["a step left todo: s3"], "phase": "1",
+        "resume": "the REW session", "next_message": "продовжуй" if ok else None,
+        "warnings": [_STALE]})
+    shown = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(self.text()) or 0)
+    monkeypatch.setattr(window, "_open_terminal", lambda: None)
+
+    window._on_handoff()
+
+    lead = i18n.t("hoWarnings").split("{warnings}")[0].strip()
+    assert shown and lead in shown[0] and _STALE in shown[0], shown
+
+
+def test_a_handoff_with_no_warnings_says_nothing_of_them(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
+    window = _window(tmp_path, monkeypatch)
+    monkeypatch.setattr(handoff, "check", lambda p: {
+        "ok": False, "missing": ["a step left todo: s3"], "phase": "1", "resume": "",
+        "next_message": None, "warnings": []})
+    shown = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(self.text()) or 0)
+
+    window._on_handoff()
+
+    assert shown and i18n.t("hoWarnings").split("{warnings}")[0].strip() not in shown[0]

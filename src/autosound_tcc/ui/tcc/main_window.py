@@ -4009,17 +4009,22 @@ class MainWindow(QMainWindow):
             return
         box = QMessageBox(self)
         box.setWindowTitle(i18n.t("hoTitle"))
+        # The method's warnings, said either way as it says them either way (#126, S-084): a
+        # ▶️ CONTINUE block behind the ledger. They never move `ok`, so they hold nothing here.
+        warned = answer.get("warnings") or []
+        warnings = ("\n\n" + i18n.t("hoWarnings").format(
+            warnings="\n".join(f"• {w}" for w in warned))) if warned else ""
         if not answer.get("ok"):
             box.setIcon(QMessageBox.Icon.Warning)
             box.setText(i18n.t("hoMissing").format(
-                missing="\n".join(f"• {m}" for m in answer["missing"]) or "—"))
+                missing="\n".join(f"• {m}" for m in answer["missing"]) or "—") + warnings)
             box.setStandardButtons(QMessageBox.StandardButton.Ok)
             box.exec()
             return
         first = str(answer.get("next_message") or "")
         box.setIcon(QMessageBox.Icon.Information)
         box.setText(i18n.t("hoReady").format(message=first,
-                                             resume=answer.get("resume") or "—"))
+                                             resume=answer.get("resume") or "—") + warnings)
         in_app = getattr(self, "_agent_worker", None) is not None
         start = box.addButton(i18n.t("hoStartInApp" if in_app else "hoStartTerminal"),
                               QMessageBox.ButtonRole.AcceptRole)

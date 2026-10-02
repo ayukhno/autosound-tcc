@@ -4,11 +4,13 @@ A session can neither restart itself nor clear, and a phase boundary is where th
 the only copy of something gets thrown away. The method's `process.py <dir> handoff --json`
 answers whether the next session has what it needs, and writes nothing either way:
 
-    {ok, missing: [str], phase, resume, next_message}
+    {ok, missing: [str], phase, resume, warnings: [str], next_message}
 
 `missing` names, item by item, the command that fixes it; `next_message` is what the new session
 starts with («продовжуй»); `resume` says what must stay open (the REW session with the round's
-captures). TCC shows the answer and starts nothing without the Arbiter's click.
+captures). `warnings` (the method's v3.0.65, S-084, hub #227) never moves `ok`: a ▶️ CONTINUE
+block naming a HEAD the ledger is not at, prose to bring up to date. TCC shows the answer and
+starts nothing without the Arbiter's click.
 """
 
 from __future__ import annotations
@@ -47,4 +49,6 @@ def check(project_dir: Path) -> Optional[dict]:
     if not isinstance(answer, dict) or "ok" not in answer:
         return None
     answer["missing"] = [str(m) for m in answer.get("missing") or []]
+    # Absent from a method before v3.0.65, which did not say: none (#126).
+    answer["warnings"] = [str(w) for w in answer.get("warnings") or []]
     return answer

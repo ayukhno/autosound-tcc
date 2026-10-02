@@ -254,6 +254,75 @@ def test_asking_records_the_time_and_never_claims_success(monkeypatch):
     assert i18n.t("diagOk") not in text
 
 
+# ---- a stale ▶️ CONTINUE block (#126; contract.py's `continue_head`, S-084, hub #227) ------------
+
+_DRIFT = {"named": ["v_010"], "heads": {"SQ_Jazzi": "v_013"}, "stale": ["v_010"],
+          "warning": "`tuning-changelog`'s ▶️ CONTINUE block names HEAD v_010, and the ledger's HEAD "
+                     "is v_013 (SQ_Jazzi) — the block was written before the ledger moved. The "
+                     "ledger is what resume trusts; bring the block up to it"}
+
+
+def _clean(**cross):
+    return _report(ok=True, files=(), cross_checks={
+        "glossary_vs_ledgers": [], "tiers_vs_profile": [], "rew": {}, **cross})
+
+
+def test_a_stale_continue_block_is_named_and_counted_nowhere(monkeypatch):
+    """The checker's one cross-check the panel never showed. A warning, never part of `ok`, so the
+    verdict stays as it was; but named, in the Arbiter's words, and forwardable in the checker's."""
+    from autosound_tcc.ui.tcc.diagnostics_panel import _AskRow
+
+    _stub_self_checks(monkeypatch)
+    _app()
+    dialog = DiagnosticsDialog()
+    sent: list[str] = []
+    dialog.askRequested.connect(sent.append)
+
+    dialog.set_report(_clean(continue_head=_DRIFT))
+
+    assert i18n.t("diagContinueHead").format(named="v_010", at="v_013 (SQ_Jazzi)") in _texts(dialog)
+    assert dialog._verdict.text() == i18n.t("diagOk"), "a warning moves no verdict"
+    [row] = dialog.findChildren(_AskRow)
+    row.findChild(QPushButton).click()
+    assert len(sent) == 1 and _DRIFT["warning"] in sent[0] and "tuning-changelog" in sent[0]
+
+
+def test_a_continue_block_over_several_slots_names_each_head(monkeypatch):
+    _stub_self_checks(monkeypatch)
+    _app()
+    dialog = DiagnosticsDialog()
+    drift = dict(_DRIFT, stale=["v_010", "v_011"], heads={"SQ": "v_013", "SPL": "v_007"})
+
+    dialog.set_report(_clean(continue_head=drift))
+
+    line = i18n.t("diagContinueHead").format(named="v_010, v_011", at="v_007 (SPL), v_013 (SQ)")
+    assert line in _texts(dialog)
+
+
+def test_a_drift_in_a_shape_tcc_cannot_read_shows_the_checkers_words(monkeypatch):
+    """A newer method may say it otherwise: its own sentence is still a true line."""
+    _stub_self_checks(monkeypatch)
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog.set_report(_clean(continue_head={"warning": "the block is stale"}))
+
+    assert "the block is stale" in _texts(dialog)
+
+
+def test_no_opinion_on_the_continue_block_shows_nothing(monkeypatch):
+    from autosound_tcc.ui.tcc.diagnostics_panel import _AskRow
+
+    _stub_self_checks(monkeypatch)
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog.set_report(_clean(continue_head=None))
+
+    assert dialog.findChildren(_AskRow) == []
+    assert i18n.t("diagNoIssues") in _texts(dialog)
+
+
 # ---- the installation tab (user, 2026-08-19) ---------------------------------------------------
 
 
