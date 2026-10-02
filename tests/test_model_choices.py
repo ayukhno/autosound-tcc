@@ -1099,3 +1099,45 @@ def test_tccs_own_agy_models_inherits_as_before_without_an_adc_line(monkeypatch)
     mc._fetch_agy_choices()
 
     assert envs == [None]
+
+
+def _adc_flash_high():
+    from autosound_tcc.core import model_choices as mc
+
+    return mc.Choice(harness="agy", model="gemini-3.8-flash-high", label="Gemini 3.8 Flash (High)")
+
+
+def test_under_adc_the_methods_reviewer_is_recommended_not_cautioned(monkeypatch):
+    """hub #235, tcc#135: under Google Cloud's ADC agy offers Flash in three tiers and Pro only at
+    `low`, and the method names `gemini-3.8-flash-high` as the reviewer there
+    (`setup-critic-channel.md`). TCC's Pro-only recommendation and its Flash caution (tcc#118)
+    would call the one reviewer the method sends an ADC user to «not recommended»."""
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.delenv("AGY_ADC_AUTH", raising=False)
+    _write_critic_env("AGY_ADC_AUTH=true\n")
+
+    assert mc.recommended(_adc_flash_high(), critic=True)
+    assert mc.reviewer_caution(_adc_flash_high()) == ""
+    low = mc.Choice(harness="agy", model="gemini-3.8-flash-low", label="Gemini 3.8 Flash (Low)")
+    assert not mc.recommended(low, critic=True)
+    assert mc.reviewer_caution(low) == mc.REVIEWER_CAUTION_FLASH
+
+
+def test_without_adc_flash_stays_cautioned(monkeypatch):
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.delenv("AGY_ADC_AUTH", raising=False)
+    _write_critic_env("AUTOSOUND_CRITIC_MODEL=x\n")
+
+    assert not mc.recommended(_adc_flash_high(), critic=True)
+    assert mc.reviewer_caution(_adc_flash_high()) == mc.REVIEWER_CAUTION_FLASH
+
+
+def test_adc_from_the_environment_counts_as_well(monkeypatch):
+    from autosound_tcc.core import model_choices as mc
+
+    _write_critic_env("")
+    monkeypatch.setenv("AGY_ADC_AUTH", "true")
+
+    assert mc.recommended(_adc_flash_high(), critic=True)

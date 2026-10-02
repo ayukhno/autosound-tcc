@@ -509,6 +509,26 @@ def _agy_env() -> Optional[dict]:
     return env
 
 
+#: The reviewer the method names for agy under Google Cloud's ADC (hub #235): there agy offers
+#: Gemini 3.6–3.8 Flash in three tiers and 3.1 Pro only at `low` (`setup-critic-channel.md`, «Or
+#: sign in through Google Cloud's ADC»).
+ADC_REVIEWER = "gemini-3.8-flash-high"
+
+
+def agy_on_adc() -> bool:
+    """Does agy sign in through ADC here — `AGY_ADC_AUTH=true` in critic-env (the method's one
+    carrier) or in TCC's own environment."""
+    from autosound_tcc.core import critic_env
+
+    said = critic_env.values().get("AGY_ADC_AUTH") or os.environ.get("AGY_ADC_AUTH") or ""
+    return said.strip().lower() in ("1", "true", "yes")
+
+
+def _adc_reviewer(choice: Choice) -> bool:
+    """The one Flash the method sends an ADC user to, on an ADC machine (tcc#135)."""
+    return choice.harness == "agy" and choice.model == ADC_REVIEWER and agy_on_adc()
+
+
 def _fetch_agy_choices() -> list[Choice]:
     """Asked rather than hardcoded, because `agy models` prints its own list and a stale hardcoded
     selector is a model that fails at call time instead of being absent at pick time. An agy model
@@ -811,7 +831,8 @@ def reviewer_caution(choice: Choice) -> str:
     (`setup-critic-channel.md`, «Name a Pro tier»), so neither does TCC: tcc#74 greyed the row, and
     the Arbiter, 2026-10-01 — «"не рекомендується" це одна справа, але вибрати — хай користувач
     вирішує». Marked, not hidden: an option that is absent reads as one that does not exist."""
-    if tier_of(choice) in ("flash", "lite"):
+    if tier_of(choice) in ("flash", "lite") and not _adc_reviewer(choice):
+        # Except the one the method itself names under ADC (hub #235, tcc#135).
         return REVIEWER_CAUTION_FLASH
     return ""
 
@@ -925,6 +946,9 @@ def recommended(choice: Choice, critic: bool = False) -> bool:
     day it appears and nobody has to ship a release for it. Everything else in the picker is a
     real option and an experiment.
     """
+    if critic and _adc_reviewer(choice):
+        # Under ADC there is no Pro at a full tier to recommend; the method names this one (hub #235).
+        return True
     vendor, tier = RECOMMENDED["critic" if critic else "generator"]
     if vendor_of(choice) != vendor or tier_of(choice) != tier:
         return False
