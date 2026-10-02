@@ -2411,3 +2411,53 @@ def test_a_refusal_after_a_bare_401_says_the_key(tmp_path, monkeypatch):
         assert out["mode"] == critic.MODE_REFUSED, (tool, out)
         assert "What to do: `OPENAI_API_KEY` is set and the API rejected it" in out["detail"], (
             tool, out["detail"])
+
+
+
+def _waited_for_at_exit(thread) -> bool:
+    """Whether interpreter exit joins `thread`: a non-daemon thread, or a worker of a
+    `concurrent.futures` pool, which `concurrent.futures.thread._python_exit` joins whatever its
+    daemon flag -- a pool made on a daemon thread has daemon workers, and they are joined all the
+    same (the reviewer measured it: 6.2 s of exit for a 6-s call)."""
+    from concurrent.futures import thread as pool_threads
+
+    return not thread.daemon or thread in pool_threads._threads_queues
+
+
+def test_a_reviewer_call_still_out_does_not_hold_the_exit(tmp_path, monkeypatch):
+    """Review of #132, I2 (Ruling 45): `asyncio.to_thread` runs on the loop's default pool, and
+    Python joins a pool's workers at exit. A Critic review still out when the window closed --
+    `critic.run`, up to 600 s -- kept TCC running with no window, and the TCC update waited on its
+    pid. The server's blocking calls run on daemon threads of their own: nothing is left for exit
+    to wait on, and the call still comes back with its answer."""
+    import threading
+
+    from autosound_tcc.core import critic
+
+    reached, release = threading.Event(), threading.Event()
+    ran_on: list = []
+
+    def _slow_review(*_a, **_k):
+        ran_on.append(threading.current_thread())
+        reached.set()
+        release.wait(30)
+        return critic.CriticResult(critic.MODE_API_OR_CLI, "the sub is 3 dB hot", "gemini",
+                                   "critic", "", 1.0, "2026-10-02T12:00:00+00:00")
+
+    monkeypatch.setattr(critic, "run", _slow_review)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    before = {t for t in threading.enumerate() if _waited_for_at_exit(t)}
+    answer: list = []
+    caller = threading.Thread(
+        target=lambda: answer.append(asyncio.run(mcp.call_tool("call_critic", {"package": "x"}))),
+        name="test-mcp-loop", daemon=True)
+    caller.start()
+    try:
+        assert reached.wait(10), "the reviewer was not reached"
+        held = {t for t in threading.enumerate() if _waited_for_at_exit(t)} - before
+        assert not _waited_for_at_exit(ran_on[0]) and not held, (
+            f"exit would wait for {sorted(t.name for t in held | set(ran_on))}")
+    finally:
+        release.set()
+        caller.join(10)
+    assert answer and "the sub is 3 dB hot" in _text(answer[0])

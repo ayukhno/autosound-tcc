@@ -49,8 +49,11 @@ Nothing on this surface writes project data any more.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import contextvars
 import ctypes
 import dataclasses
+import functools
 import json
 import os
 import secrets
@@ -89,6 +92,41 @@ _TOKEN_HEADER = "x-tcc-token"
 # user can walk to the car and back, short enough that a forgotten dialog doesn't pin an MCP call
 # open forever.
 CONFIRM_TIMEOUT_S = 600.0
+
+
+
+class _DaemonCalls(concurrent.futures.Executor):
+    """Each blocking tool call on a daemon thread of its own (review of tcc#132, I2; Ruling 45).
+
+    Not the loop's default pool, which is what `asyncio.to_thread` uses: Python joins a pool's
+    workers at exit whatever their daemon flag, so a Critic review still out when the window closed
+    -- `critic.run`, up to 600 s -- kept TCC running with no window, and the TCC update waited on
+    its pid. Not `loop.set_default_executor` either: it takes only a `ThreadPoolExecutor`.
+    """
+
+    def submit(self, fn, /, *args, **kwargs):
+        future: concurrent.futures.Future = concurrent.futures.Future()
+
+        def run() -> None:
+            if future.set_running_or_notify_cancel():
+                try:
+                    future.set_result(fn(*args, **kwargs))
+                except BaseException as exc:  # noqa: BLE001 — handed to the awaiting caller
+                    future.set_exception(exc)
+
+        threading.Thread(target=run, name="tcc-mcp-call", daemon=True).start()
+        return future
+
+
+_CALLS = _DaemonCalls()
+
+
+async def _in_thread(fn, /, *args, **kwargs):
+    """`asyncio.to_thread` on `_CALLS`: the call's context goes with it, as `to_thread` sends it."""
+    ctx = contextvars.copy_context()
+    return await asyncio.get_running_loop().run_in_executor(
+        _CALLS, functools.partial(ctx.run, fn, *args, **kwargs))
+
 
 # Rides along with every non-empty signal delivery (`get_pending_signals`, `wait_for_signal`).
 # In the payload, not only in the tools' docstrings, because a docstring is read once at tool
@@ -657,7 +695,7 @@ def build_server(
         waited = 0.0
         slice_s = 5.0
         while waited < deadline:
-            signals = await asyncio.to_thread(bus.wait, min(slice_s, deadline - waited))
+            signals = await _in_thread(bus.wait, min(slice_s, deadline - waited))
             if signals:
                 return json.dumps(
                     {
@@ -901,20 +939,20 @@ def build_server(
         you do not invent phases. Steps are added separately with `add_step`: entering a phase
         instantiates NOTHING, and a session that believed otherwise worked a whole phase with an
         empty plan (tcc#7)."""
-        return await asyncio.to_thread(_record, process_writer.enter_phase, phase)
+        return await _in_thread(_record, process_writer.enter_phase, phase)
 
     @tool()
     async def add_step(step_id: str, name: str, situational: bool = False) -> str:
         """Add a plan step. `situational=True` records it as this car's own insert rather than one
         instantiated from the phase template -- the distinction is what makes a plan readable
         later."""
-        return await asyncio.to_thread(_record, process_writer.add_step, step_id, name, situational)
+        return await _in_thread(_record, process_writer.add_step, step_id, name, situational)
 
     @tool()
     async def start_step(step_id: str) -> str:
         """Begin, or re-begin, a step. Re-beginning is attempt N+1 -- a redo is recorded next to the
         first try, never on top of it."""
-        return await asyncio.to_thread(_record, process_writer.start_step, step_id)
+        return await _in_thread(_record, process_writer.start_step, step_id)
 
     @tool()
     async def finish_step(step_id: str, evidence: list[str]) -> str:
@@ -925,7 +963,7 @@ def build_server(
         refused. The skill checks this, not TCC, and a refusal comes back in the skill's own
         wording -- write the artefact, then close the step against it, rather than retrying the
         same call."""
-        return await asyncio.to_thread(_record, process_writer.finish_step, step_id, evidence)
+        return await _in_thread(_record, process_writer.finish_step, step_id, evidence)
 
     @tool()
     async def skip_step(step_id: str, reason: str = "", superseded_by: str = "") -> str:
@@ -934,7 +972,7 @@ def build_server(
         one, or `reason`, a sentence. A skip with neither is refused (SKL-029) -- it reads exactly
         like a step nobody got to, and the next session proposes it again. Say it now: you are the
         only one who still knows, and there is no screen that asks later."""
-        return await asyncio.to_thread(
+        return await _in_thread(
             _record,
             process_writer.skip_step,
             step_id,
@@ -946,7 +984,7 @@ def build_server(
     async def block_step(step_id: str, reason: str) -> str:
         """Mark a step blocked and say what blocks it -- a gate waiting on the human, a measurement
         that cannot be taken yet."""
-        return await asyncio.to_thread(_record, process_writer.block_step, step_id, reason)
+        return await _in_thread(_record, process_writer.block_step, step_id, reason)
 
     @tool()
     async def record_decision(
@@ -958,7 +996,7 @@ def build_server(
         invisible to the next session unless somebody re-reads it out of the transcript. Call this
         BEFORE acting on a ruling that constrains a later phase. `invalidates` names what the
         ruling supersedes (channels, captures) when it supersedes anything."""
-        return await asyncio.to_thread(
+        return await _in_thread(
             _record, process_writer.record_decision, question, answer, step, invalidates
         )
 
@@ -978,7 +1016,7 @@ def build_server(
         quietest, ctl1->ctl3 drift. That reads the shoot as one thing rather than measurement by
         measurement, and it is step 0.6 of the virtual-first path -- ask for it while the tripod
         is still standing, not after."""
-        return await asyncio.to_thread(
+        return await _in_thread(
             _record, process_writer.check_captures, titles or None, session
         )
 
@@ -1009,13 +1047,13 @@ def build_server(
                 _tell("session_closed")
             return json.dumps({"recorded": recorded, "said": report}, ensure_ascii=False)
 
-        return await asyncio.to_thread(_close)
+        return await _in_thread(_close)
 
     @tool()
     async def set_target(preset: str, curve: str) -> str:
         """Record which target curve a preset is being tuned to. `enter_phase("1")` refuses
         without it -- the desk does not open until the destination is named."""
-        return await asyncio.to_thread(_record, process_writer.set_target, preset, curve)
+        return await _in_thread(_record, process_writer.set_target, preset, curve)
 
     @tool()
     async def capture_knobs(positions: dict) -> str:
@@ -1025,18 +1063,18 @@ def build_server(
         A fact about the series, not about one measurement, which is what lets two passes taken at
         different positions be told apart instead of the difference landing in a calibration
         offset. `verify_prediction --project` refuses (exit 4) while the round has none."""
-        return await asyncio.to_thread(_record, process_writer.capture_knobs, positions)
+        return await _in_thread(_record, process_writer.capture_knobs, positions)
 
     @tool()
     async def show_plan(phase: str = "") -> str:
         """The plan for a phase, as the skill prints it. Defaults to the active phase."""
-        return await asyncio.to_thread(_record, process_writer.plan, phase or None)
+        return await _in_thread(_record, process_writer.plan, phase or None)
 
     @tool()
     async def reconcile_plan() -> str:
         """The skill's own plan-versus-fact pass: done steps carrying no evidence, and done steps
         whose evidence resolves to nothing on disk."""
-        return await asyncio.to_thread(_record, process_writer.check)
+        return await _in_thread(_record, process_writer.check)
 
     @tool()
     async def start_capture(version: str, expected: list[str] | None = None, step: str = "",
@@ -1059,7 +1097,7 @@ def build_server(
         `step` binds the round to the plan step it satisfies, which is what lets that step's gate
         refuse to close while a capture it asked for is unusable (SCR-040)."""
         listed = [str(title) for title in expected or [] if str(title).strip()]
-        return await asyncio.to_thread(
+        return await _in_thread(
             _record, process_writer.start_capture, version, listed, step,
             plan=(not listed) if plan is None else bool(plan), optional=list(optional or []),
             start_method=start,
@@ -1070,19 +1108,19 @@ def build_server(
         """A measurement came back, by its REW title. One that was not on the round's list is
         recorded as unplanned rather than refused -- the derivation can only say what SHOULD have
         been taken, so "this came back and nobody asked for it" has nowhere else to live."""
-        return await asyncio.to_thread(_record, process_writer.record_capture, title)
+        return await _in_thread(_record, process_writer.record_capture, title)
 
     @tool()
     async def skip_capture(title: str, reason: str) -> str:
         """A capture deliberately NOT taken, and why. The reason is required: skipped and
         not-yet-taken render identically without it, and the next session proposes it again."""
-        return await asyncio.to_thread(_record, process_writer.skip_capture, title, reason)
+        return await _in_thread(_record, process_writer.skip_capture, title, reason)
 
     @tool()
     async def close_capture(reason: str = "") -> str:
         """Close the open capture round. Whatever is neither taken nor skipped is recorded as
         outstanding rather than quietly dropped."""
-        return await asyncio.to_thread(_record, process_writer.close_capture, reason)
+        return await _in_thread(_record, process_writer.close_capture, reason)
 
     # ---- writes (every one gated on the Arbiter) ---------------------------
 
@@ -1283,7 +1321,7 @@ def build_server(
         # session's own routing test caught it: "Підключення до API (google, gemini-3.6-flash-high)"
         # while the UI showed `gemini-3.1-pro-high` (2026-08-12). The substitution happened BEFORE
         # any fallback; there was nothing to fall back from.
-        result = await asyncio.to_thread(
+        result = await _in_thread(
             critic.run,
             package,
             project_dir=project_dir,
