@@ -1705,6 +1705,15 @@ def test_the_rew_line_of_a_method_that_does_not_send_the_key_is_unchanged():
 # ---- omp, agy, gh and Claude Code (tcc#98) ------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _nothing_learned_by_an_earlier_update(monkeypatch):
+    """What an update learned lives as long as TCC's process (tcc#138), and every test here is the
+    same process: one test's update would grey the next one's row."""
+    from autosound_tcc.ui.tcc import diagnostics_panel
+
+    monkeypatch.setattr(diagnostics_panel, "_UPDATED_TO", {}, raising=False)
+
+
 def _tool(name, here, there, updatable=True):
     from autosound_tcc.core import updates
 
@@ -1988,6 +1997,99 @@ def test_a_second_failure_of_the_same_tool_says_its_reason_once(monkeypatch):
     assert dialog._tool_rows["omp"][0].text() == (
         i18n.t("updToolAvailable").format(name="omp", here="17.3.8", there="18.2.4") + "\n"
         + i18n.t("updToolFailed").format(why=why))
+
+
+def _re_check(monkeypatch, dialog, *tools) -> None:
+    """Re-check, with the tools' status now answering `tools`."""
+    from autosound_tcc.core import updates
+
+    monkeypatch.setattr(updates, "tools_status", lambda: updates.ToolsStatus(True, tuple(tools)))
+    dialog._on_refresh()
+    _finish_tools(dialog)
+
+
+def test_a_re_check_keeps_what_the_update_just_learned(monkeypatch):
+    """Finding 140 (tcc#138), the Arbiter on the VM: «Update all» left Claude Code on 2.1.287 and
+    agy on 1.2.15, «already the newest», greyed — and Re-check put both back to «unknown» with
+    «Update» live, because their sources cannot tell without installing. The update could: the
+    version it left stays the newest on every Re-check that still finds it. A tool whose source
+    CAN tell is the source's to answer."""
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch, _tool("claude", "2.1.286", ""),
+                          _tool("omp", "18.4.8", "18.4.12"), _tool("agy", "1.2.15", ""))
+    monkeypatch.setattr(updates, "update_tools", lambda names: updates.ToolsUpdate((
+        updates.ToolUpdate("claude", True, "2.1.286", "2.1.287"),
+        updates.ToolUpdate("omp", True, "18.4.8", "18.4.12"),
+        updates.ToolUpdate("agy", True, "1.2.15", "1.2.15"))))
+    dialog._tools_all_btn.click()
+    _finish_tools(dialog)
+
+    for _re_check_number in range(2):
+        _re_check(monkeypatch, dialog, _tool("claude", "2.1.287", ""),
+                  _tool("omp", "18.4.12", "18.4.13"), _tool("agy", "1.2.15", ""))
+
+        for name, title, here in (("claude", "Claude Code", "2.1.287"), ("agy", "agy", "1.2.15")):
+            label, button = dialog._tool_rows[name]
+            assert label.text() == i18n.t("updToolSame").format(name=title, here=here), name
+            assert not button.isEnabled(), name
+        label, button = dialog._tool_rows["omp"]
+        assert label.text() == i18n.t("updToolAvailable").format(
+            name="omp", here="18.4.12", there="18.4.13"), "its source names a newer one: it wins"
+        assert button.isEnabled()
+        assert dialog._tools_all_btn.isEnabled(), "omp is still offered"
+
+
+def test_another_version_of_the_tool_drops_what_the_update_learned(monkeypatch):
+    """What the update learned is about the version it left (tcc#138). Once the tool says another —
+    moved by its own updater, or outside TCC — the source's «cannot tell» is all there is, and it
+    stays so if the old number comes back: that was learned of an install no longer here."""
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch, _tool("claude", "2.1.286", ""))
+    monkeypatch.setattr(updates, "update_tools", lambda names: updates.ToolsUpdate((
+        updates.ToolUpdate("claude", True, "2.1.286", "2.1.287"),)))
+    dialog._tool_rows["claude"][1].click()
+    _finish_tools(dialog)
+    _re_check(monkeypatch, dialog, _tool("claude", "2.1.287", ""))
+    assert dialog._tool_rows["claude"][0].text() == i18n.t("updToolSame").format(
+        name="Claude Code", here="2.1.287")
+
+    for here in ("2.1.288", "2.1.287"):
+        _re_check(monkeypatch, dialog, _tool("claude", here, ""))
+
+        label, button = dialog._tool_rows["claude"]
+        assert label.text() == i18n.t("updToolUnknown").format(name="Claude Code", here=here), here
+        assert button.isEnabled(), "the person may still update"
+
+
+def test_what_an_update_learned_outlives_the_window_it_was_learned_in(monkeypatch):
+    """A new project opens a new main window in the same run of TCC (`_open_new_project_dialog`),
+    and with it a new diagnostics window. The tools are the machine's, not a window's: the new one
+    does not offer again what the old one has just installed (tcc#138)."""
+    from autosound_tcc.core import updates
+
+    first = _tools_shown(monkeypatch, _tool("agy", "1.2.15", ""))
+    monkeypatch.setattr(updates, "update_tools", lambda names: updates.ToolsUpdate((
+        updates.ToolUpdate("agy", True, "1.2.15", "1.2.15"),)))
+    first._tool_rows["agy"][1].click()
+    _finish_tools(first)
+
+    second = _tools_shown(monkeypatch, _tool("agy", "1.2.15", ""))
+
+    label, button = second._tool_rows["agy"]
+    assert label.text() == i18n.t("updToolSame").format(name="agy", here="1.2.15")
+    assert not button.isEnabled()
+
+
+@pytest.mark.parametrize("lang", [code for code, _key, _badge in i18n.LANGS])
+def test_a_tool_whose_source_cannot_tell_is_not_written_as_an_offer(lang):
+    """Finding 140 (tcc#138): «agy 1.2.15 → unknown» had the offer's own shape — here → there, as
+    «omp 18.4.8 → 18.4.12» read beside it — and under a live «Update» it read as one more update to
+    make. It says what is so instead: the newest cannot be known without installing. Its button
+    stays (`test_the_tool_rows_appear_after_the_worker_not_before`): the person may still update."""
+    assert "→" in i18n.T[lang]["updToolAvailable"], "the offer keeps its arrow"
+    assert "→" not in i18n.T[lang]["updToolUnknown"]
 
 
 #: `conftest.py` stands in for `update_tools`; the real one, for the test that runs it end to end.

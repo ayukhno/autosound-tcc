@@ -197,17 +197,41 @@ def _signature_said(line: str) -> str:
 _SESSION_TOOLS = ("omp", "claude")
 
 
+#: The version an update in this run of TCC left each tool on, by name (finding 140, tcc#138). agy's
+#: source and a native Claude Code's cannot tell their newest without installing, so a Re-check
+#: straight after the update read «unknown» with «Update» live again — while the update itself had
+#: just installed the newest. What it reported is the newest until the tool says another version.
+#: The process's and not a window's: the tools are the machine's, and a new project opens a new
+#: window with a new diagnostics window in the same run.
+_UPDATED_TO: dict[str, str] = {}
+
+
 def _tool_title(name: str) -> str:
     """The name a person knows the tool by: `upkeep.py` says `claude` for Claude Code."""
     return {"claude": "Claude Code"}.get(name, name)
 
 
+def _updated_to_newest(tool) -> bool:
+    """The tool's source cannot tell, and it is on the version an update in this run left it on."""
+    return (not tool.available and bool(tool.installed)
+            and _UPDATED_TO.get(tool.name) == tool.installed)
+
+
+def _tool_offered(tool) -> bool:
+    """Whether the row's button may be live: the status offers it, and no update here has just
+    found the version it is on to be the newest (tcc#138)."""
+    return tool.offered and not _updated_to_newest(tool)
+
+
 def _tool_line(tool) -> str:
     """One tool's row (tcc#98): the version here → the one out there, in words. An empty
-    `available` is UNKNOWN (hub #219), never "up to date"."""
+    `available` is UNKNOWN (hub #219), never "up to date" — unless an update in this run left the
+    tool on the version it is on, and then it is that update's «already the newest» (tcc#138)."""
     name, here = _tool_title(tool.name), tool.installed or "?"
     if not tool.updatable:
         return i18n.t("updToolNotOurs").format(name=name, here=here)
+    if _updated_to_newest(tool):
+        return i18n.t("updToolSame").format(name=name, here=here)
     if not tool.available:
         return i18n.t("updToolUnknown").format(name=name, here=here)
     if tool.newer:
@@ -1038,6 +1062,10 @@ class DiagnosticsDialog(QDialog):
         self._clear_tools()
         self._tools = {tool.name: tool for tool in found.tools}
         for tool in found.tools:
+            if tool.name in _UPDATED_TO and _UPDATED_TO[tool.name] != tool.installed:
+                # Another version than the update left — its own updater, or something outside
+                # TCC: what the update learned was of an install no longer here (tcc#138).
+                del _UPDATED_TO[tool.name]
             label = QLabel(_tool_line(tool))
             label.setWordWrap(True)
             label.setProperty("class", "mn")
@@ -1057,7 +1085,7 @@ class DiagnosticsDialog(QDialog):
             button = self._tools_row(left, i18n.t("updTool"))
             button.clicked.connect(lambda _c=False, name=tool.name: self._update_tools([name]))
             self._tool_rows[tool.name] = (label, button)
-            self._tool_offer[tool.name] = tool.offered
+            self._tool_offer[tool.name] = _tool_offered(tool)
         self._tools_all_note = _note("")
         self._tools_all_note.setProperty("class", "kv-caution")
         self._tools_all_btn = self._tools_row(self._tools_all_note, i18n.t("updToolsAll"))
@@ -1118,6 +1146,10 @@ class DiagnosticsDialog(QDialog):
                 moved = True
                 label.setText(_tool_done_line(row))
                 self._tool_offer[name] = False
+                if row.new:
+                    # The package manager has just installed the newest: kept past Re-check, where
+                    # a source that cannot tell would offer the update again (tcc#138).
+                    _UPDATED_TO[name] = row.new
                 continue
             if row is not None:
                 why = row.why or "?"
