@@ -118,6 +118,18 @@ def _title_facts(title: str) -> tuple[Optional[str], Optional[str]]:
     return version, method
 
 
+def _held_twice(exc: BaseException) -> bool:
+    """Whether a read was refused because REW holds the title on more than one measurement.
+
+    The method's own refusal (`rew_api.find_measurement_id`: `KeyError("Ambiguous: …")`), read by
+    its wording the way `measurement_view.absent` reads «No measurement titled». It is told apart
+    from a missing title because the advice is the opposite one: not "open the file it was
+    captured in" but "rename or delete the extra one in REW" (tcc#94).
+    """
+    return isinstance(exc, KeyError) and str(exc.args[0] if exc.args else "").startswith(
+        "Ambiguous")
+
+
 def _start_time_of(measurement) -> Optional[float]:
     """REW's own timing reference for a capture, in seconds, or None when it does not report one.
 
@@ -282,7 +294,8 @@ def _stop_worker(worker: Optional[_CurveWorker]) -> None:
     if worker is None:
         return
     qt_shutdown.stop_or_detach(
-        worker, _WORKER_WAIT_MS, mute=(worker.done, worker.failed, worker.unreadable)
+        worker, _WORKER_WAIT_MS,
+        mute=(worker.done, worker.failed, worker.unreadable, worker.heldTwice),
     )
 
 
@@ -321,6 +334,9 @@ class _CurveWorker(QThread):
     #: used to drop its four refusals on the floor, and those four are exactly what the picker
     #: has to grey out.
     unreadable = Signal(list)
+    #: Titles the method refused because REW holds each on more than one measurement (tcc#94).
+    #: Apart from `unreadable`: those are not missing, and the advice for them is the reverse.
+    heldTwice = Signal(list)
 
     def __init__(self, bridge: RewBridge, titles: Sequence[str], kind: str,
                  legs_by_title: Optional[dict] = None) -> None:
@@ -346,6 +362,7 @@ class _CurveWorker(QThread):
         traces: list[Trace] = []
         problems: list[str] = []
         missing: list[str] = []
+        twice: list[str] = []
         for title in self._titles:
             # Asked to stop, so stop — between measurements, which is the only place this loop can
             # be interrupted: the HTTP call inside is not cancellable and does not need to be, it
@@ -409,12 +426,18 @@ class _CurveWorker(QThread):
                               **facts)
                     )
             except Exception as exc:  # noqa: BLE001 — a REW failure is a message, not a crash
+                if _held_twice(exc):
+                    twice.append(title)
+                    continue
                 problems.append(f"{title}: {type(exc).__name__}")
                 missing.append(title)
+        if twice:
+            self.heldTwice.emit(twice)
         if missing:
             self.unreadable.emit(missing)
         if not traces:
-            self.failed.emit("; ".join(problems) or "no curves")
+            # Empty when the only refusals were pairs: the dialog says those in its own words.
+            self.failed.emit("; ".join(problems) or ("" if twice else "no curves"))
             return
         self.done.emit(traces)
 
@@ -490,6 +513,11 @@ class CurveDialog(QDialog):
         #: never guessed (finding 38). Their rows are greyed and cannot be ticked. Set BEFORE any
         #: control is built: `_fill_choose_menu` runs during construction and reads it.
         self._unreadable: set = set()
+        #: Titles a read was refused because REW holds each on more than one measurement — greyed
+        #: like the ones above, with the reverse advice on them (tcc#94).
+        self._held_twice: set = set()
+        #: The same pairs as a sentence on the status line, for the LAST read only.
+        self._twice_note = ""
         #: Why what is on screen is not what was asked for, in words. Empty when nothing was
         #: refused — the status line is then free to disappear, as it did before. `_note` is the
         #: whole line; `_refused_note` and `_group_note` are the two things that can be on it.
@@ -877,7 +905,11 @@ class CurveDialog(QDialog):
             action = self._choose_menu.addAction(title)
             action.setCheckable(True)
             action.toggled.connect(lambda on, t=title: self._on_choose_toggled(t, on))
-            if title in self._unreadable:
+            if title in self._held_twice:
+                # Refused just the same, for the opposite reason: REW holds it twice (tcc#94).
+                action.setEnabled(False)
+                action.setToolTip(i18n.t("capImportDupWarn").format(names=title))
+            elif title in self._unreadable:
                 # Visible and unusable, which is this app's habit for a choice that exists and
                 # does not apply (the kind picker does the same): the row is part of the round's
                 # history and deleting it would hide that the capture was ever taken.
@@ -1541,7 +1573,7 @@ class CurveDialog(QDialog):
         tuner needed.
         """
         self._note = " ".join(
-            part for part in (self._refused_note, self._group_note) if part
+            part for part in (self._refused_note, self._group_note, self._twice_note) if part
         )
         self._status.setText(self._note)
         self._status.setVisible(bool(self._note))
@@ -1649,10 +1681,12 @@ class CurveDialog(QDialog):
             return
         self._status.setText(i18n.t("curveLoading"))
         self._sync_protection_button()
+        self._twice_note = ""
         self._worker = _CurveWorker(self._bridge, titles, self._kind, self._legs_by_title())
         self._worker.done.connect(self._on_curves)
         self._worker.failed.connect(self._on_failed)
         self._worker.unreadable.connect(self._on_unreadable)
+        self._worker.heldTwice.connect(self._on_held_twice)
         self._worker.start()
 
     def _on_curves(self, traces: list) -> None:
@@ -1836,6 +1870,17 @@ class CurveDialog(QDialog):
         self._unreadable |= {str(t) for t in titles if t}
         self._fill_choose_menu()
 
+    def _on_held_twice(self, titles) -> None:
+        """The method refused these because REW holds each on more than one measurement (tcc#94).
+
+        Greyed like a missing title — the read is refused until REW is put right — but said in the
+        card's words: rename or delete the extra one in REW, not open another file.
+        """
+        held = sorted({str(t) for t in titles if t})
+        self._held_twice |= set(held)
+        self._twice_note = i18n.t("capImportDupWarn").format(names=", ".join(held))
+        self._fill_choose_menu()
+
     def _status_bad(self, bad: bool) -> None:
         """Red for a failure, the quiet grey for everything else (the Arbiter, 2026-09-20: four
         failed reads in 11px grey over an empty plot — «хоч би червоним коли помилки»)."""
@@ -1862,7 +1907,10 @@ class CurveDialog(QDialog):
         """
         self._view.set_traces([])
         self._status.setVisible(True)
-        self._status.setText(i18n.t("curveFailed").format(error=message))
+        # A pair REW holds is said as such, not as `<title>: KeyError` (tcc#94); "could not read"
+        # stays for whatever else failed beside it.
+        parts = [i18n.t("curveFailed").format(error=message)] if message else []
+        self._status.setText(" ".join(parts + ([self._twice_note] if self._twice_note else [])))
         self._status_bad(True)
 
     def _on_send(self, reading: str) -> None:

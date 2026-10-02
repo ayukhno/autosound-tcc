@@ -4531,6 +4531,47 @@ def test_a_title_rew_could_not_answer_for_is_marked_and_the_error_goes_red():
     assert dialog._choose_actions["w-L_01 (sw)"].isEnabled(), "and the untried rows are untouched"
 
 
+class _TwiceBridge(_FrBridge):
+    """REW holding `m-L_02 (sw)` on two measurements, resolved by the METHOD's own
+    `find_measurement_id` — its real refusal, not a copy of the wording."""
+
+    HELD = {"3": {"title": "m-L_02 (sw)"}, "7": {"title": "m-L_02 (sw)"},
+            "9": {"title": "w-L_01 (sw)"}}
+
+    def by_name(self, name, exact: bool = True):
+        from autosound_tcc.core import vendor_loader
+
+        mid = vendor_loader.load_rew_api().find_measurement_id(name, self.HELD, exact=exact)
+        self.asked.append(name)
+        return mid, self.HELD[mid]
+
+
+@_needs_skill
+def test_a_title_rew_holds_twice_is_said_as_such_and_not_as_another_file():
+    """tcc#94. The method refuses a title REW holds twice, and the window filed that
+    refusal with the missing ones: the row's hover said "open the file it was captured in" and the
+    line said `KeyError` — while the card said, of the same title, "rename one in REW". Now the
+    window says what the card says. The row stays greyed: the read is refused until REW is fixed.
+    Alone, the read shows nothing; beside a title that reads, the plot answers and the line still
+    names the pair."""
+    warning = i18n.t("capImportDupWarn").format(names="m-L_02 (sw)")
+
+    alone = _dialog(["m-L_02 (sw)"], bridge=_TwiceBridge(), kind="fr",
+                    available=["m-L_02 (sw)", "w-L_01 (sw)"])
+    _fetch(alone)
+    action = alone._choose_actions["m-L_02 (sw)"]
+    assert not action.isEnabled()
+    assert action.toolTip() == warning
+    assert warning in alone._status.text()
+    assert "KeyError" not in alone._status.text()
+    assert alone._choose_actions["w-L_01 (sw)"].isEnabled()
+
+    beside = _dialog(["m-L_02 (sw)", "w-L_01 (sw)"], bridge=_TwiceBridge(), kind="fr")
+    _fetch(beside)
+    assert beside._plotted == ["w-L_01 (sw)"]
+    assert warning in beside._status.text()
+
+
 def test_a_successful_read_puts_the_status_back_to_a_quiet_one():
     """The red is a state, not a stain: the next read that works takes it off again."""
     _app()
@@ -4582,7 +4623,7 @@ def test_a_rew_known_to_be_offline_is_said_at_once_not_waited_for(monkeypatch):
     class _Worker:
         def __init__(self, *a, **kw):
             started.append(a)
-            for name in ("done", "failed", "unreadable"):
+            for name in ("done", "failed", "unreadable", "heldTwice"):
                 setattr(self, name, type("S", (), {"connect": lambda self, f: None})())
 
         def start(self):

@@ -616,7 +616,8 @@ def duplicate_titles(measurements: dict, renamed: Optional[dict] = None) -> list
     title is a question they cannot answer.
 
     The rule is the method's own `rew_api.duplicate_titles`, so the warning names what the method's
-    check names; without a method that has it, the same one-line rule. `renamed` (`{uuid: title}`)
+    check names; without a method that has it, or with one that fails, the same one-line rule —
+    this line is advice, and the import window must open without it. `renamed` (`{uuid: title}`)
     is what was renamed since the answer was read — a rename in the import window can be what
     settles a pair. An empty title is not a name, so it is never one held twice.
     """
@@ -628,13 +629,14 @@ def duplicate_titles(measurements: dict, renamed: Optional[dict] = None) -> list
         if uuid in renamed:
             raw["title"] = renamed[uuid]
         current[ordinal] = raw
+    held = None
     try:
         method = getattr(vendor_loader.load_rew_api(), "duplicate_titles", None)
-    except Exception:  # noqa: BLE001 — no method on this machine: the same rule, counted here
-        method = None
-    if callable(method):
-        held = method(current)
-    else:
+        if callable(method):
+            held = method(current)
+    except Exception:  # noqa: BLE001 — a method that fails: advice must not cost ⤓ its window
+        held = None
+    if held is None:
         counts: dict[str, int] = {}
         for raw in current.values():
             title = raw.get("title")

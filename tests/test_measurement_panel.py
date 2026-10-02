@@ -186,6 +186,10 @@ def test_the_card_names_a_title_rew_holds_twice_while_rew_was_last_seen_holding_
 
     panel._on_import_offer(_TWICE)
     assert warning.format(names="m-L_02 (sw)") in panel._status_label.text()
+    # A switch of the grid (the first Apply that opens a round re-points the live session too)
+    # drops what was counted against the grid, not what is known about REW.
+    panel.show_session("v9")
+    assert warning.format(names="m-L_02 (sw)") in panel._status_label.text()
 
     panel._on_import_offer({"1": dict(_TWICE["1"]), "2": {**_TWICE["2"], "title": "m-R_02 (sw)"}})
     assert warning.split("{")[0] not in panel._status_label.text()
@@ -193,6 +197,29 @@ def test_the_card_names_a_title_rew_holds_twice_while_rew_was_last_seen_holding_
     panel._on_import_offer(_TWICE)
     panel._on_read_failed("URLError: <urlopen error [Errno 61] Connection refused>")
     assert warning.split("{")[0] not in panel._status_label.text()
+
+
+def test_the_card_names_three_pairs_and_counts_the_rest(tmp_path, monkeypatch):
+    """A REW file holding two cars named in one grammar can repeat a dozen titles, and the card is
+    the narrow column whose growth the Arbiter already refused (2026-09-02). Three by name, the
+    rest counted; the import window keeps the whole list."""
+    from autosound_tcc.core import config
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    _rejecting_dialog(monkeypatch)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    answer = {}
+    for n, title in enumerate(("a_1 (sw)", "b_1 (sw)", "c_1 (sw)", "d_1 (sw)", "e_1 (sw)")):
+        for k in (2 * n + 1, 2 * n + 2):
+            answer[str(k)] = {"title": title, "uuid": f"u{k}", "date": ""}
+
+    panel._on_import_offer(answer)
+
+    said = panel._status_label.text()
+    assert i18n.t("capImportDupWarn").format(names="a_1 (sw), b_1 (sw), c_1 (sw) (+2)") in said
+    assert "d_1 (sw)" not in said
 
 
 def test_a_rename_that_settles_the_pair_takes_the_warning_off(tmp_path, monkeypatch):

@@ -580,3 +580,32 @@ def test_without_the_method_the_same_rule_still_names_the_title(monkeypatch):
                   ("", "u4", "2026-Aug-25 20:10:30"))
 
     assert ci.duplicate_titles(answer) == ["m-L_02 (sw)"], "and an empty title is no name"
+
+
+def test_the_method_s_own_function_is_the_one_asked(monkeypatch):
+    """Not a local copy that happens to agree with it: whatever the method's `duplicate_titles`
+    answers is what the warning names."""
+    class _Method:
+        @staticmethod
+        def duplicate_titles(measurements):
+            return {"from-the-method": ["1", "2"]}
+
+    monkeypatch.setattr(vendor_loader, "load_rew_api", lambda: _Method())
+
+    assert ci.duplicate_titles(_rew(("m-L_02 (sw)", "u1", "2026-Aug-25 20:10:00"))) == [
+        "from-the-method"]
+
+
+def test_a_method_that_raises_falls_back_to_the_same_rule(monkeypatch):
+    """The line is advice, and ⤓ must not lose its import window over it: a method
+    that is there but fails is counted past, the way a missing one is."""
+    class _Broken:
+        @staticmethod
+        def duplicate_titles(measurements):
+            raise RuntimeError("a method caught mid-update")
+
+    monkeypatch.setattr(vendor_loader, "load_rew_api", lambda: _Broken())
+    answer = _rew(("m-L_02 (sw)", "u1", "2026-Aug-25 20:10:00"),
+                  ("m-L_02 (sw)", "u2", "2026-Aug-25 20:10:10"))
+
+    assert ci.duplicate_titles(answer) == ["m-L_02 (sw)"]

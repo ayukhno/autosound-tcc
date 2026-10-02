@@ -86,7 +86,10 @@ def test_two_measurements_under_one_name_tick_neither(tmp_path):
     assert dialog.ticked_rows() == [], "neither of the two is chosen for the tuner"
     assert dialog._ambiguous == {"u2", "u3"}
     assert "⧉" in dialog._table.item(1, 2).text(), "and both are marked in the row"
-    assert i18n.t("capImportDupNote").format(names="m_3 (sw)") in dialog._note.text()
+    # Said once, by the warning (tcc#94): the ambiguous-tick line names only what the warning does
+    # not — two spellings the grammar reads alike — and the mark's hover says why neither is ticked.
+    assert i18n.t("capImportDupWarn").format(names="m_3 (sw)") in dialog._note.text()
+    assert dialog._note.text().count("m_3 (sw)") == 1, dialog._note.text()
 
 
 def test_a_title_rew_holds_twice_is_named_with_what_to_do_about_it(tmp_path):

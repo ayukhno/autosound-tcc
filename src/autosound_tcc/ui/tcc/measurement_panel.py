@@ -129,6 +129,11 @@ def short_legs(phrase: str) -> str:
     return " · ".join(parts) or "⌁"
 
 
+#: How many titles REW holds twice the card names before it counts the rest (tcc#94):
+#: a file holding two cars in one grammar repeats a dozen, and the card is the narrow column whose
+#: growth the Arbiter already refused (2026-09-02). The import window names them all.
+_CARD_PAIRS = 3
+
 #: (traffic-light status, i18n key). Keys, not words: three of the four had a Ukrainian
 #: translation sitting unused in the table while the legend showed English (2026-08-12).
 _LEGEND = (
@@ -775,13 +780,20 @@ class MeasurementPanel(QWidget):
         self._render_status()
 
     def _render_status(self) -> None:
-        if self._status is None:
-            return
+        """The last read's sentences, then what is known about REW's pairs (tcc#94).
+
+        The pairs are said with no sentence before them too: a switch of the grid drops what was
+        counted against it (`show_session`), and a title REW holds twice is not about the grid.
+        """
         parts = []
-        for key, kwargs in [self._status, *self._status_extra]:
-            parts.append(i18n.t(key).format(**kwargs) if kwargs else i18n.t(key))
+        if self._status is not None:
+            for key, kwargs in [self._status, *self._status_extra]:
+                parts.append(i18n.t(key).format(**kwargs) if kwargs else i18n.t(key))
         if self._dup_titles:
-            parts.append(i18n.t("capImportDupWarn").format(names=", ".join(self._dup_titles)))
+            named = ", ".join(self._dup_titles[:_CARD_PAIRS])
+            if len(self._dup_titles) > _CARD_PAIRS:
+                named = f"{named} (+{len(self._dup_titles) - _CARD_PAIRS})"
+            parts.append(i18n.t("capImportDupWarn").format(names=named))
         self._status_label.setText(" ".join(parts))
 
     def set_no_project(self, message: str) -> None:
@@ -900,9 +912,10 @@ class MeasurementPanel(QWidget):
         if session_id != self._shown_id:
             # A count of what matched belongs to the grid it was counted against. Carrying "16
             # matched" over to a phase showing different rows -- or none -- states something false
-            # about what is on screen (user, 2026-08-11).
-            self._status = None
-            self._status_label.setText("")
+            # about what is on screen (user, 2026-08-11). REW's pairs are not about the grid, and
+            # the first Apply that opens a round re-points the live session — so they stay (tcc#94).
+            self._status, self._status_extra = None, []
+            self._render_status()
         self._viewing_id = self._shown_id = session_id
         self.sessionChanged.emit(session_id)
         is_live = session_id == self._sessions[0].id

@@ -446,8 +446,14 @@ class CaptureImportDialog(QDialog):
         if self._ambiguous:
             # Named, not counted: the person is about to choose between rows that read alike, and
             # the name is what tells them which pair they are looking at.
-            names = sorted({row.title for row in self._all if row.uuid in self._ambiguous})
-            lines.append(i18n.t("capImportDupNote").format(names=", ".join(names)))
+            # A title the warning above already names is not named again (tcc#94): what is left
+            # here is two spellings the grammar reads alike, which the warning never holds. Why
+            # neither of a same-title pair is ticked is the ⧉ mark's hover.
+            names = [name for name in sorted({row.title for row in self._all
+                                              if row.uuid in self._ambiguous})
+                     if name not in self._dup_titles]
+            if names:
+                lines.append(i18n.t("capImportDupNote").format(names=", ".join(names)))
         if not capture_import.ordered_by_date(self._all) and self._all:
             lines.append(i18n.t("capImportRewOrder"))
         missing = capture_import.missing_imported(self._measurements, self._project_dir)
