@@ -174,6 +174,49 @@ def test_the_project_params_theme_row_follows_every_switch(monkeypatch):
             f"the theme is {window._mode}")
 
 
+def test_the_language_switch_wears_the_wait_cursor_and_takes_no_second_pick(monkeypatch):
+    """VM-14: the Arbiter saw the theme switch's wait cursor (VM-12) and asked for the same on the
+    language. The wait cursor while the window re-translates, the select off; a second pick during
+    the switch -- the select's or the menu's -- is dropped, and the select names the language the
+    window is in; the cursor and the select come back on every path, a failed switch's too."""
+    _app()
+    window = MainWindow()
+    combo = window._lang_combo
+    retranslating, seen = window._retranslate, []
+
+    def slow() -> None:
+        cursor = QApplication.overrideCursor()
+        seen.append((i18n.current_language(), cursor.shape() if cursor else None,
+                     combo.isEnabled()))
+        if len(seen) == 1:
+            combo.setCurrentIndex(combo.findData("pl"))  # picked again in the select
+            window._on_language_selected("uk")  # and from the menu
+        retranslating()
+
+    def broken() -> None:
+        raise RuntimeError("the re-translation failed")
+
+    monkeypatch.setattr(window, "_retranslate", slow)
+    try:
+        combo.setCurrentIndex(combo.findData("de"))
+        QApplication.processEvents()
+        assert seen == [("de", Qt.CursorShape.WaitCursor, False)], seen
+        assert i18n.current_language() == "de" and combo.currentData() == "de"
+        assert QApplication.overrideCursor() is None and combo.isEnabled()
+
+        monkeypatch.setattr(window, "_retranslate", broken)
+        with pytest.raises(RuntimeError):
+            window._on_language_selected("pl")
+        assert QApplication.overrideCursor() is None and combo.isEnabled()
+        assert combo.currentData() == i18n.current_language()
+
+        monkeypatch.setattr(window, "_retranslate", retranslating)
+        window._on_language_selected("en")
+        assert i18n.current_language() == "en" and combo.currentData() == "en"
+    finally:
+        i18n.set_language("en")
+
+
 def test_tree_renders_when_a_profile_and_ledger_are_present(tmp_path, monkeypatch):
     """Same profile+ledger shape used in test_dsp_state.py's MUSWAY-style regression test,
     routed through the real MainWindow load path instead of ProjectView directly."""

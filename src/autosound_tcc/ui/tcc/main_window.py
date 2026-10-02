@@ -3594,26 +3594,32 @@ class MainWindow(QMainWindow):
             style.unpolish(widget)
             style.polish(widget)
 
-    def _toggle_theme(self) -> None:
-        """◐: light ↔ dark, under the wait cursor, and no second click until the new theme is on.
+    def _switch(self, control: QWidget, change) -> None:
+        """Run `change` — a theme, a language — under the wait cursor, with `control` off and no
+        second switch taken until it is done; the cursor and the control come back on every path.
 
-        On Windows the sheet takes a second or two to apply, with no sign, and a second click
-        landed (VM-12, the Arbiter: «не давати нажати ще раз до зміни теми»). A click made during
-        the switch is dropped, not queued: the OS holds it until the event loop runs, so the loop
-        runs here, while the button is still off and the switch still under way.
+        On Windows a switch takes a second or two, with no sign, and a second click landed (VM-12,
+        the Arbiter: «не давати нажати ще раз до зміни теми»; the language the same, VM-14). One
+        made during the switch is dropped, not queued: the OS holds it until the event loop runs,
+        so the loop runs here, while the control is still off and the switch still under way.
         """
-        if self.__dict__.get("_theme_switching"):
+        if self.__dict__.get("_switching"):
             return
-        self._theme_switching = True
-        self._theme_btn.setEnabled(False)
+        self._switching = True
+        control.setEnabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            self._apply_theme("light" if self._mode == "dark" else "dark")
+            change()
         finally:
             QApplication.processEvents()
             QApplication.restoreOverrideCursor()
-            self._theme_btn.setEnabled(True)
-            self._theme_switching = False
+            control.setEnabled(True)
+            self._switching = False
+
+    def _toggle_theme(self) -> None:
+        """◐: light ↔ dark, through `_switch` (VM-12)."""
+        self._switch(self._theme_btn,
+                     lambda: self._apply_theme("light" if self._mode == "dark" else "dark"))
 
     def _set_zoom(self, zoom: float) -> None:
         self._zoom = round(min(_ZOOM_MAX, max(_ZOOM_MIN, zoom)), 2)
@@ -6093,6 +6099,20 @@ class MainWindow(QMainWindow):
         return box.exec()
 
     def _on_language_selected(self, lang: str) -> None:
+        """A language picked in the header's select or the menu, through `_switch` as the theme is
+        (VM-14: the re-translation takes a while on Windows too). Afterwards the select names the
+        language the window is in: a pick dropped mid-switch had moved it, and the menu's never
+        did."""
+        try:
+            self._switch(self._lang_combo, lambda: self._change_language(lang))
+        finally:
+            index = self._lang_combo.findData(i18n.current_language())
+            if index >= 0 and index != self._lang_combo.currentIndex():
+                blocked = self._lang_combo.blockSignals(True)
+                self._lang_combo.setCurrentIndex(index)
+                self._lang_combo.blockSignals(blocked)
+
+    def _change_language(self, lang: str) -> None:
         width = self.frameGeometry().width()
         i18n.set_language(lang)
         self._settings.setValue(_LANG_KEY, lang)
