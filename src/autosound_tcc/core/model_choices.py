@@ -485,6 +485,30 @@ def refresh_cli_catalogue(*, force: bool = False, now=None,
     return dict(_CLI_CACHE)
 
 
+#: What agy needs from the method's machine file to sign in through Google Cloud's ADC (tcc#135,
+#: hub #235): the method's one carrier is `AGY_ADC_AUTH=true` in critic-env, which every run of the
+#: method reads (`setup-critic-channel.md`). TCC's own `agy models` runs agy directly, and a TCC
+#: started from the Dock or Finder never read the `~/.zshrc` line, so these travel from the file.
+_AGY_SIGN_IN_LINES = ("AGY_ADC_AUTH", "GOOGLE_CLOUD_QUOTA_PROJECT", "GOOGLE_APPLICATION_CREDENTIALS")
+
+
+def _agy_env() -> Optional[dict]:
+    """TCC's environment plus agy's sign-in lines from critic-env; None (inherit) when it has none.
+
+    Only those lines: a reviewer key or a pinned model in the same file is the method's to read,
+    not agy's. The file wins over the environment, as the method writes it over the environment.
+    """
+    from autosound_tcc.core import critic_env
+
+    carried = {key: value for key, value in critic_env.values().items()
+               if key in _AGY_SIGN_IN_LINES and value}
+    if not carried:
+        return None
+    env = dict(os.environ)
+    env.update(carried)
+    return env
+
+
 def _fetch_agy_choices() -> list[Choice]:
     """Asked rather than hardcoded, because `agy models` prints its own list and a stale hardcoded
     selector is a model that fails at call time instead of being absent at pick time. An agy model
@@ -504,7 +528,7 @@ def _fetch_agy_choices() -> list[Choice]:
             # Bounded with the tree killed (`child.run_bounded`, review of tcc#132).
             proc = child.run_bounded(
                 ["agy", "models"], text=True, encoding="utf-8", errors="replace",
-                timeout=CLI_TIMEOUT_S, **child.quiet())
+                timeout=CLI_TIMEOUT_S, env=_agy_env(), **child.quiet())
         except (subprocess.TimeoutExpired, OSError):
             return []
         if proc.returncode == 0 and (proc.stdout or "").strip():

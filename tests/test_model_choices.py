@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -1040,3 +1041,61 @@ def test_agy_and_omp_that_never_answer_are_killed_and_say_nothing(monkeypatch):
     assert agy.timeouts == [mc.CLI_TIMEOUT_S, child.REAP_TIMEOUT_S]
     assert omp.timeouts == [mc.CATALOGUE_TIMEOUT_S, child.REAP_TIMEOUT_S]
     assert [kill[-1] for kill in spawns.taskkills] == [str(agy.pid), str(omp.pid)]
+
+
+def _write_critic_env(text: str) -> None:
+    from autosound_tcc.core import critic_env
+
+    path = critic_env.machine_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    critic_env.forget()
+
+
+def test_tccs_own_agy_models_carries_the_adc_line_from_critic_env(monkeypatch):
+    """hub #235, tcc#135: the method's one carrier for agy's Google Cloud sign-in is
+    `AGY_ADC_AUTH=true` in the machine's critic-env. Every run of the method reads it; TCC's own
+    `agy models` runs agy directly, and a TCC started from the Dock never read `~/.zshrc` — so
+    without this the picker's agy list asked for a browser sign-in on an ADC machine."""
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.delenv("AGY_ADC_AUTH", raising=False)
+    monkeypatch.delenv("GOOGLE_CLOUD_QUOTA_PROJECT", raising=False)
+    _write_critic_env("AUTOSOUND_CRITIC_MODEL=x\nAGY_ADC_AUTH=true\nGOOGLE_CLOUD_QUOTA_PROJECT=q-1\n")
+    envs: list = []
+
+    class _Proc:
+        returncode, stdout, stderr = 0, "gemini-3.1-pro-high\tGemini 3.1 Pro (High)", ""
+
+    def fake_run(argv, **kwargs):
+        envs.append(kwargs.get("env"))
+        return _Proc()
+
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(mc.child, "run_bounded", fake_run)
+
+    mc._fetch_agy_choices()
+
+    env = envs[0]
+    assert env is not None and env.get("AGY_ADC_AUTH") == "true"
+    assert env.get("GOOGLE_CLOUD_QUOTA_PROJECT") == "q-1"
+    assert "AUTOSOUND_CRITIC_MODEL" not in env, "only agy's own sign-in lines travel"
+    assert env.get("PATH") == os.environ.get("PATH"), "the rest of the environment is TCC's own"
+
+
+def test_tccs_own_agy_models_inherits_as_before_without_an_adc_line(monkeypatch):
+    from autosound_tcc.core import model_choices as mc
+
+    _write_critic_env("AUTOSOUND_CRITIC_MODEL=x\n")
+    envs: list = []
+
+    class _Proc:
+        returncode, stdout, stderr = 0, "gemini-3.1-pro-high\tGemini 3.1 Pro (High)", ""
+
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(mc.child, "run_bounded",
+                        lambda argv, **kwargs: envs.append(kwargs.get("env")) or _Proc())
+
+    mc._fetch_agy_choices()
+
+    assert envs == [None]
