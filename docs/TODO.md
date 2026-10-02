@@ -2064,9 +2064,9 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 - finding 140 — after «Update all» Claude Code and agy say «already the newest», Re-check takes it back to «unknown» with «Update» live (the Updates tab);
 - finding 141 — the method's update row «The method 3.0.66 — up to date» with a grey «Update the method» reads oddly to the Arbiter (what is odd: asked);
 - finding 142 — a new reviewer pick shows the old model's red line for about a minute; a spinner at the «!» while the check runs (the Arbiter);
+- tcc#94 reshaped by the Arbiter (2026-10-02): no addressing a capture by uuid («не стабільно»); when two captures share a title, warn the user, and nothing more;
+- hub #233 TCC-045 and hub #236 TCC-046: the skill says both are built on its wave branch (2026-10-02 evening); when its tag lands, TCC pins it, checks its own `w_L` ↔ `w-L` binding against the method's, and sets the route variable for the sessions it starts;
 - hub #235 HUB-072 (from hub, to:tcc) — agy through ADC (the Google Cloud free trial): a TCC started from the Dock or Finder never reads `~/.zshrc`, so its `agy models` and every reviewer run go without `AGY_ADC_AUTH`; and the recommended Critic is a model ADC does not offer (the skill's half is hub HUB-071; the skill is changing agy's login in its W-6);
-- the method's own route setting (hub #236, TCC-046): once it lands, TCC sets it for the sessions it starts, so a
-  session's own run of the method stops reading the stored key.
 
 ### F-091 — Left by W-5's reviews for a later wave
 
