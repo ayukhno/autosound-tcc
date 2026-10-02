@@ -1582,3 +1582,43 @@ def test_nothing_in_the_head_row_overlaps_and_the_round_select_is_never_cut(monk
         window.hide()
         if app.font() != was:
             app.setFont(was)
+
+
+def test_the_import_window_is_handed_a_check_through_the_panel_s_rew(tmp_path, monkeypatch):
+    """tcc#21: the window checks the ticked sweeps with what the panel hands it — REW's answer
+    through the bridge the panel reads with, and the method's own verdict (faked here, as REW is)."""
+    from autosound_tcc.core import config, vendor_loader
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    answer = {"4": {"title": "m-L_2 (sw)", "uuid": "u", "date": ""}}
+    asked = []
+
+    class _Verify:
+        @staticmethod
+        def verdict(name, measurements=None, **_kwargs):
+            asked.append((name, measurements))
+            return {"name": name, "exists": True, "applicable": True, "valid": False,
+                    "issues": ["no clear arrival"], "stats": {"uuid": "u"}}
+
+    monkeypatch.setattr(vendor_loader, "load_verify", lambda: _Verify())
+    seen = {}
+
+    class _Dialog:
+        def __init__(self, measurements, **kwargs):
+            seen.update(kwargs)
+
+        def exec(self):
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(mp, "CaptureImportDialog", _Dialog)
+    panel = MeasurementPanel()
+    panel._bridge = _FakeBridge(answer)
+    panel.set_sessions(MEAS_SESSIONS)
+
+    panel._on_import_offer(answer)
+    found = seen["check"](capture_import.candidates(answer, tmp_path))
+
+    assert asked == [("m-L_2 (sw)", {"4": answer["4"]})]
+    assert capture_import.unusable(found["u"])

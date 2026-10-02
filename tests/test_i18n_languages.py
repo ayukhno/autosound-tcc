@@ -119,7 +119,9 @@ def test_every_shipped_language_has_a_name_a_model_understands():
 #: does not — on Windows it clips, and the person is left choosing between "on't ask at all (aut"
 #: and "nly what the skill does not ow" (user's screenshot, 2026-09-09). The limit is generous:
 #: German is the longest of the four and "Außerhalb des Projekts" is 22.
-_BUTTON_KEYS = ("gateAskNever", "gateAskForeign", "gateAskWrites")
+_BUTTON_KEYS = ("gateAskNever", "gateAskForeign", "gateAskWrites",
+                # The two answers beside an unusable sweep in the import window (tcc#21).
+                "capCheckRetake", "capCheckAsIs")
 _BUTTON_MAX = 26
 
 

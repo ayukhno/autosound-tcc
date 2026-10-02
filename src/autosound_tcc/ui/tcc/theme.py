@@ -1770,6 +1770,15 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border-color: {t.info};
         color: {t.info};
     }}
+    /* «Re-take» / «Take it as it is» beside an unusable sweep in the import window (tcc#21): a
+       pair of `reason-btn`s, the answer in force FILLED, so it reads without a hover — the
+       `.guides-btn` rule, two states told apart by the fill. The ground on `info` reads at 7.3:1
+       dark and 5.8:1 light; `info` on a tint of itself did not (the info-blue test). */
+    QPushButton[class~="cap-answer"]:checked {{
+        background: {t.info};
+        border-color: {t.info};
+        color: {t.ground};
+    }}
     /* .meas-icon-btn — compact icon-only buttons for the measurement panel's Read/Assign-names
     actions (full-text buttons ate too much of the header row next to the version banner, user
     request 2026-07-27). Full label lives in the tooltip, not on the button face. */

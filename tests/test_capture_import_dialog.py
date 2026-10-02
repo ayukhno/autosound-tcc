@@ -535,3 +535,273 @@ def test_select_all_and_clear_at_the_foot_act_on_what_is_shown(tmp_path):
     assert all(_tick_state(dialog, r) for r in range(dialog._table.rowCount()))
     dialog._clear_btn.click()
     assert dialog.ticked_rows() == []
+
+
+# ---- the capture check, while the microphone is still in place (tcc#21) -------------------------
+
+_COL_CHECK = 6
+
+_USABLE = {"exists": True, "applicable": True, "valid": True, "issues": [], "stats": {}}
+
+
+def _unusable(*issues) -> dict:
+    """The method's verdict for a sweep that is there and cannot be used (`verify.verdict`)."""
+    return {"exists": True, "applicable": True, "valid": False, "issues": list(issues),
+            "stats": {}}
+
+
+def _checker(verdicts: dict, gate=None, fail: str = ""):
+    """A stand-in for the check the panel hands over: which rows it was asked about, and the
+    method's answers by uuid. The method itself is faked in `test_capture_import.py`; REW nowhere."""
+    asked: list = []
+
+    def check(rows):
+        asked.extend(row.uuid for row in rows)
+        if gate is not None:
+            gate.wait(10)
+        if fail:
+            raise RuntimeError(fail)
+        return {row.uuid: verdicts[row.uuid] for row in rows if row.uuid in verdicts}
+
+    return check, asked
+
+
+def _settle(dialog) -> None:
+    """Let the check's worker answer and the window take the answer in."""
+    for _ in range(100):
+        _app().processEvents()
+        worker = dialog._check_worker
+        if worker is not None:
+            worker.wait(5000)
+        _app().processEvents()
+        if not dialog.checking():
+            return
+    raise AssertionError("the check never settled")
+
+
+def _row_of(dialog, uuid: str) -> int:
+    return next(r for r in range(dialog._table.rowCount()) if dialog.uuid_at(r) == uuid)
+
+
+def _answer_buttons(dialog, uuid: str) -> dict:
+    from PySide6.QtWidgets import QPushButton
+
+    box = dialog._table.cellWidget(_row_of(dialog, uuid), _COL_CHECK)
+    assert box is not None, "an unusable sweep has its answer in the row"
+    return {button.text(): button for button in box.findChildren(QPushButton)}
+
+
+def test_only_the_ticked_sweeps_are_checked(tmp_path):
+    """Selected only (the Arbiter, 2026-10-02): REW held 90 measurements in the session this was
+    measured against, and a verdict per row is an FR and an impulse pulled for rows nobody chose."""
+    check, asked = _checker({"u3": _USABLE, "u27": _USABLE})
+    dialog = _dialog(_rew(30), tmp_path, expected=["m_3 (sw)", "m_27 (sw)"], check=check)
+
+    _settle(dialog)
+
+    assert sorted(asked) == ["u27", "u3"]
+    assert dialog._table.item(_row_of(dialog, "u3"), _COL_CHECK).text() == "✓"
+
+
+def test_an_rta_row_is_not_put_to_the_check(tmp_path):
+    """An RTA has no verdict to give, and marking it would be a verdict about nothing (TCC-008)."""
+    from autosound_tcc.core import vendor_loader
+
+    if not vendor_loader.is_available():
+        import pytest
+
+        pytest.skip("rew_tool submodule not checked out")
+    answer = _rew(3)
+    answer["2"]["notes"] = "65536-point 1/48 octave RTA using Hann window"
+    check, asked = _checker({})
+    dialog = _dialog(answer, tmp_path, expected=["m_2 (sw)", "m_3 (sw)"], check=check)
+
+    _settle(dialog)
+
+    assert asked == ["u3"]
+
+
+def test_an_unusable_sweep_is_marked_with_the_method_s_reason_on_hover(tmp_path):
+    from PySide6.QtWidgets import QLabel
+
+    check, _asked = _checker({"u2": _USABLE, "u3": _unusable("in-band mean -96.1 dB — silence, "
+                                                             "not a sweep")})
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_2 (sw)", "m_3 (sw)"], check=check)
+
+    _settle(dialog)
+
+    box = dialog._table.cellWidget(_row_of(dialog, "u3"), _COL_CHECK)
+    assert box is not None
+    assert "in-band mean -96.1 dB" in box.hover_tip.text()
+    marks = [label for label in box.findChildren(QLabel) if "tl-bad" in str(label.property("class"))]
+    assert marks, "the card's own red dot for «taken, unusable»"
+    assert dialog._table.cellWidget(_row_of(dialog, "u2"), _COL_CHECK) is None
+
+
+def test_an_unusable_sweep_is_left_for_a_retake_unless_taken_as_it_is(tmp_path):
+    """The Arbiter, 2026-10-02: TCC recommends a re-take — the capture is not taken — or the tuner
+    takes it as it is, and it is taken like any other. Apply is never refused for it."""
+    check, _asked = _checker({"u2": _USABLE, "u3": _unusable("flat to 0.4 dB across the band")})
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_2 (sw)", "m_3 (sw)"], check=check)
+    _settle(dialog)
+    retake, as_is = i18n.t("capCheckRetake"), i18n.t("capCheckAsIs")
+
+    assert [row.uuid for row in dialog.taken()] == ["u2"], "the recommendation: not taken"
+    assert _answer_buttons(dialog, "u3")[retake].isChecked()
+    assert i18n.t("capCheckRetakeList").format(names="m_3 (sw)") in dialog._note.text()
+
+    _answer_buttons(dialog, "u3")[as_is].click()
+    _app().processEvents()
+
+    assert [(row.uuid, row.as_is) for row in dialog.taken()] == [("u2", False), ("u3", True)]
+    assert _answer_buttons(dialog, "u3")[as_is].isChecked()
+    assert "m_3 (sw)" not in dialog._note.text()
+
+    _answer_buttons(dialog, "u3")[retake].click()
+    _app().processEvents()
+
+    assert [row.uuid for row in dialog.taken()] == ["u2"]
+
+
+def test_a_tick_on_a_red_row_is_taking_it_as_it_is(tmp_path):
+    """The tick and the answer are one decision: a tick by hand on a row the check marked is the
+    tuner taking it knowingly, and Select all does not answer red rows for them."""
+    check, _asked = _checker({"u3": _unusable("no clear arrival")})
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _settle(dialog)
+
+    dialog._select_all_btn.click()
+    _settle(dialog)
+    assert "u3" not in {row.uuid for row in dialog.taken()}
+
+    dialog._table.item(_row_of(dialog, "u3"), 0).setCheckState(Qt.CheckState.Checked)
+    _app().processEvents()
+
+    assert ("u3", True) in [(row.uuid, row.as_is) for row in dialog.taken()]
+    assert _answer_buttons(dialog, "u3")[i18n.t("capCheckAsIs")].isChecked()
+
+
+def test_a_capture_taken_as_it_is_is_not_asked_about_again_and_its_retake_is(tmp_path):
+    """Remembered by the capture's uuid (SCR-040): not asked again — and a re-take under the same
+    title is another capture, checked afresh."""
+    from dataclasses import replace
+
+    first = capture_import.candidates(_rew(4), tmp_path)
+    capture_import.record_imported([replace(first[3], as_is=True)], project_dir=tmp_path)
+    answer = _rew(4)
+    answer["5"] = {"title": "m_4 (sw)", "uuid": "u5", "date": "2026-Aug-25 20:05:50"}
+    check, asked = _checker({"u5": _USABLE})
+    dialog = _dialog(answer, tmp_path, check=check)
+    dialog._only_new.setChecked(False)
+
+    for uuid in ("u4", "u5"):
+        dialog._table.item(_row_of(dialog, uuid), 0).setCheckState(Qt.CheckState.Checked)
+    _settle(dialog)
+
+    assert asked == ["u5"]
+    assert dialog._table.item(_row_of(dialog, "u4"), _COL_CHECK).text() == i18n.t(
+        "capCheckAsIsDone")
+    assert [(row.uuid, row.as_is) for row in dialog.taken()] == [("u4", True), ("u5", False)]
+
+
+def test_apply_waits_for_the_check_and_goes_when_all_is_well(tmp_path):
+    """Opened, Apply — the common way through — must not walk past the check that is the point."""
+    import threading
+
+    gate = threading.Event()
+    check, _asked = _checker({"u3": _USABLE}, gate=gate)
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _app().processEvents()
+
+    dialog._on_apply()
+    assert dialog.result() != int(QDialog.DialogCode.Accepted)
+    assert i18n.t("capCheckWaiting") in dialog._note.text()
+
+    gate.set()
+    _settle(dialog)
+
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+
+
+def test_apply_that_waited_stays_open_for_an_unusable_sweep(tmp_path):
+    import threading
+
+    gate = threading.Event()
+    check, _asked = _checker({"u2": _USABLE, "u3": _unusable("no clear arrival")}, gate=gate)
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_2 (sw)", "m_3 (sw)"], check=check)
+    _app().processEvents()
+
+    dialog._on_apply()
+    gate.set()
+    _settle(dialog)
+
+    assert dialog.result() != int(QDialog.DialogCode.Accepted), "the tuner sees it once"
+    assert i18n.t("capCheckRetakeList").format(names="m_3 (sw)") in dialog._note.text()
+
+    dialog._on_apply()
+
+    assert dialog.result() == int(QDialog.DialogCode.Accepted), "and is never held"
+    assert [row.uuid for row in dialog.taken()] == ["u2"]
+
+
+def test_apply_pressed_again_does_not_wait(tmp_path):
+    import threading
+
+    gate = threading.Event()
+    check, _asked = _checker({"u3": _USABLE}, gate=gate)
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _app().processEvents()
+
+    dialog._on_apply()
+    dialog._on_apply()
+
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+    gate.set()
+    dialog._check_worker.wait(5000)
+
+
+def test_a_check_that_cannot_run_is_said_and_holds_nothing(tmp_path):
+    check, _asked = _checker({}, fail="URLError: <urlopen error [Errno 61] Connection refused>")
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _settle(dialog)
+
+    assert i18n.t("capCheckFailed").format(
+        error="RuntimeError: URLError: <urlopen error [Errno 61] Connection refused>") \
+        in dialog._note.text()
+
+    dialog._on_apply()
+
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+    assert [row.uuid for row in dialog.taken()] == ["u3"]
+
+
+def test_a_sweep_left_for_a_retake_stays_on_screen(tmp_path):
+    """Ticked by name far up the list, it was on screen only because it was ticked; the check
+    unticks it, and the next redraw must not take it — and its «Take it as it is» — out of view."""
+    check, _asked = _checker({"u3": _unusable("no clear arrival")})
+    dialog = _dialog(_rew(30), tmp_path, expected=["m_3 (sw)"], check=check)
+    _settle(dialog)
+
+    dialog._only_new.setChecked(False)
+    dialog._only_new.setChecked(True)
+
+    assert "m_3 (sw)" in _titles(dialog)
+
+
+def test_the_pair_of_answers_is_drawn_whole_in_its_cell(tmp_path):
+    """Themed, «Взяти як є» came out cut: the column was sized before the sheet styled the buttons,
+    and the cell's widget was put inside the item's padding. Measured against the widget's own
+    size hint, so the fonts a machine has do not decide it. The sheet is the dialog's own here —
+    the application's is every other test's."""
+    from autosound_tcc.ui.tcc import theme
+
+    check, _asked = _checker({"u3": _unusable("no clear arrival")})
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    dialog.setStyleSheet(theme.build_qss(theme.get_theme("dark")))
+    dialog.show()
+    _settle(dialog)
+    _app().processEvents()
+
+    box = dialog._table.cellWidget(_row_of(dialog, "u3"), _COL_CHECK)
+    assert box.width() >= box.sizeHint().width(), (box.width(), box.sizeHint().width())
+    dialog.hide()

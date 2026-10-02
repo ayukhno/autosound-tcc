@@ -17,14 +17,22 @@ is in the car.
 title already answers to one of the names the round is waiting for. It used to be the newest N
 rows, which is a guess about position — and on the user's own list the measurements the round
 wanted were not the newest ones. A name two rows answer to ticks neither of them.
+
+**The ticked sweeps are checked here, while the microphone is still in place** (tcc#21). Only the
+method's own capture verdict (SCR-013), only for what is ticked, on a worker — and the check is
+the panel's, handed in, so this file still makes no HTTP call. An unusable sweep gets a red mark
+and two answers: «Re-take» (not taken, the recommendation) or «Take it as it is». Apply is never
+refused for it (the Arbiter, 2026-10-02).
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+from html import escape
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -37,10 +45,11 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from autosound_tcc.core import capture_import
-from autosound_tcc.ui.tcc import i18n, sizing
+from autosound_tcc.ui.tcc import i18n, qt_shutdown, sizing
 from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog
 from autosound_tcc.ui.tcc.protective_dialog import ProtectiveLegsDialog
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -51,8 +60,36 @@ _UUID = Qt.ItemDataRole.UserRole
 
 #: The table's columns, by name rather than by number: the REW number was added between the tick
 #: and the title (user, 2026-09-06), and every `item(row, 3)` in here would otherwise have had to
-#: be re-counted by hand.
-_COL_TAKE, _COL_NUM, _COL_TITLE, _COL_WHEN, _COL_NAME, _COL_PROT = range(6)
+#: be re-counted by hand. The check's column (tcc#21) is added LAST so every other keeps its number,
+#: and is shown beside the title it judges (`moveSection` in `__init__`).
+_COL_TAKE, _COL_NUM, _COL_TITLE, _COL_WHEN, _COL_NAME, _COL_PROT, _COL_CHECK = range(7)
+
+
+class _SweepCheckWorker(QThread):
+    """The capture verdict for the rows handed in, off the GUI thread (tcc#21).
+
+    `verify.verdict` pulls a frequency response and an impulse per sweep over HTTP, hundreds of
+    milliseconds apiece — four to eight ticked is a second or two, fine on a thread and not on the
+    one that repaints. `check` is whatever the panel handed the dialog (`check_sweeps` over its
+    REW): this file knows nothing about REW.
+    """
+
+    done = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, check: Callable[[list], dict], rows: list) -> None:
+        super().__init__()
+        self._check = check
+        self._rows = list(rows)
+        # Say who you were if you are destroyed before you finished (finding 35): Qt's own
+        # fatal line names no class, and this app has eight kinds of worker.
+        qt_shutdown.watch(self)
+
+    def run(self) -> None:
+        try:
+            self.done.emit(dict(self._check(self._rows) or {}))
+        except Exception as exc:  # noqa: BLE001 — REW gone, a method that failed: said, not raised
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
 
 
 def legs_summary(legs) -> str:
@@ -105,6 +142,18 @@ class _NameDelegate(QStyledItemDelegate):
             model.setData(index, text)
 
 
+class _WholeCellDelegate(QStyledItemDelegate):
+    """The check's answer gets its whole cell (tcc#21).
+
+    A styled delegate puts a cell's widget inside the item's text rectangle — the cell minus the
+    sheet's `::item` padding — while the column is sized to the widget itself, so the pair of
+    answers came out cut by exactly that padding, at «Взяти як є».
+    """
+
+    def updateEditorGeometry(self, editor, option, index):  # noqa: N802 — Qt's name
+        editor.setGeometry(option.rect)
+
+
 class CaptureImportDialog(QDialog):
     """The list, the two filters over it, and Apply."""
 
@@ -120,6 +169,7 @@ class CaptureImportDialog(QDialog):
         project_dir: Optional[Path] = None,
         parent=None,
         save_order=None,
+        check: Optional[Callable[[list], dict]] = None,
     ) -> None:
         super().__init__(parent)
         self.setModal(True)
@@ -153,6 +203,22 @@ class CaptureImportDialog(QDialog):
         self._plan_note = ""
         #: Channels whose two rows described two different chains. Filled by `protective()`.
         self.protective_conflicts: list[str] = []
+        #: The capture check (tcc#21): `check(rows) -> {uuid: the method's verdict}`, run on a
+        #: worker over the ticked sweeps. None — a test, or no panel to reach REW — checks nothing.
+        self._check = check
+        #: Every verdict this window has received, by uuid. A row is checked once per window; an
+        #: empty verdict is "asked, nothing to say" (gone from REW, or the check could not run).
+        self._verdicts: dict[str, dict] = {}
+        #: The uuids the running worker is asking about; empty when none runs.
+        self._checking: set[str] = set()
+        self._check_worker: Optional[_SweepCheckWorker] = None
+        #: Why the check could not run, said under the table; the import goes on regardless.
+        self._check_error = ""
+        #: Apply was pressed while sweeps were still being checked: it goes as soon as they are,
+        #: unless one turns out unusable — then the window stays for the tuner to see it once.
+        self._apply_waiting = False
+        self._to_retake_at_apply: set[str] = set()
+        self._closed = False
 
         self._all = capture_import.candidates(self._measurements, project_dir)
         #: Why a typed name is not in the naming grammar, in the method's words (hub #153 E).
@@ -206,16 +272,18 @@ class CaptureImportDialog(QDialog):
         head.setWordWrap(True)
         layout.addWidget(head)
 
-        self._table = QTableWidget(0, 6)
+        self._table = QTableWidget(0, 7)
         self._table.setProperty("class", "ptable")
         self._table.setHorizontalHeaderLabels(
             [i18n.t("capImportColTake"), i18n.t("capImportColNum"), i18n.t("capImportColTitle"),
-             i18n.t("capImportColWhen"), i18n.t("capImportColName"), i18n.t("capImportColProt")])
+             i18n.t("capImportColWhen"), i18n.t("capImportColName"), i18n.t("capImportColProt"),
+             i18n.t("capImportColCheck")])
         # Only the name column is typed into; `_render` gives exactly that column the flag.
         self._table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked
                                     | QTableWidget.EditTrigger.EditKeyPressed
                                     | QTableWidget.EditTrigger.AnyKeyPressed)
         self._table.setItemDelegateForColumn(_COL_NAME, _NameDelegate(self))
+        self._table.setItemDelegateForColumn(_COL_CHECK, _WholeCellDelegate(self))
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
@@ -233,6 +301,10 @@ class CaptureImportDialog(QDialog):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
             header.resizeSection(column, width)
         header.setSectionResizeMode(_COL_PROT, QHeaderView.ResizeMode.Stretch)
+        # The check's answer sits right after the title it is about: "this one, re-take it" is
+        # read off one place. Shown there, numbered last — `_COL_CHECK` says why.
+        header.setSectionResizeMode(_COL_CHECK, QHeaderView.ResizeMode.ResizeToContents)
+        header.moveSection(header.visualIndex(_COL_CHECK), header.visualIndex(_COL_WHEN))
         apply_caps(header, spacing_px=0.7)
         self._table.itemChanged.connect(self._on_item_changed)
         self._table.cellClicked.connect(self._on_cell_clicked)
@@ -302,10 +374,12 @@ class CaptureImportDialog(QDialog):
         which seven are already in.
 
         Whatever was ticked by name comes along wherever it sits (`keep`): a row this dialog has
-        decided for the person has to be a row the person can see.
+        decided for the person has to be a row the person can see. So does a sweep the check left
+        out for a re-take (tcc#21): unticked by the check, it would otherwise drop out of the
+        window it was only in because it was ticked, and take its «Take it as it is» with it.
         """
         rows = self._all if not self._only_new.isChecked() else capture_import.unprocessed(self._all)
-        keep = (self._ticked | self._ambiguous) & {row.uuid for row in rows}
+        keep = (self._ticked | self._ambiguous | self._to_retake()) & {row.uuid for row in rows}
         return capture_import.window(rows, self._waiting, self._pages, keep=keep)
 
     def ticked_rows(self) -> list[capture_import.Candidate]:
@@ -413,9 +487,191 @@ class CaptureImportDialog(QDialog):
             prot.setToolTip(i18n.t("capImportProtTip") if row.identified
                             else i18n.t("capImportNoUuid"))
             self._table.setItem(index, _COL_PROT, prot)
+            self._render_check(index, row)
         self._table.blockSignals(False)
+        self._fit_check_column()
         self._render_note(len(rows))
         self._scroll_to_pick(rows)
+        self._schedule_check()
+
+    # ---- the capture check (tcc#21) ----------------------------------------------------------
+
+    def _render_check(self, index: int, row: capture_import.Candidate) -> None:
+        """What the check said about one row: nothing yet, checking, fine, or unusable."""
+        self._table.removeCellWidget(index, _COL_CHECK)
+        cell = QTableWidgetItem("")
+        cell.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        verdict = self._verdicts.get(row.uuid)
+        if row.as_is:
+            # Answered on an earlier import and remembered by its uuid: not asked again.
+            cell.setText(i18n.t("capCheckAsIsDone"))
+            cell.setToolTip(i18n.t("capCheckAsIsTip"))
+        elif row.uuid in self._checking:
+            cell.setText(i18n.t("capCheckRunning"))
+        elif capture_import.unusable(verdict):
+            self._table.setItem(index, _COL_CHECK, cell)
+            self._table.setCellWidget(index, _COL_CHECK, self._answer(row.uuid, verdict))
+            return
+        elif verdict and verdict.get("valid"):
+            cell.setText("✓")
+            cell.setToolTip(i18n.t("capCheckOkTip"))
+        self._table.setItem(index, _COL_CHECK, cell)
+
+    def _answer(self, uuid: str, verdict: dict) -> QWidget:
+        """The red mark, the method's reasons on its hover, and the two answers beside it.
+
+        The pair is the row's tick seen from the check's side: «Re-take» is unticked, «Take it as it
+        is» is ticked. One decision in two places, so neither can say something the other does not.
+        """
+        box = QWidget()
+        line = QHBoxLayout(box)
+        line.setContentsMargins(4, 0, 4, 0)
+        line.setSpacing(6)
+        # The card's own dot for «taken, unusable» (`measurement_panel.TrafficLight("bad")`), by
+        # its class: the panel imports this dialog, so the widget cannot come the other way.
+        mark = QLabel()
+        mark.setProperty("class", "tl tl-bad")
+        mark.setFixedSize(9, 9)
+        line.addWidget(mark)
+        taken = uuid in self._ticked
+        for key, take in (("capCheckRetake", False), ("capCheckAsIs", True)):
+            button = QPushButton(i18n.t(key))
+            button.setProperty("class", "reason-btn cap-answer")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setCheckable(True)
+            button.setChecked(taken == take)
+            sizing.fit_to_text(button)
+            attach_tip(button, i18n.t(f"{key}Tip"))
+            button.clicked.connect(lambda _on=False, u=uuid, t=take: self._choose(u, t))
+            line.addWidget(button)
+        # The method's own words, not a paraphrase: "no clear arrival" and "covers 200-2000 Hz"
+        # lead to different things done at the car (`main_window._on_capture_check_done`).
+        reasons = "<br>".join(escape(str(issue)) for issue in verdict.get("issues") or [])
+        said = f"{escape(i18n.t('capCheckBadTip'))}<br>{reasons}"
+        attach_tip(box, said)
+        attach_tip(mark, said)
+        return box
+
+    def _choose(self, uuid: str, take: bool) -> None:
+        """«Re-take» or «Take it as it is» for one unusable sweep."""
+        if take:
+            self._ticked.add(uuid)
+        else:
+            self._ticked.discard(uuid)
+        # Deferred: this runs inside the button's own click, and the refresh replaces the button.
+        QTimer.singleShot(0, self, self._refresh_checks)
+
+    def _refresh_checks(self) -> None:
+        """Ticks and check cells redrawn in place. Not `_render`: that rebuilds the name editors,
+        and a verdict arriving while somebody types a name must not take the typing with it."""
+        by_uuid = {row.uuid: row for row in self._all}
+        self._table.blockSignals(True)
+        for index in range(self._table.rowCount()):
+            row = by_uuid.get(self.uuid_at(index))
+            if row is None:
+                continue
+            take = self._table.item(index, _COL_TAKE)
+            if take is not None and row.identified:
+                take.setCheckState(Qt.CheckState.Checked if row.uuid in self._ticked
+                                   else Qt.CheckState.Unchecked)
+            self._render_check(index, row)
+        self._table.blockSignals(False)
+        self._fit_check_column()
+        self._render_note(self._table.rowCount())
+
+    def _fit_check_column(self) -> None:
+        """The check's column to the answer it now holds. A widget put in a cell after the header
+        last sized its sections is not counted until it is asked again, and the pair of answers came
+        out cut at «Взяти як є»."""
+        self._table.horizontalHeader().resizeSections()
+
+    def _unchecked(self) -> list[capture_import.Candidate]:
+        """Ticked sweeps the check has not answered for yet — the SELECTED ones only (the Arbiter,
+        2026-10-02): a verdict per listed row is an FR and an impulse for rows nobody chose."""
+        if self._check is None:
+            return []
+        return [row for row in capture_import.to_check(self.ticked_rows())
+                if row.uuid not in self._verdicts]
+
+    def checking(self) -> bool:
+        """Whether a ticked sweep is still waiting for its verdict."""
+        return bool(self._checking) or bool(self._unchecked())
+
+    def _to_retake(self) -> set[str]:
+        """Unusable sweeps left out — the ones to re-take."""
+        return {row.uuid for row in self._all if row.uuid not in self._ticked
+                and capture_import.unusable(self._verdicts.get(row.uuid))}
+
+    def _schedule_check(self) -> None:
+        if self._check is not None:
+            # Deferred, so a burst of ticks is one batch and the window is on screen first.
+            # Bound to this dialog, so a timer outliving a closed window does nothing.
+            QTimer.singleShot(0, self, self._check_selected)
+
+    def _check_selected(self) -> None:
+        """Start the worker on the ticked sweeps that have no verdict yet; one worker at a time,
+        and whatever was ticked while it ran is taken up when it answers."""
+        if self._closed or self._checking:
+            return
+        rows = self._unchecked()
+        if not rows:
+            return
+        self._checking = {row.uuid for row in rows}
+        worker = _SweepCheckWorker(self._check, rows)
+        worker.done.connect(self._on_checked)
+        worker.failed.connect(self._on_check_failed)
+        self._check_worker = worker
+        worker.start()
+        self._refresh_checks()
+
+    def _on_checked(self, verdicts: dict) -> None:
+        asked, self._checking = self._checking, set()
+        for uuid in asked:
+            verdict = dict(verdicts.get(uuid) or {})
+            self._verdicts[uuid] = verdict
+            if capture_import.unusable(verdict):
+                # The recommendation, applied where it can be seen: a re-take, so not taken —
+                # one click on «Take it as it is» takes it (the Arbiter, 2026-10-02).
+                self._ticked.discard(uuid)
+        self._refresh_checks()
+        self._check_selected()
+        self._resolve_wait()
+
+    def _on_check_failed(self, error: str) -> None:
+        asked, self._checking = self._checking, set()
+        for uuid in asked:
+            self._verdicts[uuid] = {}  # not checked: no mark, and not asked again in this window
+        self._check_error = error
+        self._refresh_checks()
+        self._check_selected()
+        self._resolve_wait()
+
+    def _resolve_wait(self) -> None:
+        """An Apply that waited for the check goes now — unless the check left a new sweep out."""
+        if not self._apply_waiting or self.checking():
+            return
+        self._apply_waiting = False
+        if self._to_retake() - self._to_retake_at_apply:
+            # The window stays, once: the mark and the line under the table say what to re-take,
+            # and the next Apply goes whatever is chosen.
+            self._render_note(self._table.rowCount())
+            return
+        self._on_apply()
+
+    def done(self, result: int) -> None:  # noqa: N802 — Qt's name; Apply and Cancel both end here
+        """A check still running is let go rather than waited on: it only reads, and the Apply
+        that closed the window must not freeze it. `qt_shutdown` holds the thread until it ends."""
+        self._closed = True
+        self._apply_waiting = False
+        worker = self._check_worker
+        if worker is not None:
+            for signal in (worker.done, worker.failed):
+                try:
+                    signal.disconnect()
+                except (RuntimeError, TypeError):  # nothing connected any more
+                    pass
+            qt_shutdown.stop_or_detach(worker, 0)
+        super().done(result)
 
     def _scroll_to_pick(self, rows: list) -> None:
         """Put the first pre-ticked row in view, once, when the dialog opens.
@@ -436,6 +692,15 @@ class CaptureImportDialog(QDialog):
 
     def _render_note(self, shown: int) -> None:
         lines = [self._plan_note] if self._plan_note else []
+        to_retake = self._to_retake()
+        retakes = sorted({row.title for row in self._all if row.uuid in to_retake})
+        if retakes:
+            # What to re-take, by name, while the microphone is still in place (tcc#21's title).
+            lines.append(i18n.t("capCheckRetakeList").format(names=", ".join(retakes)))
+        if self._apply_waiting:
+            lines.append(i18n.t("capCheckWaiting"))
+        if self._check_error:
+            lines.append(i18n.t("capCheckFailed").format(error=self._check_error))
         if self._dup_titles:
             # Said, never resolved: which of the two is meant is the tuner's to settle in REW (the
             # Arbiter, 2026-10-02 — a pair is not to be addressed by uuid, tcc#94).
@@ -483,6 +748,10 @@ class CaptureImportDialog(QDialog):
                 self._ticked.add(uuid)
             else:
                 self._ticked.discard(uuid)
+            # On a row the check marked, the tick IS the answer: ticked is «Take it as it is»,
+            # unticked «Re-take» (tcc#21). Deferred, as the editors' refresh below is.
+            QTimer.singleShot(0, self, self._refresh_checks)
+            self._schedule_check()
         elif item.column() == _COL_NAME:
             typed = item.text().strip()
             if typed:
@@ -518,9 +787,11 @@ class CaptureImportDialog(QDialog):
         rows = self.visible_rows()
         start = max(self._table.currentRow(), 0)
         plan = capture_import.plan_renames(rows, names, start)
+        to_retake = self._to_retake()
         for uuid, name in plan.pairs:
             self._names[uuid] = name
-            self._ticked.add(uuid)
+            if uuid not in to_retake:  # a red row is answered on its own (tcc#21)
+                self._ticked.add(uuid)
         self._plan_note = "" if plan.lines_up else i18n.t("capImportUneven").format(
             rows=len(plan.unnamed), names=len(plan.leftover))
         self._render()
@@ -531,9 +802,14 @@ class CaptureImportDialog(QDialog):
                 if self._names.get(row.uuid) and self._names[row.uuid] != row.title]
 
     def _tick_all(self, on: bool) -> None:
-        """Tick every row on screen that can be taken, or untick everything."""
+        """Tick every row on screen that can be taken, or untick everything.
+
+        Not the rows the check left out for a re-take: taking one of those is an answer the tuner
+        gives that row by name, not a side effect of «Select all» (tcc#21)."""
         if on:
-            self._ticked |= {row.uuid for row in self.visible_rows() if row.identified}
+            retakes = self._to_retake()
+            self._ticked |= {row.uuid for row in self.visible_rows()
+                             if row.identified and row.uuid not in retakes}
         else:
             self._ticked.clear()
         self._render()
@@ -560,11 +836,24 @@ class CaptureImportDialog(QDialog):
                 channels=", ".join(sorted(set(conflicts))))
             self._render()
             return
+        if self.checking() and not self._apply_waiting:
+            # Opened and applied at once is the common way through, and it must not walk past
+            # the check that is the point of #21. So the first Apply waits for the verdicts and
+            # goes by itself when they are in; a second one goes now. Never refused.
+            self._apply_waiting = True
+            self._to_retake_at_apply = self._to_retake()
+            self._render_note(self._table.rowCount())
+            return
+        self._apply_waiting = False
         self.accept()
 
     def taken(self) -> list[capture_import.Candidate]:
-        """What the panel should write down once whatever renaming there is has happened."""
-        return self.ticked_rows()
+        """What the panel should write down once whatever renaming there is has happened.
+
+        A sweep the check called unusable and the tuner took anyway goes as `as_is`, so the store
+        remembers that answer for that capture (tcc#21, `record_imported`)."""
+        return [replace(row, as_is=True) if capture_import.unusable(self._verdicts.get(row.uuid))
+                else row for row in self.ticked_rows()]
 
     def protective(self) -> dict:
         """`{channel: legs}` for every ticked row that names a chain — the round's own record.

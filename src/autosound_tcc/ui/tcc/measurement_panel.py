@@ -1245,6 +1245,9 @@ class MeasurementPanel(QWidget):
             project_dir=config.project_dir(),
             parent=self,
             save_order=self._store_order,
+            # The ticked sweeps are checked while the microphone is still in place (tcc#21): the
+            # method's verdict, REW's answer through this panel's bridge, on the dialog's worker.
+            check=lambda rows: capture_import.check_sweeps(rows, listing=self._bridge.measurements),
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             self._set_status("measReadCancelled", n=len(measurements))
