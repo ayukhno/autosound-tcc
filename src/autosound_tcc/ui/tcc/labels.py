@@ -144,9 +144,15 @@ class ElidedButton(QPushButton):
     are also in the main menu's help section in full, so nothing becomes unreachable.
     """
 
-    def __init__(self, text: str = "", parent=None, holds: bool = False) -> None:
+    def __init__(self, text: str = "", parent=None, holds: bool = False,
+                 gives_way: bool = False) -> None:
         super().__init__(text, parent)
         self._full = text
+        # `gives_way`: a one-word label whose word is not its floor. «Protection» held its whole
+        # word -- the leading word of a one-word label is all of it -- and was drawn over the
+        # round select beside it in a narrow column (VM-15, the Arbiter: «можна назву на кнопці
+        # скоротити до Prot...»). Elided by its font's metrics, down to «…»; the hover names it.
+        self._gives_way = gives_way
         # `holds`: the floor is the whole label, as a plain button's is. The detail pane's
         # «закрити ✕» holds (tcc#96, fix round 5): a box layout takes a small shortfall equally
         # from every item that can shrink, and the button shrank beside a title with room to
@@ -165,7 +171,10 @@ class ElidedButton(QPushButton):
 
     def _short(self) -> str:
         """The leading glyph -- everything up to the first space, or the whole label if it has no
-        space in it. The emoji is part of the translated string in both of these buttons."""
+        space in it. The emoji is part of the translated string in both of these buttons. One that
+        `gives_way` comes down to «…»."""
+        if self._gives_way:
+            return "…"
         head = self._full.split(" ", 1)[0]
         return head or self._full
 
