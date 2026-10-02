@@ -114,8 +114,12 @@ class ElidedLabel(QLabel):
         # puts the uppercasing and the letter-spacing on the QFont (QSS ignores both), so they are
         # in the metrics rather than applied afterwards by the style.
         metrics = self.fontMetrics()
+        # Less the margins set on it (control mode's corner labels carry their gap to the box as
+        # one, `control_layout._build_corner`): the text is drawn inside them.
+        margins = self.contentsMargins()
         shown = metrics.elidedText(
-            self._full, Qt.TextElideMode.ElideRight, max(self.width(), self._min_width)
+            self._full, Qt.TextElideMode.ElideRight,
+            max(self.width() - margins.left() - margins.right(), self._min_width)
         )
         if shown != super().text():
             super().setText(shown)

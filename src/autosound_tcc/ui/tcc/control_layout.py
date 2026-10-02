@@ -787,7 +787,12 @@ class ControlLayout:
         self._corner = QWidget()
         layout = QHBoxLayout(self._corner)
         layout.setContentsMargins(0, 0, 6, 2)
-        layout.setSpacing(6)
+        # The gaps are the labels' own margins, not the layout's spacing: a hidden item drops its
+        # spacing, so hiding «порівняти з» -- which a refused pick's longer ask does at half a
+        # screen -- took 6 px off the window's floor (tcc#122's rule: a pick never moves it;
+        # caught once VM-16's shorter footer stopped holding the floor). A label's floor is 0, so
+        # its margin is in its ask and never in the corner's minimum, shown or hidden.
+        layout.setSpacing(0)
         # Shown whole or not at all (tcc#96, finding 105: «порівнят», then «пор…» at half a screen
         # after the first two passes): `_fit_corner` hides it, and the «інша конфігурація» tag,
         # whenever the header cannot give it its full width -- judged on every resize of the
@@ -803,6 +808,7 @@ class ControlLayout:
         self._compare_label = ElidedLabel(i18n.t("cmpWith"), min_width=0,
                                           policy=QSizePolicy.Policy.Maximum)
         self._compare_label.setProperty("class", "phead-sub")
+        self._compare_label.setContentsMargins(0, 0, 6, 0)
         layout.addWidget(self._compare_label)
         self.compare_combo = _CompareBox()
         # `cmp-box`: a refused pick's closed box greyed (`paint_compare_box`, tcc#122).
@@ -827,6 +833,7 @@ class ControlLayout:
         self._compare_other = ElidedLabel(i18n.t("cmpOtherTag"), min_width=0,
                                           policy=QSizePolicy.Policy.Maximum)
         self._compare_other.setProperty("class", "cmp-other")
+        self._compare_other.setContentsMargins(6, 0, 0, 0)
         self._compare_other.setVisible(False)
         layout.addWidget(self._compare_other)
         button = self.window._layout_btn
