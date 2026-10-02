@@ -198,13 +198,16 @@ def steps_using(state: Optional[dict], titles) -> tuple[str, ...]:
     wanted = {str(t) for t in titles if str(t).strip()}
     if not wanted or not state:
         return ()
+    one, tags = _reading()
+    if one is not None:
+        wanted |= {str(one(t)) for t in wanted}  # an older round's `w_L_10 (sw)` is `w-L_10 (sw)`
     out = []
     for step in state.get("plan") or []:
         if not isinstance(step, dict):
             continue
-        evidence = " ".join(str(item) for item in (step.get("evidence") or []))
+        evidence = _evidence_text(step.get("evidence"), one)
         # Whole, as the stale check reads it (`_cites`): `w-L_10 (sw)` is in `tw-L_10 (sw)` as text.
-        if any(_cites(title, evidence) for title in wanted):
+        if any(_cites(title, evidence, tags) for title in wanted):
             out.append(str(step.get("id")))
     return tuple(out)
 
@@ -234,6 +237,7 @@ def to_plan(state: dict, stale: Optional[dict] = None) -> tuple[PlanPhase, ...]:
     # Read once, not per step: a rename is the only thing that makes this map interesting, and it
     # is a whole-project fact either way.
     aliases = _channel_aliases() if stale else {}
+    reading = _reading() if stale else (None, None)
     out: list[PlanPhase] = []
     for key in process.PHASES:
         meta = phases_meta.get(key, {})
@@ -246,7 +250,7 @@ def to_plan(state: dict, stale: Optional[dict] = None) -> tuple[PlanPhase, ...]:
                     "en": f"Phase {key} · {title}",
                     "uk": f"Фаза {key} · {_PHASE_TITLES_UK.get(title, title)}",
                 },
-                steps=tuple(_to_step(s, stale or {}, aliases)
+                steps=tuple(_to_step(s, stale or {}, aliases, reading)
                             for s in steps_by_phase.get(key, [])),
             )
         )
@@ -254,13 +258,14 @@ def to_plan(state: dict, stale: Optional[dict] = None) -> tuple[PlanPhase, ...]:
 
 
 def _to_step(step: dict, stale: Optional[dict] = None,
-             aliases: Optional[dict] = None) -> PlanStep:
+             aliases: Optional[dict] = None, reading: tuple = (None, None)) -> PlanStep:
     tag, tag_class = _STATUS_TAGS.get(step.get("status", "todo"), ("", ""))
-    evidence = " ".join(str(item) for item in step.get("evidence") or [])
+    one, tags = reading
+    evidence = _evidence_text(step.get("evidence"), one)
     # Any name the channel answers to (SCR-039) — the evidence is a REW title typed under whichever
     # name was current that day, which need not be the one the `config_change` used.
     if evidence and any(
-        _cites(name, evidence)
+        _cites(name, evidence, tags)
         for code in (stale or {})
         for name in (aliases or {}).get(code, (code,))
     ):
@@ -388,6 +393,7 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
     proc = process.Process(str(process_dir(project_dir)))
     parse = _impact_parser()
     aliases = _channel_aliases(project_dir)
+    one, tags = _reading()
 
     stale: dict[str, dict] = {}
     for event in proc.events():  # oldest first
@@ -402,10 +408,10 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
         elif kind == process.EV_STEP_DONE:
             # Evidence is free-form pointers (REW names, `v_003`, an audit entry), so the code is
             # looked for in the text -- as a whole code, not a substring (`_cites`).
-            evidence = " ".join(str(item) for item in event.get("evidence") or [])
+            evidence = _evidence_text(event.get("evidence"), one)
             cleared = [
                 c for c in stale
-                if any(_cites(name, evidence) for name in aliases.get(c, (c,)))
+                if any(_cites(name, evidence, tags) for name in aliases.get(c, (c,)))
             ]
             for code in cleared:
                 del stale[code]
@@ -417,7 +423,7 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
 _CONTROLS_IN_CODE = ("ctl1", "ctl3")
 
 
-def _cites(name: str, evidence: str) -> bool:
+def _cites(name: str, evidence: str, tags: Optional[tuple[str, ...]] = None) -> bool:
     """Whether `evidence` names `name` -- a channel code, or a capture title that begins with one --
     whole, not as a piece of another channel's.
 
@@ -427,20 +433,56 @@ def _cites(name: str, evidence: str) -> bool:
     variation>` with any variation (`sr-LH`, `sw-r2`; the Arbiter, 2026-10-02), and `_` only begins
     the series. So no letter or digit may touch the name on either side; no `-` may come before it
     (it would be another channel's variation) nor after it, unless that `-` begins a control
-    (`w-L-ctl1_3`). A `(` may come before it, as prose puts things in brackets, but a bare code
-    that is the WHOLE of a bracket is not counted: `(sw)` is the method tag, not the channel `sw`,
-    and a code alone in brackets cannot be told from one -- left stale, which says so, rather than
-    cleared in silence. A title carries its own tag and may be bracketed whole. What may follow:
-    the series `_`, a space and a modifier, the `+` of a joint, punctuation, the end.
+    (`w-L-ctl1_3`). A `(` may come before it, as prose puts things in brackets, but a code that is
+    also a method tag and is the WHOLE of a bracket is not counted: `(sw)` is the tag, not the
+    channel `sw`, and the two cannot be told apart -- left stale, which says so, rather than cleared
+    in silence. `(w-L)` is no tag and counts (#126's re-review, Minor B). A title carries its own
+    tag and may be bracketed whole, but not follow a `+`: there it is part of a joint's title,
+    another measurement (`sw+w-L_3 (sw)` is not `w-L_3 (sw)`, Minor C), while a bare code after a
+    `+` is a member the joint names. What may follow: the series `_`, a space and a modifier, the
+    `+` of a joint, punctuation, the end.
+
+    `tags` is `naming.METHODS` (`_reading`); None, with no method to ask, takes every code for one.
     """
     word = re.escape(name)
     controls = "|".join(_CONTROLS_IN_CODE)
-    if re.search(r"\s", name):  # a title (`w-L_10 (sw)`): prose may bracket it whole
-        before = r"(?<![A-Za-z0-9\-])"
-    else:  # a bare code: never the whole of a bracket
+    if re.search(r"\s", name):  # a title (`w-L_10 (sw)`): bracketed whole, never after a `+`
+        before = r"(?<![A-Za-z0-9\-+])"
+    elif tags is None or name in tags:  # `sw`: never the whole of a bracket, where it is the tag
         before = rf"(?:(?<![A-Za-z0-9(\-])|(?<=\()(?!{word}\)))"
+    else:  # any other code: a bracket around it is prose
+        before = r"(?<![A-Za-z0-9\-])"
     pattern = rf"{before}{word}(?=$|[^A-Za-z0-9\-]|-(?:{controls})(?![A-Za-z0-9]))"
     return re.search(pattern, evidence) is not None
+
+
+def _reading() -> tuple:
+    """`(canonical_title, METHODS)` from the method's `naming`, read once per pass, not per name.
+
+    - `canonical_title` (v3.0.65 on): a capture typed `w_L_10 (sw)` is `w-L_10 (sw)` to the
+      method, which accepts it as evidence and reads it so -- asked of the method rather than
+      copied, as `load_channels` does (#126's re-review, Minor A).
+    - `METHODS` (`sw`, `rta`, `imp`): the tags a `(code)` cannot be told from (Minor B).
+
+    `(None, None)` with no method to ask: titles are read as written, and every bracketed code is
+    left stale rather than cleared on a guess.
+    """
+    try:
+        naming = vendor_loader.load_naming()
+    except Exception:  # noqa: BLE001 — no method to ask: the readings fall back
+        return None, None
+    tags = getattr(naming, "METHODS", None)
+    return getattr(naming, "canonical_title", None), (tuple(map(str, tags)) if tags else None)
+
+
+def _evidence_text(items, one=None) -> str:
+    """A step's evidence as one text to look names up in: each item as written, and after them
+    each one `one` (`canonical_title`) reads in another notation, as it reads it."""
+    said = [str(item) for item in items or []]
+    if one is not None:
+        read = [str(one(item)) for item in said]
+        said += [r for r, item in zip(read, said) if r != item]
+    return " ".join(said)
 
 
 def _channel_aliases(project_dir: Optional[Path] = None) -> dict[str, tuple[str, ...]]:

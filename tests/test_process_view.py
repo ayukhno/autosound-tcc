@@ -297,6 +297,13 @@ def test_a_channel_written_with_underscore_answers_to_both_notations(project, pr
     (["sr-LH", "sr-L"], "sr-LH", "sr-LH_3 (rta)"),  # a variation of any length (the Arbiter, 2026-10-02)
     (["sw-r2", "sw"], "sw-r2", "sw-r2_3 (sw)"),
     (["w-L"], "w-L", "v_003 (w-L_10 (sw))"),  # a capture bracketed in prose
+    (["sw", "w-L"], "w-L", "sw+w-L_3 (sw)"),  # each member of the joint, not only the first
+    # #126's re-review, Minor A: a driver's side typed with `_` in a project written in hyphens is
+    # read through the method's `canonical_title` (`w_L_10 (sw)` is `w-L_10 (sw)`)
+    (["w-L", "tw-L"], "w-L", "w_L_10 (sw)"),
+    # Minor B: a code in brackets counts unless it is a method tag (`(sw)`), which it cannot be
+    # told from -- `w-L` is no tag
+    (["w-L"], "w-L", "v_003 (w-L)"),
 ])
 def test_a_capture_clears_its_own_channel_whatever_follows_the_code(project, process, codes, said,
                                                                      title):
@@ -312,6 +319,8 @@ def test_a_capture_clears_its_own_channel_whatever_follows_the_code(project, pro
     (["sr-LH", "xsr-LH"], "sr-LH", "xsr-LH_3 (rta)"),  # a longer driver type ending the same way
     (["sr-L", "sr-LH"], "sr-L", "sr-LH_3 (rta)"),  # a longer variation of the same driver
     (["sw", "sw-r2"], "sw", "sw-r2_3 (sw)"),  # a variation is another channel
+    (["w-L", "tw-L"], "w-L", "tw_L_10 (sw)"),  # read through `canonical_title`, still the tweeter's
+    (["sw", "w-L"], "sw", "v_003 (sw)"),  # `(sw)` alone is the method tag, whatever comes before
 ])
 def test_another_channels_capture_never_clears_a_change(project, process, codes, said, title):
     """#126's review, Important 1: the evidence was matched as a substring, so `w-L` was found in
@@ -332,6 +341,10 @@ def test_another_channels_capture_never_clears_a_change(project, process, codes,
     ("sr-L_3 (rta)", "sr-LH_3 (rta)"),  # a longer variation of the same driver
     ("sr-LH_3 (rta)", "xsr-LH_3 (rta)"),  # a longer driver type ending the same way
     ("w-L (imp)", "tw-L (imp)"),
+    # #126's re-review, Minor C: a title after a `+` is part of a joint's title, another
+    # measurement -- unlike a bare code, which a joint names as one of its members
+    ("w-L_3 (sw)", "sw+w-L_3 (sw)"),
+    ("C_25 (rta)", "ALL+C_25 (rta)"),
 ])
 def test_a_step_is_not_linked_to_a_round_by_another_channels_capture(round_title, cited):
     """The round-to-step link (`steps_using`) read the evidence the way the stale check did, as
@@ -347,11 +360,43 @@ def test_a_step_is_not_linked_to_a_round_by_another_channels_capture(round_title
     "w-L_10 (sw) captured and verified",
     "sweeps: w-L_10 (sw), w-R_10 (sw)",
     "the left woofer (w-L_10 (sw))",  # in brackets in prose: a `(` before a title is not a tag
+    "w-L_10 (sw) + w-R_10 (sw)",  # a list of captures: a space before each, not a joint
+    "w-R_10 (sw) + w-L_10 (sw)",
+    "w_L_10 (sw)",  # #126's re-review, Minor A: typed with `_`, read by the method as `w-L`
 ])
 def test_a_step_is_linked_to_the_round_whose_capture_it_cites(cited):
     state = {"plan": [{"id": "s", "evidence": [cited]}, {"id": "t", "evidence": ["v_003"]}]}
 
     assert process_view.steps_using(state, ["w-L_10 (sw)"]) == ("s",)
+
+
+def test_a_round_written_with_underscore_is_linked_by_its_capture_in_the_one_notation():
+    """Minor A from the round's side: an older round asked for `w_L_10 (sw)`, and the step cites
+    the capture as the method renamed it. A joint's own title links its own round."""
+    state = {"plan": [{"id": "s", "evidence": ["w-L_10 (sw)"]},
+                      {"id": "j", "evidence": ["sw+w-L_3 (sw)"]}]}
+
+    assert process_view.steps_using(state, ["w_L_10 (sw)"]) == ("s",)
+    assert process_view.steps_using(state, ["sw+w-L_3 (sw)"]) == ("j",)
+
+
+def test_with_no_method_to_ask_a_bracketed_code_is_not_counted(monkeypatch):
+    """Which codes are method tags is the method's (`naming.METHODS`); with none to ask, every
+    `(code)` is treated as one -- left stale rather than cleared on a guess -- and a title is read
+    as written."""
+    from autosound_tcc.core import vendor_loader
+
+    def missing():
+        raise vendor_loader.VendorNotInitializedError("no skill here")
+
+    monkeypatch.setattr(vendor_loader, "load_naming", missing)
+    one, tags = process_view._reading()
+    state = {"plan": [{"id": "s", "evidence": ["w_L_10 (sw)"]}]}
+
+    assert (one, tags) == (None, None)
+    assert not process_view._cites("w-L", "v_003 (w-L)", tags)
+    assert process_view._cites("w-L", "v_003 (w-L_10 (sw))", tags)
+    assert process_view.steps_using(state, ["w-L_10 (sw)"]) == ()
 
 
 def test_a_step_evidenced_by_another_channel_is_not_re_chipped(project, process):
