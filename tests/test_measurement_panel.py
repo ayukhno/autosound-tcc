@@ -1342,7 +1342,11 @@ def test_the_columns_scroll_sideways_on_tcc_s_own_bar(monkeypatch):
     a native grey bar with «‹ ›» arrows. The columns scroll on their own both ways on purpose (the
     Arbiter, 2026-09-23: only the table scrolls), and the panel is as wide as its handle leaves it,
     so the overflow stays — on the bar every other scroll area has: as thick as the vertical one,
-    no arrows, the handle in the sheet's `border2`. Drawn under the sheet the window applies."""
+    no arrows, the handle in the sheet's `border2`. Drawn under the sheet the window applies.
+
+    The overflow is made, not hoped for: at the panel's own narrowest the grid is wider by
+    another column's width whatever the font (the Windows runner's fit at 300 px, CI on 0277e21,
+    while its panel's floor came out 100 000 px wide)."""
     from PySide6.QtGui import QColor
 
     from tests import _windows
@@ -1351,15 +1355,21 @@ def test_the_columns_scroll_sideways_on_tcc_s_own_bar(monkeypatch):
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)
     palette = _windows.theme_on(monkeypatch, panel, "dark")
-    panel.resize(300, 500)
+    panel.resize(panel.minimumSizeHint().width(), 500)
     panel.show()
     try:
         for _ in range(4):
             app.processEvents()
             app.sendPostedEvents()
         scroll = panel._cols_scroll
+        grid = scroll.widget()
+        grid.setMinimumWidth(scroll.viewport().width() + 200)  # one more column than room
+        for _ in range(4):
+            app.processEvents()
+            app.sendPostedEvents()
         bar = scroll.horizontalScrollBar()
-        assert bar.isVisible(), "the grid fits at 300 px: nothing to scroll, nothing to test"
+        assert bar.isVisible(), (
+            f"a {grid.width()}-px grid in a {scroll.viewport().width()}-px view shows no bar")
         assert bar.height() == scroll.verticalScrollBar().sizeHint().width(), (
             f"{bar.height()} px thick, the vertical bar {scroll.verticalScrollBar().sizeHint().width()}")
         drawn = panel.grab().toImage()

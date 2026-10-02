@@ -30,6 +30,17 @@ Mode = Literal["dark", "light"]
 _POPUP_CHROME_PX = 28 + 14 + 6 + 18
 
 
+def drawn_width(metrics: QFontMetricsF, text: str) -> float:
+    """How far right of where it starts `text` is drawn: its ink, and never past its advance.
+
+    The ink is what Qt sizes a box by (`AdjustToContents`), and a trailing bearing past the field
+    is nothing anybody sees (VM-6). Never past the advance, because a font-less platform's box
+    engine puts the ink's rectangle 100 000 px to the right: on the Windows runner, whose offscreen
+    platform finds no fonts, a floor measured off it made the right column 100 000 px wide (CI on
+    0277e21)."""
+    return min(metrics.horizontalAdvance(text), metrics.boundingRect(text).right())
+
+
 class MiniCombo(QComboBox):
     """A `.mini-select` whose DROP-DOWN is as wide as its widest row, whatever the box's width.
 
@@ -80,8 +91,8 @@ class MiniCombo(QComboBox):
         elif self._held_rows is not None:
             asks = self._own_ask()
             metrics = QFontMetricsF(self.font())
-            widest = max((max(metrics.horizontalAdvance(row), metrics.boundingRect(row).right())
-                          for row in self._held_rows), default=metrics.horizontalAdvance("…"))
+            widest = max((drawn_width(metrics, row) for row in self._held_rows),
+                         default=metrics.horizontalAdvance("…"))
             hint.setWidth(asks.width() - self._room(asks) + math.ceil(widest))
         return hint
 
@@ -119,7 +130,7 @@ class MiniCombo(QComboBox):
         asks = self._own_ask()
         text = self.currentText()
         metrics = QFontMetricsF(self.font())
-        drawn = math.ceil(max(metrics.horizontalAdvance(text), metrics.boundingRect(text).right()))
+        drawn = math.ceil(drawn_width(metrics, text))
         return max(0, drawn - self._room(asks))
 
     def lent(self) -> int:
@@ -179,7 +190,7 @@ class MiniCombo(QComboBox):
         a trailing bearing past the field is nothing anybody sees, and it is what Qt's own sizing
         leaves out — otherwise elided to that room."""
         text, room = self.currentText(), self._room()
-        if QFontMetricsF(self.font()).boundingRect(text).right() <= room:
+        if drawn_width(QFontMetricsF(self.font()), text) <= room:
             return text
         return self.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, room)
 

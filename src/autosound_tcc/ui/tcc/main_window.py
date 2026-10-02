@@ -3290,7 +3290,8 @@ class MainWindow(QMainWindow):
         if floor != right.minimumWidth():
             right.setMinimumWidth(floor)
             # The centre's floor is capped against the sides' (two thirds of the screen, #106).
-            if self.__dict__.get("_center") is not None and self.__dict__.get("_main_splitter"):
+            if (self.__dict__.get("_center") is not None and self.__dict__.get("_main_splitter")
+                    and self.centralWidget() is not None):
                 self._fit_centre_floor()
 
     def _fit_centre_floor(self) -> None:

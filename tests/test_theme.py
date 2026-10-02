@@ -302,6 +302,8 @@ def test_a_mini_select_too_narrow_for_its_pick_says_so_with_an_ellipsis(monkeypa
     from PySide6.QtGui import QFontMetricsF
     from PySide6.QtWidgets import QComboBox
 
+    from autosound_tcc.ui.tcc import theme
+
     drawn = _drawn_picks(monkeypatch)
     full = "API · gemini-3.1-pro-preview"
     combo = _styled_mini_select(monkeypatch, stretch)
@@ -317,7 +319,7 @@ def test_a_mini_select_too_narrow_for_its_pick_says_so_with_an_ellipsis(monkeypa
         assert shown.endswith("…") and full.startswith(shown[:-1]) and len(shown) > 1, (share, shown)
         assert metrics.horizontalAdvance(shown) <= _edit_field(combo), (
             share, shown, _edit_field(combo))
-    ink = math.ceil(metrics.boundingRect(full).right())
+    ink = math.ceil(theme.drawn_width(metrics, full))
     combo.resize(ink + combo.width() - _edit_field(combo), 26)
     combo.grab()
     assert drawn[-1] == full, f"whole in a field of its ink ({ink} px), which clips nothing"

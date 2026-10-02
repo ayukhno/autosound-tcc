@@ -3730,6 +3730,7 @@ def test_a_roomy_footer_shows_the_reviewer_whole_and_a_narrow_one_keeps_its_floo
 
     from autosound_tcc.core import model_choices
     from autosound_tcc.ui.tcc import copy_menu
+    from autosound_tcc.ui.tcc.theme import drawn_width
 
     app = _app()
     window = MainWindow()
@@ -3745,15 +3746,14 @@ def test_a_roomy_footer_shows_the_reviewer_whole_and_a_narrow_one_keeps_its_floo
             app.sendPostedEvents()
 
     def whole(box) -> int:
-        """The box's width with its pick drawn whole: the text's advance or ink, whichever reaches
-        further, and the chrome around the edit field."""
+        """The box's width with its pick drawn whole: how far its text is drawn (`theme.
+        drawn_width`), and the chrome around the edit field."""
         option = QStyleOptionComboBox()
         box.initStyleOption(option)
         field = box.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
                                            QStyle.SubControl.SC_ComboBoxEditField, box).width()
         metrics, text = QFontMetricsF(box.font()), box.currentText()
-        drawn = max(metrics.horizontalAdvance(text), metrics.boundingRect(text).right())
-        return math.ceil(drawn) + box.width() - field
+        return math.ceil(drawn_width(metrics, text)) + box.width() - field
 
     def own_asks() -> int:
         """What the row's controls ask for of themselves, before a picker is lent anything."""
@@ -4015,7 +4015,8 @@ def test_the_full_window_at_its_minimum_reads_the_output_table_and_its_tabs(
 
 
 # The stretched font in both languages: there the header holds the window's floor (1317-1328 px),
-# and the tabs elide at it with the flat 200-px column too -- tcc#106's own test skips that font.
+# so two thirds do not bind and only the rounds and the row are checked (tcc#106's own test skips
+# that font; its tabs elide at the header's floor with the flat 200-px column too).
 # An older journal's series-only rounds in the Mac's font, where the cap binds (Ruling 31).
 @pytest.mark.parametrize(("stretch", "lang", "shape"), [
     (100, "uk", "round-open"), (100, "de", "round-open"), (141, "uk", "round-open"),
@@ -4048,8 +4049,14 @@ def test_a_round_open_on_two_thirds_of_a_1512_screen_leaves_the_centre_its_tabs(
         _settle_at(window, 200)
         assert window.width() == window.minimumSizeHint().width(), "at the window's floor"
         said = f"{lang} at {stretch}: window {window.width()} px, centre {window._center.width()}"
-        if stretch == 100:
-            assert window.width() <= 1512 * 2 // 3, said
+        # The premise, read off the window rather than the font: two thirds of the screen bind
+        # only where the header and the footer ask for less. Where one of them asks for more --
+        # the stretched font here, and the Windows runner's font-less text (CI on 0277e21) --
+        # it holds the window's floor and the centre has the room it leaves.
+        cap = 1512 * 2 // 3
+        assert _floor_part(window) <= cap, f"{said}: the columns' floor past two thirds"
+        if _other_rows(window) <= cap:
+            assert window.width() <= cap, said
             tabs = [cut for cut in _what_does_not_read(window) if " reads " in cut]
             assert not tabs, f"{said}: {tabs}"
         combo = panel._session_combo
