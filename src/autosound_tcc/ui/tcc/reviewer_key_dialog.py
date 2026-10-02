@@ -33,7 +33,7 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 
-from PySide6.QtCore import QEventLoop, Qt
+from PySide6.QtCore import QEvent, QEventLoop, Qt
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
@@ -79,6 +79,16 @@ def _place(export: dict) -> str:
     if export.get("line") is None:
         return i18n.t("rkPlaceEnv").format(file=file)
     return i18n.t("rkPlaceFile").format(file=file, line=export["line"])
+
+
+def _places(places: list[str]) -> str:
+    """Several places in one line, as a sentence names them: `A`, `A and B`, `A, B and C`.
+
+    Not `A; B` — «із захищеного сховища; змінних середовища Windows …?» read as two sentences
+    (finding 138, tcc#136). The word between the last two is the language's (`rkPlacesAnd`)."""
+    if len(places) < 2:
+        return "".join(places)
+    return i18n.t("rkPlacesAnd").format(rest=", ".join(places[:-1]), last=places[-1])
 
 
 def _shell_line(export: dict) -> str:
@@ -179,6 +189,27 @@ class ReviewerKeyDialog(QDialog):
         # Otherwise a dialog makes the first button in its focus chain the default, «Перенести»
         # whenever it shows: Enter in the key field then saved AND opened the terminal.
         self._field.setFocus()
+
+    def event(self, event) -> bool:
+        """Once the layout has taken in new content — the copy line and its buttons, a longer
+        result — and when the window shows, it fits that content (`_fit`)."""
+        handled = super().event(event)
+        if event.type() in (QEvent.Type.LayoutRequest, QEvent.Type.Show):
+            self._fit()
+        return handled
+
+    def _fit(self) -> None:
+        """No shorter than the content at the window's narrowest (finding 137, tcc#136).
+
+        A dialog's own minimum counts a word-wrapped label as one line. When a save left a copy,
+        the red line and «Перенести» / «Видалити копію …» appeared, the window grew by that
+        minimum only, and the layout took the rest from the rows: «Видалити ключ» was squeezed
+        until its words could not be read, and only a resize brought it back. The content's height
+        at the minimum width is enough at every wider one, so as the minimum it grows the window,
+        and no drag squeezes the rows again."""
+        layout = self.layout()
+        self.setMinimumHeight(max(layout.totalMinimumSize().height(),
+                                  layout.totalHeightForWidth(self.minimumWidth())))
 
     def refresh(self, *, ask: bool = False) -> None:
         """Show what the method says now. `ask` re-runs `key status` instead of the kept answer.
@@ -365,7 +396,7 @@ class ReviewerKeyDialog(QDialog):
         lines = [i18n.t("rkSaved").format(where=where or said or "—")]
         tips = [said]
         if copies:
-            var, place = copies[0].get("var", "?"), "; ".join(_place(e) for e in copies)
+            var, place = copies[0].get("var", "?"), _places([_place(e) for e in copies])
             if drops is None:
                 # Not «too old»: the method did not say, and nothing is sent it may misread.
                 lines.append(i18n.t("rkDropProbeNoAnswer").format(var=var, place=place))
@@ -418,8 +449,8 @@ class ReviewerKeyDialog(QDialog):
         # `key status` (ruling 42).
         with self._busy():
             var = self._entry(provider).get("var") or "?"
-            place = "; ".join(
-                _place(e) for e in reviewer_key.shell_exports() if e.get("var") == var) or "—"
+            place = _places([_place(e) for e in reviewer_key.shell_exports()
+                             if e.get("var") == var]) or "—"
         if not self._confirm(i18n.t("rkDropAsk").format(var=var, place=place,
                                                         save=i18n.t("rkSave")),
                              i18n.t("rkDropYes"), default_yes=False):
@@ -445,10 +476,10 @@ class ReviewerKeyDialog(QDialog):
             var = self._entry(provider).get("var") or "?"
             exports = [e for e in reviewer_key.shell_exports() if e.get("var") == var]
             kept = self._kept(provider, exports)
-        places = "; ".join([i18n.t("rkPlaceStore")] + [_place(e) for e in exports])
+        places = _places([i18n.t("rkPlaceStore")] + [_place(e) for e in exports])
         ask = i18n.t("rkRmAsk").format(provider=name, places=places, save=i18n.t("rkSave"))
         if kept:
-            ask += "\n\n" + i18n.t("rkRmAskKept").format(where="; ".join(kept))
+            ask += "\n\n" + i18n.t("rkRmAskKept").format(where=_places(kept))
         if not self._confirm(ask, i18n.t("rkDropYes"), default_yes=False):
             return
         tips: list[str] = []
@@ -486,7 +517,7 @@ class ReviewerKeyDialog(QDialog):
     def _drop_first(self, provider, var: str, exports: list[dict], tips: list[str]) -> str:
         """The exported copies dropped before the key leaves the store (review I2): "" to go on,
         or the line that says why the delete stopped here."""
-        place = "; ".join(_place(e) for e in exports)
+        place = _places([_place(e) for e in exports])
         drops = self._takes_drop()
         if drops is None:
             return i18n.t("rkDropProbeNoAnswer").format(var=var, place=place)
@@ -511,7 +542,7 @@ class ReviewerKeyDialog(QDialog):
         """The line after `key rm`, from the store it left and the copies still there."""
         still = [i18n.t(f"rkLeft_{where}") for where in left] + [
             _place(e) for e in reviewer_key.shell_exports() if e.get("var") == var]
-        left_line = i18n.t("rkRmLeft").format(where="; ".join(still)) if still else ""
+        left_line = i18n.t("rkRmLeft").format(where=_places(still)) if still else ""
         if happened == reviewer_key.REMOVED:
             return " ".join((i18n.t("rkRmDone").format(provider=name, places=places),
                              left_line or i18n.t("rkRmFree").format(provider=name)))

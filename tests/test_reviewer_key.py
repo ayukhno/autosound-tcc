@@ -1144,7 +1144,7 @@ def test_an_exported_copy_is_dropped_before_the_key_leaves_the_store(monkeypatch
     dialog, asked = _rm_dialog(monkeypatch, method)
     dialog._removes["google"].click()
     place = i18n.t("rkPlaceFile").format(file="~/.zshrc", line=3)
-    places = f"{i18n.t('rkPlaceStore')}; {place}"
+    places = f"{i18n.t('rkPlaceStore')} і {place}"
     assert len(asked) == 1 and places in asked[0]
     assert method.changes() == [(["key", "move-shell", "google", "--drop", "--yes"], None),
                                 (["key", "rm", "google"], None)]
@@ -1209,7 +1209,7 @@ def test_a_copy_the_window_cannot_remove_is_named_before_and_after(monkeypatch):
                      after_rm=_with(_GONE, google=copies))
     dialog, asked = _rm_dialog(monkeypatch, method)
     dialog._removes["google"].click()
-    where = f"{i18n.t('rkLeft_file')}; {i18n.t('rkLeft_env')}"
+    where = f"{i18n.t('rkLeft_file')} і {i18n.t('rkLeft_env')}"
     assert i18n.t("rkRmAskKept").format(where=where) in asked[0]
     name = "Google (Gemini)"
     assert dialog._result.text() == " ".join((
@@ -1247,7 +1247,7 @@ def test_the_line_after_a_delete_is_true_on_every_answer(monkeypatch, lang, case
     free = i18n.t("rkRmFree").format(provider=name)
     assert (free in text) == (line == "rkRmDone" and not left), case
     if left:
-        where = "; ".join(i18n.t(f"rkLeft_{w}") for w in left)
+        where = {"uk": " і ", "en": " and "}[lang].join(i18n.t(f"rkLeft_{w}") for w in left)
         assert i18n.t("rkRmLeft").format(where=where) in text, case
     else:
         assert i18n.t("rkRmLeft").split("{")[0] not in text, case
@@ -1362,4 +1362,138 @@ def test_a_read_the_kept_answer_cannot_give_waits_too(monkeypatch):
         assert all((shape, on) == (Qt.CursorShape.WaitCursor, [])
                    for _c, shape, on, _l in method.seen), method.seen
         _settled(dialog)
+    dialog.close()
+
+
+# ── tcc#136: the window keeps its rows' height, and names places with «and» (findings 137, 138) ──
+
+
+class _Saving(_Method):
+    """`_Method` whose `key set` changes what `key status` says next: the store holds the key now,
+    and its copy is still where it was."""
+
+    def __init__(self, after_set, **kwargs):
+        super().__init__(**kwargs)
+        self.after_set = after_set
+
+    def __call__(self, args, *, stdin=None):
+        if args[:2] == ["key", "set"]:
+            self.status = self.after_set
+        return super().__call__(args, stdin=stdin)
+
+
+def _buttons(window) -> list:
+    from PySide6.QtWidgets import QPushButton
+
+    return [b for b in window.findChildren(QPushButton) if b.window() is window and b.isVisible()]
+
+
+def test_a_save_that_leaves_a_copy_keeps_every_row_s_height(monkeypatch):
+    """Finding 137, on Windows: «Зберегти» left a copy in HKCU\\Environment, the red line and
+    «Перенести» / «Видалити копію …» appeared, and the rows' «Видалити ключ» were squeezed until
+    their words could not be read; a resize brought them back. Each button keeps its own height —
+    and the window holds what it shows, at the width it has."""
+    before = _with(keystore="dpapi", exports=[], openai={"used": "keystore", "keystore": True})
+    after = _with(before, exports=[_REGISTRY], google={"used": "keystore", "keystore": True})
+    method = _Saving(after, status=before)
+    dialog, asked = _dialog(monkeypatch, method, answer=False)
+    dialog.show()
+    QApplication.processEvents()
+    assert dialog._shell.isHidden() and dialog._drops == {}
+
+    dialog._field.setText("AIza" + "v" * 35)
+    dialog._save.click()
+    QApplication.processEvents()
+
+    assert len(asked) == 1, "the copy was asked about, and kept"
+    assert not dialog._shell.isHidden() and list(dialog._drops) == ["google"]
+    rows = [dialog._removes[p] for p in ("google", "openai")]
+    assert all(button.isVisible() for button in rows)
+    for button in _buttons(dialog):
+        assert button.height() >= button.sizeHint().height(), button.text()
+    layout = dialog.layout()
+    assert dialog.height() >= layout.totalHeightForWidth(dialog.width())
+
+    # «… or the rows keep their minimum height» (tcc#136): a drag cannot squeeze them either.
+    dialog.resize(dialog.width(), 1)
+    QApplication.processEvents()
+    for button in _buttons(dialog):
+        assert button.height() >= button.sizeHint().height(), button.text()
+    dialog.close()
+
+
+def test_the_window_opens_no_shorter_than_its_content(monkeypatch):
+    """The same minimum from the moment it shows, before anything changes in it: the copy line
+    already there at opening, a drag cannot squeeze the rows under it."""
+    status = _with(keystore="dpapi", exports=[_REGISTRY],
+                   google={"used": "keystore", "keystore": True})
+    dialog, _ = _dialog(monkeypatch, _Method(status=status))
+    dialog.show()
+    assert dialog.minimumHeight() >= dialog.layout().totalHeightForWidth(dialog.minimumWidth())
+    dialog.close()
+
+
+#: A second export of the same variable: on macOS a key can sit in two profiles at once.
+_ZPROFILE = {"var": "GEMINI_API_KEY", "file": "~/.zprofile", "line": 2}
+
+#: The Arbiter's rule, finding 138: two places with «і» («and»), three with commas and «і». Spelt
+#: out for the two languages read here; Polish and German take their word from the Advisor, so
+#: their test is the shape (`_and`).
+_PLACES_AND = {
+    "uk": {"two": "захищеного сховища і ~/.zshrc, рядок 3",
+           "three": "захищеного сховища, ~/.zshrc, рядок 3 і ~/.zprofile, рядок 2",
+           "copies": "~/.zshrc, рядок 3 і ~/.zprofile, рядок 2"},
+    "en": {"two": "the secure store and ~/.zshrc, line 3",
+           "three": "the secure store, ~/.zshrc, line 3 and ~/.zprofile, line 2",
+           "copies": "~/.zshrc, line 3 and ~/.zprofile, line 2"},
+}
+
+
+def _and(lang, case, places: list[str]) -> str:
+    from autosound_tcc.ui.tcc import i18n
+
+    if lang in _PLACES_AND:
+        return _PLACES_AND[lang][case]
+    return i18n.t("rkPlacesAnd").format(rest=", ".join(places[:-1]), last=places[-1])
+
+
+@pytest.mark.parametrize("lang", ["uk", "en", "pl", "de"])
+def test_the_delete_names_two_and_three_places_with_and(monkeypatch, lang):
+    """Finding 138: «Видалити ключ Anthropic (Claude) із захищеного сховища; змінних середовища
+    Windows …?» — and the line after it — joined the places with «;». The question and the done
+    line both name them as a sentence does."""
+    from autosound_tcc.ui.tcc import i18n
+
+    name = "Google (Gemini)"
+    for case, exports in (("two", [_STATUS["shell_exports"][0]]),
+                          ("three", [_STATUS["shell_exports"][0], _ZPROFILE])):
+        method = _Method(status=_with(exports=exports), after_move=_with(exports=[]),
+                         after_rm=_GONE)
+        dialog, asked = _dialog(monkeypatch, method, answer=True, lang=lang)
+        files = [i18n.t("rkPlaceFile").format(file=e["file"], line=e["line"]) for e in exports]
+        places = _and(lang, case, [i18n.t("rkPlaceStore"), *files])
+        assert ";" not in places
+        dialog._removes["google"].click()
+        assert asked == [i18n.t("rkRmAsk").format(provider=name, places=places,
+                                                  save=i18n.t("rkSave"))], (case, asked)
+        assert dialog._result.text().startswith(
+            i18n.t("rkRmDone").format(provider=name, places=places)), (case, dialog._result.text())
+        dialog.close()
+
+
+@pytest.mark.parametrize("lang", ["uk", "en", "pl", "de"])
+def test_the_copies_after_a_save_are_named_with_and(monkeypatch, lang):
+    """The same rule for the question after a save, and for its done line: the two copies of one
+    variable read «~/.zshrc, рядок 3 і ~/.zprofile, рядок 2»."""
+    from autosound_tcc.ui.tcc import i18n
+
+    exports = [_STATUS["shell_exports"][0], _ZPROFILE]
+    method = _Method(status=_with(exports=exports), after_move=_with(exports=[]))
+    dialog, asked = _dialog(monkeypatch, method, answer=True, lang=lang)
+    place = _and(lang, "copies", [i18n.t("rkPlaceFile").format(file=e["file"], line=e["line"])
+                                  for e in exports])
+    dialog._field.setText("AIza" + "j" * 35)
+    dialog._on_save()
+    assert asked == [i18n.t("rkRemoveAsk").format(var="GEMINI_API_KEY", place=place)]
+    assert i18n.t("rkRemoved").format(place=place) in dialog._result.text()
     dialog.close()
