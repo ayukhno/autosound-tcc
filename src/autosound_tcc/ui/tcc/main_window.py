@@ -4743,9 +4743,7 @@ class MainWindow(QMainWindow):
         if resolved.note:
             pairs.append((i18n.t("criticSubstituted"), resolved.note))
         actual = self_check.reviewer_mismatch()
-        # Not while the pick's check runs: the last review is the previous pick's, and naming its
-        # model here is the old pick's line the status no longer shows (finding 142, tcc#140).
-        if actual and not self._critic_being_checked():
+        if actual:
             pairs.append((i18n.t("criticAnswered").format(model=actual[1]),
                           i18n.t("selfReviewerDiffDetail").format(wanted=actual[0],
                                                                    answered=actual[1])))
@@ -5300,6 +5298,12 @@ class MainWindow(QMainWindow):
         self._clipboard_before_probe = _clipboard_snapshot()
         worker = _ReviewerProbeWorker(key, config.project_dir())
         worker.done.connect(self._on_reviewer_probed)
+        # The answer is known at `done`; the next check may start only at `finished`. `done` is
+        # emitted inside `run()`, and a re-probe queued from it could meet the thread still
+        # unwinding: the guard above turned it away, and the pick that waited was never asked
+        # while the wheel said it was (review of tcc#140, I-2). Not in `stop_workers`' `mute`: a
+        # bare disconnect there would cut `qt_shutdown.watch`'s own `finished` too.
+        worker.finished.connect(self._on_reviewer_probe_finished)
         self._reviewer_probe = worker
         self._reviewer_checking = key
         worker.start()
@@ -5323,9 +5327,12 @@ class MainWindow(QMainWindow):
                 clipboard.clear()
         self._reload_model_choices()
         self._refresh_critic_status()
-        if getattr(self, "_reprobe_reviewer", False):
-            # Picked while the previous check ran (tcc#74): this one's answer is still unknown.
-            QTimer.singleShot(0, self._probe_reviewer)
+
+    def _on_reviewer_probe_finished(self) -> None:
+        """The probe's thread has ended, so the next check can start: a pick made while it ran
+        (tcc#74) is asked now. `finished` is delivered with `isRunning()` already false."""
+        if getattr(self, "_reprobe_reviewer", False) and not getattr(self, "_closing", False):
+            self._probe_reviewer()
 
     def _say_what_the_project_applies(self) -> None:
         """Name this project folder's own hooks and permissions before the first turn (HUB-050).
@@ -6055,6 +6062,11 @@ class MainWindow(QMainWindow):
                        getattr(self, "_reviewer_probe", None)):
             if worker is not None:
                 qt_shutdown.stop_or_detach(worker, 5000, mute=(worker.done,))
+        # The wheel shows that check, and a check let go of with its `done` cut never answers:
+        # nothing else would stop it, and its timer ticked on with the window gone (tcc#140).
+        spinner = getattr(self, "_critic_spinner", None)
+        if spinner is not None:
+            spinner.stop()
         # The MCP server is a background thread this window owns, and it used to be stopped ONLY
         # in `closeEvent` — so a quit that does not close a window (Cmd-Q, a signal) left a daemon
         # thread running uvicorn's asyncio loop into interpreter shutdown, and the process died

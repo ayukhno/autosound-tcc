@@ -855,12 +855,17 @@ def refusal_reason(detail: str) -> Optional[str]:
     return availability.REFUSED
 
 
-def log_call(result: CriticResult, package_path: Optional[Path], project_dir: Optional[Path] = None) -> None:
+def log_call(result: CriticResult, package_path: Optional[Path], project_dir: Optional[Path] = None,
+             *, asked: str = "") -> None:
     """Append one reviewer call to an append-only log.
 
     "Which AI reviewed this, on which model, when" is part of the process record the concept calls
     for (TCC-Concept §4: the advisor panel shows vendor/model and when it was last called). It
     lives here until SCR-004's `process-state.json` exists to hold it properly.
+
+    `asked` is the model the call asked for, beside the one that answered (`model`): only the two
+    together say a fallback happened. Without it a review by the reviewer picked BEFORE read as a
+    fallback of the one picked now (finding 142, tcc#140). A line without it is no evidence.
     """
     import json
 
@@ -869,6 +874,7 @@ def log_call(result: CriticResult, package_path: Optional[Path], project_dir: Op
         "at": result.called_at,
         "role": result.role,
         "mode": result.mode,
+        "asked": asked or None,
         "model": result.model,
         "duration_s": round(result.duration_s, 1),
         "package": str(package_path) if package_path else None,

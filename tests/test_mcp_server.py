@@ -1387,6 +1387,30 @@ def test_an_explicit_model_still_wins_over_the_footer(tmp_path, monkeypatch):
     assert seen["model"] == "gemini-9-pro-high"
 
 
+def test_the_log_says_which_model_a_review_asked_for(tmp_path, monkeypatch):
+    """Finding 142 (tcc#140): the log said only who ANSWERED, so a review by the reviewer picked
+    before read as a fallback of the one picked now — the «!» said «answered by
+    gemini-3.1-pro-preview» beside a pick that had just answered its check. Each line says what
+    the call asked for: the footer's pick, or the model the session named."""
+    from autosound_tcc.core import config, critic, project_settings
+
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.1-pro-high")
+
+    def _fake_run(package, project_dir=None, trace_path=None, model=None, **kw):
+        return critic.CriticResult(critic.MODE_API_OR_CLI, "fine", "gemini-3.6-flash-high",
+                                   "critic", "", 1.0, "2026-10-02T10:00:00+00:00")
+
+    monkeypatch.setattr(critic, "run", _fake_run)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    asyncio.run(mcp.call_tool("call_critic", {"package": "x"}))
+    entry = critic.last_call(tmp_path)
+    assert (entry["asked"], entry["model"]) == ("gemini-3.1-pro-high", "gemini-3.6-flash-high")
+
+    asyncio.run(mcp.call_tool("call_critic", {"package": "x", "model": "gemini-9-pro-high"}))
+    assert critic.last_call(tmp_path)["asked"] == "gemini-9-pro-high"
+
+
 def test_no_configured_critic_leaves_the_scripts_own_default_alone(tmp_path, monkeypatch):
     """Empty means "nothing chosen", not "choose for them"."""
     from autosound_tcc.core import critic

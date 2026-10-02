@@ -1321,13 +1321,14 @@ def build_server(
         # session's own routing test caught it: "Підключення до API (google, gemini-3.6-flash-high)"
         # while the UI showed `gemini-3.1-pro-high` (2026-08-12). The substitution happened BEFORE
         # any fallback; there was nothing to fall back from.
+        asked = model or configured_critic_model(project_dir) or ""
         result = await _in_thread(
             critic.run,
             package,
             project_dir=project_dir,
             trace_path=trace_path or None,
             role=role,
-            model=model or configured_critic_model(project_dir) or None,
+            model=asked or None,
             # And the CLI that goes with it. Sending the model without the binary is how the two
             # came to disagree: the pick said `agy`, the machine's `GEMINI_BIN` said `gemini`, and
             # the reviewer script reads the env var first (TCC-002).
@@ -1336,7 +1337,9 @@ def build_server(
             # The pick's vendor, which goes with the pick's model only (tcc#113).
             provider="" if model else configured_critic_provider(project_dir),
         )
-        critic.log_call(result, None, project_dir)
+        # With what was asked for: who answered alone cannot tell a fallback from the reviewer
+        # picked before (finding 142, tcc#140).
+        critic.log_call(result, None, project_dir, asked=asked)
         try:
             # Under the key the call went to — the alias target, as for `model` above — which is
             # the key the footer, the pickers and `get_tcc_state` look a refusal up under.

@@ -235,20 +235,28 @@ def _reviewer_actual_check() -> Check:
     reviewing — because the substitution happened inside the reviewer script's own API→CLI
     fallback, which no flag in TCC records. Both halves of this comparison are already on disk;
     nothing compared them (live session, 2026-08-12: "the only reliable check is to make a call").
+
+    Only a call that ASKED for this pick's model is evidence about it (finding 142, tcc#140). The
+    last line is often the reviewer picked before, asked for and answered by itself, and it read
+    as a fallback of the one picked since. A line without `asked` (a log written before tcc#140)
+    cannot tell the two apart, so it claims neither.
     """
     entry = critic.last_call() or {}
     answered = str(entry.get("model") or "").strip()
     if not answered or entry.get("mode") != "answered":
         return Check("reviewer_actual", OK, _t("selfReviewerNeverTitle"), _t("selfReviewerNeverDetail"))
-    wanted_key = project_settings.get(config.tcc_dir(), "critic", "") or ""
-    wanted = wanted_key.partition(":")[2] or wanted_key
-    if not wanted or same_model(wanted, answered):
+    asked = str(entry.get("asked") or "").strip()
+    # The model a call for today's pick sends, the alias followed — what `asked` holds for one.
+    wanted = critic.configured(config.project_dir())[0]
+    if not (asked and wanted and same_model(asked, wanted)):
+        return Check("reviewer_actual", OK, _t("selfReviewerLastTitle").format(model=answered))
+    if same_model(asked, answered):
         return Check("reviewer_actual", OK, _t("selfReviewerOkTitle").format(model=answered))
     return Check(
         "reviewer_actual",
         BAD,
         _t("selfReviewerDiffTitle"),
-        _t("selfReviewerDiffDetail").format(wanted=wanted or "?", answered=answered),
+        _t("selfReviewerDiffDetail").format(wanted=asked, answered=answered),
     )
 
 

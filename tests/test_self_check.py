@@ -118,16 +118,25 @@ def test_worst_first():
 # ---- who actually answered (live session, 2026-08-12) -----------------------------------------
 
 
-def _last_call(tmp_path, monkeypatch, model, mode="answered"):
+_ASKED_BY_THE_PICK = object()
+
+
+def _last_call(tmp_path, monkeypatch, model, mode="answered", asked=_ASKED_BY_THE_PICK):
+    """The log's last line: `model` answered a call that asked for `asked` — the pick's own model
+    unless a test says otherwise, and no `asked` at all for None, as a log written before tcc#140."""
     import json
     from autosound_tcc.core import config, critic, project_settings
 
     monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
     project_settings.set_value(config.tcc_dir(tmp_path), "critic", "agy:gemini-3.1-pro-high")
+    entry = {"at": "2026-08-12T06:24:58+00:00", "role": "critic", "mode": mode, "model": model}
+    if asked is _ASKED_BY_THE_PICK:
+        entry["asked"] = "gemini-3.1-pro-high"
+    elif asked is not None:
+        entry["asked"] = asked
     path = critic.log_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"at": "2026-08-12T06:24:58+00:00", "role": "critic",
-                                "mode": mode, "model": model}) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(entry) + "\n", encoding="utf-8")
 
 
 def test_a_different_model_answering_is_caught_even_with_no_alias(tmp_path, monkeypatch):
@@ -150,6 +159,35 @@ def test_two_spellings_of_the_same_model_are_not_a_mismatch(tmp_path, monkeypatc
 
     assert _find(self_check.run(), "reviewer_actual").status == self_check.OK
     assert self_check.reviewer_mismatch() is None
+
+
+def test_a_review_asked_for_another_model_is_no_fallback_of_this_pick(tmp_path, monkeypatch):
+    """Finding 142 (tcc#140): a new reviewer was picked and answered its check, and the footer's «!»
+    said «answered by gemini-3.1-pro-preview» — the previous pick's last review — with a detail
+    claiming the script had fallen back. That call asked for its own model and got it. A fallback
+    is claimed only from a call that asked for this pick's model."""
+    _last_call(tmp_path, monkeypatch, "gemini-3.1-pro-preview", asked="gemini-3.1-pro-preview")
+
+    check = _find(self_check.run(), "reviewer_actual")
+
+    assert check.status == self_check.OK
+    assert self_check.reviewer_mismatch() is None
+    assert "gemini-3.1-pro-preview" in check.title, "it still says who answered last"
+
+
+def test_a_log_line_that_does_not_say_what_it_asked_for_is_no_evidence(tmp_path, monkeypatch):
+    """The log written before tcc#140 has no `asked`: such a line cannot tell a fallback from a
+    review by the reviewer picked before — the Arbiter's log on the VM is all of this kind. It
+    claims neither, nor that what answered is what was asked for."""
+    from autosound_tcc.ui.tcc import i18n
+
+    _last_call(tmp_path, monkeypatch, "gemini-3.6-flash-high", asked=None)
+
+    check = _find(self_check.run(), "reviewer_actual")
+
+    assert check.status == self_check.OK
+    assert self_check.reviewer_mismatch() is None
+    assert check.title != i18n.t("selfReviewerOkTitle").format(model="gemini-3.6-flash-high")
 
 
 def test_a_clipboard_round_is_not_evidence_of_anything(tmp_path, monkeypatch):

@@ -114,6 +114,7 @@ T: dict[Lang, dict[str, str]] = {
         "selfReviewerNeverTitle": "The reviewer has not been called in this project yet",
         "selfReviewerNeverDetail": "Nothing to compare until it answers once. A configured model is a claim; a call is evidence.",
         "selfReviewerOkTitle": "Last review came back from {model}, which is what was asked for",
+        "selfReviewerLastTitle": "Last review came back from {model}; the log does not show it as a call for the reviewer selected now",
         "selfReviewerDiffTitle": "The reviewer that answered is not the one selected",
         "selfReviewerDiffDetail": "Asked for {wanted}; {answered} answered. Neither picker nor `substituted` shows this — the reviewer script falls back from the Gemini API to the local CLI (a 404 is enough), and the CLI runs whichever model it is currently set to. Check what `agy` has selected, or accept that this is the reviewer.",
         "selfAliasCrossVendor": "{keys} now runs a model from a DIFFERENT vendor than the one asked for. When that is the reviewer, cross-vendor review has stopped — the point of a second vendor is that it does not share the Generator's blind spots.",
@@ -1414,6 +1415,7 @@ Choose sweeps (sw) above to read this.",
         "selfReviewerNeverTitle": "Рецензента в цьому проєкті ще не викликали",
         "selfReviewerNeverDetail": "Поки він не відповів, звіряти нема з чим. Налаштована модель — це заява; виклик — це доказ.",
         "selfReviewerOkTitle": "Остання рецензія прийшла від {model} — саме від тієї, яку обрано",
+        "selfReviewerLastTitle": "Остання рецензія прийшла від {model}; у журналі не видно, що це був виклик рецензента, обраного зараз",
         "selfReviewerDiffTitle": "Відповів не той рецензент, якого обрано",
         "selfReviewerDiffDetail": "Обрано {wanted}; відповів {answered}. Цього не показує ні пікер, ні `substituted` — скрипт рецензента падає з Gemini API на локальний CLI (досить 404), а CLI запускає ту модель, яку в ньому обрано. Перевір, що вибрано в `agy`, або прийми, що рецензент саме цей.",
         "selfAliasCrossVendor": "{keys} тепер запускає модель ІНШОГО вендора, ніж обрано. Якщо це рецензент — крос-вендорна рецензія припинилась: сенс другого вендора саме в тому, що він не поділяє сліпих плям Генератора.",
@@ -2619,6 +2621,7 @@ Choose sweeps (sw) above to read this.",
         "selfReviewerNeverDetail": 'Dopóki nie odpowie, nie ma czego porównywać. Skonfigurowany model to deklaracja; wywołanie '
                                    'to dowód.',
         "selfReviewerOkTitle": 'Ostatnia recenzja przyszła od {model} — dokładnie od wybranego',
+        "selfReviewerLastTitle": "Last review came back from {model}; the log does not show it as a call for the reviewer selected now",
         "selfReviewerDiffTitle": 'Odpowiedział nie ten recenzent, którego wybrano',
         "selfReviewerDiffDetail": 'Wybrano {wanted}; odpowiedział {answered}. Nie pokazuje tego ani wybierak, ani `substituted` '
                                   '— skrypt recenzenta spada z API Gemini na lokalny CLI (wystarczy 404), a CLI uruchamia '
@@ -3891,6 +3894,7 @@ Choose sweeps (sw) above to read this.",
         "selfReviewerNeverDetail": 'Solange er nicht einmal geantwortet hat, gibt es nichts zu vergleichen. Ein eingestelltes '
                                    'Modell ist eine Behauptung; ein Aufruf ist ein Beleg.',
         "selfReviewerOkTitle": 'Die letzte Prüfung kam von {model}, also von dem angeforderten Modell',
+        "selfReviewerLastTitle": "Last review came back from {model}; the log does not show it as a call for the reviewer selected now",
         "selfReviewerDiffTitle": 'Geantwortet hat nicht der ausgewählte Prüfer',
         "selfReviewerDiffDetail": 'Angefordert war {wanted}; geantwortet hat {answered}. Weder die Auswahl noch `substituted` '
                                   'zeigt das — das Prüfer-Skript fällt von der Gemini-API auf das lokale CLI zurück (ein 404 '
