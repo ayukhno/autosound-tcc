@@ -380,6 +380,8 @@ _PARAM_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]")
 _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _ASSIGNMENT = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?\+?=")
 _HOME_ASSIGNMENT = re.compile(r"HOME(?:\[[^\]]*\])?\+?=")
+#: An assignment by expansion: `${NAME:=value}` and `${NAME=value}` set NAME when it is unset.
+_DEFAULT_ASSIGNMENT = re.compile(r"\$\{(\w+):?=")
 _ARRAY_START = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\+?=")
 _FD = re.compile(r"[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\}")
 _DECLARERS = frozenset({"export", "local", "declare", "typeset", "readonly"})
@@ -423,6 +425,8 @@ class _Command:
     piped: bool = False
     #: A `( … )` stood here; the commands inside it were read on their own.
     compound: bool = False
+    #: The command whose output this one reads in a pipeline: `ls` in `ls | xargs chmod 755`.
+    producer: Optional[_Command] = None
 
     def is_empty(self) -> bool:
         return not (self.words or self.redirects or self.stdin or self.compound)
@@ -514,6 +518,8 @@ class _Reader:
             if len(pipeline) > 1:
                 for member in pipeline:
                     member.piped = True
+                for producer, member in zip(pipeline, pipeline[1:]):
+                    member.producer = producer
             self.commands.extend(pipeline)
             pipeline.clear()
 
@@ -881,11 +887,15 @@ def _tainted(commands: list[_Command], inherited: Iterable[str] = ()) -> set[str
     And `HOME`, set on the line to anything: `_home_head_name` reads `$HOME` as the home, and a home
     the line sets is not one — `HOME='/bin/rm -rf / '; $HOME/x` splits into a delete (tcc#128). A
     `HOME=` word anywhere in a command counts, so `env HOME=… bash -c …` does too: at worst it costs
-    a question about a `$HOME` head on the same line."""
+    a question about a `$HOME` head on the same line. So does `${HOME:=…}`, and `${f:=$(…)}` taints
+    `f` as `f=$(…)` does (re-review of tcc#128)."""
     tainted: set[str] = set(inherited)
     while True:
         before = len(tainted)
         for command in commands:
+            for word in [*command.words, *command.stdin, *(target for _, target in command.redirects)]:
+                tainted.update(name for name in _DEFAULT_ASSIGNMENT.findall(word.text)
+                               if name == "HOME" or _runs(word, tainted))
             for words in _segments(command):
                 head = words[0].text
                 if any(_HOME_ASSIGNMENT.match(word.text) for word in words):
@@ -1002,10 +1012,12 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
         return _find_is_dangerous(arguments, command, tainted, depth)
     if name == "dd":
         return any(text.startswith("of=/dev/") for text in texts)
-    if name == "chmod":
+    if name == "chmod" and _lists_names_below_a_narrow_folder(command.producer):
         # Ruling 35: what `xargs` appends to a chmod is read as one file, not as a chance at `-R /`
         # — a mode on named files is undone by another chmod (finding 123). `-R` on the line asks.
+        # Ruling 37: only when the names come from a listing whose reach is not a whole home.
         arguments = [replace(a, quoted=True) if a.dynamic and a.text == "…" else a for a in arguments]
+    if name == "chmod":
         return _reach_is_dangerous(arguments, lambda text: text.startswith("-"), _is_recursive_flag,
                                    bare=False)
     if name == "git":
@@ -1013,6 +1025,39 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
     if name in _FETCHERS and command.piped:
         return True
     return False
+
+
+def _lists_names_below_a_narrow_folder(producer: Optional[_Command]) -> bool:
+    """Whether a pipe's producer prints file names, and only below a folder that is not somebody's
+    whole home or system: `ls`, `find`, `git ls-files`, every word spelled (Ruling 37). `echo` and
+    `printf` print what they are told — `echo '-R /' | xargs chmod 755` is `chmod 755 -R /` to GNU
+    chmod — and `find ~` reaches what `chmod -R 644 ~` does."""
+    if producer is None or producer.compound or producer.redirects or producer.stdin:
+        return False
+    segments = _segments(producer)
+    if len(segments) != 1:
+        return False
+    words = segments[0]
+    while words and _ASSIGNMENT.match(words[0].text):
+        words = words[1:]
+    if not words or any(word.dynamic or word.output for word in words):
+        return False
+    name, texts = _command_name(words[0].text), [word.text for word in words[1:]]
+    if name == "git":
+        return texts[:1] == ["ls-files"]
+    if name == "ls":
+        roots = [text for text in texts if not text.startswith("-")]
+    elif name == "find":
+        at = 0
+        while at < len(texts) and texts[at] in _FIND_LEADING_FLAGS:
+            at += 1
+        roots = []
+        while at < len(texts) and not texts[at].startswith("-") and texts[at] not in ("(", "!"):
+            roots.append(texts[at])
+            at += 1
+    else:
+        return False
+    return not any(_is_wide_target(root) for root in roots)
 
 
 def _xargs_command(arguments: list[_Word]) -> Optional[list[_Word]]:

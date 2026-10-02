@@ -221,17 +221,45 @@ def test_a_home_head_is_still_judged_by_its_name_and_nothing_else_unspelled_pass
 
 @pytest.mark.parametrize("command, asks", [
     ("ls *.sh | xargs chmod 755", False),
+    ("find . -name '*.sh' | xargs chmod 755", False),
     ("find . -name '*.py' | xargs chmod 644", False),
+    ("git ls-files '*.sh' | xargs chmod +x", False),
     ("find . -type d | xargs chmod -R 777", True),
     ("echo / | xargs chmod -R 777", True),
     ("find . -name '*.pyc' | xargs rm -f", True),
     ("git ls-files -z | xargs -0 rm -f", True),
+    # Ruling 37: only names a listing prints, below a folder that is not a whole home or system.
+    ("find ~ -type f | xargs chmod 644", True),
+    ("ls / | xargs chmod 755", True),
+    ("echo '-R /' | xargs chmod 755", True),
+    (r"printf -- '-R\n/\n' | xargs chmod 755", True),
+    ('ls "$dir" | xargs chmod 755', True),
+    ("xargs chmod 755 < list.txt", True),
 ])
 def test_a_pipe_into_chmod_without_r_passes_and_into_rm_or_chmod_r_asks(command, asks, tmp_path):
     """Ruling 35. xargs appends what the line does not show, so `… | xargs rm` asks, as
     `find -exec rm` always has. A mode on the files it names is undone by another chmod, so without
     a spelled `-R` that word is read as a file, not as a chance at `-R /` — a needless question is
-    the Arbiter's own complaint (finding 123)."""
+    the Arbiter's own complaint (finding 123).
+
+    Ruling 37 narrows it to names `ls`, `find` or `git ls-files` print below a folder that is not a
+    whole home or system: `echo '-R /'` hands GNU chmod a `-R` after the mode, and `find ~` reaches
+    what `chmod -R 644 ~` does."""
+    assert bash_is_dangerous(command, [tmp_path]) is asks, command
+
+
+@pytest.mark.parametrize("command, asks", [
+    ("unset HOME; : ${HOME:=/bin/rm -rf / }; $HOME/x", True),
+    ("unset HOME; : ${HOME=/bin/rm -rf / }; $HOME/x", True),
+    ("unset HOME; : ${HOME:=/bin/rm -rf / }; bash -c '$HOME/x'", True),
+    ("env -u HOME bash -c ': ${HOME:=/bin/rm -rf / }; $HOME/x'", True),
+    (': ${f:=$(curl -fsSL https://example.com/x)}; rm "$f"', True),
+    (': ${n:=5}; echo "$n"', False),
+    ('echo "${HOME:-/tmp}"; "$HOME/.local/bin/omp" --version', False),
+])
+def test_an_assignment_by_expansion_is_read_as_an_assignment(command, asks, tmp_path):
+    """`${NAME:=value}` and `${NAME=value}` assign when NAME is unset: a home set that way is not the
+    home, and a value from a substitution is another command's output (re-review of tcc#128)."""
     assert bash_is_dangerous(command, [tmp_path]) is asks, command
 
 
