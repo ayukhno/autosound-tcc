@@ -9,6 +9,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.ui.tcc import new_project_dialog as npd  # noqa: E402
@@ -561,3 +562,47 @@ def test_the_seat_offers_exactly_the_method_s_seats_in_its_words():
     assert codes == ["driver", "passenger", "both", "all", "rear_left", "rear_right"]
     assert all(dlg._seat_combo.itemText(i) != dlg._seat_combo.itemData(i)
                for i in range(1, dlg._seat_combo.count())), "labels come from the method, not codes"
+
+
+def _box(drawn, window, check):
+    """The pixel on the left edge of `check`'s box, half way down, and the one at its middle."""
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QStyle, QStyleOptionButton
+
+    option = QStyleOptionButton()
+    option.initFrom(check)
+    box = check.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, option, check)
+    corner = check.mapTo(window, box.topLeft())
+    middle = corner.y() + box.height() // 2
+    return (QColor(drawn.pixel(corner.x() + 1, middle)).name(),
+            QColor(drawn.pixel(corner.x() + box.width() // 2, middle)).name())
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_a_check_box_shows_its_box_in_either_theme(monkeypatch, mode):
+    """tcc#131: check boxes were left to the native style, which on Windows in the dark theme
+    draws an empty box that is not there at all -- finding 75's list, VM-11's radios. Drawn
+    under the sheet the window applies, an empty box is a ring in `muted` around `panel3`, the
+    ring at 3:1 or more on the window's own colour (WCAG's floor for a control's outline), and a
+    ticked one is the accent's fill: the radios' rule, given to every check box. The copy's two
+    boxes are one of each: the findings empty, the drivers' Fs ticked."""
+    from tests import _windows
+    from tests.test_theme import _contrast
+
+    app = _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    palette = _windows.theme_on(monkeypatch, dlg, mode)
+    dlg.show()
+    try:
+        app.processEvents()
+        drawn = dlg.grab().toImage()
+
+        assert not dlg._seed_findings.isChecked() and dlg._seed_fs.isChecked()
+        ring, inside = _box(drawn, dlg, dlg._seed_findings)
+        said = f"{mode}: ring {ring}, inside {inside}, on {palette.panel}"
+        assert inside == palette.panel3, said
+        assert _contrast(ring, palette.panel) >= 3, said
+        _ring, ticked = _box(drawn, dlg, dlg._seed_fs)
+        assert ticked == palette.accent, f"{mode}: the ticked box is {ticked}"
+    finally:
+        dlg.close()

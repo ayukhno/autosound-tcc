@@ -459,3 +459,147 @@ def test_every_radio_wears_one_ring_that_reads_in_both_themes():
             ground = palette.tokens[surface]
             assert _contrast(ring, ground) >= 3, (
                 f"{name}: the ring {ring} is {_contrast(ring, ground):.2f}:1 on {surface} {ground}")
+
+
+def test_every_check_box_wears_the_radios_ring_in_both_themes():
+    """tcc#131: check boxes were still drawn natively, and the native box is not there at all in
+    the dark theme on Windows — finding 75's list, and VM-11's radios before they got one rule.
+    Every check box gets the radios' rule: a widget's (`QCheckBox`) and a list's or a table's row
+    (`QAbstractItemView`) alike, one rule for the box and one for the tick, no class keeping a box
+    to itself (`.check-list`'s went into it). The ring, the inside and the tick are the radio's
+    own colours, and the ring holds 3:1 or more on every surface a box sits on, in both themes."""
+    import re
+
+    from autosound_tcc.ui.tcc import theme
+
+    for name in ("dark", "light"):
+        palette = theme.get_theme(name)
+        rules = [(one.strip(), body) for selector, body in _rules(theme.build_qss(palette))
+                 for one in selector.split(",")]
+        boxes = {one: body for one, body in rules
+                 if "::indicator" in one and not one.startswith("QRadioButton")}
+        radio = dict(rules)
+        assert boxes, f"{name}: no check box rule at all"
+        assert set(boxes) <= {f"{kind}::indicator{state}" for kind in ("QCheckBox",
+                                                                      "QAbstractItemView")
+                              for state in ("", ":hover", ":checked")}, (
+            f"{name}: a class with a box of its own: {sorted(boxes)}")
+
+        def drawn(body, prop):
+            return _hex(re.search(r"(?:^|\s)" + prop + r":\s*([^;]+);", body).group(1)
+                        .replace("2px solid", "").strip())
+
+        for kind in ("QCheckBox", "QAbstractItemView"):
+            box = boxes.get(f"{kind}::indicator")
+            ticked = boxes.get(f"{kind}::indicator:checked")
+            assert box and ticked, f"{name}: {kind} has no box or no tick"
+            for prop in ("border", "background"):
+                assert drawn(box, prop) == drawn(radio["QRadioButton::indicator"], prop), (
+                    f"{name}: {kind}'s {prop} is not the radio's")
+                chosen = radio["QRadioButton::indicator:checked"]
+                assert drawn(ticked, prop) == drawn(chosen, prop), (
+                    f"{name}: {kind}'s tick {prop} is not the chosen radio's")
+            ring = drawn(box, "border")
+            for surface in ("panel", "panel2", "panel3", "ground"):
+                ground = palette.tokens[surface]
+                assert _contrast(ring, ground) >= 3, (
+                    f"{name}: the ring {ring} is {_contrast(ring, ground):.2f}:1 on {surface}")
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_a_row_s_check_box_is_drawn_by_the_sheet_in_either_theme(monkeypatch, mode):
+    """tcc#131: the boxes in a list's or a table's rows — the capture import's «take» column, the
+    diagnostics' sessions — were the native one finding 75 found drawing nothing in the dark
+    theme. Drawn under the sheet, an empty row's box shows the `muted` ring and a ticked row's the
+    accent's fill. Rows without words, so no font is measured."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import (QApplication, QListWidget, QListWidgetItem, QTableWidget,
+                                   QTableWidgetItem, QVBoxLayout, QWidget)
+
+    from tests import _windows
+
+    app = QApplication.instance() or QApplication([])
+    host = QWidget()
+    palette = _windows.theme_on(monkeypatch, host, mode)
+    layout = QVBoxLayout(host)
+    listed = QListWidget()
+    table = QTableWidget(2, 1)
+    table.setProperty("class", "ptable")
+    for row, state in enumerate((Qt.CheckState.Unchecked, Qt.CheckState.Checked)):
+        item = QListWidgetItem("")
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(state)
+        listed.addItem(item)
+        cell = QTableWidgetItem("")
+        cell.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+        cell.setCheckState(state)
+        table.setItem(row, 0, cell)
+    layout.addWidget(listed)
+    layout.addWidget(table)
+    host.resize(240, 320)
+    host.show()
+    try:
+        app.processEvents()
+        for view, rects in ((listed, [listed.visualItemRect(listed.item(r)) for r in (0, 1)]),
+                            (table, [table.visualItemRect(table.item(r, 0)) for r in (0, 1)])):
+            drawn = view.viewport().grab().toImage()
+
+            def count(rect, colour):
+                return sum(QColor(drawn.pixel(x, y)).name() == colour
+                           for x in range(rect.left(), rect.right() + 1)
+                           for y in range(rect.top(), rect.bottom() + 1))
+
+            empty, ticked = rects
+            kind = type(view).__name__
+            assert count(empty, palette.muted) >= 24, f"{mode} {kind}: no ring on the empty box"
+            assert count(ticked, palette.accent) >= 60, f"{mode} {kind}: no fill on the ticked box"
+    finally:
+        host.close()
+
+
+def test_every_button_greys_when_it_is_disabled_in_both_themes(monkeypatch):
+    """tcc#131: the feedback window's «Send →» stayed orange while disabled, because its rule comes
+    after the sheet's `QPushButton:disabled` and, with the same weight, outranked it — and so did
+    «Cancel» and the editor's tools beside it. Every button the sheet gives a class to draws a fill
+    of its own when disabled, in both themes: the floor's, or its own `:disabled`. Sampled in the
+    padding of a button without words."""
+    import re
+
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QWidget
+
+    from autosound_tcc.ui.tcc import theme
+    from tests import _windows
+
+    app = QApplication.instance() or QApplication([])
+    for mode in ("dark", "light"):
+        host = QWidget()
+        _windows.theme_on(monkeypatch, host, mode)
+        layout = QHBoxLayout(host)
+        classes = sorted(set(re.findall(r'QPushButton\[class~="([^"]+)"\]',
+                                        theme.build_qss(theme.get_theme(mode)))))
+        pairs = {}
+        for name in classes:
+            pair = []
+            for enabled in (True, False):
+                button = QPushButton("")
+                button.setProperty("class", name)
+                button.setFixedSize(40, 28)
+                button.setEnabled(enabled)
+                layout.addWidget(button)
+                pair.append(button)
+            pairs[name] = pair
+        host.show()
+        try:
+            app.processEvents()
+            drawn = host.grab().toImage()
+
+            def fill(button):
+                return QColor(drawn.pixel(button.mapTo(host, button.rect().center()))).name()
+
+            live = [name for name, (armed, disabled) in pairs.items()
+                    if fill(armed) == fill(disabled)]
+            assert live == [], f"{mode}: disabled and still drawn as when armed: {live}"
+        finally:
+            host.close()

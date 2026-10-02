@@ -649,3 +649,54 @@ def test_an_unchosen_radio_shows_its_ring_in_either_theme(monkeypatch, mode):
         assert chosen == palette.accent, f"{mode}: the chosen radio is {chosen}"
     finally:
         dialog.close()
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_send_looks_disabled_while_a_report_is_on_its_way_and_after_it_went(monkeypatch, mode):
+    """tcc#131 (fix C's review, W-5): «Send →» / «Надіслати →» is disabled while the report is
+    on its way and after it has gone, and still looked live — white words on the orange fill —
+    because its rule comes after the sheet's `QPushButton:disabled` and, with the same weight,
+    outranked it; «Cancel» beside it, disabled while sending, likewise. Drawn under the sheet the
+    window applies, both wear the look every disabled button has, `panel2` and not their own fill,
+    in both themes. Sampled in the padding, where no words are."""
+    import threading
+
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QColor
+
+    from autosound_tcc.core import form_report
+    from tests import _windows
+
+    held = threading.Event()
+
+    def slow(report, url):
+        held.wait(5)
+        return form_report.Sent(True)
+
+    app = _app()
+    dialog, _calls = _form_dialog(monkeypatch, send=slow)
+    palette = _windows.theme_on(monkeypatch, dialog, mode)
+    _ready(dialog)
+    dialog.show()
+
+    def fill(button):
+        app.processEvents()
+        drawn = dialog.grab().toImage()
+        at = button.mapTo(dialog, QPoint(3, button.height() // 2))
+        return QColor(drawn.pixel(at)).name()
+
+    try:
+        assert fill(dialog._send) == palette.accent_fill, f"{mode}: armed, Send is the orange"
+        dialog._on_send()
+        assert not dialog._send.isEnabled() and not dialog._cancel.isEnabled()
+        assert fill(dialog._send) == palette.panel2, f"{mode}: Send while the report is on its way"
+        assert fill(dialog._cancel) == palette.panel2, f"{mode}: Cancel while it is on its way"
+        held.set()
+        _wait_for_send(dialog)
+        assert not dialog._send.isEnabled()
+        assert fill(dialog._send) == palette.panel2, f"{mode}: Send after the report went"
+    finally:
+        held.set()
+        if dialog._sending is not None:
+            _wait_for_send(dialog)
+        dialog.close()

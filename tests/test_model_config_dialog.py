@@ -281,4 +281,5 @@ def test_the_list_draws_its_own_check_boxes_and_the_window_is_wide(catalogue):
     dialog = ModelConfigDialog([])
     assert dialog._list.property("class") == "check-list"
     assert dialog.minimumWidth() >= 720
-    assert 'QListWidget[class~="check-list"]::indicator' in build_qss(get_theme("dark"))
+    # Every row's box since tcc#131 (the list's own went into it), this list's included.
+    assert "QAbstractItemView::indicator {" in build_qss(get_theme("dark"))

@@ -757,15 +757,23 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         padding: 4px 6px;
         color: {t.text};
     }}
-    QListWidget[class~="check-list"]::indicator {{
-        width: 13px;
-        height: 13px;
-        border: 2px solid {t.muted};
+    /* Every check box's box — the radios' rule, given to every check box (tcc#131): a widget's
+    and a list's or a table's row alike, so none is left to the native style, which drew an empty
+    box as nothing at all in the dark theme on Windows. The omp list (`.check-list`, finding 75)
+    had a box of its own; this is it, made everyone's, as VM-11 made the delay radios' ring. The
+    radio's ring, inside and fill, in a square: a tick is the fill, as it was in that list. */
+    QCheckBox::indicator, QAbstractItemView::indicator {{
+        width: 11px;
+        height: 11px;
         border-radius: 3px;
-        background: {t.panel};
+        border: 2px solid {t.muted};
+        background: {t.panel3};
     }}
-    QListWidget[class~="check-list"]::indicator:checked {{
-        border-color: {t.accent};
+    QCheckBox::indicator:hover, QAbstractItemView::indicator:hover {{
+        border-color: {t.accent_dim};
+    }}
+    QCheckBox::indicator:checked, QAbstractItemView::indicator:checked {{
+        border: 2px solid {t.accent};
         background: {t.accent};
     }}
     QRadioButton::indicator:checked {{
@@ -1994,6 +2002,20 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     QPushButton[class~="fb-send"]:hover, QPushButton[class~="fb-send"]:pressed {{
         background: {mix(t.accent_fill, 85, "#000000")};
+    }}
+    /* Disabled, the modal's buttons look it (tcc#131). Their rules come after the floor's
+    `QPushButton:disabled` and, with the same weight, outranked it: while a report was on its way,
+    and after it went, «Send →» stayed orange with white words and «Cancel» looked live beside it.
+    The floor's own look; Send's padding gives back the pixel its border takes, so it does not
+    change size as it greys. */
+    QPushButton[class~="fb-tool"]:disabled, QPushButton[class~="fb-cancel"]:disabled,
+    QPushButton[class~="fb-send"]:disabled {{
+        background: {t.panel2};
+        color: {t.faint};
+        border: 1px solid {t.border};
+    }}
+    QPushButton[class~="fb-send"]:disabled {{
+        padding: 7px 15px;
     }}
     QRadioButton {{
         color: {t.text};
