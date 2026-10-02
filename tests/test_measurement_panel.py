@@ -445,25 +445,30 @@ def test_picking_a_past_session_moves_its_step_onto_the_picker_and_disables_live
     assert panel._read_btn.isEnabled()
 
 
-def test_the_session_picker_asks_for_its_widest_id_and_draws_every_one_whole_in_it(monkeypatch):
+def test_the_session_picker_is_never_narrower_than_the_id_it_shows(monkeypatch):
     """`minimumContentsLength` is counted in `x` widths and a round id is not made of `x`: the
-    picker asks for its widest row measured off the rows, and given that, draws every id whole.
-    Asked, not held, since VM-15: where the row cannot give it, «Protection» gives way first and
-    then the picker elides with «…» -- held as a floor, it was drawn under its neighbour. Under
-    the sheet the window applies."""
+    picker's floor is its widest row, measured off the rows, and at that floor every id draws
+    whole -- refilled in another language too, where Qt's own cached minimum kept the first
+    rows' width (VM-15, Ruling 30: the rounds must be told apart). Under the window's sheet."""
     from tests import _windows
 
     _app()
     panel = MeasurementPanel()
     _windows.theme_on(monkeypatch, panel, "dark")
-    panel.set_sessions(MEAS_SESSIONS)
     combo = panel._session_combo
-    combo.ensurePolished()
-    combo.resize(combo.sizeHint())
-    for index in range(combo.count()):
-        if combo.itemText(index):
-            combo.setCurrentIndex(index)
-            assert combo.fit_text() == combo.itemText(index), (combo.width(), combo.fit_text())
+    try:
+        for lang in ("en", "de"):
+            i18n.set_language(lang)
+            panel.set_sessions(MEAS_SESSIONS)
+            combo.ensurePolished()
+            combo.resize(combo.minimumSizeHint())
+            for index in range(combo.count()):
+                if combo.itemText(index):
+                    combo.setCurrentIndex(index)
+                    assert combo.fit_text() == combo.itemText(index), (
+                        lang, combo.width(), combo.fit_text())
+    finally:
+        i18n.set_language("en")
 
 
 def test_picking_session_via_combo_switches_the_grid():
@@ -1336,15 +1341,19 @@ def _head_row(panel) -> list:
     return sorted((w for w in widgets if w.isVisible()), key=lambda w: w.geometry().left())
 
 
-@pytest.mark.parametrize("lang", ["en", "de"])
-def test_nothing_in_the_head_row_overlaps_at_the_panel_s_narrowest(monkeypatch, lang):
+@pytest.mark.parametrize("lang, stretch", [("en", 100), ("en", 141), ("de", 141)])
+def test_nothing_in_the_head_row_overlaps_and_the_round_select_is_never_cut(monkeypatch, lang,
+                                                                          stretch):
     """VM-15 (the Windows VM, English): «Protection» was drawn over the round select «next round ●»
-    («Захист» fitted). The right column goes down to its 200-px floor, below what the row's
-    widgets held as theirs, and the layout put them on top of one another. The Arbiter: «можна
-    назву на кнопці скоротити до Prot...». The button gives way first, elided by its font's
-    metrics; the select keeps its pick whole while it can and elides after; nothing overlaps.
-    And the select's OPEN list read «next…nd ●», cut in the middle: a list row reads whole.
-    In the real window, under its sheet, at its own floor with the right column at its floor."""
+    («Захист» fitted): the right column went down to a flat 200 px, below what the row's widgets
+    held as theirs, and the layout put one on the other. The Arbiter: «можна назву на кнопці
+    скоротити до Prot...». The button gives way, elided by its font's metrics down to «…», and
+    while cut its hover names it; the select keeps its widest id whole -- his own rule, «rounds
+    must be told apart» (2026-08-11, 2026-08-21) -- and the right column is never narrower than
+    that row (Ruling 30). And the select's OPEN list read «next…nd ●», cut in the middle: a row
+    of the list reads whole. In the real window under its sheet, at its own minimum and with the
+    right column dragged to its floor, in the Mac's font and stretched to the Windows runner's."""
+    from PySide6.QtGui import QFont, QFontDatabase
     from PySide6.QtWidgets import QSplitter
 
     from autosound_tcc.ui.tcc.main_window import MainWindow
@@ -1356,6 +1365,11 @@ def test_nothing_in_the_head_row_overlaps_at_the_panel_s_narrowest(monkeypatch, 
             app.processEvents()
             app.sendPostedEvents()
 
+    was = QFont(app.font())
+    if stretch != 100:
+        font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+        font.setStretch(stretch)
+        app.setFont(font)
     window = MainWindow()
     monkeypatch.setattr(window, "_refresh_cli_catalogue", lambda force=False: None)
     window.show()
@@ -1367,25 +1381,34 @@ def test_nothing_in_the_head_row_overlaps_at_the_panel_s_narrowest(monkeypatch, 
         panel.set_sessions(MEAS_SESSIONS)
         window.resize(window.minimumSizeHint().width(), 820)
         settle()
+        combo, button = panel._session_combo, panel._protective_btn
         splitter = window.findChild(QSplitter)
-        sizes = splitter.sizes()
-        splitter.setSizes([sizes[0], sizes[1] + sizes[2], 0])  # the right column to its floor
-        settle()
-        row = _head_row(panel)
-        assert panel._session_combo in row and panel._protective_btn in row
-        for left, right in zip(row, row[1:]):
-            assert left.geometry().right() < right.geometry().left(), (
-                f"{lang}, panel {panel.width()} px: {type(left).__name__} "
-                f"{left.geometry().left()}..{left.geometry().right()} runs into "
-                f"{type(right).__name__} from {right.geometry().left()}")
-        # Each draws its words whole, or cut with «…», or -- at the column's last pixels, in a
-        # wide font -- not at all; never clipped mid-glyph.
-        for shown, whole in ((panel._session_combo.fit_text(), panel._session_combo.currentText()),
-                             (panel._protective_btn.fit_text(), i18n.t("protBtn"))):
-            assert shown in (whole, "") or (
-                shown.endswith("…") and whole.startswith(shown[:-1])), (lang, shown, whole)
+        for where in ("the window's minimum", "the right column at its floor"):
+            if where == "the right column at its floor":
+                sizes = splitter.sizes()
+                splitter.setSizes([sizes[0], sizes[1] + sizes[2], 0])
+                settle()
+            row = _head_row(panel)
+            said = f"{lang} at {stretch}, {where}, panel {panel.width()} px"
+            assert combo in row and button in row, said
+            for left, right in zip(row, row[1:]):
+                assert left.geometry().right() < right.geometry().left(), (
+                    f"{said}: {type(left).__name__} {left.geometry().left()}.."
+                    f"{left.geometry().right()} runs into {type(right).__name__} from "
+                    f"{right.geometry().left()}")
+            for index in range(combo.count()):
+                if combo.itemText(index):
+                    combo.setCurrentIndex(index)
+                    assert combo.fit_text() == combo.itemText(index), (said, combo.fit_text())
+            # The button gives way first, and never to nothing: whole or cut with «…», and
+            # while cut its hover names it in full.
+            shown, whole = button.fit_text(), i18n.t("protBtn")
+            assert shown and (shown == whole or (
+                shown.endswith("…") and whole.startswith(shown[:-1]))), (said, shown)
+            button.grab()
+            assert (whole in button.hover_tip.text()) == (shown != whole), (
+                said, shown, button.hover_tip.text())
 
-        combo = panel._session_combo
         combo.showPopup()
         try:
             settle()
@@ -1402,3 +1425,5 @@ def test_nothing_in_the_head_row_overlaps_at_the_panel_s_narrowest(monkeypatch, 
     finally:
         i18n.set_language("en")
         window.hide()
+        if app.font() != was:
+            app.setFont(was)

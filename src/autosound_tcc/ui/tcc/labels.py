@@ -7,7 +7,9 @@ and the panel's section headers (`sidebar_section`) need it, and `sidebar_sectio
 
 from __future__ import annotations
 
+import html
 import math
+from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetricsF
@@ -19,6 +21,8 @@ from PySide6.QtWidgets import (
     QStyleOptionButton,
     QStylePainter,
 )
+
+from autosound_tcc.ui.tcc.rounded_tooltip import attach
 
 
 class ElidedLabel(QLabel):
@@ -153,6 +157,8 @@ class ElidedButton(QPushButton):
         # round select beside it in a narrow column (VM-15, the Arbiter: «можна назву на кнопці
         # скоротити до Prot...»). Elided by its font's metrics, down to «…»; the hover names it.
         self._gives_way = gives_way
+        #: A rounded hover the button owns (`set_hover`), or None.
+        self._hover: Optional[str] = None
         # `holds`: the floor is the whole label, as a plain button's is. The detail pane's
         # «закрити ✕» holds (tcc#96, fix round 5): a box layout takes a small shortfall equally
         # from every item that can shrink, and the button shrank beside a title with room to
@@ -239,7 +245,21 @@ class ElidedButton(QPushButton):
         QStylePainter(self).drawControl(QStyle.ControlElement.CE_PushButton, option)
         self._tell_the_full_text(cut=True)
 
+    def set_hover(self, text: str) -> None:
+        """A rounded hover of the button's own, with the whole label above it while the button is
+        cut: «Protection» cut to «…» was named nowhere, its hover explaining it without saying
+        what it is (VM-15, the review's M5)."""
+        self._hover = text
+        if getattr(self, "hover_tip", None) is None:
+            attach(self, text)
+        self._tell_the_full_text(cut=self.fit_text() != self._full)
+
     def _tell_the_full_text(self, cut: bool) -> None:
+        if self._hover is not None:
+            whole = f"<b>{html.escape(self._full)}</b>"
+            self.hover_tip.set_text(f"{whole}<br>{self._hover}" if cut and self._hover else
+                                    whole if cut else self._hover)
+            return
         # Same rule as `ElidedLabel`: skip a widget that already carries one of the app's own
         # rounded tips, or the same words would hover over it twice in two shapes.
         if getattr(self, "hover_tip", None) is not None:

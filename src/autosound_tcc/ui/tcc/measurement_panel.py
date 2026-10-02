@@ -16,12 +16,10 @@ from html import escape
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QSizePolicy,
-    QStyle,
-    QStyleOptionComboBox,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
@@ -547,6 +545,9 @@ class MeasurementPanel(QWidget):
     #: The header's "Protection" button. The panel does not own the dialog: it has neither the
     #: project's channel list nor the writer, and both live where the window already keeps them.
     protectiveRequested = Signal()
+    #: The panel's own floor moved -- its head row's: the round select whole, «Protection» at
+    #: «…», the two icons. The right column follows it (`main_window._fit_right_floor`, VM-15).
+    floorChanged = Signal()
     #: The grid switched to another capture series. The curve window listens: its delay bank is
     #: scoped by series, and a window left open while the panel moves would keep showing the
     #: corrections of a series nobody is looking at any more (user, 2026-08-12).
@@ -624,9 +625,7 @@ class MeasurementPanel(QWidget):
         # capture" to "which step it was used for" (see `show_session`). Stretch 1:4 (not a fixed
         # width) so both keep their ratio if the panel is resized.
         # A `MiniCombo` (VM-15): its open list as wide as its widest row — a plain combo's list is
-        # the closed box's width, and read «next…nd ●», cut in the middle — and its closed box
-        # elided with «…» where the row cannot hold the pick, rather than drawn under its
-        # neighbour.
+        # the closed box's width, and read «next…nd ●», cut in the middle.
         self._session_combo = mini_combo()
         self._fill_session_combo()
         self._session_combo.currentIndexChanged.connect(
@@ -634,11 +633,12 @@ class MeasurementPanel(QWidget):
         )
         # A round id is `cap_001` plus the live-marker dot, and at stretch 1 against the banner's
         # 4 it was eliding to "cap_00…" — a picker whose entries cannot be told apart (user,
-        # 2026-08-11 and again 2026-08-21). It asks for its widest row whole (`AdjustToContents`,
-        # which measures the rows themselves, not `x` widths) and gives it up only after
-        # «Protection» has given up its own (`_fit_session_combo`).
+        # 2026-08-11 and again 2026-08-21). Its floor is its widest row whole: `AdjustToContents`
+        # measures the rows themselves, where `minimumContentsLength` counted `x` widths and came
+        # to less than `cap_002 ●`. Never cut, then: «Protection» gives way, and the right column
+        # is never narrower than this row needs (`floorChanged`, VM-15, Ruling 30).
+        self._session_combo.holds_its_widest_row()
         self._session_tip = attach_tip(self._session_combo)
-        self._fit_session_combo()
         head_row.addWidget(self._session_combo)
 
         # What was in the signal path while this round was measured: a fact about the CAPTURE, one
@@ -647,15 +647,15 @@ class MeasurementPanel(QWidget):
         # finding 31: its own row pushed the list down for one button.
         #
         # It gives way first, elided by its font's metrics (VM-15): «Protection» held its whole
-        # word as its floor, and where the right column is narrower than the row's floors the
+        # word as its floor, and where the right column was narrower than the row's floors the
         # layout drew it over the round select. A stretching item is laid out from its floor, so
         # the select is given its ask before this button gets a pixel past «…»; its `Maximum`
-        # policy keeps it from growing past its whole word.
+        # policy keeps it from growing past its whole word. Cut, its hover names it in full.
         self._protective_btn = ElidedButton(i18n.t("protBtn"), gives_way=True)
         self._protective_btn.setProperty("class", "reason-btn")
         self._protective_btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self._protective_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._protective_tip = attach_tip(self._protective_btn, i18n.t("protBtnTip"))
+        self._protective_btn.set_hover(i18n.t("protBtnTip"))
         self._protective_btn.clicked.connect(self.protectiveRequested.emit)
         head_row.addWidget(self._protective_btn, 1)
         self._version = QLabel("")
@@ -842,7 +842,6 @@ class MeasurementPanel(QWidget):
         self._viewing_id = self._sessions[0].id
         self._session_combo.blockSignals(True)
         self._fill_session_combo()
-        self._fit_session_combo()
         self._session_combo.blockSignals(False)
         self.show_session(self._viewing_id)
 
@@ -866,26 +865,6 @@ class MeasurementPanel(QWidget):
         this: switching back to an earlier series must bring that series' own corrections, not the
         current one's (user, 2026-08-12)."""
         return self._viewing_id
-
-    def _fit_session_combo(self) -> None:
-        """The picker's floor: its frame and its arrow.
-
-        It was the longest id whole, measured off the rows (`minimumContentsLength` counts `x`
-        widths, and `cap_002 ●` is wider): a floor the right column at its own 200-px floor
-        cannot give, and the layout drew «Protection» over it (VM-15). The ask is still the
-        widest row whole (`AdjustToContents`), so a row with room shows it; one without shows it
-        elided by the font's metrics, «Protection» having given way to «…» first -- down to its
-        frame and arrow only at the column's last pixels, where a wide font leaves no more.
-        """
-        # The chrome was a constant of 33 and `серія 6` still came back clipped on a real macOS
-        # build (user, 2026-08-21, second run). Ask the style what its own frame costs instead of
-        # trusting the stylesheet's numbers to be the whole story, and keep a floor under it.
-        style_option = QStyleOptionComboBox()
-        style_option.initFrom(self._session_combo)
-        chrome = self._session_combo.style().sizeFromContents(
-            QStyle.ContentsType.CT_ComboBox, style_option, QSize(0, 0), self._session_combo
-        ).width()
-        self._session_combo.setMinimumWidth(max(chrome, 33))
 
     def show_session(self, session_id: str) -> None:
         """Switch the grid to show `session_id` -- the live session ([0]) is fully interactive
@@ -975,6 +954,16 @@ class MeasurementPanel(QWidget):
         if session.groups:
             self._cols_layout.setRowStretch(max(self._col_next_row), 1)
 
+    def event(self, event) -> bool:  # noqa: N802 (Qt override)
+        """Says when the panel's own floor moved (`floorChanged`): a layout request is what a
+        refill of the round select, a language, a zoom or a theme sends this widget."""
+        if event.type() == QEvent.Type.LayoutRequest:
+            floor = self.minimumSizeHint().width()
+            if floor != self.__dict__.get("_floor"):
+                self._floor = floor
+                self.floorChanged.emit()
+        return super().event(event)
+
     def _fit_fact_buttons(self) -> None:
         """The word button's ask follows its words: a new language is a new width.
 
@@ -1010,7 +999,7 @@ class MeasurementPanel(QWidget):
         # Both of these are WORDS on the button, not glyphs, so the label has to move too -- the
         # icon buttons above only need their tip re-set.
         self._protective_btn.setText(i18n.t("protBtn"))
-        self._protective_tip.set_text(i18n.t("protBtnTip"))
+        self._protective_btn.set_hover(i18n.t("protBtnTip"))
         self._fit_fact_buttons()
 
     # ---- capture-order (item 9) ---------------------------------------------

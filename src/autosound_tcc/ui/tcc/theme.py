@@ -49,6 +49,24 @@ class MiniCombo(QComboBox):
         #: What a row lends this box past its own ask, and its maximum before any was lent (VM-9).
         self._lent = 0
         self._cap: int | None = None
+        #: Whether the floor is the ask itself, the widest row whole (`holds_its_widest_row`).
+        self._holds_widest = False
+
+    def holds_its_widest_row(self) -> None:
+        """Make the floor the box's own ask, its widest row whole (`AdjustToContents`).
+
+        Qt's own minimum hint is cached from the rows the box had when it was first asked and is
+        not measured again on a refill: the round select, refilled in German, kept the floor of
+        its English rows and read «nächste Rund…» at it (VM-15, Ruling 30). The ask is re-measured
+        on every refill, font and style, so the floor follows it."""
+        self._holds_widest = True
+        self.updateGeometry()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 (Qt override)
+        hint = super().minimumSizeHint()
+        if self._holds_widest:
+            hint.setWidth(self._own_ask().width())
+        return hint
 
     def takes_spare_room(self) -> None:
         """Let a row lend this box its spare width, as far as the pick whole (VM-9).

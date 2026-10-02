@@ -337,6 +337,9 @@ def _mini_combo() -> QComboBox:
 
 _ZOOM_MIN, _ZOOM_MAX, _ZOOM_STEP = 0.8, 1.5, 0.1
 
+#: A side column's floor (the right one rises to its measurement panel's, `_fit_right_floor`).
+_SIDE_MIN_PX = 200
+
 
 def _ago(iso_timestamp: str) -> str:
     """Human "how long ago" for the reviewer status, in the reader's language («just now» stood in
@@ -878,7 +881,10 @@ class MainWindow(QMainWindow):
         # grew past the screen edge -- reported exactly that way. The handle still works.
         for side in (self._left, self._right):
             side.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            side.setMinimumWidth(200)
+            side.setMinimumWidth(_SIDE_MIN_PX)
+        # ...and the right one never narrower than the measurement panel's head row: below it,
+        # «Protection» was drawn over the round select (VM-15, Ruling 30).
+        self._fit_right_floor()
         outer.addWidget(splitter, stretch=1)
 
         outer.addWidget(self._build_footer())
@@ -3263,6 +3269,25 @@ class MainWindow(QMainWindow):
             self._detail.set_back(None)
             self._detail.open_eq(group, row)
 
+    def _fit_right_floor(self) -> None:
+        """The right column's floor: 200 px, or what the measurement panel's head row needs if
+        that is more -- the round select's widest id whole, «Protection» at «…», the two icons
+        (VM-15, Ruling 30). A flat 200 is narrower than that row, and the layout drew «Protection»
+        over the select; the select's floor is the Arbiter's own rule (2026-08-11, 2026-08-21: the
+        rounds must be told apart), so it is the column that follows. Asked again whenever the
+        panel's floor moves (`MeasurementPanel.floorChanged`): a new round, a language, a zoom."""
+        right, panel = self.__dict__.get("_right"), self.__dict__.get("_meas_panel")
+        if right is None or panel is None:
+            return
+        card = self._meas_card
+        frame = card.width() - card.contentsRect().width()
+        floor = max(_SIDE_MIN_PX, panel.minimumSizeHint().width() + frame)
+        if floor != right.minimumWidth():
+            right.setMinimumWidth(floor)
+            # The centre's floor is capped against the sides' (two thirds of the screen, #106).
+            if self.__dict__.get("_center") is not None and self.__dict__.get("_main_splitter"):
+                self._fit_centre_floor()
+
     def _fit_centre_floor(self) -> None:
         """The full window's minimum: as wide as its tables and the pane's tabs need to read whole
         (tcc#106, TEST-FINDINGS 114).
@@ -3498,6 +3523,7 @@ class MainWindow(QMainWindow):
 
         meas_panel = _panel()
         meas_panel.setProperty("class", "panel meas-card")
+        self._meas_card = meas_panel
         meas_layout = QVBoxLayout(meas_panel)
         meas_layout.setContentsMargins(0, 0, 0, 0)
         meas_head, self._meas_title, self._meas_sub = _phead("focus", "measSub")
@@ -3541,6 +3567,7 @@ class MainWindow(QMainWindow):
         self._plan_panel.sessionRequested.connect(self._meas_panel.show_session)
         self._meas_panel.curvesRequested.connect(self._open_curves_from_panel)
         self._meas_panel.protectiveRequested.connect(self._open_protective)
+        self._meas_panel.floorChanged.connect(self._fit_right_floor)
 
         return container
 
