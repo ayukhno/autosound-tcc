@@ -155,7 +155,8 @@ class Report:
 
 @dataclass(frozen=True)
 class Sent:
-    """`reason` is "" when the form confirmed, else "unconfirmed", "network", "http" or "no_form".
+    """`reason` is "" when the form confirmed, else "unconfirmed", "network", "http", "no_form" or
+    "no_sender" (an older method asks who is writing; nothing was posted).
 
     `status` is the HTTP status the form answered with, 0 when nothing answered.
     """
@@ -265,18 +266,39 @@ def _post(url: str, data: bytes, timeout: float) -> tuple[int, str]:
         return response.status, response.read().decode("utf-8", "replace")
 
 
+def _wants_a_sender(gate, report: Report) -> bool:
+    """Whether the method refused `report` for its empty sender alone — a method older than
+    v3.0.65, which asks who is writing (hub #228). Asked of the method with the same report signed,
+    not of its words: they are English, and its own to change."""
+    if report.sender.strip():
+        return False
+    try:
+        gate.form_answers("?", report.kind, report.message, report.impact, report.versions)
+    except ValueError:
+        return False
+    return True
+
+
 def send(report: Report, *, url: str = "", post=None, timeout: float = 0.0) -> Sent:
     """Post `report` to the form and say whether the form confirmed it.
 
     Raises only for a report the form would not take (`fields`); a network, a form that says no,
-    and a method that is not installed are all a `Sent`. The address, the timeout and the verdict
+    and a method that is not installed are all a `Sent`. So is an empty sender an older method
+    refuses (`no_sender`, tcc#129): the window showed its ValueError as «Not sent: ValueError: …»,
+    and the cure is an update or a contact, nothing sent. The address, the timeout and the verdict
     on the answer are the gate's — `url` and `timeout` are for a test, not for a caller choosing
     where a person's words go.
     """
     gate = _form_gate()
     if gate is None:
         return Sent(False, "no_form", "no method installed, so there is no form to send to")
-    data = urllib.parse.urlencode(fields(report)).encode("utf-8")
+    try:
+        answers = fields(report)
+    except ValueError:
+        if not _wants_a_sender(gate, report):
+            raise
+        return Sent(False, "no_sender", "the method on this computer asks who is writing")
+    data = urllib.parse.urlencode(answers).encode("utf-8")
     try:
         status, body = (post or _post)(url or post_url(), data, timeout or timeout_s())
     except urllib.error.HTTPError as exc:

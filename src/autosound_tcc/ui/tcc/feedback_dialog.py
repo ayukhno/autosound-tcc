@@ -539,9 +539,13 @@ class FeedbackDialog(QDialog):
         # Nothing a person wrote is lost to a network: the whole report goes to the clipboard.
         QGuiApplication.clipboard().setText(form_report.as_text(self._outgoing))
         # A form that answered and turned the report away has most likely moved under this TCC,
-        # and an update is the cure; a network keeps its own words (hub #231 ask 4, tcc#121).
-        self._say(i18n.t("fbFormRefused") if result.form_refused
-                  else i18n.t("fbNotSent").format(problem=result.detail))
+        # and an update is the cure; a network keeps its own words (hub #231 ask 4, tcc#121). A
+        # method older than v3.0.65 asks who is writing: its update, or a contact (tcc#129).
+        if result.reason == "no_sender":
+            self._say(i18n.t("fbSenderOld"))
+        else:
+            self._say(i18n.t("fbFormRefused") if result.form_refused
+                      else i18n.t("fbNotSent").format(problem=result.detail))
         self._send.setEnabled(True)
 
     def _on_send(self) -> None:

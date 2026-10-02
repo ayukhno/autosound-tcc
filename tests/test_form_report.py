@@ -101,6 +101,44 @@ def test_a_report_without_words_is_refused_and_one_without_a_sender_is_not():
         form_report.fields(_report(message="  "))
 
 
+#: A method older than v3.0.65 asked for a sender, in its own words (hub #228 took it away).
+_OLDER_REFUSAL = ("the form asks who is writing -- a name and a contact the Arbiter can answer; "
+                  "ask the person")
+
+
+def _older_method(monkeypatch):
+    """The gate as a method older than v3.0.65 had it: an empty sender refused."""
+    newer = _GATE.form_answers
+
+    def form_answers(sender, kind, message, impact="", versions=""):
+        if not str(sender or "").strip():
+            raise ValueError(_OLDER_REFUSAL)
+        return newer(sender, kind, message, impact, versions)
+
+    monkeypatch.setattr(_GATE, "form_answers", form_answers)
+
+
+def test_an_older_method_that_wants_a_sender_is_told_and_nothing_is_posted(monkeypatch):
+    """tcc#129: an installed method older than v3.0.65 refuses an empty sender, and the window
+    showed its ValueError as «Not sent: ValueError: …», in English, with no way on. Told by the
+    same report signed passing — not by the method's words — and nothing reaches the form."""
+    _older_method(monkeypatch)
+    posted = []
+
+    def post(*args):
+        posted.append(args)
+        return 200, "usp=form_confirm"
+
+    got = form_report.send(_report(sender="  "), post=post)
+    assert not got.ok and got.reason == "no_sender" and posted == []
+    assert form_report.send(_report(), post=post).ok, "signed, the same report goes"
+    # Any other refusal is still the caller's, not read as the sender.
+    for report in (_report(sender="", message="  "), _report(sender="", kind="bug")):
+        with pytest.raises(ValueError):
+            form_report.send(report, post=post)
+    assert len(posted) == 1
+
+
 def test_a_kind_or_an_impact_outside_the_forms_list_is_refused():
     with pytest.raises(ValueError):
         form_report.fields(_report(kind="bug"))

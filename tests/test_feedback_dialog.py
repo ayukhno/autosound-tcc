@@ -443,6 +443,57 @@ def test_the_update_line_names_the_menu_item_as_the_menu_calls_it():
         assert f"→ {item})" in i18n.T[lang]["fbFormRefused"], lang
 
 
+def test_an_older_method_that_wants_a_sender_says_to_update_it(monkeypatch):
+    """tcc#129: a method older than v3.0.65 refuses an empty sender (hub #228), and the window
+    said «Not sent: ValueError: the form asks who is writing …» — English in a Ukrainian window,
+    and no way on. Now it says to update the method, or to fill in a contact; nothing is posted,
+    and the words are on the clipboard as for every report the form did not take."""
+    from PySide6.QtGui import QGuiApplication
+
+    from autosound_tcc.core import form_report
+    from autosound_tcc.ui.tcc import i18n
+
+    gate = form_report._form_gate()
+    if gate is None:
+        pytest.skip("no method with the form route")
+    newer = gate.form_answers
+
+    def older(sender, kind, message, impact="", versions=""):
+        if not str(sender or "").strip():
+            raise ValueError("the form asks who is writing -- a name and a contact the Arbiter "
+                             "can answer; ask the person")
+        return newer(sender, kind, message, impact, versions)
+
+    monkeypatch.setattr(gate, "form_answers", older)
+    posted = []
+    monkeypatch.setattr(form_report, "_post", lambda *args: posted.append(args) or (200, ""))
+    send = form_report.send
+    dialog, calls = _form_dialog(monkeypatch, send=lambda report, url: send(report, url=url))
+    _ready(dialog, words="the window froze", sender="")
+
+    dialog._on_send()
+    _wait_for_send(dialog)
+
+    assert len(calls) == 1 and posted == []
+    assert dialog._status.text() == i18n.t("fbSenderOld")
+    assert "ValueError" not in dialog._status.text()
+    assert "the window froze" in QGuiApplication.clipboard().text()
+    assert dialog._send.isEnabled(), "and it can be sent again, signed or after the update"
+
+
+def test_the_older_method_line_names_where_the_update_is():
+    """Update the method, not TCC: the method refuses. The path down to the tab, as the menu and
+    the tab call themselves; plain Ukrainian."""
+    from autosound_tcc.ui.tcc import i18n
+
+    for lang in ("uk", "en"):
+        item = i18n.T[lang]["menuDiagnostics"].rstrip("…")
+        said = i18n.T[lang]["fbSenderOld"]
+        assert f"→ {item} → {i18n.T[lang]['diagTabUpdates']})" in said, lang
+        assert i18n.T[lang]["fbFrom"].rstrip(":") in said, lang
+        assert "ValueError" not in said and "TCC" not in said, lang
+
+
 def test_an_empty_report_is_not_sent(monkeypatch):
     from autosound_tcc.ui.tcc import i18n
 
