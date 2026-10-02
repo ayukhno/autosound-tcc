@@ -142,14 +142,19 @@ def test_the_offer_starts_the_in_app_session(tmp_path, monkeypatch):
 
 def test_the_offer_starts_the_terminal_the_project_was_created_with(tmp_path, monkeypatch):
     window, _ = _window(tmp_path, monkeypatch)
-    launched = []
+    launched, envs = [], []
     monkeypatch.setattr(main_window.terminal_launcher, "launch",
-                        lambda project_dir, cli, hint, model=None: launched.append((cli, hint, model)))
+                        lambda project_dir, cli, hint, model=None, env=None:
+                        launched.append((cli, hint, model)) or envs.append(env))
+    monkeypatch.setattr(main_window.critic, "session_env",
+                        lambda project_dir: {"AUTOSOUND_CRITIC_VIA": "cli"})
     window._intake_terminal_cli, window._intake_terminal_model = "claude", "opus"
     window._start_after_intake()
     cli, hint, model = launched[0]
     assert (cli, model) == ("claude", "opus")
     assert i18n.language_name() in hint
+    # The reviewer's route rides with the terminal session (hub #236, tcc#134).
+    assert envs == [{"AUTOSOUND_CRITIC_VIA": "cli"}]
 
 
 class _Dialog:

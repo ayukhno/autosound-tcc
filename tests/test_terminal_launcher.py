@@ -456,3 +456,59 @@ def test_windows_runs_the_update_script_by_name_from_its_own_folder(recorded, mo
         assert recorded[0] == ["cmd", "/k", "tcc-update.cmd"]
         assert recorded.kwargs["cwd"] == str(script.parent)
     assert recorded.kwargs.get("shell") is not True
+
+
+_PICK_ENV = {"AUTOSOUND_CRITIC_MODEL": "gemini-3.8-flash-high", "AUTOSOUND_CRITIC_VIA": "cli"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="AppleScript: the command this builds exists only on macOS")
+def test_macos_terminal_session_gets_the_reviewers_model_and_route(recorded, monkeypatch, tmp_path):
+    """hub #236, tcc#134 (task 9 review, I1): the terminal session is the other front-end; its
+    own run of the method must follow the footer's route, not a stored key. Neither Terminal nor
+    iTerm passes TCC's environment through osascript, so the variables ride in the line."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+
+    launch(tmp_path, "claude", env=_PICK_ENV)
+
+    script = recorded[0][2]
+    assert "exec env AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high AUTOSOUND_CRITIC_VIA=cli claude" in script
+
+
+def test_windows_terminal_session_gets_the_reviewers_model_and_route(recorded, monkeypatch, tmp_path):
+    """`wt` does not pass the caller's environment either: with one, the `cmd /k` branch sets it."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+
+    launch(tmp_path, "claude", env=_PICK_ENV)
+
+    assert recorded[0][:5] == ["wt", "-d", str(tmp_path), "cmd", "/k"], recorded[0]
+    assert recorded[0][5].startswith(
+        'set "AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high" && '
+        'set "AUTOSOUND_CRITIC_VIA=cli" && "claude"'), recorded[0][5]
+
+
+def test_windows_console_session_gets_them_too(recorded, monkeypatch, tmp_path):
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(
+        terminal_launcher.shutil, "which", lambda name: None if name == "wt" else f"C:/{name}")
+
+    launch(tmp_path, "claude", env=_PICK_ENV)
+
+    assert recorded[0][:2] == ["cmd", "/k"]
+    assert recorded[0][2].startswith('set "AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high" && ')
+
+
+def test_linux_terminal_session_gets_them_too(recorded, monkeypatch, tmp_path):
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "linux")
+
+    launch(tmp_path, "claude", env=_PICK_ENV)
+
+    assert "exec env AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high AUTOSOUND_CRITIC_VIA=cli claude" \
+        in " ".join(recorded[0])
+
+
+def test_no_env_keeps_every_line_as_it_was(recorded, monkeypatch, tmp_path):
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+
+    launch(tmp_path, "claude", env={})
+
+    assert recorded[0] == ["wt", "-d", str(tmp_path), "claude"]

@@ -2796,8 +2796,11 @@ class MainWindow(QMainWindow):
             return
         hint = i18n.t("npOnboardingHint").format(language=i18n.language_name())
         try:
+            # The reviewer's model and route go with it (hub #236): the terminal session's own run
+            # of the method follows the footer, not a stored key.
             terminal_launcher.launch(config.project_dir(), cli=cli, hint=hint,
-                                     model=getattr(self, "_intake_terminal_model", None))
+                                     model=getattr(self, "_intake_terminal_model", None),
+                                     env=critic.session_env(config.project_dir()))
         except terminal_launcher.TerminalLaunchError as exc:
             self._status_strip.notify(str(exc), level="warn")
 
@@ -4668,8 +4671,10 @@ class MainWindow(QMainWindow):
         model = model_choices.reviewer_model(choice)
         server.bus.push(
             signal_bus.REVIEWER, model=model, label=choice.label, route=choice.harness,
+            # Both variables the shell was started with (hub #236): the route went stale with it.
             note=("call_critic uses it from now on; this session's shell still has the previous "
-                  "reviewer in AUTOSOUND_CRITIC_MODEL, so do not run the reviewer script directly"),
+                  "reviewer in AUTOSOUND_CRITIC_MODEL and its route in AUTOSOUND_CRITIC_VIA, so do "
+                  "not run the reviewer script directly"),
         )
         self._dialog._add_system_message(i18n.t("criticChangedSent").format(label=choice.label))
 
@@ -5996,7 +6001,8 @@ class MainWindow(QMainWindow):
             cli, model, extra = "claude", choice.model, ()
         try:
             launched = terminal_launcher.launch(
-                project_dir, cli=cli, model=model, extra=extra
+                project_dir, cli=cli, model=model, extra=extra,
+                env=critic.session_env(project_dir),  # the reviewer's route, as in-app (hub #236)
             )
         except terminal_launcher.TerminalLaunchError as exc:
             self._status_strip.notify(str(exc), level="warn")

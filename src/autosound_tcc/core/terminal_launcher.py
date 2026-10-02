@@ -85,6 +85,7 @@ def _posix_command(
     hint: Optional[str] = None,
     model: Optional[str] = None,
     extra: tuple[str, ...] = (),
+    env: Optional[dict] = None,
 ) -> str:
     """The shell line the terminal will run: enter the project, then hand over to the CLI.
 
@@ -94,10 +95,22 @@ def _posix_command(
     whatever the shell printed a moment earlier -- an `echo` before `exec` was confirmed
     (2026-07-29 dogfood) to render as nothing at all once the TUI took over.
     """
+    # The reviewer's model and route ride IN the line (hub #236, tcc#134): neither Terminal nor
+    # iTerm through osascript, nor a Linux terminal, hands the CLI TCC's own environment.
+    setting = "".join(f"{key}={shlex.quote(str(value))} " for key, value in (env or {}).items())
     return (
         f"cd {shlex.quote(str(project_dir))} && "
-        f"exec {_posix_cli_invocation(cli, hint, model, extra)}"
+        f"exec {'env ' + setting if setting else ''}{_posix_cli_invocation(cli, hint, model, extra)}"
     )
+
+
+def _win_setting(env: Optional[dict]) -> str:
+    """`set "K=V" && ` for each variable: what `cmd /k` runs before the CLI (hub #236, tcc#134).
+
+    `wt` does not pass the caller's environment to what it starts, so the line carries it. The
+    quotes around `K=V` keep `&` and spaces in a value literal.
+    """
+    return "".join(f'set "{key}={value}" && ' for key, value in (env or {}).items())
 
 
 def run_line(line: str) -> None:
@@ -281,8 +294,9 @@ def _launch_macos(
     hint: Optional[str] = None,
     model: Optional[str] = None,
     extra: tuple[str, ...] = (),
+    env: Optional[dict] = None,
 ) -> None:
-    command = _posix_command(project_dir, cli, hint, model, extra)
+    command = _posix_command(project_dir, cli, hint, model, extra, env)
     app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
     _yield_focus_to(app)
     _osascript(_mac_script(app, command))
@@ -294,14 +308,15 @@ def _launch_windows(
     hint: Optional[str] = None,
     model: Optional[str] = None,
     extra: tuple[str, ...] = (),
+    env: Optional[dict] = None,
 ) -> None:
     if shutil.which("wt"):
         argv = ["wt", "-d", str(project_dir)]
         # Plain case stays exactly the original bare-argv shape; a hint or model needs a single
         # `wt` argument, which only cmd /k can express as one string.
         argv += (
-            ["cmd", "/k", _win_cli_invocation(cli, hint, model, extra)]
-            if (hint or model or extra)
+            ["cmd", "/k", _win_setting(env) + _win_cli_invocation(cli, hint, model, extra)]
+            if (hint or model or extra or env)
             else [cli]
         )
         subprocess.Popen(argv, close_fds=True)
@@ -318,7 +333,7 @@ def _launch_windows(
     # this is self-harm rather than an attack — which is the kind that actually happens.
     #
     # `cwd` is not an escaping trick that has to be got right; it is the path not being text.
-    inner = _win_cli_invocation(cli, hint, model, extra)
+    inner = _win_setting(env) + _win_cli_invocation(cli, hint, model, extra)
     subprocess.Popen(
         ["cmd", "/k", inner], close_fds=True, cwd=str(project_dir), **child.wants_a_console()
     )
@@ -330,8 +345,9 @@ def _launch_linux(
     hint: Optional[str] = None,
     model: Optional[str] = None,
     extra: tuple[str, ...] = (),
+    env: Optional[dict] = None,
 ) -> None:
-    command = _posix_command(project_dir, cli, hint, model, extra)
+    command = _posix_command(project_dir, cli, hint, model, extra, env)
     candidates = (
         (["x-terminal-emulator", "-e"], True),
         (["gnome-terminal", "--working-directory", str(project_dir), "--"], False),
@@ -354,6 +370,7 @@ def launch(
     hint: Optional[str] = None,
     model: Optional[str] = None,
     extra: tuple[str, ...] = (),
+    env: Optional[dict] = None,
 ) -> str:
     """Open a terminal in `project_dir` running `cli`. Returns the CLI that was launched.
 
@@ -368,6 +385,10 @@ def launch(
     `extra`, if given, is passed verbatim before `--model` -- omp needs `--config <overlay>` or
     TCC's MCP tools stay behind `xd://` and never enter the model's function list, which would
     make this front-end quietly weaker than the in-app one for no visible reason.
+
+    `env`, if given, is set for the CLI in the line itself -- the reviewer's model and route
+    (`critic.session_env`, hub #236): no terminal TCC drives passes on TCC's own environment, and
+    without them a session's own run of the method went to the API on a stored key.
 
     Raises `TerminalLaunchError` if no agent CLI is installed or no terminal can be driven — the
     caller is expected to turn that into a message, since "nothing happened" after clicking a
@@ -391,11 +412,11 @@ def launch(
     # semantics, so the mismatch shows up as a bogus "not a directory" rather than as itself.
     try:
         if sys.platform == "darwin":
-            _launch_macos(project_dir, cli, hint, model, extra)
+            _launch_macos(project_dir, cli, hint, model, extra, env)
         elif sys.platform.startswith("win"):
-            _launch_windows(project_dir, cli, hint, model, extra)
+            _launch_windows(project_dir, cli, hint, model, extra, env)
         else:
-            _launch_linux(project_dir, cli, hint, model, extra)
+            _launch_linux(project_dir, cli, hint, model, extra, env)
     except (OSError, subprocess.CalledProcessError) as exc:
         raise TerminalLaunchError(f"could not open a terminal: {exc}") from exc
     return cli

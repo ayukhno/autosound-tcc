@@ -1015,6 +1015,27 @@ def test_a_claude_pick_opens_claude(monkeypatch):
     assert seen["extra"] == ()
 
 
+def test_the_terminal_session_carries_the_reviewers_route(monkeypatch):
+    """hub #236, tcc#134 (task 9 review, I1): the terminal is the other front-end, and its own run
+    of the method follows the footer's route as the in-app session does."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+    monkeypatch.setattr(main_window.critic, "session_env",
+                        lambda project_dir: {"AUTOSOUND_CRITIC_MODEL": "m", "AUTOSOUND_CRITIC_VIA": "cli"})
+    seen = {}
+    monkeypatch.setattr(
+        main_window.terminal_launcher,
+        "launch",
+        lambda project_dir, **kw: seen.update(kw) or kw["cli"],
+    )
+
+    window._open_terminal()
+
+    assert seen["env"] == {"AUTOSOUND_CRITIC_MODEL": "m", "AUTOSOUND_CRITIC_VIA": "cli"}
+
+
 def test_the_sdk_is_named_in_the_generator_picker(monkeypatch):
     """Which harness carries the model is the licensing split; it is named, not inferred."""
     _catalogue(monkeypatch, [])
