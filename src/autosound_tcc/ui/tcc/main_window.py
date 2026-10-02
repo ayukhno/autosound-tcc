@@ -1425,12 +1425,12 @@ class MainWindow(QMainWindow):
             ai_effort.setItemData(
                 ai_effort.count() - 1, i18n.t(f"effortTip_{level}"), Qt.ItemDataRole.ToolTipRole
             )
-        # The other two pickers get their floor from `_cap_combo_width`; this one is not capped
-        # (its rows are short, so its widest row is not a problem) and so had none -- min and hint
-        # were the same number and it could not give up a pixel either (TODO F-060). A layout takes
-        # an explicit minimum in place of the minimum hint, so the box keeps its natural width
-        # while the row has room.
-        ai_effort.setMinimumWidth(62)
+        # No floor below its widest value: its own minimum hint, «x-high» whole in every language.
+        # It had an explicit 62 px (TODO F-060) so that it could give a pixel too, and in a narrow
+        # German window it gave all of them: the longer «KI MAIN», «AUFWAND» and «KI CRITIC» left
+        # it «…» (VM-13). The Arbiter: never narrower than its widest value; the model pickers,
+        # which may elide, give way instead. Its hint is the same number, so a roomy row is as
+        # before, and the full window's floor stays the header's in every font measured.
         self._ai_effort_combo = ai_effort
         ai_effort.currentIndexChanged.connect(self._on_effort_changed)
         layout.addWidget(ai_effort)

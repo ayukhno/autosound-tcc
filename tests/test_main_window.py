@@ -3743,6 +3743,51 @@ def test_a_roomy_footer_shows_the_reviewer_whole_and_a_narrow_one_keeps_its_floo
         f"its own {asks}: the room came out of the row\n{_row_width_report(window, footer)}")
 
 
+@pytest.mark.parametrize("stretch", [100, 141, 175, 200])
+def test_a_narrow_german_footer_keeps_the_effort_box_whole(monkeypatch, stretch):
+    """VM-13 (the Windows VM): in a narrow German window the effort box read «…» — «KI MAIN»,
+    «AUFWAND» and «KI CRITIC» are longer than the English, and the box gave way with the rest
+    down to its 62-px floor. The Arbiter: the effort box is never narrower than its widest value
+    («x-high», the same in all four languages); the model pickers give way instead, and may elide.
+    Under the window's sheet, at the window's own floor and at 1280 px, in the Mac's font and
+    stretched about as wide as the Windows runner's and wider (the wide-font emulation's
+    `WIDE_STRETCH` values), the box draws «x-high» whole."""
+    from PySide6.QtGui import QFont, QFontDatabase
+
+    app = _app()
+    was = QFont(app.font())
+    font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+    font.setStretch(stretch)
+    if app.font() != font:
+        app.setFont(font)
+    try:
+        window = MainWindow()
+        monkeypatch.setattr(window, "_refresh_cli_catalogue", lambda force=False: None)
+        window.show()
+        _let_it_settle()
+        window._on_language_selected("de")
+        _let_it_settle()
+        effort = window._ai_effort_combo
+        widest = max((effort.itemText(i) for i in range(effort.count())),
+                     key=effort.fontMetrics().horizontalAdvance)
+        assert widest == "x-high", widest
+        footer = effort.parentWidget()
+        for width in (window.minimumSizeHint().width(), 1280):
+            window.resize(width, 820)
+            _let_it_settle()
+            for index in range(effort.count()):
+                effort.setCurrentIndex(index)
+                assert effort.fit_text() == effort.itemText(index), (
+                    f"at {window.width()} px the effort box reads «{effort.fit_text()}», "
+                    f"{effort.width()} px wide\n{_row_width_report(window, footer)}")
+        assert window._ai_critic_combo.width() < window._ai_critic_combo.sizeHint().width(), (
+            "the pickers gave way instead: at the floor the reviewer is the one cut")
+    finally:
+        i18n.set_language("en")
+        if app.font() != was:
+            app.setFont(was)
+
+
 #: The output table's columns that read whole at the full window's minimum (tcc#106, finding 114:
 #: «300 …», «NO…», «GAIN DE», «ELAY M» on the Arbiter's screenshot): the crossovers, the gain, the
 #: delay and the polarity.
