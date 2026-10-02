@@ -1705,15 +1705,6 @@ def test_the_rew_line_of_a_method_that_does_not_send_the_key_is_unchanged():
 # ---- omp, agy, gh and Claude Code (tcc#98) ------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _nothing_learned_by_an_earlier_update(monkeypatch):
-    """What an update learned lives as long as TCC's process (tcc#138), and every test here is the
-    same process: one test's update would grey the next one's row."""
-    from autosound_tcc.ui.tcc import diagnostics_panel
-
-    monkeypatch.setattr(diagnostics_panel, "_UPDATED_TO", {}, raising=False)
-
-
 def _tool(name, here, there, updatable=True):
     from autosound_tcc.core import updates
 
@@ -2080,6 +2071,97 @@ def test_what_an_update_learned_outlives_the_window_it_was_learned_in(monkeypatc
     label, button = second._tool_rows["agy"]
     assert label.text() == i18n.t("updToolSame").format(name="agy", here="1.2.15")
     assert not button.isEnabled()
+
+
+def _update_all_answering(monkeypatch, dialog, *rows) -> None:
+    """«Update all», with the skill's `tools` answering `rows`."""
+    from autosound_tcc.core import updates
+
+    monkeypatch.setattr(updates, "update_tools", lambda names: updates.ToolsUpdate(tuple(rows)))
+    dialog._tools_all_btn.click()
+    _finish_tools(dialog)
+
+
+def test_what_an_update_learned_lapses_after_twelve_hours(monkeypatch):
+    """Ruling 3 on tcc#138: what the update learned has an end besides the tool's version. agy's
+    source and a native Claude Code's never name a version, so without one a TCC left open
+    overnight would say «already the newest», with «Update» off, over a release that came out in
+    the night. The update's word stands for the working session it was said in: twelve hours."""
+    from autosound_tcc.core import updates
+    from autosound_tcc.ui.tcc import diagnostics_panel
+
+    learned = time.time()
+    monkeypatch.setattr(diagnostics_panel.time, "time", lambda: learned)
+    dialog = _tools_shown(monkeypatch, _tool("claude", "2.1.286", ""))
+    _update_all_answering(monkeypatch, dialog,
+                          updates.ToolUpdate("claude", True, "2.1.286", "2.1.287"))
+
+    monkeypatch.setattr(diagnostics_panel.time, "time", lambda: learned + 12 * 3600 - 60)
+    _re_check(monkeypatch, dialog, _tool("claude", "2.1.287", ""))
+    assert dialog._tool_rows["claude"][0].text() == i18n.t("updToolSame").format(
+        name="Claude Code", here="2.1.287"), "a minute short of twelve hours: still the update's"
+
+    monkeypatch.setattr(diagnostics_panel.time, "time", lambda: learned + 12 * 3600)
+    _re_check(monkeypatch, dialog, _tool("claude", "2.1.287", ""))
+
+    label, button = dialog._tool_rows["claude"]
+    assert label.text() == i18n.t("updToolUnknown").format(name="Claude Code", here="2.1.287")
+    assert button.isEnabled(), "the person may update again"
+
+
+def test_the_receipt_names_the_version_the_row_showed(monkeypatch):
+    """Finding 140 on the VM: Claude Code read 2.1.286, «Update all» left it on 2.1.287, and its
+    receipt said «2.1.287: already the newest». A native Claude Code updates itself in the
+    background, and the skill reads `old` at the press — after that move. The person saw 2.1.286 on
+    the row, and the receipt is about that row (review of tcc#138, M1). A tool the row showed on the
+    version it stayed on is still «already the newest»."""
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch, _tool("claude", "2.1.286", ""), _tool("agy", "1.2.15", ""))
+    _update_all_answering(monkeypatch, dialog,
+                          updates.ToolUpdate("claude", True, "2.1.287", "2.1.287"),
+                          updates.ToolUpdate("agy", True, "1.2.15", "1.2.15"))
+
+    assert dialog._tool_rows["claude"][0].text() == i18n.t("updToolDone").format(
+        name="Claude Code", old="2.1.286", new="2.1.287")
+    assert dialog._tool_rows["agy"][0].text() == i18n.t("updToolSame").format(
+        name="agy", here="1.2.15")
+
+
+def test_a_tool_that_would_not_say_its_version_keeps_what_the_update_learned(monkeypatch):
+    """`--version` that fails or runs past the skill's timeout is an empty version (`upkeep.py`
+    `tool_version`): a slow VM, a binary in the middle of its swap. The tool would not say — not
+    that it is on another version — so the next Re-check that hears 2.1.287 still has the update's
+    word, and does not offer it again (review of tcc#138, M2)."""
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch, _tool("claude", "2.1.286", ""))
+    _update_all_answering(monkeypatch, dialog,
+                          updates.ToolUpdate("claude", True, "2.1.286", "2.1.287"))
+    _re_check(monkeypatch, dialog, _tool("claude", "", ""))
+
+    _re_check(monkeypatch, dialog, _tool("claude", "2.1.287", ""))
+
+    label, button = dialog._tool_rows["claude"]
+    assert label.text() == i18n.t("updToolSame").format(name="Claude Code", here="2.1.287")
+    assert not button.isEnabled()
+
+
+def test_a_failed_update_teaches_nothing(monkeypatch):
+    """The skill writes `new` for a tool that did not update too: the version it was left on. That
+    is no word on the newest, so a Re-check reads «unknown» with «Update» live — not «already the
+    newest» over a «not updated» the person has just seen (review of tcc#138, M3)."""
+    from autosound_tcc.core import updates
+
+    dialog = _tools_shown(monkeypatch, _tool("agy", "1.2.15", ""))
+    _update_all_answering(monkeypatch, dialog, updates.ToolUpdate(
+        "agy", False, "1.2.15", "1.2.15", "agy: the update server did not answer"))
+
+    _re_check(monkeypatch, dialog, _tool("agy", "1.2.15", ""))
+
+    label, button = dialog._tool_rows["agy"]
+    assert label.text() == i18n.t("updToolUnknown").format(name="agy", here="1.2.15")
+    assert button.isEnabled()
 
 
 @pytest.mark.parametrize("lang", [code for code, _key, _badge in i18n.LANGS])

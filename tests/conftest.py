@@ -489,6 +489,11 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
                         raising=False)
     monkeypatch.setattr(updates, "update_tools",
                         lambda names: updates.ToolsUpdate((), "offline in tests"), raising=False)
+    # ...and what an update taught those rows, which lives as long as the process (tcc#138): one
+    # test's update would grey the row of whichever test the same worker runs next.
+    from autosound_tcc.ui.tcc import diagnostics_panel
+
+    monkeypatch.setattr(diagnostics_panel, "_UPDATED_TO", {})
     # ...and no modal question waits for a person who is not there. A first capture round with no
     # series asks for its number (hub #153 A); in a test nobody answers, and a real QInputDialog
     # holds the whole run — it did, for five minutes, on the first try. Cancel is the answer here;

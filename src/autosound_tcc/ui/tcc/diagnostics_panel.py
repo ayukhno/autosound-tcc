@@ -200,10 +200,16 @@ _SESSION_TOOLS = ("omp", "claude")
 #: The version an update in this run of TCC left each tool on, by name (finding 140, tcc#138). agy's
 #: source and a native Claude Code's cannot tell their newest without installing, so a Re-check
 #: straight after the update read «unknown» with «Update» live again — while the update itself had
-#: just installed the newest. What it reported is the newest until the tool says another version.
-#: The process's and not a window's: the tools are the machine's, and a new project opens a new
-#: window with a new diagnostics window in the same run.
-_UPDATED_TO: dict[str, str] = {}
+#: just installed the newest. What it reported is the newest until the tool says another version,
+#: or for `_LEARNED_FOR_S`. The process's and not a window's: the tools are the machine's, and a
+#: new project opens a new window with a new diagnostics window in the same run. Name -> (version,
+#: `time.time()` when the update reported it).
+_UPDATED_TO: dict[str, tuple[str, float]] = {}
+#: How long what an update learned stands in for a source that cannot tell (Ruling 3 on tcc#138):
+#: the working session it was learned in, not the night after, when a newer one may be out — those
+#: sources never name one, so nothing else would end it. The wall clock, not `time.monotonic()`,
+#: which on macOS may not count the hours the Mac sleeps.
+_LEARNED_FOR_S = 12 * 3600
 
 
 def _tool_title(name: str) -> str:
@@ -212,9 +218,11 @@ def _tool_title(name: str) -> str:
 
 
 def _updated_to_newest(tool) -> bool:
-    """The tool's source cannot tell, and it is on the version an update in this run left it on."""
-    return (not tool.available and bool(tool.installed)
-            and _UPDATED_TO.get(tool.name) == tool.installed)
+    """The tool's source cannot tell, and it is on the version an update in this run left it on,
+    less than `_LEARNED_FOR_S` ago."""
+    version, learned_at = _UPDATED_TO.get(tool.name, ("", 0.0))
+    return (not tool.available and bool(tool.installed) and version == tool.installed
+            and time.time() - learned_at < _LEARNED_FOR_S)
 
 
 def _tool_offered(tool) -> bool:
@@ -239,12 +247,18 @@ def _tool_line(tool) -> str:
     return i18n.t("updToolCurrent").format(name=name, here=here)
 
 
-def _tool_done_line(row) -> str:
-    """The receipt of one tool that updated: old → new, or that it already was the newest."""
+def _tool_done_line(row, shown: str = "") -> str:
+    """The receipt of one tool that updated: old → new, or that it already was the newest.
+
+    `shown` is the version its row showed. The skill reads `old` at the press, and a native Claude
+    Code updates itself in the background: on the VM it moved 2.1.286 → 2.1.287 before the press,
+    and the receipt said «2.1.287: already the newest» under a row that had read 2.1.286 (finding
+    140, review of tcc#138). The person saw the row, so the move is said from it."""
     name = _tool_title(row.name)
-    if row.new and row.new == row.old:
+    old = shown if shown and row.old == row.new else row.old
+    if row.new and row.new == old:
         return i18n.t("updToolSame").format(name=name, here=row.new)
-    return i18n.t("updToolDone").format(name=name, old=row.old or "?", new=row.new or "?")
+    return i18n.t("updToolDone").format(name=name, old=old or "?", new=row.new or "?")
 
 
 def _note(text: str) -> QLabel:
@@ -1062,9 +1076,12 @@ class DiagnosticsDialog(QDialog):
         self._clear_tools()
         self._tools = {tool.name: tool for tool in found.tools}
         for tool in found.tools:
-            if tool.name in _UPDATED_TO and _UPDATED_TO[tool.name] != tool.installed:
+            if (tool.installed and tool.name in _UPDATED_TO
+                    and _UPDATED_TO[tool.name][0] != tool.installed):
                 # Another version than the update left — its own updater, or something outside
-                # TCC: what the update learned was of an install no longer here (tcc#138).
+                # TCC: what the update learned was of an install no longer here (tcc#138). An
+                # empty one is a `--version` that failed or timed out: the tool would not say,
+                # which is not another version, and dropping it brought the offer back.
                 del _UPDATED_TO[tool.name]
             label = QLabel(_tool_line(tool))
             label.setWordWrap(True)
@@ -1144,12 +1161,12 @@ class DiagnosticsDialog(QDialog):
             row = answered.get(name)
             if row is not None and row.ok:
                 moved = True
-                label.setText(_tool_done_line(row))
+                label.setText(_tool_done_line(row, self._tools[name].installed))
                 self._tool_offer[name] = False
                 if row.new:
                     # The package manager has just installed the newest: kept past Re-check, where
                     # a source that cannot tell would offer the update again (tcc#138).
-                    _UPDATED_TO[name] = row.new
+                    _UPDATED_TO[name] = (row.new, time.time())
                 continue
             if row is not None:
                 why = row.why or "?"
