@@ -64,13 +64,18 @@ from autosound_tcc.core.agent_events import (
     Unasked,
 )
 from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
-from autosound_tcc.core.tuning_session import (
-    SKILL_NAME,
-    _read_roots_for,
+# The gate's modes live with the gate since tcc#128; the window and the suite read them from here,
+# so they are named here too.
+from autosound_tcc.core.shell_gate import (
+    GATE_AUTO as GATE_AUTO,
+    GATE_DEFAULT as GATE_DEFAULT,
+    GATE_FOREIGN as GATE_FOREIGN,
+    GATE_NEVER as GATE_NEVER,
+    GATE_WRITES as GATE_WRITES,
     bash_is_dangerous,
     bash_is_read_only,
-    language_rule,
 )
+from autosound_tcc.core.tuning_session import SKILL_NAME, _read_roots_for, language_rule
 
 DEFAULT_MODEL = model_choices.DEFAULT_OMP_MODEL
 
@@ -248,31 +253,6 @@ _EFFECTS: tuple[tuple[str, str], ...] = (
     ("project.py", "effectProject"),
     ("contract.py", "effectContract"),
 )
-
-# Which writes still ask. `writes` gates everything that is not read-only; `foreign` also lets the
-# skill write its own files (`process/`, `state/`, and the project files it owns) and asks only
-# about what reaches outside them. The choice belongs to the project (SCR-004's "the skill owns
-# its namespace" read as a permission rule).
-GATE_WRITES = "writes"
-GATE_FOREIGN = "foreign"
-# Nothing from the harness asks. Chosen by the Arbiter, and narrower than it sounds: TCC's own
-# tools raise their confirmations *inside* the tool, so a DSP or REW write still stops for a
-# human. What this turns off is the shell-and-file traffic, which is where the noise was -- and a
-# gate that fires on `ls` is a gate that gets clicked through, which protects nothing.
-GATE_AUTO = "auto"
-# Nothing asks, not even what cannot be undone: a delete or an overwrite outside the project goes
-# through unasked. The Arbiter's own proposal (2026-10-01, tcc#115) after `auto` stopped him on a
-# read for the fourth time (finding 123), and named for what it lifts. Never silent: what `auto`
-# would have stopped is said in the dialog (`agent_events.Unasked`). TCC's own tools still
-# confirm inside the tool, so a DSP or REW write still stops for a human.
-GATE_NEVER = "never"
-
-# What a project starts on. `auto`, not `writes` (user, 2026-08-21): the reason the strictest
-# setting was the default -- "start with every write and narrow it if it gets in the way" -- is an
-# argument for a gate that TEACHES, and what it taught was clicking through. TCC's own tools still
-# confirm inside themselves, so what this default hands over is the shell-and-file traffic and
-# nothing that reaches the DSP.
-GATE_DEFAULT = GATE_AUTO
 
 # Paths the skill legitimately owns inside a project.
 _SKILL_OWNED = ("process/", "state/", "dsp_profile.json", "dsp_profile.draft.json",

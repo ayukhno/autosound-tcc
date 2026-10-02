@@ -532,14 +532,14 @@ def test_every_script_the_allowlist_names_exists_in_the_method():
     actually asks, was NOT on the list, so the model was not allowed to run it. Neither half was
     visible from either side: they do not see our tree, and we do not watch theirs.
     """
-    from autosound_tcc.core import tuning_session, vendor_loader
+    from autosound_tcc.core import shell_gate, vendor_loader
 
     if not vendor_loader.is_available():
         pytest.skip("the vendored skill is not checked out")
 
     rew_tool = vendor_loader.skill_dir() / "rew_tool"
     missing = sorted(
-        name for name in tuning_session._SAFE_REW_SCRIPTS
+        name for name in shell_gate._SAFE_REW_SCRIPTS
         if not (rew_tool / name).is_file()
     )
 
