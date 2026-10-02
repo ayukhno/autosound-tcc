@@ -1536,8 +1536,11 @@ def test_a_sessions_own_run_of_the_method_follows_the_footers_route(tmp_path, mo
     keys: list = []
     # No harness, so no `--via` on the call, as from a session's own shell: its environment is all
     # the run is told.
+    # Review M1: the vendor's key is EXPORTED too, so `keys == []` proves the CLI child is started
+    # without it, not merely that nothing was there to pass.
+    var = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}[provider]
     route = _route_taken(tmp_path, monkeypatch, harness="", model=model, provider=provider,
-                         seen_keys=keys, extra_env=session)
+                         seen_keys=keys, exported=(var,), extra_env=session)
     assert route == f"cli {cli}" and keys == [], (route, keys, session)
 
 

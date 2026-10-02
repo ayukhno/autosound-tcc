@@ -635,6 +635,29 @@ def test_a_ledger_row_binds_to_the_channel_the_methods_own_sheet_binds_it_to(tmp
         ("w-L", "B"), ("tw_R", "D"), ("sw-f", None), ("sw_f", "K")]
 
 
+def test_a_method_without_project_channels_leaves_the_literal_names(tmp_path, monkeypatch):
+    """Task 9 review, M5: with a method before v3.1.0 (no `state.project_channels`) or none at
+    all, `load_channels` is the plain reader it was — the literal names and previous names, and no
+    reading in the one notation, as that method's own sheet reads them (one rule, hub #233)."""
+    from types import SimpleNamespace
+
+    from autosound_tcc.core import vendor_loader
+    from autosound_tcc.state import project_view
+
+    (tmp_path / "project.json").write_text(json.dumps({"channels": [
+        {"code": "w_L", "id": "w_L", "slot": "B", "previous_names": ["woofer-L"]},
+        {"code": "", "id": "x"},
+    ]}), encoding="utf-8")
+
+    for older in (lambda: SimpleNamespace(), lambda: (_ for _ in ()).throw(ImportError("no method"))):
+        monkeypatch.setattr(vendor_loader, "load_dsp_state", older)
+
+        channels = project_view.load_channels(tmp_path)
+
+        assert set(channels) == {"w_L", "woofer-L"}, channels
+        assert "w-L" not in channels
+
+
 def test_the_project_file_is_read_as_utf8_and_not_as_the_machines_locale(tmp_path, monkeypatch):
     """A Ukrainian project blanked the DSP panel and the target curve on Windows (autosound-tcc#4).
 

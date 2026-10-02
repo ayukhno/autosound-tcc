@@ -415,9 +415,7 @@ def session_env(project_dir: Path) -> dict:
         return {"AUTOSOUND_CRITIC_MODEL": model, "AUTOSOUND_CRITIC_BIN": "omp",
                 "AUTOSOUND_CRITIC_VIA": "omp"}
     env = {"AUTOSOUND_CRITIC_MODEL": model}
-    # «API · …» is the key's route; a login's pick goes by its CLI, which the method starts with
-    # no vendor key (tcc#127). Any other route names none and leaves the method its own default.
-    via = "api" if route == "api" else "cli" if route in _LOGIN_ROUTES else ""
+    via = via_of(route)
     if via:
         env["AUTOSOUND_CRITIC_VIA"] = via
     env.update(critic_bin_override(harness=route))
@@ -440,6 +438,22 @@ _CLI_REROUTING_KEYS = {"agy": ("GEMINI_API_KEY",), "codex": ("OPENAI_API_KEY",),
 #: a subscription: agy's, codex's, and the SDK's Claude login, which the method reaches through
 #: the `claude` CLI. Each run goes as `--via cli` (tcc#127).
 _LOGIN_ROUTES = ("agy", "codex", "sdk")
+
+
+def via_of(harness: str) -> str:
+    """The method's route word for a pick's harness: `run`'s `--via` and a session's
+    `AUTOSOUND_CRITIC_VIA` (hub #236) — one mapping, so the two cannot drift (task 9 review, M2).
+
+    «API · …» is the key's route and nothing else; «OMP · …» is omp's (tcc#74); a login's route
+    is its CLI, which the method starts with no vendor key (tcc#127): with a key stored, agy's
+    untiered and Claude models, codex and the SDK all went to the vendor's API under a pick that
+    said «subscription» (measured on the method, finding 136). Any other route names none and
+    leaves the method its own default.
+    """
+    route = (harness or "").strip().lower()
+    if route in ("api", "omp"):
+        return route
+    return "cli" if route in _LOGIN_ROUTES else ""
 
 
 def run(
@@ -501,17 +515,7 @@ def run(
     argv = [python_executable, str(script_path()), role, str(package_path)]
     if trace_path:
         argv.append(str(trace_path))
-    via = (via or "").strip().lower()
-    route = (harness or "").strip().lower()
-    if not via and route in ("api", "omp"):
-        # «API · …» is the key's route and nothing else; «OMP · …» is omp's (tcc#74).
-        via = route
-    elif not via and route in _LOGIN_ROUTES:
-        # And a login's route is its CLI. The method reads its OS key store as well as the
-        # environment, and tries the API first whenever it finds a key there: with a key stored,
-        # agy's untiered and Claude models, codex and the SDK all went to the vendor's API under a
-        # pick that said «subscription» (measured on the method, finding 136, tcc#127).
-        via = "cli"
+    via = (via or "").strip().lower() or via_of(harness)
     if via in VIA_ROUTES:
         argv += ["--via", via]
     # The run's own model by the method's flag (hub #226). An environment variable is outranked by
