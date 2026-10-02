@@ -561,3 +561,24 @@ def test_a_cd_carries_to_the_recursive_delete_after_it(command, asks, tmp_path):
     a wide folder, or one the line does not spell, and `*` or `.` there is that folder. A subshell's
     `cd` stays in the subshell; cmd's `cd /d` and PowerShell's `Set-Location` are followed too."""
     assert bash_is_dangerous(command, [tmp_path]) is asks, command
+
+
+@pytest.mark.parametrize("command, asks", [
+    ("builtin cd / && rm -rf *", True),
+    ("command cd / && rm -rf *", True),
+    ("CDPATH=/ cd Users && rm -rf *", True),
+    ("export CDPATH=/; cd Users; rm -rf *", True),
+    (r'cmd /c "if exist x cd /d C:\ && rd /s /q ."', True),
+    # Near misses: the same shapes into the project's own folder, an empty CDPATH, a `cd` that
+    # only prints.
+    ("builtin cd build && rm -rf *", False),
+    ("CDPATH= cd build && rm -rf tmp", False),
+    ('cmd /c "if exist x cd build && rd /s /q tmp"', False),
+    ("command -v cd && rm -rf build", False),
+    ("export CDPATH=/; cd ./build; rm -rf *", False),
+])
+def test_a_cd_spelled_through_a_builtin_cdpath_or_cmd_s_if_is_followed(command, asks, tmp_path):
+    """Ruling 50: `builtin cd` and `command cd` move the folder as `cd` does; a CDPATH the line sets
+    makes a relative `cd` land where the line does not say (except `./x`, which CDPATH skips); and
+    cmd's `if exist x cd /d C:\\` moves it behind its condition."""
+    assert bash_is_dangerous(command, [tmp_path]) is asks, command

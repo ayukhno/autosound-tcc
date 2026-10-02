@@ -528,6 +528,7 @@ def _follow_cd(commands: list[_Command], cwd: Optional[str]) -> None:
     runs in a subshell of its own and moves nothing. Every separator counts alike — `;`, `&&`, `||`,
     a newline: what runs after `cd x || …` is not known to run where it started (Ruling 49)."""
     where: dict[tuple[int, ...], Optional[str]] = {(): cwd}
+    cdpath = False
     for command in commands:
         scope = command.scope
         while scope not in where:
@@ -536,16 +537,32 @@ def _follow_cd(commands: list[_Command], cwd: Optional[str]) -> None:
         if command.piped:
             continue
         for words in _segments(command):
-            moved, target = _cd_target(words, here, shell="bash")
+            cdpath |= _sets_cdpath(words)
+            moved, target = _cd_target(words, here, shell="bash", cdpath=cdpath)
             if moved:
                 here = where[command.scope] = target
 
 
-def _cd_target(words: list[_Word], here: Optional[str], shell: str) -> tuple[bool, Optional[str]]:
+def _sets_cdpath(words: list[_Word]) -> bool:
+    """Whether a command gives CDPATH a value — `CDPATH=/ cd x`, `export CDPATH=/`: from then on a
+    relative `cd` may land in any of its folders (Ruling 50). An empty one is no CDPATH."""
+    return any((match := _ASSIGNMENT.match(word.text)) and match.group(1) == "CDPATH"
+               and (word.dynamic or word.text[match.end():]) for word in words)
+
+
+def _cd_target(words: list[_Word], here: Optional[str], shell: str,
+               cdpath: bool = False) -> tuple[bool, Optional[str]]:
     """(whether `words` change the folder, where to: a path, or None when the line does not spell
-    it). bash's `cd` alone is the home and `cd -` the last folder; cmd's `cd` alone only prints."""
+    it). bash's `cd` alone is the home and `cd -` the last folder; cmd's `cd` alone only prints.
+    `builtin cd` and `command cd` are `cd` (`command -v cd` only prints); with a CDPATH set, a
+    relative target that does not start with `.` is looked up in it, so it is not known (Ruling 50)."""
+    cdpath |= _sets_cdpath(words)
     while words and _ASSIGNMENT.match(words[0].text):
         words = words[1:]
+    while shell == "bash" and words and _command_name(words[0].text) in ("builtin", "command"):
+        if len(words) > 1 and words[1].text in ("-v", "-V"):
+            return False, here
+        words = words[2:] if len(words) > 1 and words[1].text == "-p" else words[1:]
     if not words:
         return False, here
     name = _command_name(words[0].text)
@@ -564,6 +581,8 @@ def _cd_target(words: list[_Word], here: Optional[str], shell: str) -> tuple[boo
     target = arguments[0]
     if target.dynamic or target.output or target.text in ("-", "") or target.text[:1] in "+-%!":
         return True, None
+    if cdpath and not _is_absolute(target.text) and not target.text.startswith("."):
+        return True, None  # `CDPATH=/ cd Users`: /Users, if CDPATH has it first
     if _is_absolute(target.text) or here == "":
         return True, target.text
     return True, None if here is None else posixpath.join(here, target.text.replace("\\", "/"))
@@ -1602,6 +1621,7 @@ def _cmd_line_is_dangerous(line: str, tainted: set[str], depth: int,
             # judged by its last part, as cmd reads it by its first.
             readings.append([replace(words[0], text=glued.group(1)),
                              _Word(text=glued.group(2), started=True), *words[1:]])
+        sure = len(readings)
         if _command_name(words[0].text) in ("if", "else", "do"):
             # cmd runs the command after `if exist x`, `if not … ==…`, `else` and `for … do`; where
             # the condition ends is cmd's to say, so every tail is read as that command (Ruling 41).
@@ -1609,10 +1629,20 @@ def _cmd_line_is_dangerous(line: str, tainted: set[str], depth: int,
         if any(_words_are_dangerous(reading, _Command(piped=in_pipe, cwd=cwd), tainted, depth)
                for reading in readings):
             return True
-        moved, target = _cd_target(words, cwd, shell="cmd")  # `cd /d C:\ && rd /s /q .`
-        if moved and not in_pipe:
-            cwd = target
+        if not in_pipe:
+            cwd = _cmd_cd(readings, sure, cwd)  # `cd /d C:\ && rd /s /q .`
     return False
+
+
+def _cmd_cd(readings: list[list[_Word]], sure: int, cwd: Optional[str]) -> Optional[str]:
+    """Where a cmd command leaves the folder. The first `sure` readings run as written; a `cd`
+    found only in a tail behind `if`, `else` or `do` may not run, so it moves the folder only from
+    one that is narrow — from a wide one, the `cd` that did not run is the wider case (Ruling 50)."""
+    for at, reading in enumerate(readings):
+        moved, target = _cd_target(reading, cwd, shell="cmd")
+        if moved:
+            return target if at < sure or not _is_wide_here(".", cwd) else cwd
+    return cwd
 
 
 def _powershell_is_dangerous(arguments: list[_Word], command: _Command, tainted: set[str],
