@@ -272,7 +272,7 @@ def test_the_terminal_opens_in_the_home_folder_when_there_is_no_project(monkeypa
     assert ModelConfigDialog._launch_dir() == Path.home()
 
 
-def test_the_list_draws_its_own_check_boxes_and_the_window_is_wide(catalogue):
+def test_the_list_wears_every_row_s_check_box_and_the_window_is_wide(catalogue):
     """Finding 75 (tcc#70): an empty box drew nothing in the dark theme, the tick sat over the
     text in the light one, and the rows were cut on the right — «зроби вікно ширше в два рази»."""
     from autosound_tcc.ui.tcc.model_config_dialog import ModelConfigDialog

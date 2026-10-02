@@ -780,6 +780,23 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border: 2px solid {t.accent};
         background: {t.accent};
     }}
+    /* Disabled, a box or a radio says so (tcc#131's review). None is disabled today; without this
+    one would keep the live ring, the accent's fill and its words in full ink, since `QWidget`'s
+    `color` covers every state. Each list starts with the radio so VM-11's guard, which reads a
+    selector whole, still finds no radio ring that is not the type's own. */
+    QRadioButton::indicator:disabled, QCheckBox::indicator:disabled,
+    QAbstractItemView::indicator:disabled {{
+        border-color: {t.mix('muted', 45, 'panel')};
+        background: {t.panel2};
+    }}
+    QRadioButton::indicator:checked:disabled, QCheckBox::indicator:checked:disabled,
+    QAbstractItemView::indicator:checked:disabled {{
+        border-color: {t.mix('muted', 45, 'panel')};
+        background: {t.mix('muted', 45, 'panel')};
+    }}
+    QRadioButton:disabled, QCheckBox:disabled {{
+        color: {t.faint};
+    }}
     /* .curve-chip — one chosen measurement in the curve window's selection row, with the × that
     takes it off the plot. The frame is shared; the BORDER and the name are coloured per chip, from
     the pen its own trace is drawn with (`curve_view.trace_colour`), so the row reads as a legend of

@@ -482,7 +482,8 @@ def test_every_check_box_wears_the_radios_ring_in_both_themes():
         assert boxes, f"{name}: no check box rule at all"
         assert set(boxes) <= {f"{kind}::indicator{state}" for kind in ("QCheckBox",
                                                                       "QAbstractItemView")
-                              for state in ("", ":hover", ":checked")}, (
+                              for state in ("", ":hover", ":checked", ":disabled",
+                                            ":checked:disabled")}, (
             f"{name}: a class with a box of its own: {sorted(boxes)}")
 
         def drawn(body, prop):
@@ -553,10 +554,65 @@ def test_a_row_s_check_box_is_drawn_by_the_sheet_in_either_theme(monkeypatch, mo
             empty, ticked = rects
             kind = type(view).__name__
             assert count(empty, palette.muted) >= 24, f"{mode} {kind}: no ring on the empty box"
-            assert count(ticked, palette.accent) >= 60, f"{mode} {kind}: no fill on the ticked box"
+            # The ring alone is 84 px of the accent and the filled box 203-205 (tcc#131's
+            # review): 150 tells a fill from an accent ring around an empty inside.
+            assert count(ticked, palette.accent) >= 150, f"{mode} {kind}: no fill on the ticked box"
     finally:
         host.close()
 
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_a_disabled_check_box_or_radio_is_drawn_grey_in_either_theme(monkeypatch, mode):
+    """tcc#131's review: the issue's «disabled looks disabled», applied to the boxes and radios it
+    restyled. Without a rule of its own a disabled one kept the live ring, the accent's fill and its
+    words in full ink, since `QWidget`'s `color` covers every state. Drawn under the sheet, a
+    disabled empty box or radio is `panel2` inside a ring dimmed toward the panel, a disabled ticked
+    or chosen one is that grey and not the accent, and the words are `faint` — read from the palette
+    Qt draws a disabled label with, so no font is measured."""
+    from PySide6.QtGui import QColor, QPalette
+    from PySide6.QtWidgets import (QApplication, QCheckBox, QRadioButton, QStyle,
+                                   QStyleOptionButton, QVBoxLayout, QWidget)
+
+    from autosound_tcc.ui.tcc import theme
+    from tests import _windows
+
+    app = QApplication.instance() or QApplication([])
+    host = QWidget()
+    palette = _windows.theme_on(monkeypatch, host, mode)
+    layout = QVBoxLayout(host)
+    controls = []
+    for kind, indicator in ((QCheckBox, QStyle.SubElement.SE_CheckBoxIndicator),
+                            (QRadioButton, QStyle.SubElement.SE_RadioButtonIndicator)):
+        for on in (False, True):
+            control = kind("")
+            control.setAutoExclusive(False)
+            control.setChecked(on)
+            control.setEnabled(False)
+            layout.addWidget(control)
+            controls.append((control, indicator, on))
+    host.show()
+    grey = _hex(theme.mix(palette.muted, 45, palette.panel))
+    try:
+        app.processEvents()
+        drawn = host.grab().toImage()
+        for control, indicator, on in controls:
+            option = QStyleOptionButton()
+            option.initFrom(control)
+            box = control.style().subElementRect(indicator, option, control)
+            corner = control.mapTo(host, box.topLeft())
+            middle = corner.y() + box.height() // 2
+            ring = QColor(drawn.pixel(corner.x() + 1, middle)).name()
+            inside = QColor(drawn.pixel(corner.x() + box.width() // 2, middle)).name()
+            said = f"{mode} {type(control).__name__} {'ticked' if on else 'empty'}: " \
+                   f"ring {ring}, inside {inside}"
+            assert ring == grey, said
+            assert inside == (grey if on else palette.panel2), said
+            words = control.palette().color(QPalette.ColorGroup.Disabled,
+                                            QPalette.ColorRole.WindowText).name()
+            assert words == palette.faint, f"{said}, words {words}"
+    finally:
+        host.close()
 
 def test_every_button_greys_when_it_is_disabled_in_both_themes(monkeypatch):
     """tcc#131: the feedback window's «Send →» stayed orange while disabled, because its rule comes
