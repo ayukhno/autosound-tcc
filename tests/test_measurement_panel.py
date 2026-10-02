@@ -445,13 +445,22 @@ def test_picking_a_past_session_moves_its_step_onto_the_picker_and_disables_live
     assert panel._read_btn.isEnabled()
 
 
-def _rounds(live_round: bool) -> list:
-    """A capture task with two rounds taken; the live entry a round of its own (`cap_003 ●`) or
-    the next one, not opened yet («next round ●»)."""
+#: The capture task's shapes: a round open (`cap_003 ●`), the next round not opened yet
+#: («next round ●»), and a project from an older journal, whose rounds are series («серія 2»).
+_SHAPES = ("round-open", "next-round", "series-only")
+
+
+def _rounds(shape) -> list:
+    """A capture task with two rounds taken, in one of `_SHAPES` (True and False for the first
+    two, as the earlier tests named them)."""
     from autosound_tcc.state.models import MeasSession
 
+    shape = {True: "round-open", False: "next-round"}.get(shape, shape)
+    if shape == "series-only":
+        return [MeasSession(id=f"v{n}", version={"en": "past" if n < 3 else "live"}, groups=(),
+                            series=str(n)) for n in (3, 2, 1)]
     live = (MeasSession(id="cap_003", version={"en": "live"}, groups=(), series="3",
-                        round_id="cap_003") if live_round
+                        round_id="cap_003") if shape == "round-open"
             else MeasSession(id="v3", version={"en": "live"}, groups=(), series="3"))
     return [live,
             MeasSession(id="cap_002", version={"en": "past"}, groups=(), series="2",
@@ -461,18 +470,18 @@ def _rounds(live_round: bool) -> list:
 
 
 def _is_round_id(text: str) -> bool:
-    import re
+    """A row that names a round -- every row but the live phrase (Ruling 31)."""
+    return bool(text) and text != f"{i18n.t('measNextRound')} ●"
 
-    return re.fullmatch(r"cap_\d+( ●)?", text) is not None
 
-
-@pytest.mark.parametrize("live_round", [True, False], ids=["round-open", "next-round"])
-def test_the_session_picker_is_never_narrower_than_the_id_it_shows(monkeypatch, live_round):
+@pytest.mark.parametrize("shape", _SHAPES)
+def test_the_session_picker_is_never_narrower_than_the_id_it_shows(monkeypatch, shape):
     """`minimumContentsLength` is counted in `x` widths and a round id is not made of `x`: the
-    picker's floor is its widest round id, measured off the rows, and at that floor every id
-    draws whole -- refilled in another language too, where Qt's own cached minimum kept the
-    first rows' width (VM-15, Ruling 30). The live phrase («next round ●») is not an id and may
-    give way to «…» (Ruling 30 (c)). Under the window's sheet."""
+    picker's floor is its widest round, measured off the rows, and at that floor every round
+    draws whole -- its `cap_NNN` id, or in an older journal its series («серія 2») -- refilled in
+    another language too, where Qt's own cached minimum kept the first rows' width (VM-15,
+    Rulings 30 and 31). The live phrase («next round ●») names no round and may give way to «…»
+    (Ruling 30 (c)). Under the window's sheet."""
     from tests import _windows
 
     _app()
@@ -482,7 +491,7 @@ def test_the_session_picker_is_never_narrower_than_the_id_it_shows(monkeypatch, 
     try:
         for lang in ("en", "de"):
             i18n.set_language(lang)
-            panel.set_sessions(_rounds(live_round))
+            panel.set_sessions(_rounds(shape))
             combo.ensurePolished()
             combo.resize(combo.minimumSizeHint())
             for index in range(combo.count()):
@@ -1371,17 +1380,17 @@ def _head_row(panel) -> list:
 
 
 @pytest.mark.parametrize("lang, stretch", [("en", 100), ("en", 141), ("de", 141)])
-@pytest.mark.parametrize("live_round", [True, False], ids=["round-open", "next-round"])
+@pytest.mark.parametrize("shape", _SHAPES)
 def test_nothing_in_the_head_row_overlaps_and_the_round_select_is_never_cut(monkeypatch, lang,
-                                                                          stretch, live_round):
+                                                                          stretch, shape):
     """VM-15 (the Windows VM, English): «Protection» was drawn over the round select «next round ●»
     («Захист» fitted): the right column went down to a flat 200 px, below what the row's widgets
     held as theirs, and the layout put one on the other. The Arbiter: «можна назву на кнопці
     скоротити до Prot...». The button gives way, elided by its font's metrics down to «…», and
-    while cut its hover names it; the select keeps its round ids whole -- his own rule, «rounds
-    must be told apart» (2026-08-11, 2026-08-21) -- and the right column is never narrower than
-    that row (Ruling 30); the live phrase, «next round ●», is no id and may give way (Ruling 30
-    (c)). And the select's OPEN list read «next…nd ●», cut in the middle: a row
+    while cut its hover names it; the select keeps its rounds whole -- his own rule, «rounds
+    must be told apart» (2026-08-11, 2026-08-21), a `cap_NNN` id or an older journal's series --
+    and the right column is never narrower than that row (Ruling 30); the live phrase, «next
+    round ●», names no round and may give way (Rulings 30 (c) and 31). And the select's OPEN list read «next…nd ●», cut in the middle: a row
     of the list reads whole. In the real window under its sheet, at its own minimum and with the
     right column dragged to its floor, in the Mac's font and stretched to the Windows runner's."""
     from PySide6.QtGui import QFont, QFontDatabase
@@ -1409,7 +1418,7 @@ def test_nothing_in_the_head_row_overlaps_and_the_round_select_is_never_cut(monk
         if lang != "en":
             window._on_language_selected(lang)
         panel = window._meas_panel
-        panel.set_sessions(_rounds(live_round))
+        panel.set_sessions(_rounds(shape))
         window.resize(window.minimumSizeHint().width(), 820)
         settle()
         combo, button = panel._session_combo, panel._protective_btn

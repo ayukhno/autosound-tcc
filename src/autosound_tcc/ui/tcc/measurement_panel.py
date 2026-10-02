@@ -861,16 +861,18 @@ class MeasurementPanel(QWidget):
             marker = " ●" if index == 0 else ""
             label = _picker_label(session, live=index == 0) + marker
             self._session_combo.addItem(label, session.id)
-            if _round_id(session):
+            if index > 0 or _round_id(session):  # every row but the live phrase
                 ids.append(label)
             series = _series_of(session)
             if series:
                 self._session_combo.setItemData(
                     self._session_combo.count() - 1,
                     i18n.t("measRoundSeriesTip").format(v=series), Qt.ItemDataRole.ToolTipRole)
-        # Only the round ids are held whole (Ruling 30 (c)): «next round ●» / «новий раунд ●»
-        # / «nächste Runde ●» is a phrase no id can be taken for, and held whole it took the full
-        # window's centre's room at two thirds of a 1512 screen.
+        # The rounds are held whole, and only the live phrase may give way (Ruling 31): «next
+        # round ●» / «новий раунд ●» / «nächste Runde ●» is a phrase no round can be taken for,
+        # and held whole it took the full window's centre's room at two thirds of a 1512 screen
+        # (Ruling 30 (c)). A round is its `cap_NNN` id, or -- in a project from an older journal,
+        # which has none -- its series, «серія 9»: held as the ids only, those all read «сері…».
         self._session_combo.holds_whole(ids)
 
     def viewing_session_id(self) -> str:

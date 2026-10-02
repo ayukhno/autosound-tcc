@@ -4016,17 +4016,21 @@ def test_the_full_window_at_its_minimum_reads_the_output_table_and_its_tabs(
 
 # The stretched font in both languages: there the header holds the window's floor (1317-1328 px),
 # and the tabs elide at it with the flat 200-px column too -- tcc#106's own test skips that font.
-@pytest.mark.parametrize(("stretch", "lang"), [(100, "uk"), (100, "de"), (141, "uk"), (141, "de")])
+# An older journal's series-only rounds in the Mac's font, where the cap binds (Ruling 31).
+@pytest.mark.parametrize(("stretch", "lang", "shape"), [
+    (100, "uk", "round-open"), (100, "de", "round-open"), (141, "uk", "round-open"),
+    (141, "de", "round-open"), (100, "uk", "series-only"), (100, "de", "series-only")])
 def test_a_round_open_on_two_thirds_of_a_1512_screen_leaves_the_centre_its_tabs(
-        tmp_path, monkeypatch, stretch, lang):
+        tmp_path, monkeypatch, stretch, lang, shape):
     """VM-15's re-review (N1): the right column's floor follows the measurement panel's head row,
     and on a 1512 screen the window's floor sits at two thirds of it (tcc#106), so every pixel the
     column gained came out of the centre: 588 -> 499-536 px, and the detail tabs read «Табли…»,
     «Ріве…» at the width the Arbiter signed off on (finding 114). Ruling 30 (c): only the round
     ids are held whole, the live phrase may give way, and the row gives up the room it did not
-    use. With the Arbiter's rig open and a round open in the capture task, at the window's own
-    floor: the floor is still two thirds of the screen, the tabs read whole, every round id reads
-    whole, and nothing in the panel's head row overlaps."""
+    use. With the Arbiter's rig open and a round open in the capture task -- or an older
+    journal's series-only rounds, «серія 2», which held as no id read «сері…» (Ruling 31) -- at
+    the window's own floor: the floor is still two thirds of the screen, the tabs read whole,
+    every round reads whole, and nothing in the panel's head row overlaps."""
     from tests.test_measurement_panel import _head_row, _is_round_id, _rounds
 
     app = _app()
@@ -4040,7 +4044,7 @@ def test_a_round_open_on_two_thirds_of_a_1512_screen_leaves_the_centre_its_tabs(
         monkeypatch.setattr(window, "_refresh_cli_catalogue", lambda force=False: None)
         window._on_language_selected(lang)
         panel = window._meas_panel
-        panel.set_sessions(_rounds(live_round=True))
+        panel.set_sessions(_rounds(shape))
         _settle_at(window, 200)
         assert window.width() == window.minimumSizeHint().width(), "at the window's floor"
         said = f"{lang} at {stretch}: window {window.width()} px, centre {window._center.width()}"
