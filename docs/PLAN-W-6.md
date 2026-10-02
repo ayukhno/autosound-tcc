@@ -84,9 +84,12 @@ committer at a time. Strings in four languages: uk and en by the builder, pl and
 
 ## 2 · Larger — with a design pass first
 
-**#21** capture quality at import, while the microphone is in hand. *design ~30 min with the Arbiter, then ~5–6 h*
+**#21** capture quality at import, while the microphone is in hand. *design ~15 min with the Arbiter, then ~4 h*
 - The Arbiter's rule (2026-10-02): for a sweep the check finds unusable, TCC recommends a re-take, or the tuner
   confirms the capture as it is and it is taken — import is never blocked.
+- Scope (the Arbiter, the same evening): only the check we already have — the method's capture verdict
+  (`verify.py`, SCR-013: a sweep that never completed, a flat loopback, a silent capture). Noise and distortion are
+  REW's own; TCC adds nothing for them.
 - Design first (`superpowers:brainstorming`, with the Arbiter): the row's look for «unusable», where the reasons
   show, the re-take / confirm choice and what the checklist counts, whether a confirmed verdict is remembered (by
   the capture's uuid, as `verify` returns `stats.uuid`, SCR-040).
