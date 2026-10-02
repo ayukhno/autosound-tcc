@@ -14,6 +14,7 @@ import sys
 import pytest
 
 from autosound_tcc.core import child
+from tests import _hung_child
 
 
 def test_a_probe_gets_no_stdin_to_wait_on():
@@ -810,3 +811,30 @@ def test_the_console_stays_up_until_the_models_are_read_or_the_cap(monkeypatch):
 
     assert order == ["waited 1.2", "hide", "keeper"]
     assert waited == [pytest.approx(6.8)], "the rest of the cap, after the readable second"
+
+
+# ── a child that has to be given up on (tcc#132) ─────────────────────────────────────────────────
+
+
+def test_a_bounded_run_hands_back_what_the_child_said():
+    """`run_bounded` is `subprocess.run` for every caller that gives up on a child: the same
+    answer when the child answers. A real child, and a quick one."""
+    done = child.run_bounded(
+        [sys.executable, "-c", "import sys; print('out'); print('err', file=sys.stderr); sys.exit(3)"],
+        timeout=60, text=True, **child.quiet())
+
+    assert (done.returncode, done.stdout.strip(), done.stderr.strip()) == (3, "out", "err")
+
+
+def test_off_windows_a_child_given_up_on_is_killed_and_no_taskkill_runs(monkeypatch):
+    """`taskkill` is Windows'. Elsewhere the child is killed, the wait after the kill is bounded
+    all the same, and the caller hears `TimeoutExpired` with the bound it set."""
+    spawns = _hung_child.install(monkeypatch, windows=False)
+
+    with pytest.raises(subprocess.TimeoutExpired) as raised:
+        child.run_bounded(["probe", "--version"], timeout=3.0)
+
+    [probe] = spawns.hung
+    assert probe.killed and spawns.taskkills == []
+    assert probe.timeouts == [3.0, child.REAP_TIMEOUT_S]
+    assert raised.value.timeout == 3.0

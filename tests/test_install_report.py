@@ -12,6 +12,7 @@ import time
 import pytest
 
 from autosound_tcc.core import install_report
+from tests import _hung_child
 
 
 def test_every_section_is_present_and_the_text_is_pasteable():
@@ -132,8 +133,33 @@ def test_a_probe_that_hangs_or_explodes_is_swallowed(monkeypatch):
         raise OSError("no such thing")
 
     monkeypatch.setattr(install_report.subprocess, "run", _boom)
+    monkeypatch.setattr(install_report.child, "run_bounded", _boom)  # the probes' (tcc#132)
 
     assert install_report.as_text()  # still a report
+
+
+def test_a_tool_that_never_answers_is_killed_and_its_worker_comes_back(monkeypatch):
+    """tcc#132 (Ruling 45): each `--version` runs on a worker of a pool, and Python waits for those
+    workers at exit. On Windows a probe killed at its timeout was then waited on in
+    `communicate()` with no bound, and a grandchild holding its pipes -- `node.exe` behind an npm
+    shim -- kept that worker for good: TCC went on running after its window closed, and could hold
+    «Оновити TCC». The probe's tree is killed at the timeout, the wait after it is bounded, every
+    worker returns, and none is a thread Python waits for at exit."""
+    monkeypatch.setattr(install_report, "_which_all",
+                        lambda names: {name: f"/opt/bin/{name}" for name in names})
+    spawns = _hung_child.install(monkeypatch)
+    before = {t for t in threading.enumerate() if not t.daemon}
+
+    section = install_report._tools()
+
+    assert [item.value for item in section.items] == ["installed"] * len(install_report._TOOLS)
+    assert len(spawns.hung) == len(install_report._TOOLS)
+    for probe in spawns.hung:
+        assert probe.killed, probe.args
+        assert probe.timeouts == [install_report._PROBE_TIMEOUT, install_report.child.REAP_TIMEOUT_S]
+    assert sorted(kill[-1] for kill in spawns.taskkills) == sorted(str(p.pid) for p in spawns.hung)
+    assert all(thread.daemon for thread in spawns.threads), "a probe on a thread exit waits for"
+    assert {t for t in threading.enumerate() if not t.daemon} <= before, "a worker outlived it"
 
 
 def test_the_windows_facts_the_window_passes_in_are_in_the_report():

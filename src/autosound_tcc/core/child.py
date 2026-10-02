@@ -284,6 +284,63 @@ def flags() -> dict:
     return {"creationflags": flag} if flag else {}
 
 
+#: How long a child killed for running out of time is given to let go of its pipes (tcc#132).
+#: The tree kill takes the grandchildren too, so they close at once; this bounds the one that got
+#: away from it.
+REAP_TIMEOUT_S = 2.0
+#: How long `taskkill` itself may take. It walks a process snapshot and answers in well under a
+#: second; past this, the plain kill is all there is.
+TASKKILL_TIMEOUT_S = 5.0
+
+
+def kill_tree(proc: subprocess.Popen) -> None:
+    """Kill `proc` and, on Windows, every process under it. Never raises.
+
+    `Popen.kill()` takes the one process. On Windows its children live on -- the `csc.exe` that
+    PowerShell's `Add-Type` starts, the `node.exe` behind an npm shim -- holding the pipes they
+    inherited, and whoever reads those pipes waits for them (tcc#132). `taskkill /T` walks the
+    tree from the parent, so it runs while the parent is still there; the plain kill follows for a
+    machine where `taskkill` could not run.
+    """
+    if sys.platform.startswith("win"):
+        try:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True,
+                           timeout=TASKKILL_TIMEOUT_S, check=False, **quiet())
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
+def run_bounded(args, *, timeout: float, **kwargs) -> subprocess.CompletedProcess:
+    """`subprocess.run(args, capture_output=True, timeout=timeout, **kwargs)` that comes back.
+
+    `subprocess.run` on Windows, at the timeout, kills the one process and then waits in
+    `communicate()` with no bound for its pipes -- which a grandchild that outlived the kill holds
+    open. A hung `csc.exe` kept `--install-desktop` waiting that way, and a hung tool probe kept a
+    worker that Python waits for at exit, so TCC ran on after its window closed (tcc#132). Here the
+    tree is killed (`kill_tree`) and the wait after it is `REAP_TIMEOUT_S`; a grandchild that
+    outlives even that keeps its pipes, read by `subprocess`'s own daemon threads, and nothing
+    waits for it. Raises `TimeoutExpired` with `timeout`, as `run` does.
+    """
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill_tree(proc)
+        try:
+            proc.communicate(timeout=REAP_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            pass
+        raise subprocess.TimeoutExpired(args, timeout) from None
+    except BaseException:
+        proc.kill()  # as `run` does: an interrupted wait leaves no child behind
+        raise
+    return subprocess.CompletedProcess(args, proc.returncode, out, err)
+
+
 def script_interpreter(*, executable: Optional[str] = None, exists=None) -> str:
     """The interpreter a helper SCRIPT is run with: console-subsystem, even though we are not.
 

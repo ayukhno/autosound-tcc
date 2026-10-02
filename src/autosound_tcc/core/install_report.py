@@ -28,7 +28,7 @@ import re
 import shutil
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
+import threading
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, distribution, version as package_version
 from pathlib import Path
@@ -83,10 +83,17 @@ class Section:
 
 
 def _run(argv: list[str]) -> str:
-    """First line of a command's output, or "" — never an exception, never a traceback."""
+    """First line of a command's output, or "" — never an exception, never a traceback.
+
+    Bounded with the tree killed (`child.run_bounded`), not `subprocess.run`: on Windows `run`
+    kills a probe at its timeout and then waits for its pipes with no bound, and a grandchild that
+    outlived the kill held them for good (tcc#132). Now at most `_PROBE_TIMEOUT` +
+    `child.TASKKILL_TIMEOUT_S` + `child.REAP_TIMEOUT_S` (3 + 5 + 2 s), and about 3 s where
+    `taskkill` answers as it does: inside the 15 s the diagnostics panel waits for the section."""
     try:
-        done = subprocess.run(
-            argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=_PROBE_TIMEOUT, check=False, **child.quiet())
+        done = child.run_bounded(
+            argv, text=True, encoding="utf-8", errors="replace", timeout=_PROBE_TIMEOUT,
+            **child.quiet())
     except Exception:  # noqa: BLE001 — a probe that fails is a finding, not a crash
         return ""
     out = (done.stdout or done.stderr or "").strip().splitlines()
@@ -328,16 +335,11 @@ def _tools() -> Section:
 
     Eight independent `--version` calls taken in turn is eight round trips of process startup —
     measured at about twelve seconds on a laptop where each one is fine. They do not depend on
-    each other, so they go in a pool and the section costs about as long as its slowest member.
+    each other, so they run at once and the section costs about as long as its slowest member.
     """
     where = _which_all([exe for exe, _what in _TOOLS])
     found = [(exe, what, where[exe]) for exe, what in _TOOLS]
-    versions: dict[str, str] = {}
-    live = [exe for exe, _what, where in found if where]
-    if live:
-        with ThreadPoolExecutor(max_workers=min(8, len(live))) as pool:
-            for exe, version in zip(live, pool.map(lambda e: _run([e, "--version"]), live)):
-                versions[exe] = version
+    versions = _versions([exe for exe, _what, where in found if where])
     items: list[Item] = []
     for exe, what, where in found:
         if not where:
@@ -345,6 +347,27 @@ def _tools() -> Section:
             continue
         items.append(Item(exe, versions.get(exe) or "installed", f"{what} · {where}"))
     return Section("Command-line tools", items)
+
+
+def _versions(exes: list[str]) -> dict[str, str]:
+    """Every tool's `--version` at once, each on a daemon thread of its own.
+
+    Not a `ThreadPoolExecutor`: Python waits for a pool's workers at exit, so a probe still out
+    when the window closed kept TCC running — on Windows, for good, while the probe could hang
+    (tcc#132, Ruling 45). Each probe is bounded now (`_run`), and exit waits for none of them.
+    """
+    versions: dict[str, str] = {}
+
+    def ask(exe: str) -> None:
+        versions[exe] = _run([exe, "--version"])
+
+    threads = [threading.Thread(target=ask, args=(exe,), name=f"tcc-version-{exe}", daemon=True)
+               for exe in exes]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return versions
 
 
 def _app() -> Section:

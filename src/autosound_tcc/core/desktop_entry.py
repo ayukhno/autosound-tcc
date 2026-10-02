@@ -537,15 +537,15 @@ def _stamp_windows(targets: list[Path], result: Result) -> bool:
     script ran clean.
     """
     try:
-        proc = subprocess.run(
+        # `run_bounded`, not `subprocess.run`: at the timeout `run` kills PowerShell alone and then
+        # waits, unbounded, for pipes a hung `csc.exe` from `Add-Type` still holds (tcc#132).
+        proc = child.run_bounded(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
              _stamp_script(targets, BUNDLE_ID)],
-            check=False,
-            capture_output=True,
+            timeout=STAMP_TIMEOUT_S,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=STAMP_TIMEOUT_S,
             **child.quiet(),
         )
         ran, said = proc.returncode == 0, (proc.stderr or "").strip()

@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 from autosound_tcc.core import desktop_entry
+from tests import _hung_child
 
 
 def _bundle(tmp_path: Path, launcher: str = "/opt/bin/autosound-tcc") -> tuple[Path, bool]:
@@ -174,8 +175,8 @@ def test_a_machine_that_cannot_stamp_still_keeps_its_shortcuts(monkeypatch, tmp_
     """The shortcuts are already saved when this runs. A PowerShell that cannot compile the COM
     declarations costs the grouping, and must not cost the install."""
     monkeypatch.setattr(
-        desktop_entry.subprocess,
-        "run",
+        desktop_entry.child,
+        "run_bounded",
         lambda *a, **k: SimpleNamespace(returncode=1, stdout="", stderr="Add-Type: no compiler"),
     )
     result = desktop_entry.Result(True)
@@ -197,6 +198,7 @@ def test_every_spawn_here_goes_through_child_quiet(monkeypatch, tmp_path):
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(desktop_entry.subprocess, "run", _run)
+    monkeypatch.setattr(desktop_entry.child, "run_bounded", _run)  # the stamp's (tcc#132)
     result = desktop_entry.Result(True)
     desktop_entry._stamp_windows([tmp_path / "Autosound TCC.lnk"], result)
     desktop_entry._windows_target_of(tmp_path / "Autosound TCC.lnk")
@@ -290,7 +292,7 @@ def test_repair_stamps_and_notifies_tcc_s_unstamped_pins_and_no_other(monkeypatc
         scripts.append(args[-1])
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(desktop_entry.subprocess, "run", _run)
+    monkeypatch.setattr(desktop_entry.child, "run_bounded", _run)
 
     repaired = desktop_entry.repair_pins(pinned, launcher=_LAUNCHER)
 
@@ -314,6 +316,7 @@ def test_an_ordinary_start_spawns_nothing(monkeypatch, tmp_path):
         raise AssertionError(f"spawned: {args}")
 
     monkeypatch.setattr(desktop_entry.subprocess, "run", _run)
+    monkeypatch.setattr(desktop_entry.child, "run_bounded", _run)
 
     assert desktop_entry.repair_pins(pinned, launcher=_LAUNCHER) == []
     # Nothing pinned at all, and no `User Pinned` folder: the same nothing.
@@ -330,7 +333,7 @@ def test_a_powershell_that_never_answers_is_not_stamped_and_does_not_hang(monkey
         seen["timeout"] = kwargs.get("timeout")
         raise desktop_entry.subprocess.TimeoutExpired(args, kwargs.get("timeout"))
 
-    monkeypatch.setattr(desktop_entry.subprocess, "run", _run)
+    monkeypatch.setattr(desktop_entry.child, "run_bounded", _run)
     result = desktop_entry.Result(True)
 
     assert desktop_entry._stamp_windows([tmp_path / "Autosound TCC.lnk"], result) is False
@@ -342,6 +345,38 @@ def test_a_powershell_that_never_answers_is_not_stamped_and_does_not_hang(monkey
     assert len(desktop_entry.repair_pins(_pinned(tmp_path), launcher=_LAUNCHER)) == 2
 
 
+def test_a_hung_stamp_is_killed_with_everything_powershell_started(monkeypatch, tmp_path):
+    """`Add-Type` compiles the COM declarations with `csc.exe`, a child of PowerShell. At the
+    timeout only PowerShell was killed, and a hung compiler went on running (tcc#132). The kill
+    takes the tree -- `taskkill /T /F` -- started as quietly as every other spawn here."""
+    spawns = _hung_child.install(monkeypatch)
+    result = desktop_entry.Result(True)
+
+    assert desktop_entry._stamp_windows([tmp_path / "Autosound TCC.lnk"], result) is False
+    [powershell] = spawns.hung
+    assert spawns.taskkills == [["taskkill", "/T", "/F", "/PID", str(powershell.pid)]]
+    for args, kwargs in spawns.calls:
+        for key, value in desktop_entry.child.quiet().items():
+            assert kwargs.get(key) == value, f"{key} not passed to {args[0]}: {kwargs}"
+    assert any("did not answer" in line for line in result.lines)
+
+
+def test_a_compiler_that_outlives_the_kill_does_not_hold_the_install(monkeypatch, tmp_path):
+    """After the kill, `subprocess.run` on Windows waits in `communicate()` for the pipes, and a
+    `csc.exe` that outlived PowerShell holds them: the install, or the repair's thread, waited for
+    good (tcc#132). The wait after the kill has a bound of its own, and a child that outlives it
+    is left behind with its pipes."""
+    spawns = _hung_child.install(monkeypatch)
+    result = desktop_entry.Result(True)
+
+    assert desktop_entry._stamp_windows([tmp_path / "Autosound TCC.lnk"], result) is False
+    [powershell] = spawns.hung
+    assert powershell.killed
+    assert powershell.timeouts == [desktop_entry.STAMP_TIMEOUT_S, desktop_entry.child.REAP_TIMEOUT_S]
+    assert result.ok
+    assert any("second taskbar button" in line for line in result.lines)
+
+
 def test_a_repair_that_cannot_spawn_does_not_raise(monkeypatch, tmp_path):
     """It runs on a thread of its own while the window is up, and an exception there is an error
     shown in the window -- for a repair that is best effort, like the stamp it reuses."""
@@ -350,7 +385,7 @@ def test_a_repair_that_cannot_spawn_does_not_raise(monkeypatch, tmp_path):
     def _run(*args, **kwargs):
         raise OSError("powershell: not found")
 
-    monkeypatch.setattr(desktop_entry.subprocess, "run", _run)
+    monkeypatch.setattr(desktop_entry.child, "run_bounded", _run)
 
     assert len(desktop_entry.repair_pins(pinned, launcher=_LAUNCHER)) == 2
 
