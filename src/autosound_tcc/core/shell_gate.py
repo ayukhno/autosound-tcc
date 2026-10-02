@@ -15,11 +15,12 @@ moved here unchanged.
 
 from __future__ import annotations
 
+import posixpath
 import re
 import shlex
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 # Which writes still ask. `writes` gates everything that is not read-only; `foreign` also lets the
 # skill write its own files (`process/`, `state/`, and the project files it owns) and asks only
@@ -217,9 +218,28 @@ _RUINOUS_PREFIXES = ("mkfs.",)
 _PROTECTED_ROOTS = ("/etc/", "/usr/", "/bin/", "/sbin/", "/System/", "/Library/", "/var/", "/dev/")
 #: `rm` is judged by its arguments rather than by its name: `rm build/tmp.json` is a Tuesday.
 _RM_RECURSIVE = re.compile(r"(?:^|\s)-[a-zA-Z]*[rR][a-zA-Z]*(?:\s|$)")
-#: The paths that are somebody's whole machine or whole home. A recursive delete of one of these
-#: is the case this check exists for.
-_WIDE_TARGETS = ("/", "~", "~/", "/*", "$HOME", "${HOME}")
+#: The paths that are somebody's whole machine or whole home — `_is_wide_target` reads a target
+#: against them. A recursive delete of one of these is the case this check exists for. `~` and `/`
+#: were known; `/Users`, the system's own folders and a home spelled as a path were not (tcc#128).
+#: Lower case, because the comparison is: macOS and Windows disks ignore case.
+_SYSTEM_DIRS = frozenset({"/etc", "/usr", "/bin", "/sbin", "/system", "/library", "/var", "/dev",
+                          "/users", "/home", "/applications", "/volumes", "/private", "/opt"})
+#: The same on a Windows disk, as Git Bash, WSL and Cygwin spell it: a drive, its system folders,
+#: the folder the homes live in, and one home.
+_WINDOWS_WIDE = re.compile(r"(?:[a-z]:|/[a-z]|/mnt/[a-z]|/cygdrive/[a-z])"
+                           r"(?:/(?:windows|program files(?: \(x86\))?|programdata|users(?:/[^/]+)?))?")
+#: What a word the line does not spell starts with when nothing spelled stands before it: `$x`,
+#: `` `…` ``, `{a,b}`, `$'\x2d'`, cmd's `%x%`, and the word `xargs` appends (`_xargs_command`).
+_EXPANSION_STARTS = ("$", "`", "{", "\\", "%", "…")
+#: A head whose only expansion is the home: `"$HOME/.local/bin/omp"`, `${HOME}/bin/tool`. Every
+#: part after it is a plain name, so the last one is what runs.
+_HOME_HEAD = re.compile(r"(?:\$HOME|\$\{HOME\})(?:/[\w.+@-]+)*/([\w.+-]+)")
+#: cmd's own deletes. `/s` makes `rd` take the whole tree and `del` reach every folder under it —
+#: the Windows spelling of `rm -r` (tcc#128).
+_WINDOWS_DELETES = frozenset({"rd", "rmdir", "del", "erase"})
+#: A cmd switch: `/s`, `/Q`, `/s/q`, `/a:h` — and Git Bash's `//c` for the `/c` it would otherwise
+#: turn into a path.
+_WINDOWS_SWITCH = re.compile(r"(?://?[A-Za-z](?::[A-Za-z0-9-]*)?)+")
 #: `curl … | sh` and its family: what runs is fetched at that moment and nobody has read it.
 _FETCHERS = frozenset({"curl", "wget", "fetch"})
 #: Shells. What they run is a script, and a script written on the line is read like the line —
@@ -227,8 +247,28 @@ _FETCHERS = frozenset({"curl", "wget", "fetch"})
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 #: Interpreters whose program is NOT read: `python3 -c` passes as it always did. What they must not
 #: run is a program that is another command's output — `python3 -c "$(curl …)"` is `curl … | python3`.
+#: Lower case, as `_command_name` gives names: `Rscript` is `rscript` here.
 _INTERPRETERS = frozenset({"python", "python3", "pypy", "pypy3", "ruby", "perl", "node", "php",
-                           "osascript", "Rscript", "lua"})
+                           "osascript", "rscript", "lua"})
+#: Interpreter options that take the next word as a value — a library, a folder, a setting — so the
+#: walk steps over it to the program. `-r` is php's code but ruby's and node's library, and the walk
+#: stopped at `json` in `ruby -r json -e "$(curl …)"` (review of tcc#115, parked into tcc#128).
+_INTERPRETER_VALUES = {
+    "python": frozenset({"-W", "-X"}),
+    "ruby": frozenset({"-r", "-I", "-C", "-E"}),
+    "node": frozenset({"-r", "--require", "--import", "--loader", "--experimental-loader", "-C",
+                       "--conditions"}),
+    "perl": frozenset({"-I"}),
+    "php": frozenset({"-c", "-d"}),
+    "lua": frozenset({"-l"}),
+    "osascript": frozenset({"-l", "-s"}),
+}
+#: `git push` options that rewrite or delete what others already have; `--force-with-lease` and
+#: `--force-if-includes` are `--force` with a condition, and still a force.
+_PUSH_REWRITES = frozenset({"--force", "--delete", "--mirror", "--prune"})
+#: `find` actions that run a command on every hit. `-exec rm` asked; `-execdir` is the same delete
+#: run from each hit's folder, `-ok`/`-okdir` the same behind a prompt (tcc#128).
+_FIND_RUNNERS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 
 
 def bash_is_dangerous(command: str, roots: Sequence[Path]) -> bool:
@@ -314,9 +354,10 @@ _RESERVED = frozenset({"if", "then", "else", "elif", "fi", "do", "done", "while"
 _UNREAD_KEYWORDS = frozenset({"case", "esac", "function", "coproc"})
 #: Words that run the command written after them. Their own options differ and some take a value
 #: (`nice -n 5`, `timeout 5`, `xargs -n 1`), so every tail of the line is judged as a command.
+#: `call` and `start` are cmd's: `cmd /c call rd /s /q C:\` (tcc#128).
 _WRAPPERS = frozenset({"env", "command", "builtin", "exec", "nohup", "nice", "time", "timeout",
                        "stdbuf", "ionice", "caffeinate", "setsid", "flock", "chronic", "unbuffer",
-                       "noglob", "nocorrect", "repeat", "-"})
+                       "noglob", "nocorrect", "repeat", "-", "call", "start"})
 #: `xargs` options that take a value — attached (`-n1`) or as the next word (`-n 1`) — and the
 #: ones whose value can only be attached (`-i{}`, `-l5`, `-eEOF`). GNU and BSD together.
 _XARGS_VALUE_FLAGS = frozenset("InLsPdEaJRS")
@@ -827,7 +868,10 @@ def _segments(command: _Command) -> list[list[_Word]]:
 def _tainted(commands: list[_Command]) -> set[str]:
     """Variables holding another command's output somewhere on this line: `f=$( … )`, a loop over
     one, `read`. Order is not followed — a name set from a substitution ANYWHERE on the line counts
-    — which can only make the answer more careful."""
+    — which can only make the answer more careful.
+
+    And `HOME`, set on the line to anything: `_home_head_name` reads `$HOME` as the home, and a home
+    the line sets is not one — `HOME='/bin/rm -rf / '; $HOME/x` splits into a delete (tcc#128)."""
     tainted: set[str] = set()
     while True:
         before = len(tainted)
@@ -835,7 +879,7 @@ def _tainted(commands: list[_Command]) -> set[str]:
             for words in _segments(command):
                 head = words[0].text
                 if head in ("for", "select") and len(words) > 1:
-                    if any(_runs(word, tainted) for word in words[2:]):
+                    if words[1].text == "HOME" or any(_runs(word, tainted) for word in words[2:]):
                         tainted.add(words[1].text)
                 elif head in _STDIN_READERS:
                     tainted.update(word.text for word in words[1:] if _NAME.fullmatch(word.text))
@@ -845,7 +889,7 @@ def _tainted(commands: list[_Command]) -> set[str]:
                 else:
                     for word in words[1:] if head in _DECLARERS else words:
                         assignment = _ASSIGNMENT.match(word.text)
-                        if assignment and _runs(word, tainted):
+                        if assignment and (_runs(word, tainted) or assignment.group(1) == "HOME"):
                             tainted.add(assignment.group(1))
                         elif not assignment and head not in _DECLARERS:
                             break
@@ -869,6 +913,24 @@ def _command_is_dangerous(command: _Command, tainted: set[str], depth: int) -> b
                for words in _segments(command))
 
 
+def _command_name(text: str) -> str:
+    """What runs, as the rules name it: the last part of its path (`/` or `\\`), `.exe` dropped, in
+    lower case — macOS and Windows disks ignore case, so `RM -rf ~` runs `/bin/rm` there (tcc#128)."""
+    parts = [part for part in re.split(r"[\\/]", text) if part]
+    name = parts[-1].lower() if parts else ""
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def _home_head_name(head: _Word) -> Optional[str]:
+    """The name a head runs when its only expansion is `$HOME`: `"$HOME/.local/bin/omp" --version`
+    reads as `omp`, as `~/.local/bin/omp` always did. The home is not what the command is, and a
+    question about a version check is finding 123's class (tcc#128). None for anything else."""
+    if head.refs != {"HOME"} or head.output or head.glob:
+        return None
+    match = _HOME_HEAD.fullmatch(head.text)
+    return _command_name(match.group(1)) if match else None
+
+
 def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str], depth: int,
                          unwrap: bool = True) -> bool:
     start = 0
@@ -879,11 +941,13 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
     if not words:
         return False
     head, arguments = words[0], words[1:]
-    if head.dynamic or head.glob or _runs(head, tainted):
-        return True  # what runs is not written on the line: `$x`, `$(echo rm)`, `/bin/r?`
-    name = head.text if head.text in (".", "..") else Path(head.text).name
-    if name.lower().endswith(".exe"):
-        name = name[:-4]
+    if _runs(head, tainted):
+        return True  # what runs is another command's output: `$(echo rm)`
+    name = _home_head_name(head)
+    if name is None:
+        if head.dynamic or head.glob:
+            return True  # what runs is not written on the line: `$x`, `/bin/r?`
+        name = _command_name(head.text)
     texts = [argument.text for argument in arguments]
     if name in ("for", "select"):
         return False  # its list was read word by word, and its body is commands of their own
@@ -910,23 +974,24 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
                               for at in range(1, len(words)))
     if name in _SHELLS:
         return _shell_is_dangerous(arguments, command, tainted, depth)
+    if name == "cmd":
+        return _cmd_is_dangerous(arguments, command, tainted, depth)
     if name in _INTERPRETERS or name.startswith("python"):
-        return _interpreter_is_dangerous(arguments, command, tainted)
+        return _interpreter_is_dangerous(name, arguments, command, tainted)
     if name in ("rm", "find", "dd", "chmod") and any(_runs(a, tainted) for a in arguments):
         return True  # its arguments decide, and one is another command's output: `rm $(echo -rf /)`
     if name == "rm":
         return _rm_is_dangerous(arguments)
+    if name in _WINDOWS_DELETES:
+        return _reach_is_dangerous(arguments, _is_windows_switch,
+                                   lambda text: "s" in _switch_letters(text), bare=False)
     if name == "find":
-        joined = " ".join(texts)
-        return "-delete" in texts or "-exec" in texts and (
-            " rm " in f" {joined} " or " rm" in joined
-        )
+        return _find_is_dangerous(arguments, command, tainted, depth)
     if name == "dd":
         return any(text.startswith("of=/dev/") for text in texts)
     if name == "chmod":
-        return bool(_RM_RECURSIVE.search(" " + " ".join(texts))) and any(
-            text in _WIDE_TARGETS for text in texts
-        )
+        return _reach_is_dangerous(arguments, lambda text: text.startswith("-"), _is_recursive_flag,
+                                   bare=False)
     if name == "git":
         return _git_is_dangerous(arguments, tainted)
     if name in _FETCHERS and command.piped:
@@ -985,36 +1050,200 @@ def _xargs_command(arguments: list[_Word]) -> Optional[list[_Word]]:
     if not tail:
         return []  # it runs `echo`
     if placeholder is not None:
-        return [replace(word, dynamic=True) if placeholder in word.text else word for word in tail]
+        # The placeholder takes a whole input line as ONE argument — never split, so as one quoted
+        # word: `xargs -I{} chmod 644 {}` is a chmod of one file, not a chance at `-R /` (tcc#128).
+        return [replace(word, dynamic=True, quoted=True) if placeholder in word.text else word
+                for word in tail]
     return [*tail, _Word(text="…", started=True, dynamic=True)]
 
 
 def _rm_is_dangerous(arguments: list[_Word]) -> bool:
-    """`rm` is judged by its arguments rather than by its name: `rm build/tmp.json` is a Tuesday."""
-    flags: list[str] = []
-    targets: list[_Word] = []
+    """`rm` is judged by its arguments rather than by its name: `rm build/tmp.json` is a Tuesday.
+    With no target it is fed by `xargs` or a pipe, and deletes what is not on the line."""
+    return _reach_is_dangerous(arguments, lambda text: text.startswith("-"), _is_recursive_flag,
+                               bare=True)
+
+
+def _reach_is_dangerous(arguments: list[_Word], is_option: Callable[[str], bool],
+                        is_recursive: Callable[[str], bool], bare: bool) -> bool:
+    """A recursive delete (`rm -r`, `rd /s`) or `chmod -R`, judged by what it reaches.
+
+    A target the line does not spell — `"$f"` in `for f in *`, `$(cat list)` — is unknown, and a
+    recursive delete of something unknown is the case this check exists for; so is one of a whole
+    home or system folder (`_is_wide_target`).
+
+    And an OPTION the line does not spell counts as the recursive one (tcc#128): `x=-rf; rm $x ~` is
+    `rm -rf ~`, and xargs's appended word may be `-R`. An unquoted one (or `"$@"`) may split into
+    several words, the flag and the target at once (`x='-rf ~'; rm $x`); a quoted one is one word,
+    either the flag or the target, so it takes another unknown or wide word beside it to be both.
+    `rm "$tmp"` stays a delete of one file.
+    """
+    options: list[_Word] = []
+    operands: list[_Word] = []
+    could_be_options: list[_Word] = []
     options_over = False
     for argument in arguments:
-        if not options_over and argument.text == "--":
+        if not options_over and argument.text == "--" and not argument.dynamic:
             options_over = True
-        elif not options_over and argument.text.startswith("-"):
-            flags.append(argument.text)
+        elif not options_over and is_option(argument.text):
+            options.append(argument)
         else:
-            targets.append(argument)
-    if "--recursive" not in flags and not _RM_RECURSIVE.search(" " + " ".join(flags)):
+            operands.append(argument)
+            if not options_over and _could_be_an_option(argument):
+                could_be_options.append(argument)
+    if any(option.dynamic or is_recursive(option.text) for option in options):
+        if not operands:
+            return bare
+        return any(operand.dynamic or _is_wide_target(operand.text) for operand in operands)
+    if not could_be_options:
         return False
-    if not targets:
-        return True  # fed by `xargs` or a pipe: what it deletes is not on the line
-    # A target the line does not spell — `"$f"` in `for f in *`, `$(cat list)` — is unknown, and a
-    # recursive delete of something unknown is the case this check exists for.
-    return any(
-        target.dynamic or target.text in _WIDE_TARGETS or target.text.rstrip("/") in ("", "~")
-        for target in targets
-    )
+    return (any(_may_be_several_words(word) for word in could_be_options)
+            or sum(operand.dynamic for operand in operands) > 1
+            or any(not operand.dynamic and _is_wide_target(operand.text) for operand in operands))
+
+
+def _is_recursive_flag(text: str) -> bool:
+    """`-r`, `-R`, `-rf`, `--recursive` — and any start of it GNU accepts, `--rec`."""
+    return bool(_RM_RECURSIVE.search(text)) or len(text) > 2 and "--recursive".startswith(text)
+
+
+def _may_be_several_words(word: _Word) -> bool:
+    """An unquoted expansion splits; `"$@"` and `"${a[@]}"` are several words even quoted."""
+    return not word.quoted or bool(re.search(r"\$@|\$\{@|\[@\]", word.text))
+
+
+def _could_be_an_option(word: _Word) -> bool:
+    """Whether a word the line does not spell could be an option: it starts with an expansion, and
+    no spelled `/` after it makes it a path. `"$x"` and `${x}f` could be `-rf`; `"$dir/a.json"` cannot."""
+    return word.dynamic and word.text.startswith(_EXPANSION_STARTS) and "/" not in word.text
+
+
+def _is_wide_target(text: str) -> bool:
+    """Whether a path is somebody's whole machine or home: `/`, `~`, `$HOME`, `/Users`, a system
+    folder, `/Users/someone`, `C:\\`, `C:\\Users` — or a glob over one (`~/*`, `/Users/*`), or a
+    climb to one (`~/../*`), which reach the same files (tcc#128). Without case: macOS and Windows
+    disks ignore it."""
+    path = text.replace("\\", "/").lower()
+    home = re.match(r"~[^/]*|\$home|\$\{home\}", path)
+    if home and path[home.end():home.end() + 1] in ("", "/"):
+        # A home, wherever it lives, is one folder among the homes: `~/..` is all of them.
+        path = "/users/" + home.group() + path[home.end():]
+    if path:
+        path = posixpath.normpath(path)
+    while "/" in path:
+        parent, _, last = path.rpartition("/")
+        if last and not any(ch in last for ch in "*?["):
+            break
+        path = parent  # a glob over a folder's contents reaches the folder: `~/*`, `~/.[!.]*`
+    return (path == "" or path in _SYSTEM_DIRS or bool(re.fullmatch(r"/(?:users|home)/[^/]+", path))
+            or bool(_WINDOWS_WIDE.fullmatch(path)))
+
+
+def _is_windows_switch(text: str) -> bool:
+    return bool(_WINDOWS_SWITCH.fullmatch(text))
+
+
+def _switch_letters(text: str) -> str:
+    """`/s/Q` → `sq`: the letters of a cmd switch, without case."""
+    return "".join(re.findall(r"/([A-Za-z])", text)).lower()
+
+
+def _find_is_dangerous(arguments: list[_Word], command: _Command, tainted: set[str],
+                       depth: int) -> bool:
+    """`-delete`, or an action that runs a command on every hit (`_FIND_RUNNERS`): a delete of every
+    hit asks whatever its flags, as `find -exec rm` always did, and anything else it runs is judged
+    by the same rules — `{}` being each hit's name, one word the line does not spell."""
+    texts = [argument.text for argument in arguments]
+    if "-delete" in texts:
+        return True
+    joined = " ".join(texts)
+    for at, argument in enumerate(arguments):
+        if argument.text not in _FIND_RUNNERS:
+            continue
+        if " rm " in f" {joined} " or " rm" in joined:
+            return True  # the old reading, kept: it also catches `-exec sh -c 'rm "$1"' _ {} ;`
+        end = at + 1
+        while end < len(arguments) and arguments[end].text not in (";", "+"):
+            end += 1
+        run = [replace(word, dynamic=True, quoted=True) if "{}" in word.text else word
+               for word in arguments[at + 1:end]]
+        if run and (_command_name(run[0].text) == "rm"
+                    or _words_are_dangerous(run, command, tainted, depth)):
+            return True
+    return False
+
+
+def _cmd_is_dangerous(arguments: list[_Word], command: _Command, tainted: set[str],
+                      depth: int) -> bool:
+    """`cmd /c …` runs a line in cmd's own language, which `_Reader` does not speak: it is read by
+    `_cmd_line_is_dangerous`. Without `/c` or `/k`, cmd runs what comes in on stdin."""
+    for at, word in enumerate(arguments):
+        if word.dynamic or _runs(word, tainted):
+            return True  # a switch the line does not spell could be `/c`
+        if not _is_windows_switch(word.text):
+            break
+        if set(_switch_letters(word.text)) & {"c", "k"}:
+            line = arguments[at + 1:]
+            if any(rest.dynamic or _runs(rest, tainted) for rest in line):
+                return True  # the line cmd runs is not written here
+            return _cmd_line_is_dangerous(" ".join(rest.text for rest in line), depth + 1)
+    return command.piped or bool(command.stdin) or any(
+        operator in ("<", "<>", "<&") for operator, _ in command.redirects)
+
+
+def _cmd_line_is_dangerous(line: str, depth: int) -> bool:
+    """A cmd line, read closely enough to judge: `&`, `|`, `(` and `)` part commands, a double quote
+    holds spaces, `^` escapes, and `%NAME%` or `!NAME!` is a value the line does not spell. Each
+    command is judged by the same rules as a shell one — `rd /s` among them (tcc#128)."""
+    if depth > _MAX_DEPTH:
+        return True
+    commands: list[list[_Word]] = [[]]
+    word: Optional[_Word] = None
+    quoted = skip = False
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        delimiter = not quoted and (ch in " \t,;=&|()<>")
+        if delimiter and word is not None:
+            word.dynamic = bool(re.search(r"[%!]", word.text))
+            if not skip and not (ch in "<>" and word.text.isdigit()):
+                commands[-1].append(word)
+            skip = False
+            word = None
+        if ch == '"':
+            quoted = not quoted
+            word = word or _Word(started=True)
+            word.quoted = True
+        elif not quoted and ch == "^" and i + 1 < len(line):
+            word = word or _Word(started=True)
+            word.text += line[i + 1]
+            i += 1
+        elif not quoted and ch == "&" and line[i - 1:i] in ("<", ">"):
+            pass  # `2>&1`: a stream moved, not a command after it
+        elif not quoted and ch in "&|()":
+            commands.append([])
+            skip = False
+        elif not quoted and ch in "<>":
+            skip = True  # the next word is where the stream goes, not an argument
+        elif not delimiter:
+            word = word or _Word(started=True)
+            word.text += ch
+        i += 1
+    if quoted:
+        return True  # a quote that never closes: unknown is not safe
+    if word is not None and not skip:
+        word.dynamic = bool(re.search(r"[%!]", word.text))
+        commands[-1].append(word)
+    for words in commands:
+        if words and words[0].text.startswith("@"):
+            words[0] = replace(words[0], text=words[0].text[1:])  # `@rd`: the echo stays off
+        if words and _words_are_dangerous(words, _Command(), set(), depth):
+            return True
+    return False
 
 
 def _git_is_dangerous(arguments: list[_Word], tainted: set[str]) -> bool:
-    """A force push or a deleted remote branch rewrites what others already have."""
+    """A force push, a deleted remote branch or a mirror rewrites what others already have."""
     at = 0
     while at < len(arguments):
         argument = arguments[at]
@@ -1028,9 +1257,26 @@ def _git_is_dangerous(arguments: list[_Word], tainted: set[str]) -> bool:
             break
     if at >= len(arguments) or arguments[at].text != "push":
         return False
-    rest = arguments[at + 1:]
-    return any(_runs(argument, tainted) for argument in rest) or any(
-        argument.text in ("--force", "-f", "--delete") for argument in rest)
+    return any(_push_word_is_dangerous(argument, tainted) for argument in arguments[at + 1:])
+
+
+def _push_word_is_dangerous(word: _Word, tainted: set[str]) -> bool:
+    """One word of `git push`: a force (`--force`, `-f`, `+main`), a delete (`--delete`, `-d`,
+    `:main`), `--mirror`, `--prune` — or a word the line does not spell, which could be any of them:
+    `echo --force | xargs git push origin main` (tcc#128). `"feature/$name"` cannot."""
+    if _runs(word, tainted) or word.dynamic and word.text.startswith(_EXPANSION_STARTS):
+        return True
+    text = word.text
+    if text.startswith("--"):
+        return text.partition("=")[0] in _PUSH_REWRITES or text.startswith("--force")
+    if text.startswith("-"):
+        for letter in text[1:]:
+            if letter in "fd":
+                return True
+            if letter == "o":
+                return False  # `-o<option>`: the rest is its value
+        return False
+    return text.startswith(("+", ":"))
 
 
 def _shell_is_dangerous(arguments: list[_Word], command: _Command, tainted: set[str],
@@ -1081,14 +1327,16 @@ def _stdin_script_is_dangerous(command: _Command, tainted: set[str], depth: int)
                for operator, target in command.redirects)
 
 
-def _interpreter_is_dangerous(arguments: list[_Word], command: _Command,
+def _interpreter_is_dangerous(name: str, arguments: list[_Word], command: _Command,
                               tainted: set[str]) -> bool:
     """The program is not read — but it must not be another command's output."""
+    values = _INTERPRETER_VALUES.get(
+        "python" if name.startswith(("python", "pypy")) else name, frozenset())
     at = 0
     while at < len(arguments):
         text = arguments[at].text
-        if text in ("-W", "-X"):
-            at += 2  # python's warning and implementation options take a value
+        if text in values:
+            at += 2  # its value — a library, a folder, a setting — is not the program
             continue
         # `-c` python, `-e`/`-E` perl, ruby, node, osascript, Rscript, lua, `-p` node, `-r` php.
         code_flag = text in ("--eval", "--print") or (
