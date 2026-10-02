@@ -6614,6 +6614,67 @@ def test_a_process_state_refresh_takes_the_pin_tip_with_its_text(tmp_path, monke
         availability.reset()
 
 
+def _process_names_reviewer(tmp_path, monkeypatch, model: str) -> None:
+    """A project whose process state names `model` as its last reviewer."""
+    process = tmp_path / "process"
+    process.mkdir(exist_ok=True)
+    (process / "process-state.json").write_text(json.dumps({
+        "schema_version": 3, "active_phase": "1",
+        "phases": {"1": {"status": "cur", "title": "Crossovers"}},
+        "plan": [{"id": "xo", "name": "Choose crossovers", "status": "cur", "phase": "1"}],
+        "reviewer": {"vendor": "google", "model": model, "at": "2026-10-02T10:00:00Z"},
+    }), encoding="utf-8")
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+
+
+def test_a_process_state_write_keeps_the_picks_refusal(tmp_path, monkeypatch):
+    """Review of #129, Minor 4: the pick refused, and the footer said so in red with why in its
+    tip. A process-state write then put «Critic · model · ago» over it — the red stayed with
+    nothing to say what it was, and the refusal was gone. The pick's refusal stays, whole."""
+    from autosound_tcc.core import availability, model_choices
+    from autosound_tcc.ui.tcc import copy_menu
+
+    _process_names_reviewer(tmp_path, monkeypatch, "gemini-3.1-pro-preview")
+    pick = model_choices.Choice(harness="api", model="gemini-3.1-pro-preview",
+                                label="gemini-3.1-pro-preview", provider="google")
+    window = _reviewer_window(monkeypatch, pick)
+    try:
+        availability.refused(pick.key, availability.REFUSED, "HTTP 429: quota exhausted")
+        window._refresh_critic_status()
+        refused = copy_menu.full_text(window._critic_status)
+        assert "kv-warn" in str(window._critic_status.property("class"))
+        assert "quota exhausted" in window._critic_status.toolTip()
+
+        window._refresh_process()
+        assert copy_menu.full_text(window._critic_status) == refused
+        assert "quota exhausted" in window._critic_status.toolTip()
+        assert "kv-warn" in str(window._critic_status.property("class"))
+    finally:
+        availability.reset()
+
+
+@pytest.mark.parametrize("named,red", [("gemini-3.1-pro-preview", False), ("gpt-5.5", True)])
+def test_a_process_state_write_paints_by_its_own_line(tmp_path, monkeypatch, named, red):
+    """The red follows the line on screen (finding 55): another model than the pick named by the
+    process state is red; the pick's own is not — whatever the footer was painted before."""
+    from autosound_tcc.core import availability, model_choices
+    from autosound_tcc.ui.tcc import copy_menu
+
+    _process_names_reviewer(tmp_path, monkeypatch, named)
+    pick = model_choices.Choice(harness="api", model="gemini-3.1-pro-preview",
+                                label="gemini-3.1-pro-preview", provider="google")
+    window = _reviewer_window(monkeypatch, pick)
+    try:
+        availability.succeeded(pick.key)
+        for before in (True, False):
+            window._paint_critic_status(before)
+            window._refresh_process()
+            assert named in copy_menu.full_text(window._critic_status)
+            assert ("kv-warn" in str(window._critic_status.property("class"))) == red, before
+    finally:
+        availability.reset()
+
+
 def test_the_start_up_probe_does_not_clear_a_pin_it_cannot_see(monkeypatch):
     """tcc#113 review, Minor 2: the probe runs with a scratch `PROJECT_MIRROR`, so the method never
     reads the project's `rew_analitic/.critic-env` for it. Its list of pins is not the whole story:

@@ -3840,15 +3840,7 @@ class MainWindow(QMainWindow):
 
         review = process_view.reviewer(state)
         if review:
-            # The new text takes the tip of the one before with it — a pin set aside, or why the
-            # pick is not ready — since that tip is not about this line (`ElidedLabel.setText`,
-            # tcc#129).
-            self._critic_status.setText(
-                i18n.t("criticStatus").format(
-                    model=review.get("model") or review.get("vendor") or "?",
-                    ago=_ago(review.get("at", "")),
-                )
-            )
+            self._show_process_reviewer(review)
 
         # Re-arm: an atomic write replaces the inode, so the watcher silently drops the path it
         # was watching. Re-adding after every change is what keeps this from firing exactly once.
@@ -4814,10 +4806,33 @@ class MainWindow(QMainWindow):
         box.setText(self._critic_warn_detail)
         box.exec()
 
+    def _critic_pick(self):
+        """The reviewer picked in the footer, or None — None too while the window is being built."""
+        combo = getattr(self, "_ai_critic_combo", None)
+        key = str(combo.currentData() or "") if combo is not None else ""
+        return model_choices.resolve(getattr(self, "_critic_choices", []), key).choice \
+            if key else None
+
+    def _show_process_reviewer(self, review: dict) -> None:
+        """The last reviewer the process state names, in the footer, by the status's own rules
+        (review of #129, Minor 4). A pick that is not ready keeps its line, its tip and its red:
+        this write used to put «Critic · model · ago» over the refusal and leave the red with
+        nothing to say what it was. Otherwise the line is red only when the model it names is not
+        the pick's, as `_refresh_critic_status` paints the critic log's (finding 55). The new text
+        takes the tip of the one before with it (`ElidedLabel.setText`, tcc#129)."""
+        chosen = self._critic_pick()
+        if chosen is not None and not availability.status(chosen).ready:
+            self._refresh_critic_status()
+            return
+        model = str(review.get("model") or "")
+        self._critic_status.setText(i18n.t("criticStatus").format(
+            model=model or review.get("vendor") or "?", ago=_ago(review.get("at", ""))))
+        wanted = model_choices.reviewer_model(chosen) if chosen is not None else ""
+        self._paint_critic_status(bool(wanted and model) and not self_check.same_model(wanted, model))
+
     def _refresh_critic_status(self) -> None:
         self._refresh_critic_warning()
-        key = str(self._ai_critic_combo.currentData() or "")
-        chosen = model_choices.resolve(self._critic_choices, key).choice if key else None
+        chosen = self._critic_pick()
         if chosen is not None:
             state = availability.status(chosen)
             if not state.ready:
