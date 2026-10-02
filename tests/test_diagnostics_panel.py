@@ -310,6 +310,41 @@ def test_a_drift_in_a_shape_tcc_cannot_read_shows_the_checkers_words(monkeypatch
     assert "the block is stale" in _texts(dialog)
 
 
+@pytest.mark.parametrize("lang", ["uk", "en"])
+def test_a_block_ahead_of_the_ledger_is_not_said_to_be_behind_it(monkeypatch, lang):
+    """#126's review, Minor 1: the block can name a version AHEAD of a HEAD that was rolled back
+    (v_009 against v_001, as the real method gives it in `test_contract_check`). The line says
+    where each stands and nothing about which moved."""
+    _stub_self_checks(monkeypatch)
+    _app()
+    previous = i18n.current_language()
+    i18n.set_language(lang)
+    try:
+        dialog = DiagnosticsDialog()
+        dialog.set_report(_clean(continue_head=dict(_DRIFT, stale=["v_009"], heads={"FULL": "v_001"})))
+        line = i18n.t("diagContinueHead").format(named="v_009", at="v_001 (FULL)")
+        assert line in _texts(dialog)
+        assert "already" not in line and "уже" not in line, line
+    finally:
+        i18n.set_language(previous)
+
+
+@pytest.mark.parametrize("drift", [{"named": []}, {"stale": "v_010", "warning": "  "}])
+def test_a_continue_head_with_nothing_to_say_shows_no_row(monkeypatch, drift):
+    """#126's review, Minor 2: no fields TCC can read and no sentence of the checker's -- an empty
+    row with an Ask that sends nothing. Shown as nothing at all."""
+    from autosound_tcc.ui.tcc.diagnostics_panel import _AskRow
+
+    _stub_self_checks(monkeypatch)
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog.set_report(_clean(continue_head=drift))
+
+    assert dialog.findChildren(_AskRow) == []
+    assert i18n.t("diagNoIssues") in _texts(dialog)
+
+
 def test_no_opinion_on_the_continue_block_shows_nothing(monkeypatch):
     from autosound_tcc.ui.tcc.diagnostics_panel import _AskRow
 

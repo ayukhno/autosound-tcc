@@ -130,7 +130,6 @@ def test_an_answer_with_no_warnings_key_reads_as_none(tmp_path, monkeypatch):
     assert handoff.check(tmp_path)["warnings"] == []
 
 
-
 @pytest.mark.parametrize("ok", [True, False])
 def test_the_handoff_box_names_the_methods_warnings(tmp_path, monkeypatch, ok):
     """Said either way, as the method prints it either way: on a ready answer and on a refusal."""

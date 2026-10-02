@@ -1624,11 +1624,13 @@ class DiagnosticsDialog(QDialog):
         # checker keeps out of `ok`, so out of the headline too -- but the block is what a person
         # opens first and what the next session reads beside the ledger, and the panel never said
         # it was stale. Forwardable like the rest.
-        drift = report.continue_head()
-        if drift:
-            self._body_layout.addWidget(self._ask_row(
-                "tuning-changelog", str(drift.get("warning") or ""), _continue_head_line(drift)))
-        if not cross_notes and not drift:
+        # Nothing to read and no sentence to send is no row at all (#126's review, Minor 2).
+        drift = report.continue_head() or {}
+        shown = _continue_head_line(drift) if drift else None
+        said = str(drift.get("warning") or "").strip() or shown
+        if said:
+            self._body_layout.addWidget(self._ask_row("tuning-changelog", said, shown))
+        if not cross_notes and not said:
             self._body_layout.addWidget(_note(i18n.t("diagNoIssues")))
         self._body_layout.addWidget(_note(_rew_line(report)))
 
