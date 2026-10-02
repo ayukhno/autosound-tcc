@@ -3499,6 +3499,8 @@ The same with one button: «Update» on Claude Code alone → «Claude Code 2.1.
 
 ### 141. The method's update row reads oddly (the Arbiter: «кнопка не нажимається, але надпис дивний»)
 
+**Withdrawn** by the Arbiter the same evening: «все ок. знімається» (tcc#139 closed, not planned).
+
 **What.** The same tab: «The method 3.0.66 — up to date» with a greyed «Update the method». The Arbiter finds the
 wording odd; what he expected is to be asked (recorded as said).
 
