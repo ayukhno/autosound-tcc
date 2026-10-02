@@ -607,6 +607,43 @@ def duplicate_targets(pairs: Iterable[tuple[str, str]], measurements: dict) -> l
     return sorted(set(clashes))
 
 
+def duplicate_titles(measurements: dict, renamed: Optional[dict] = None) -> list[str]:
+    """Titles REW already holds on more than one measurement, sorted — for a warning, nothing more.
+
+    `duplicate_targets` stops TCC from MAKING such a pair; this names one REW already has (tcc#94).
+    The Arbiter, 2026-10-02: a pair is not to be resolved by uuid («не стабільно»), only said —
+    the curve window and the method read a measurement by its title, and two graphs under one
+    title is a question they cannot answer.
+
+    The rule is the method's own `rew_api.duplicate_titles`, so the warning names what the method's
+    check names; without a method that has it, the same one-line rule. `renamed` (`{uuid: title}`)
+    is what was renamed since the answer was read — a rename in the import window can be what
+    settles a pair. An empty title is not a name, so it is never one held twice.
+    """
+    renamed = dict(renamed or {})
+    current = {}
+    for ordinal, raw in (measurements or {}).items():
+        raw = dict(raw or {})
+        uuid = str(raw.get("uuid") or "")
+        if uuid in renamed:
+            raw["title"] = renamed[uuid]
+        current[ordinal] = raw
+    try:
+        method = getattr(vendor_loader.load_rew_api(), "duplicate_titles", None)
+    except Exception:  # noqa: BLE001 — no method on this machine: the same rule, counted here
+        method = None
+    if callable(method):
+        held = method(current)
+    else:
+        counts: dict[str, int] = {}
+        for raw in current.values():
+            title = raw.get("title")
+            if title is not None:
+                counts[title] = counts.get(title, 0) + 1
+        held = [title for title, n in counts.items() if n > 1]
+    return sorted(str(title) for title in held if str(title or "").strip())
+
+
 def channel_of(row: "Candidate", proposed: str = "", project_dir: Optional[Path] = None) -> str:
     """Which channel this row is about: from the name it is being GIVEN, or the one it has.
 

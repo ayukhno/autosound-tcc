@@ -89,6 +89,20 @@ def test_two_measurements_under_one_name_tick_neither(tmp_path):
     assert i18n.t("capImportDupNote").format(names="m_3 (sw)") in dialog._note.text()
 
 
+def test_a_title_rew_holds_twice_is_named_with_what_to_do_about_it(tmp_path):
+    """tcc#94 (the Arbiter, 2026-10-02): two measurements under one title are warned about, and
+    nothing more. Said whether or not the round waits for that name — the curve window and the
+    method read every title, not only the round's. Distinct titles say nothing."""
+    answer = _rew(3)
+    answer["2"]["title"] = "m_3 (sw)"
+
+    twice = _dialog(answer, tmp_path)
+    once = _dialog(_rew(3), tmp_path)
+
+    assert i18n.t("capImportDupWarn").format(names="m_3 (sw)") in twice._note.text()
+    assert i18n.t("capImportDupWarn").split("{")[0] not in once._note.text()
+
+
 def test_the_row_carries_rews_own_number(tmp_path):
     """For finding the row in REW's own window — navigation, never an identity (`capture_import`
     module docstring: the ordinal is the index of a view)."""

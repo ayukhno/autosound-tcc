@@ -538,3 +538,45 @@ def test_a_series_the_grammar_reads_is_not_a_typo_either(tmp_path):
     picked = ci.preselect(rows, ["sw_3 (sw)"], tmp_path)
 
     assert picked.names == {} and picked.proposed == frozenset()
+
+
+# ---- one title REW already holds twice: said, nothing more (tcc#94) ---------------------
+
+
+@needs_the_method
+def test_a_title_rew_holds_twice_is_named_and_distinct_titles_are_not():
+    """tcc#94, the Arbiter 2026-10-02: «якщо є однакові назви … попереджати користувача і все».
+    The rule is the method's own `rew_api.duplicate_titles`, so the warning names exactly what the
+    method's check names — compared with the real function, not with a copy of it."""
+    twice = _rew(("m-L_02 (sw)", "u1", "2026-Aug-25 20:10:00"),
+                 ("m-R_02 (sw)", "u2", "2026-Aug-25 20:10:10"),
+                 ("m-L_02 (sw)", "u3", "2026-Aug-25 20:10:20"))
+    once = _rew(("m-L_02 (sw)", "u1", "2026-Aug-25 20:10:00"),
+                ("m-R_02 (sw)", "u2", "2026-Aug-25 20:10:10"))
+
+    assert ci.duplicate_titles(twice) == ["m-L_02 (sw)"]
+    assert ci.duplicate_titles(twice) == sorted(
+        vendor_loader.load_rew_api().duplicate_titles(twice))
+    assert ci.duplicate_titles(once) == []
+
+
+def test_a_rename_already_sent_is_read_over_rews_answer():
+    """A rename made in the import window can be what settles a pair: the answer was read before
+    it, and a warning about a name REW no longer holds twice is a warning about nothing."""
+    answer = _rew(("m-L_02 (sw)", "u1", "2026-Aug-25 20:10:00"),
+                  ("m-L_02 (sw)", "u2", "2026-Aug-25 20:10:10"))
+
+    assert ci.duplicate_titles(answer, renamed={"u2": "m-R_02 (sw)"}) == []
+    assert ci.duplicate_titles(answer) == ["m-L_02 (sw)"], "REW's answer itself is not edited"
+
+
+def test_without_the_method_the_same_rule_still_names_the_title(monkeypatch):
+    """No method on the machine (or one too old to have the function) must not silence the
+    warning: the rule is one line, and it is the method's line."""
+    monkeypatch.setattr(vendor_loader, "load_rew_api", lambda: object())
+    answer = _rew(("m-L_02 (sw)", "u1", "2026-Aug-25 20:10:00"),
+                  ("m-L_02 (sw)", "u2", "2026-Aug-25 20:10:10"),
+                  ("", "u3", "2026-Aug-25 20:10:20"),
+                  ("", "u4", "2026-Aug-25 20:10:30"))
+
+    assert ci.duplicate_titles(answer) == ["m-L_02 (sw)"], "and an empty title is no name"

@@ -151,6 +151,76 @@ def test_the_dialog_is_told_what_the_round_is_waiting_for(tmp_path, monkeypatch)
     assert seen["has_task"] is True
 
 
+def _rejecting_dialog(monkeypatch):
+    """The import window, closed with Cancel: what is left on the card is the panel's own line."""
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+
+    class _Dialog:
+        def __init__(self, measurements, **kwargs):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(mp, "CaptureImportDialog", _Dialog)
+
+
+_TWICE = {"1": {"title": "m-L_02 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:10:00"},
+          "2": {"title": "m-L_02 (sw)", "uuid": "u2", "date": "2026-Aug-25 20:10:10"}}
+
+
+def test_the_card_names_a_title_rew_holds_twice_while_rew_was_last_seen_holding_it(
+        tmp_path, monkeypatch):
+    """tcc#94: the import window says it while it is open; the card's line keeps saying it after,
+    beside the curves button — the curve window reads by title, and one title on two graphs is
+    where it cannot tell which is meant. Gone again with a read that shows distinct titles, and with
+    a read that did not reach REW: then nothing is known."""
+    from autosound_tcc.core import config
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    _rejecting_dialog(monkeypatch)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    warning = i18n.t("capImportDupWarn")
+
+    panel._on_import_offer(_TWICE)
+    assert warning.format(names="m-L_02 (sw)") in panel._status_label.text()
+
+    panel._on_import_offer({"1": dict(_TWICE["1"]), "2": {**_TWICE["2"], "title": "m-R_02 (sw)"}})
+    assert warning.split("{")[0] not in panel._status_label.text()
+
+    panel._on_import_offer(_TWICE)
+    panel._on_read_failed("URLError: <urlopen error [Errno 61] Connection refused>")
+    assert warning.split("{")[0] not in panel._status_label.text()
+
+
+def test_a_rename_that_settles_the_pair_takes_the_warning_off(tmp_path, monkeypatch):
+    """The import window can rename one of the two; REW's answer was read before that, and a
+    warning about a name REW no longer holds twice is a warning about nothing. Both ends of the
+    rename: all sent, and a batch that stopped after the one that mattered."""
+    from autosound_tcc.core import config
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    _rejecting_dialog(monkeypatch)
+    warning = i18n.t("capImportDupWarn")
+    for settle in ("renamed", "stopped"):
+        panel = MeasurementPanel()
+        panel.set_sessions(MEAS_SESSIONS)
+        panel._on_import_offer(_TWICE)
+        assert warning.format(names="m-L_02 (sw)") in panel._status_label.text()
+        panel._taking = capture_import.candidates(_TWICE, tmp_path)
+        panel._renaming = [("u2", "m-R_02 (sw)"), ("u1", "w-L_02 (sw)")]
+
+        if settle == "renamed":
+            panel._on_import_renamed([("u2", "m-R_02 (sw)"), ("u1", "w-L_02 (sw)")])
+        else:
+            panel._on_import_rename_failed("REW rejected the rename", [("u2", "m-R_02 (sw)")])
+
+        assert warning.split("{")[0] not in panel._status_label.text(), settle
+
+
 def test_a_rew_holding_nothing_is_said_rather_than_shown_as_an_empty_table():
     _app()
     panel = MeasurementPanel()

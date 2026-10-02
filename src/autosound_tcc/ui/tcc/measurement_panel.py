@@ -586,6 +586,11 @@ class MeasurementPanel(QWidget):
         self._ledger_worker: "_LedgerWriteWorker | None" = None
         #: Extra sentences on the status line, kept as keys — see `_add_status`.
         self._status_extra: list = []
+        #: REW's last answer to ⤓, and the titles it holds on more than one measurement. The pair
+        #: is said at the end of the status line until a read shows it gone (tcc#94): the import
+        #: window closes, and the curve window — opened from this card — reads by title.
+        self._rew_answer: dict = {}
+        self._dup_titles: list[str] = []
         self._rows: list[_MeasRow] = []
         self._preset_provider = preset_provider
         self._settings = get_settings()
@@ -775,6 +780,8 @@ class MeasurementPanel(QWidget):
         parts = []
         for key, kwargs in [self._status, *self._status_extra]:
             parts.append(i18n.t(key).format(**kwargs) if kwargs else i18n.t(key))
+        if self._dup_titles:
+            parts.append(i18n.t("capImportDupWarn").format(names=", ".join(self._dup_titles)))
         self._status_label.setText(" ".join(parts))
 
     def set_no_project(self, message: str) -> None:
@@ -1202,6 +1209,8 @@ class MeasurementPanel(QWidget):
         """
         self.rewStatusChanged.emit(True)
         self._read_btn.setEnabled(True)
+        self._rew_answer = dict(measurements or {})
+        self._dup_titles = capture_import.duplicate_titles(self._rew_answer)
         if not measurements:
             self._set_status("measReadNoMeas")
             return
@@ -1253,6 +1262,8 @@ class MeasurementPanel(QWidget):
         self._supersede_renamed(rows, titles)
         written = capture_import.record_imported(
             rows, round_id=self._round_id, project_dir=config.project_dir(), titles=titles)
+        # A rename in the import window can be what settled a pair the answer still shows.
+        self._dup_titles = capture_import.duplicate_titles(self._rew_answer, renamed=titles)
         if titles:
             self._set_status("capImportRenamed", n=written, renamed=len(titles))
         else:
@@ -1409,6 +1420,7 @@ class MeasurementPanel(QWidget):
         rows = [row for row in self._taking if row.uuid in keep]
         written = capture_import.record_imported(
             rows, round_id=self._round_id, project_dir=config.project_dir(), titles=titles)
+        self._dup_titles = capture_import.duplicate_titles(self._rew_answer, renamed=titles)
         self._set_status("capImportRenameFail", n=len(renamed), error=message, taken=written)
         self.titlesChanged.emit()
         # Half a batch is still a pass: what did come in is recorded, under the names it answers
@@ -1417,6 +1429,8 @@ class MeasurementPanel(QWidget):
 
     def _on_read_failed(self, message: str) -> None:
         self._read_btn.setEnabled(True)
+        # Nothing is known about REW now, so nothing is said about its pairs either.
+        self._rew_answer, self._dup_titles = {}, []
         self._set_status("measReadFail", error=message)
         # The dot goes out with it. This signal only ever carried the good news, so a REW that was
         # reachable at launch and has since been closed left a green dot over a failed read

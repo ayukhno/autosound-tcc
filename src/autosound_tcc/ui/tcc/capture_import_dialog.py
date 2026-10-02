@@ -184,6 +184,9 @@ class CaptureImportDialog(QDialog):
         #: Every uuid whose title is not unique in REW's current answer — marked in the row, so a
         #: tick on one of a pair is made knowing there is a pair.
         self._repeated = capture_import.repeated_titles(self._all)
+        #: The same pairs by NAME, for the line under the table: the mark says "there is a pair",
+        #: this says what it costs — the curve window and the method read by title (tcc#94).
+        self._dup_titles = capture_import.duplicate_titles(self._measurements)
         #: The table is scrolled to the first pre-ticked row ONCE, when it opens. Re-rendering
         #: (a filter, +10, a typed name) must not yank the view back while somebody is working.
         self._scrolled_to_pick = False
@@ -433,6 +436,10 @@ class CaptureImportDialog(QDialog):
 
     def _render_note(self, shown: int) -> None:
         lines = [self._plan_note] if self._plan_note else []
+        if self._dup_titles:
+            # Said, never resolved: which of the two is meant is the tuner's to settle in REW (the
+            # Arbiter, 2026-10-02 — a pair is not to be addressed by uuid, tcc#94).
+            lines.append(i18n.t("capImportDupWarn").format(names=", ".join(self._dup_titles)))
         lines.append(i18n.t("capImportShowing"))
         if self._picked:
             lines.append(i18n.t("capImportPicked").format(n=self._picked))
