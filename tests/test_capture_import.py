@@ -609,3 +609,131 @@ def test_a_method_that_raises_falls_back_to_the_same_rule(monkeypatch):
                   ("m-L_02 (sw)", "u2", "2026-Aug-25 20:10:10"))
 
     assert ci.duplicate_titles(answer) == ["m-L_02 (sw)"]
+
+
+# ---- the capture check at import (tcc#21) ---------------------------------------------------
+
+
+_RTA_NOTES = "65536-point 1/48 octave RTA using Hann window, no smoothing and 150 averages"
+
+
+def _verdict(valid=True, exists=True, applicable=True, issues=()):
+    """The method's verdict shape (`verify.verdict`): `{name, exists, applicable, valid, issues,
+    stats}`, `stats.uuid` pinned (SCR-040)."""
+    return {"name": "", "exists": exists, "applicable": applicable, "valid": valid,
+            "issues": list(issues), "stats": {}}
+
+
+def _asking(answer=None):
+    """A stand-in for the method's `verdict`, writing down each question it was asked."""
+    asked = []
+
+    def verdict(name, measurements=None, **_kwargs):
+        asked.append((name, dict(measurements or {})))
+        return dict(answer or _verdict(), name=name)
+
+    return verdict, asked
+
+
+def test_only_the_sweeps_handed_in_are_put_to_the_method():
+    """The selected rows, and of those only the swept: an RTA has no verdict to give (TCC-008), and
+    a row with no uuid cannot be told apart from a re-take under its title."""
+    rows = ci.candidates({
+        "1": {"title": "w-L_1 (sw)", "uuid": "a", "date": "", "notes": "DELAY 11.5 ms"},
+        "2": {"title": "ALL_1 (rta)", "uuid": "b", "date": "", "notes": _RTA_NOTES},
+        "3": {"title": "nameless", "uuid": "", "date": ""},
+    }, imported={})
+    verdict, asked = _asking()
+    listing = {str(i): {"title": r.title, "uuid": r.uuid, "notes": ""} for i, r in
+               enumerate(rows, start=1)}
+
+    found = ci.check_sweeps(rows, listing=lambda: listing, verdict=verdict)
+
+    assert [name for name, _ in asked] == ["w-L_1 (sw)"]
+    assert set(found) == {"a"}
+
+
+def test_each_sweep_is_judged_by_its_uuid_from_a_fresh_answer():
+    """Two graphs under one title are a normal state of REW (a re-take before the dud is deleted),
+    and the method resolves a title, which is ambiguous there. So it is handed the one record whose
+    uuid the row carries — at the ordinal REW gives it NOW, since a hand can have moved it since
+    the list was drawn (`resolve_ordinals`)."""
+    rows = ci.candidates(_rew(("m-L_2 (sw)", "old", "2026-Aug-25 20:10:00"),
+                              ("m-L_2 (sw)", "new", "2026-Aug-25 20:10:10")), imported={})
+    fresh = {"7": {"title": "m-L_2 (sw)", "uuid": "new"},
+             "9": {"title": "m-L_2 (sw)", "uuid": "old"}}
+    verdict, asked = _asking()
+
+    ci.check_sweeps([row for row in rows if row.uuid == "new"], listing=lambda: fresh,
+                    verdict=verdict)
+
+    assert asked == [("m-L_2 (sw)", {"7": {"title": "m-L_2 (sw)", "uuid": "new"}})]
+
+
+def test_a_sweep_rew_no_longer_shows_gets_no_verdict():
+    """Deleted, or hidden by a filter since the list was drawn: there is nothing to judge, and a
+    verdict about nothing would be a red mark on a row that did nothing wrong."""
+    rows = ci.candidates(_rew(("m-L_2 (sw)", "gone", "2026-Aug-25 20:10:00")), imported={})
+    verdict, asked = _asking()
+
+    assert ci.check_sweeps(rows, listing=lambda: {}, verdict=verdict) == {}
+    assert asked == []
+
+
+def test_a_method_without_the_verdict_checks_nothing(monkeypatch):
+    """No method on this machine, or one too old to have `verify.verdict`: no marks, and REW is not
+    asked for anything — the import window works as it did before the check existed."""
+    monkeypatch.setattr(vendor_loader, "load_verify", lambda: object(), raising=False)
+    rows = ci.candidates(_rew(("m-L_2 (sw)", "u", "2026-Aug-25 20:10:00")), imported={})
+
+    def listing():
+        raise AssertionError("REW was asked with nothing to judge the answer")
+
+    assert ci.check_sweeps(rows, listing=listing) == {}
+
+
+def test_unusable_is_measured_and_failed_and_nothing_else():
+    """The one verdict the import window paints red. Not a curve that is not there (`exists:
+    false` is a different conversation, verify.py's docstring), not an RTA the check does not apply
+    to (TCC-008), and not a pass."""
+    assert ci.unusable(_verdict(valid=False, issues=["in-band mean -95.0 dB — silence"]))
+    assert not ci.unusable(_verdict(valid=True))
+    assert not ci.unusable(_verdict(valid=False, exists=False))
+    assert not ci.unusable(_verdict(valid=False, applicable=False))
+    assert not ci.unusable(None) and not ci.unusable({})
+
+
+@needs_the_method
+def test_the_method_s_own_verdict_takes_the_question_the_check_asks():
+    """The stand-in above is only worth what its likeness to the real one is (`test_ship.py`'s
+    header). An RTA is the one record the real verdict answers with no HTTP at all: the call shape
+    is the method's, the uuid is pinned, and `unusable` reads its answer as not red."""
+    verdict = ci._verdict_by_the_method()
+    record = {"title": "ALL_60 (rta)", "uuid": "u1", "notes": _RTA_NOTES}
+
+    answer = verdict("ALL_60 (rta)", measurements={"4": record})
+
+    assert answer["exists"] is True and answer["applicable"] is False, answer
+    assert answer["stats"]["uuid"] == "u1"
+    assert not ci.unusable(answer)
+
+
+def test_taken_as_it_is_is_remembered_for_that_capture_and_not_for_its_title(tmp_path):
+    """«Take it as it is» is asked once per capture (the Arbiter, 2026-10-02): remembered by uuid
+    beside what the store already pins, so a re-take under the same title — a new uuid — is checked
+    afresh (SCR-040). A later import of the same capture does not forget it."""
+    from dataclasses import replace
+
+    first = ci.candidates(_rew(("m-L_2 (sw)", "dud", "2026-Aug-25 20:10:00")), tmp_path)
+    ci.record_imported([replace(first[0], as_is=True)], round_id="cap_001", project_dir=tmp_path)
+    ci.record_imported(ci.candidates(_rew(("m-L_2 (sw)", "dud", "2026-Aug-25 20:10:00")),
+                                     tmp_path), round_id="cap_001", project_dir=tmp_path)
+
+    again = ci.candidates(_rew(("m-L_2 (sw)", "dud", "2026-Aug-25 20:10:00"),
+                               ("m-L_2 (sw)", "retake", "2026-Aug-25 20:12:00")), tmp_path)
+
+    assert [(row.uuid, row.as_is) for row in again] == [("dud", True), ("retake", False)]
+    verdict, asked = _asking()
+    listing = {"1": {"title": "m-L_2 (sw)", "uuid": "dud"},
+               "2": {"title": "m-L_2 (sw)", "uuid": "retake"}}
+    assert set(ci.check_sweeps(again, listing=lambda: listing, verdict=verdict)) == {"retake"}

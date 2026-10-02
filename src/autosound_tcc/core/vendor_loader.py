@@ -186,6 +186,12 @@ _VENDORED = {
     # method cannot — which project folders to look in, since it keeps no registry and TCC has the
     # recent list.
     "car_profile.py": "autosound_tcc._vendor.car_profile",
+    # The capture verdict (SCR-013): is a sweep there, and does it look like a real capture. The
+    # import window asks it of the sweeps the tuner ticked, while the microphone is still in place
+    # (tcc#21) -- the same function the method's own `capture-check` runs after the import, so the
+    # two cannot disagree. Like `resonalyze_vc` it puts `rew_tool/` on `sys.path` at import, and
+    # it talks to REW through its own bare `rew_api` (`tests/conftest.py` points both at nothing).
+    "verify.py": "autosound_tcc._vendor.verify",
 }
 # `contract.py` (the whole-project machine-contract checker, SKILL-SYNC-PLAN.md §2.3) is
 # deliberately NOT registered here: it's shaped as a CLI (`python rew_tool/contract.py check
@@ -397,6 +403,11 @@ def reload_loaded() -> bool:
 def load_rew_api() -> ModuleType:
     """The REW HTTP-API module (`rew_api.py`)."""
     return load("rew_api.py")
+
+
+def load_verify() -> ModuleType:
+    """The capture verdict (`verify.py`, SCR-013) — `verdict(title, measurements)` per sweep."""
+    return load("verify.py")
 
 
 def load_dsp_state() -> ModuleType:

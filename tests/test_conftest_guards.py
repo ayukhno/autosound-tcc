@@ -275,3 +275,16 @@ def test_a_test_starts_on_a_frozen_heap_and_its_own_cycles_are_still_collected()
     del dropped
     gc.collect()
     assert gone() is None, "a cycle made and dropped in the test is collected"
+
+
+def test_the_suite_cannot_reach_this_machines_rew_through_the_capture_check():
+    """A second door onto REW, opened by tcc#21: the method's `verify.py` talks to REW through its
+    OWN bare `rew_api` (it puts `rew_tool/` on `sys.path` and imports it by name), not the namespaced
+    one `conftest._no_live_rew` re-points. With a REW live on this Mac — the normal state while
+    somebody tunes — a test reaching the real verdict would pull curves out of it."""
+    from autosound_tcc.core import vendor_loader
+
+    if not vendor_loader.is_available():
+        pytest.skip("the vendored skill is not checked out")
+
+    assert vendor_loader.load_verify()._api.BASE_URL == "http://127.0.0.1:1"

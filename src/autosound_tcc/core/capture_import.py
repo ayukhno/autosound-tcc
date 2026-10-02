@@ -91,6 +91,10 @@ class Candidate:
     #: other, but there is no capture check that could say anything about it (the method's
     #: `rew_api.is_swept`).
     swept: bool = True
+    #: Taken although the capture check called it unusable — the tuner's «Take it as it is»
+    #: (tcc#21). Read back from the store, so that capture is not asked about again; a re-take
+    #: under the same title is another uuid and is checked afresh (SCR-040).
+    as_is: bool = False
 
     @property
     def identified(self) -> bool:
@@ -157,9 +161,13 @@ def record_imported(rows: Iterable["Candidate"], round_id: str = "",
         if not row.identified:
             continue
         title = str((titles or {}).get(row.uuid) or row.title)
-        data["measurements"][row.uuid] = {
-            "title": title, "round": str(round_id or ""), "when": stamp, "date": row.date,
-        }
+        entry = {"title": title, "round": str(round_id or ""), "when": stamp, "date": row.date}
+        # «Take it as it is» is pinned here, beside the uuid this store already keys by (tcc#21):
+        # it is a fact about one capture, like everything else in this log, and a later import of
+        # the same capture must not quietly forget that the tuner already answered for it.
+        if row.as_is or (data["measurements"].get(row.uuid) or {}).get("as_is"):
+            entry["as_is"] = True
+        data["measurements"][row.uuid] = entry
         written += 1
     if not written:
         return 0
@@ -240,6 +248,7 @@ def candidates(measurements: dict, project_dir: Optional[Path] = None,
             when=parse_date(raw.get("date")),
             imported=bool(uuid) and uuid in seen,
             swept=bool(is_swept(raw)),
+            as_is=bool(uuid) and bool((seen.get(uuid) or {}).get("as_is")),
         )))
     rows.sort(key=lambda pair: pair[0])
     ordered = [row for _position, row in rows]
@@ -278,6 +287,81 @@ def window(rows: list[Candidate], waiting: int = 0, pages: int = 0,
     if wanted <= shown:
         return tail
     return [row for row in rows if row.uuid in shown or row.uuid in wanted]
+
+
+# ---- the capture check, while the microphone is still in place (tcc#21) ---------------------
+
+
+def _verdict_by_the_method() -> Optional[Callable[..., dict]]:
+    """The method's `verify.verdict` (SCR-013), or None without a method that has one.
+
+    Only the method's verdict, nothing of ours (the Arbiter, 2026-10-02): a sweep that never
+    completed, a flat loopback, a silent capture. Noise and distortion are REW's to report. It is
+    also the function the method's own `capture-check` runs after the import, so the mark in the
+    import window and the colour on the card come from one rule.
+    """
+    try:
+        answer = getattr(vendor_loader.load_verify(), "verdict", None)
+    except Exception:  # noqa: BLE001 — no method on this machine: nothing to ask
+        answer = None
+    return answer if callable(answer) else None
+
+
+def to_check(rows: Iterable[Candidate]) -> list[Candidate]:
+    """Which of `rows` the check has something to say about.
+
+    Swept, because an RTA answers none of a sweep's questions (TCC-008); identified, because the
+    verdict is pinned to a uuid; and not already taken as it is — the tuner answered for that one,
+    and asking again is what «Take it as it is» is remembered to prevent.
+    """
+    return [row for row in rows if row.swept and row.identified and not row.as_is]
+
+
+def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]] = None,
+                 verdict: Optional[Callable[..., dict]] = None) -> dict[str, dict]:
+    """`{uuid: the method's verdict}` for every row of `rows` the check applies to (`to_check`).
+
+    HTTP throughout — one `listing()` and an FR and an impulse per sweep — so it is called from a
+    worker, never from the window. `listing` is REW's `GET /measurements`; `verdict` the method's.
+
+    Each sweep is handed to the method as the ONE record carrying its uuid, at the ordinal REW gives
+    it now. The method resolves a title, and two graphs under one title — a re-take before the dud
+    is deleted — is exactly where a title cannot say which; the ordinal is read fresh because a
+    hand can have moved it since the list was drawn (`resolve_ordinals`). A row REW no longer shows
+    gets no verdict: there is nothing there to judge.
+    """
+    wanted = to_check(rows)
+    if not wanted:
+        return {}
+    judge = verdict or _verdict_by_the_method()
+    if judge is None:
+        return {}
+    answer = (listing or vendor_loader.load_rew_api().get_measurements)() or {}
+    by_uuid = {str((raw or {}).get("uuid") or ""): (str(ordinal), raw or {})
+               for ordinal, raw in answer.items()}
+    found: dict[str, dict] = {}
+    for row in wanted:
+        if row.uuid not in by_uuid:
+            continue
+        ordinal, raw = by_uuid[row.uuid]
+        try:
+            found[row.uuid] = dict(judge(str(raw.get("title") or ""),
+                                         measurements={ordinal: raw}) or {})
+        except Exception:  # noqa: BLE001 — the verdict "never raises"; one that does says nothing
+            continue
+    return found
+
+
+def unusable(verdict: Optional[dict]) -> bool:
+    """Measured, and the method says it cannot be used — the one verdict the window marks red.
+
+    Not a curve REW does not hold (`exists: false` is "nobody measured it", a different
+    conversation in the method's own words), and not a capture the check does not apply to
+    (`applicable: false`, an RTA: grey, never red — TCC-008).
+    """
+    verdict = verdict or {}
+    return (bool(verdict.get("exists")) and verdict.get("applicable", True) is not False
+            and not verdict.get("valid"))
 
 
 # ---- the two things worth saying out loud -------------------------------------------------

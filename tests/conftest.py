@@ -175,20 +175,35 @@ def _no_live_rew():
 
     NOT "stop REW": it may be live and mid-measurement, and this repository does not touch it
     (cockpit rule 6). Tests that want REW's behaviour fake it themselves.
+
+    The variable as well as the module (tcc#21): the method's `verify.py` imports its OWN bare
+    `rew_api` by name, a second copy of the file this one never patched, and the copy reads its
+    endpoint from `REW_API_URL` when it loads. So do the method's scripts run as children.
     """
+    dead = "http://127.0.0.1:1"  # refused instantly, on every platform
+    before = os.environ.get("REW_API_URL")
+    os.environ["REW_API_URL"] = dead
+    bare = sys.modules.get("rew_api")  # a bare copy already loaded is re-pointed too
+    if bare is not None:
+        bare.BASE_URL = dead
     try:
         from autosound_tcc.core import vendor_loader
 
         api = vendor_loader.load_rew_api()
     except Exception:  # noqa: BLE001 — no skill checked out: nothing can call REW anyway
-        yield
-        return
-    previous = api.BASE_URL
-    api.BASE_URL = "http://127.0.0.1:1"  # refused instantly, on every platform
+        api = None
+    previous = api.BASE_URL if api is not None else None
+    if api is not None:
+        api.BASE_URL = dead
     try:
         yield
     finally:
-        api.BASE_URL = previous
+        if api is not None:
+            api.BASE_URL = previous
+        if before is None:
+            os.environ.pop("REW_API_URL", None)
+        else:
+            os.environ["REW_API_URL"] = before
 
 
 @pytest.fixture(autouse=True)
