@@ -3448,3 +3448,37 @@ key from the OS store too (`key_source` → `keystore`) — whether a stored key
 **Task.** For the next wave's collection — in the reviewer-key window, a «Видалити ключ» for the stored key (the
 method's `key rm <provider>`), and, if it stays simple, an explicit «не використовувати API» switch; the check above
 first.
+
+### 137. The reviewer-key window squeezes the rows' «Delete the key» buttons after a save that leaves a copy
+
+**What.** The Arbiter on the Windows VM, 2026-10-02 (W-5's VM look, v0.1.46 before the tag): after «Save» with a copy
+of the key still in the Windows environment, the red line and the «Move it» / «Delete the copy of VAR» buttons appear,
+and the provider rows' «Delete the key» buttons are squeezed in height until their words cannot be read. Enlarging the
+window brings them back.
+
+**Weight.** Low: a look, the buttons still work and a resize fixes it.
+
+**Task.** For the next wave — the window grows with its content (or the rows keep their minimum height) when the
+copy line and its buttons appear.
+
+### 138. The key window's question and result join the places with «;»
+
+**What.** The Arbiter, 2026-10-02: «Delete the Anthropic (Claude) key from the secure store; the Windows environment
+variables (HKCU\Environment)?» and «… is deleted from the secure store; the Windows environment variables …». Two
+places read as a list, and the «;» reads as a break.
+
+**Weight.** Low: wording.
+
+**Task.** For the next wave — join two places with «and» («і»), three with commas and «and», in all four languages.
+
+### 139. Hover sticks after switching to another app and back
+
+**What.** The Arbiter on the Windows VM, 2026-10-02: in the diagnostics window, after switching to a terminal and
+back, the widget that was under the mouse keeps its hover look (the «Beta channel» box kept its orange ring while the
+mouse was on «Update»), and no hover works on that page until another tab is chosen. Older than W-5: Qt does not send
+a leave when the window loses activation.
+
+**Weight.** Low: a look; clicks work.
+
+**Task.** For the next wave — on the window's deactivation, send the hovered widget its leave (and on activation
+re-read what is under the cursor), app-wide; a VM look.
