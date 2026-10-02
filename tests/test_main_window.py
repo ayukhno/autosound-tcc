@@ -4019,8 +4019,9 @@ def test_the_full_window_at_its_minimum_reads_the_output_table_and_its_tabs(
 
 
 # The stretched font in both languages: there the header holds the window's floor (1317-1328 px),
-# so two thirds do not bind and only the rounds and the row are checked (tcc#106's own test skips
-# that font; its tabs elide at the header's floor with the flat 200-px column too).
+# so two thirds do not bind and only the rounds and the row are checked, and the run says so with a
+# skip (tcc#132; tcc#106's own test skips that font; its tabs elide at the header's floor with the
+# flat 200-px column too).
 # An older journal's series-only rounds in the Mac's font, where the cap binds (Ruling 31).
 @pytest.mark.parametrize(("stretch", "lang", "shape"), [
     (100, "uk", "round-open"), (100, "de", "round-open"), (141, "uk", "round-open"),
@@ -4059,7 +4060,8 @@ def test_a_round_open_on_two_thirds_of_a_1512_screen_leaves_the_centre_its_tabs(
         # it holds the window's floor and the centre has the room it leaves.
         cap = 1512 * 2 // 3
         assert _floor_part(window) <= cap, f"{said}: the columns' floor past two thirds"
-        if _other_rows(window) <= cap:
+        rows = _other_rows(window)
+        if rows <= cap:
             assert window.width() <= cap, said
             tabs = [cut for cut in _what_does_not_read(window) if " reads " in cut]
             assert not tabs, f"{said}: {tabs}"
@@ -4072,6 +4074,12 @@ def test_a_round_open_on_two_thirds_of_a_1512_screen_leaves_the_centre_its_tabs(
         for left, right in zip(row, row[1:]):
             assert left.geometry().right() < right.geometry().left(), (
                 f"{said}: {type(left).__name__} runs into {type(right).__name__}")
+        if rows > cap:
+            # Said, not passed: a green run here checked the rounds and the row and not the tabs
+            # (tcc#132). Last, so what this font does check is checked first.
+            pytest.skip(f"{said}: the header and the footer hold the window at {rows} px, past two "
+                        f"thirds of the 1512 screen ({cap}), so the tabs are not checked here; the "
+                        f"rounds and the head row are")
     finally:
         app.setFont(before)
         i18n.set_language("en")
