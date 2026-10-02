@@ -537,6 +537,10 @@ def main() -> int:
     if icon.is_file():
         app.setWindowIcon(QIcon(str(icon)))
     app_log.install_qt_handler()  # Qt's own warnings, into the same file
+    # Hover that follows the mouse after a switch to another app and back (tcc#137): Qt sends a
+    # window no leave when it loses activation, and its hover stayed stuck until a tab switch.
+    from autosound_tcc.ui.tcc import hover_reset
+    hover_reset.install(app)
     # The same language the window will come up in — read from the same store `MainWindow` reads
     # it from, so the three lines below are not in English on a Ukrainian install.
     try:
