@@ -2174,6 +2174,47 @@ def test_a_tool_whose_source_cannot_tell_is_not_written_as_an_offer(lang):
     assert "→" not in i18n.T[lang]["updToolUnknown"]
 
 
+def test_agy_and_a_native_claude_code_read_up_to_date_or_newer_from_the_methods_answer(tmp_path):
+    """hub #237 (TCC-047), the method's v3.1.0: `upkeep.py` names the newest version of a
+    self-installed agy (its update server's manifest for this platform) and of a native Claude Code
+    (the npm dist-tag of its update channel), where it said "" before — so their rows read «up to
+    date» or «→ x.y.z» as omp's and gh's do, and «cannot be known» stays for a source that does
+    not answer. Asked of the vendored `available_version` through its own `fetch`: no network."""
+    import importlib.util
+
+    from autosound_tcc.core import updates
+    from autosound_tcc.ui.tcc import diagnostics_panel
+
+    script = updates.upkeep_script()
+    if not script.is_file():
+        pytest.skip("the method's submodule is not checked out")
+    spec = importlib.util.spec_from_file_location("upkeep_under_test", script)
+    upkeep = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(upkeep)
+
+    def fetch(url, timeout=20):
+        if "/manifests/" in url:
+            return {"version": "1.2.16"}
+        if "dist-tags" in url:
+            return {"latest": "2.1.287", "stable": "2.1.280"}
+        return None
+
+    def newest(name, package, source=fetch):
+        return upkeep.available_version(name, str(tmp_path / name), "self", package,
+                                        fetch=source, home=str(tmp_path))
+
+    agy = updates.Tool("agy", "1.2.15", newest("agy", "agy"), True)
+    claude = updates.Tool("claude", "2.1.287", newest("claude", "@anthropic-ai/claude-code"), True)
+    silent = updates.Tool("agy", "1.2.15", newest("agy", "agy", lambda url, timeout=20: None), True)
+
+    assert diagnostics_panel._tool_line(agy) == i18n.t("updToolAvailable").format(
+        name="agy", here="1.2.15", there="1.2.16") and agy.offered
+    assert diagnostics_panel._tool_line(claude) == i18n.t("updToolCurrent").format(
+        name="Claude Code", here="2.1.287") and not claude.offered
+    assert diagnostics_panel._tool_line(silent) == i18n.t("updToolUnknown").format(
+        name="agy", here="1.2.15") and silent.offered
+
+
 #: `conftest.py` stands in for `update_tools`; the real one, for the test that runs it end to end.
 from autosound_tcc.core import updates as _updates  # noqa: E402
 

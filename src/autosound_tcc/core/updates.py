@@ -1088,8 +1088,9 @@ class Tool:
     name: str
     #: The version it says it is; "" when it would not say.
     installed: str
-    #: What its source offers. "" when the source cannot say without installing (agy, a native
-    #: Claude Code): UNKNOWN, which is not "up to date" (the contract says so in as many words).
+    #: What its source offers. "" when the source cannot say: UNKNOWN, which is not "up to date"
+    #: (the contract says so in as many words). Before the method's v3.1.0 that was agy's and a
+    #: native Claude Code's answer every time; now it is a source that does not answer (hub #237).
     available: str
     #: False for a tool installed some other way (`how: other`): the skill leaves it alone.
     updatable: bool
@@ -1119,8 +1120,9 @@ class ToolsStatus:
 
 def tools_status() -> ToolsStatus:
     """omp, agy, gh and Claude Code — whichever are present — with the version here and the one
-    their source offers. Up to about a minute (it asks Homebrew, npm, `omp update --check` and
-    GitHub): off the GUI thread. Reads only; nothing is updated here."""
+    their source offers. Up to about a minute (it asks Homebrew, npm, `omp update --check`,
+    GitHub, and from the method's v3.1.0 agy's update server and the npm registry over HTTP, hub
+    #237): off the GUI thread. Reads only; nothing is updated here."""
     script = upkeep_script()
     if not script.is_file():
         return ToolsStatus(False, reason="no_upkeep_here")

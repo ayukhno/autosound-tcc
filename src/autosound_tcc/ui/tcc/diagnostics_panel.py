@@ -197,18 +197,20 @@ def _signature_said(line: str) -> str:
 _SESSION_TOOLS = ("omp", "claude")
 
 
-#: The version an update in this run of TCC left each tool on, by name (finding 140, tcc#138). agy's
-#: source and a native Claude Code's cannot tell their newest without installing, so a Re-check
-#: straight after the update read «unknown» with «Update» live again — while the update itself had
-#: just installed the newest. What it reported is the newest until the tool says another version,
-#: or for `_LEARNED_FOR_S`. The process's and not a window's: the tools are the machine's, and a
-#: new project opens a new window with a new diagnostics window in the same run. Name -> (version,
-#: `time.time()` when the update reported it).
+#: The version an update in this run of TCC left each tool on, by name (finding 140, tcc#138). A
+#: source that cannot tell its newest made a Re-check straight after the update read «unknown» with
+#: «Update» live again — while the update itself had just installed the newest. Until the method's
+#: v3.1.0 that was agy's and a native Claude Code's every time; since then `upkeep.py` names their
+#: newest (hub #237), and only a source that does not answer (no network, a platform agy builds
+#: nothing for) still cannot tell. What the update reported is the newest until the tool says
+#: another version, or for `_LEARNED_FOR_S`. The process's and not a window's: the tools are the
+#: machine's, and a new project opens a new window with a new diagnostics window in the same run.
+#: Name -> (version, `time.time()` when the update reported it).
 _UPDATED_TO: dict[str, tuple[str, float]] = {}
 #: How long what an update learned stands in for a source that cannot tell (Ruling 3 on tcc#138):
-#: the working session it was learned in, not the night after, when a newer one may be out — those
-#: sources never name one, so nothing else would end it. The wall clock, not `time.monotonic()`,
-#: which on macOS may not count the hours the Mac sleeps.
+#: the working session it was learned in, not the night after, when a newer one may be out — a
+#: source that keeps not answering names none, so nothing else would end it. The wall clock, not
+#: `time.monotonic()`, which on macOS may not count the hours the Mac sleeps.
 _LEARNED_FOR_S = 12 * 3600
 
 
