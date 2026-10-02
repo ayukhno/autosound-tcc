@@ -6735,3 +6735,215 @@ def test_the_footer_note_says_what_kind_of_pin_was_set_aside(monkeypatch):
             assert [k for k in keys if i18n.t(k) in text] == [want], (want, text)
     finally:
         availability.reset()
+
+
+def _a_reviewer_picked_in_the_footer(monkeypatch):
+    """Finding 142 (tcc#140), as the Arbiter met it on the VM: «gemini-3.1-pro-preview» reviewed
+    last, 23 h ago, and «AGY · Gemini 3.8 Flash (Low)» is about to be picked in the footer. A probe
+    asked for is recorded and never runs, so its check does not answer until a test says so."""
+    from datetime import datetime, timedelta, timezone
+
+    from autosound_tcc.core import critic, model_choices
+
+    before = model_choices.Choice(harness="agy", model="gemini-3.1-pro-preview",
+                                  label="Gemini 3.1 Pro (Preview)", provider="google")
+    flash = model_choices.Choice(harness="agy", model="gemini-3.8-flash-low",
+                                 label="Gemini 3.8 Flash (Low)", provider="google")
+    window = _reviewer_window(monkeypatch, before, flash)
+    monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")  # past the launch-time escape hatch (conftest)
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda _c: True)
+    # `_on_reviewer_probed` refills the pickers: both rows resolve, so no modal «model gone» box.
+    monkeypatch.setattr(model_choices, "choices", lambda _active: [])
+    monkeypatch.setattr(model_choices, "critic_choices", lambda _active: [before, flash])
+    at = (datetime.now(timezone.utc) - timedelta(hours=23)).isoformat()
+    monkeypatch.setattr(critic, "last_call", lambda _p=None: {
+        "model": before.model, "at": at, "mode": "answered"})
+    window._set_project_setting(main_window._CRITIC_KEY, before.key)
+    started: list = []
+    running: set = set()
+
+    def start(worker) -> None:
+        started.append(worker)
+        running.add(worker)
+
+    monkeypatch.setattr(main_window._ReviewerProbeWorker, "start", start)
+    monkeypatch.setattr(main_window._ReviewerProbeWorker, "isRunning",
+                        lambda worker: worker in running)
+    return window, before, flash, started, running
+
+
+def _pick_reviewer(window, choice) -> None:
+    window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData(choice.key))
+
+
+def test_a_new_reviewer_pick_spins_while_its_check_runs_and_names_no_old_reviewer(monkeypatch):
+    """Finding 142 (tcc#140): for about a minute after the pick the footer read the previous
+    reviewer in red, «gemini-3.1-pro-preview · 23 h ago», and then «… answered the check». The
+    Arbiter: «на місці чи поруч зі знаком питання крутити колесико поки іде перевірка». From the
+    pick until its check answers, the footer says the new pick is being checked, with a turning
+    wheel beside the «!» — and no line from the old pick, there or in the «!»."""
+    from autosound_tcc.core import availability, critic
+    from autosound_tcc.ui.tcc import copy_menu
+
+    window, before, flash, started, running = _a_reviewer_picked_in_the_footer(monkeypatch)
+    _pick_reviewer(window, flash)
+
+    status = window._critic_status
+    text = copy_menu.full_text(status)
+    assert before.model not in text and before.model not in status.toolTip(), text
+    assert text == i18n.t("criticChecking").format(label=flash.label), text
+    assert "kv-warn" not in str(status.property("class")), "nothing is wrong yet: it is asked"
+    assert before.model not in window._critic_warn_detail, window._critic_warn_detail
+    assert [worker._key for worker in started] == [flash.key], "the new pick is the one asked"
+    spinner = window._critic_spinner
+    assert spinner.is_spinning() and not spinner.isHidden()
+
+    # The check answers: the wheel stops and goes, and the status says so (finding 92, tcc#82).
+    running.clear()
+    availability.succeeded(flash.key)
+    window._on_reviewer_probed(critic.MODE_API_OR_CLI)
+
+    assert not spinner.is_spinning() and spinner.isHidden()
+    assert copy_menu.full_text(status) == i18n.t("criticCheckAnswered").format(label=flash.label)
+
+
+def test_a_pick_made_while_the_previous_check_runs_spins_until_its_own_answers(monkeypatch):
+    """One check at a time (the probe30 crash), so a pick made during the launch's check is asked
+    when that one ends (tcc#74). It is being checked all that time: the wheel turns from the pick,
+    the end of the other check does not stop it, and only its own answer does."""
+    from autosound_tcc.core import availability, critic
+    from autosound_tcc.ui.tcc import copy_menu
+
+    window, before, flash, started, running = _a_reviewer_picked_in_the_footer(monkeypatch)
+    window._probe_reviewer()  # the launch's check, of the reviewer picked before
+    assert [worker._key for worker in started] == [before.key]
+    _pick_reviewer(window, flash)
+
+    status, spinner = window._critic_status, window._critic_spinner
+    checking = i18n.t("criticChecking").format(label=flash.label)
+    assert copy_menu.full_text(status) == checking
+    assert spinner.is_spinning()
+
+    running.clear()  # the previous pick's check answers
+    availability.succeeded(before.key)
+    window._on_reviewer_probed(critic.MODE_API_OR_CLI)
+    assert copy_menu.full_text(status) == checking, "the new pick is still to be asked"
+    assert spinner.is_spinning()
+    # The «!» was asked anew with the pickers' refill: the last review is still the old pick's,
+    # and «answered by gemini-3.1-pro-preview» is that pick's line too.
+    assert before.model not in window._critic_warn_detail, window._critic_warn_detail
+
+    _app().processEvents()  # the new pick is asked now
+    assert [worker._key for worker in started] == [before.key, flash.key]
+    assert spinner.is_spinning()
+
+    running.clear()
+    availability.succeeded(flash.key)
+    window._on_reviewer_probed(critic.MODE_API_OR_CLI)
+    assert not spinner.is_spinning() and spinner.isHidden()
+    assert copy_menu.full_text(status) == i18n.t("criticCheckAnswered").format(label=flash.label)
+
+
+def test_a_process_state_write_during_the_check_names_no_old_reviewer(tmp_path, monkeypatch):
+    """The process state names the last reviewer, and its refresh writes that line over the
+    footer's (tcc#129). During the new pick's check that line is the old pick's: the footer keeps
+    saying the new one is being checked."""
+    from autosound_tcc.ui.tcc import copy_menu
+
+    _process_names_reviewer(tmp_path, monkeypatch, "gemini-3.1-pro-preview")
+    window, before, flash, started, running = _a_reviewer_picked_in_the_footer(monkeypatch)
+    _pick_reviewer(window, flash)
+
+    window._refresh_process()
+
+    text = copy_menu.full_text(window._critic_status)
+    assert before.model not in text, text
+    assert text == i18n.t("criticChecking").format(label=flash.label)
+    assert window._critic_spinner.is_spinning()
+
+
+@pytest.mark.parametrize("why", ["no transport", "no MCP"])
+def test_a_reviewer_that_is_never_asked_shows_no_wheel(monkeypatch, why):
+    """No transport for the pick, so the method can only compile a clipboard package and nothing
+    asks it (final review, Minor 3) — or TCC runs with its MCP off, and asks nothing at all. No
+    check runs, and nothing turns as though one did."""
+    from autosound_tcc.core import model_choices
+    from autosound_tcc.ui.tcc import copy_menu
+
+    window, before, flash, started, running = _a_reviewer_picked_in_the_footer(monkeypatch)
+    if why == "no transport":
+        monkeypatch.setattr(model_choices, "critic_reaches", lambda _c: False)
+    else:
+        monkeypatch.setenv("AUTOSOUND_TCC_MCP", "0")
+    _pick_reviewer(window, flash)
+
+    assert started == []
+    assert not window._critic_spinner.is_spinning() and window._critic_spinner.isHidden()
+    assert copy_menu.full_text(window._critic_status) != i18n.t("criticChecking").format(
+        label=flash.label)
+
+
+def test_the_check_wheel_turns_in_each_themes_own_colour(monkeypatch):
+    """The wheel paints itself, so no style sheet colours it: it reads the theme it is drawn in —
+    the Critic's own blue in each palette — and a switch moves it with the rest. And it turns."""
+    from PySide6.QtTest import QTest
+
+    from autosound_tcc.ui.tcc.theme import PALETTE_DARK, PALETTE_LIGHT
+    from tests import _windows
+
+    window, before, flash, started, running = _a_reviewer_picked_in_the_footer(monkeypatch)
+    _pick_reviewer(window, flash)
+    spinner = window._critic_spinner
+
+    def drawn() -> set:
+        image = spinner.grab().toImage()
+        return {image.pixelColor(x, y).name() for x in range(image.width())
+                for y in range(image.height()) if image.pixelColor(x, y).alpha() == 255}
+
+    for mode, palette in (("dark", PALETTE_DARK), ("light", PALETTE_LIGHT)):
+        _windows.theme_on(monkeypatch, window, mode)
+        colours = drawn()
+        assert palette["info"] in colours, (mode, sorted(colours))
+        other = PALETTE_LIGHT if palette is PALETTE_DARK else PALETTE_DARK
+        assert other["info"] not in colours, mode
+
+    first = spinner.grab().toImage()
+    QTest.qWait(4 * spinner.interval_ms())
+    assert spinner.grab().toImage() != first, "a wheel that does not turn says nothing is running"
+
+
+def test_a_pin_the_last_run_set_aside_is_still_named_while_the_pick_is_checked(monkeypatch):
+    """tcc#113 and #129: the footer names a pin the pick's last run set aside, and where it lives
+    is in the tip. The check says nothing about that pin, so it stays named beside «checking»."""
+    from autosound_tcc.core import availability
+    from autosound_tcc.ui.tcc import copy_menu
+
+    window, before, flash, started, running = _a_reviewer_picked_in_the_footer(monkeypatch)
+    pin = {"variable": "GEMINI_CRITIC_MODEL", "value": "gemini-2.5-pro", "file": None, "line": None}
+    availability.set_aside(flash.key, [pin])
+    _pick_reviewer(window, flash)
+
+    status = window._critic_status
+    checking = i18n.t("criticChecking").format(label=flash.label)
+    assert copy_menu.full_text(status) == f"{checking} · {i18n.t('criticPinsShortEnv')}"
+    assert i18n.t("criticPinInEnv").format(var="GEMINI_CRITIC_MODEL",
+                                           value="gemini-2.5-pro") in status.toolTip()
+    assert window._critic_spinner.is_spinning()
+
+
+def test_a_refused_pick_asked_again_keeps_its_refusal_with_the_wheel_beside_it(monkeypatch):
+    """#129: a refused pick keeps its line, its tip and its red. Picked again, it is asked again —
+    the wheel turns beside the refusal, and the refusal stays until the check answers otherwise."""
+    from autosound_tcc.core import availability
+    from autosound_tcc.ui.tcc import copy_menu
+
+    window, before, flash, started, running = _a_reviewer_picked_in_the_footer(monkeypatch)
+    availability.refused(flash.key, availability.REFUSED, "HTTP 429: quota exhausted")
+    _pick_reviewer(window, flash)
+
+    status = window._critic_status
+    assert [worker._key for worker in started] == [flash.key]
+    assert window._critic_spinner.is_spinning()
+    assert copy_menu.full_text(status).startswith(f"{flash.label} · ")
+    assert "quota exhausted" in status.toolTip()
+    assert "kv-warn" in str(status.property("class"))

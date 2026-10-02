@@ -137,6 +137,7 @@ from autosound_tcc.ui.tcc.sidebar_section import (
 )
 from autosound_tcc.ui.tcc.reviewer_key_dialog import ReviewerKeyDialog
 from autosound_tcc.ui.tcc.save_config_dialog import SaveConfigDialog
+from autosound_tcc.ui.tcc.spinner import Spinner
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
 from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme, current_theme
 from autosound_tcc.ui.tcc.theme import mini_combo as theme_mini_combo
@@ -145,6 +146,7 @@ from autosound_tcc.ui.tcc.workers import (
     _CliCatalogueWorker,
     _ContractWorker,
     _REVIEWER_PROBE_QUESTION,
+    _REVIEWER_PROBE_TIMEOUT_S,
     _ReviewerProbeWorker,
     _RewPingWorker,
 )
@@ -804,6 +806,9 @@ class MainWindow(QMainWindow):
         #: (so a clipboard-mode probe's copy can be given back -- see `_on_reviewer_probed`).
         self._reviewer_probe: _ReviewerProbeWorker | None = None
         self._clipboard_before_probe: _ClipboardSnapshot | None = None
+        #: The reviewer key that probe asks, from its start until its answer; "" when none runs. Not
+        #: `isRunning()`: `done` arrives while the thread is still unwinding (tcc#140).
+        self._reviewer_checking = ""
         #: What the curve window was last plotting, per capture series — see
         #: `_open_curves_from_panel`. In memory only, and deliberately: it is "what am I working on
         #: right now", which is a fact about this sitting rather than about the project, and a
@@ -1480,6 +1485,14 @@ class MainWindow(QMainWindow):
         self._critic_warn_tip = attach_tip(self._critic_warn, "")
         self._critic_warn_detail = ""
         layout.addWidget(self._critic_warn)
+        # A wheel beside the «!» while the pick's check runs (finding 142, tcc#140: «на місці чи
+        # поруч зі знаком питання крутити колесико поки іде перевірка»). Beside it, not in its
+        # place: the «!» says what is known about the pick whatever the check answers — a Flash
+        # model, the Generator's own vendor — and hiding that for the length of a check hides it
+        # when the pick is made, which is when it is read.
+        self._critic_spinner = Spinner()
+        self._critic_spinner_tip = attach_tip(self._critic_spinner, "")
+        layout.addWidget(self._critic_spinner)
 
         # Which reviewer answered last, on what model, how long ago (TCC-Concept §4: the advisor
         # panel's "engaged? which AI+model? last called when").
@@ -4637,6 +4650,9 @@ class MainWindow(QMainWindow):
             # до запуску», tcc#74); a check still running for the previous pick asks again after.
             self._reprobe_reviewer = True
             self._probe_reviewer()
+            # Asked now or after the check before it, it is being checked from here on, and the
+            # line it inherited is the previous reviewer's (finding 142, tcc#140).
+            self._show_critic_status()
 
     def _tell_session_reviewer(self, choice) -> None:
         """A running session learns the new reviewer through the signal queue (finding 59).
@@ -4727,7 +4743,9 @@ class MainWindow(QMainWindow):
         if resolved.note:
             pairs.append((i18n.t("criticSubstituted"), resolved.note))
         actual = self_check.reviewer_mismatch()
-        if actual:
+        # Not while the pick's check runs: the last review is the previous pick's, and naming its
+        # model here is the old pick's line the status no longer shows (finding 142, tcc#140).
+        if actual and not self._critic_being_checked():
             pairs.append((i18n.t("criticAnswered").format(model=actual[1]),
                           i18n.t("selfReviewerDiffDetail").format(wanted=actual[0],
                                                                    answered=actual[1])))
@@ -4816,9 +4834,12 @@ class MainWindow(QMainWindow):
         this write used to put «Critic · model · ago» over the refusal and leave the red with
         nothing to say what it was. Otherwise the line is red only when the model it names is not
         the pick's, as `_refresh_critic_status` paints the critic log's (finding 55). The new text
-        takes the tip of the one before with it (`ElidedLabel.setText`, tcc#129)."""
+        takes the tip of the one before with it (`ElidedLabel.setText`, tcc#129). While the pick's
+        check runs, the line this writes is the previous pick's: the status keeps saying the pick
+        is being checked (finding 142, tcc#140)."""
         chosen = self._critic_pick()
-        if chosen is not None and not availability.status(chosen, reviewer=True).ready:
+        if chosen is not None and (not availability.status(chosen, reviewer=True).ready
+                                   or self._critic_being_checked()):
             self._refresh_critic_status()
             return
         model = str(review.get("model") or "")
@@ -4827,12 +4848,46 @@ class MainWindow(QMainWindow):
         wanted = model_choices.reviewer_model(chosen) if chosen is not None else ""
         self._paint_critic_status(bool(wanted and model) and not self_check.same_model(wanted, model))
 
+    def _critic_being_checked(self) -> bool:
+        """Whether the pick's check is running, or waits for the one running before it (tcc#74).
+
+        By the stored key, as `_probe_reviewer` asks it: the picker resolves an alias, the probe
+        sends the key and the worker follows the alias itself."""
+        key = self._project_setting(_CRITIC_KEY)
+        if not key:
+            return False
+        if key == getattr(self, "_reviewer_checking", ""):
+            return True
+        return bool(getattr(self, "_reprobe_reviewer", False)) and self._probe_target(key) is not None
+
+    def _show_critic_check(self, checking: bool, tip: str) -> None:
+        """The wheel beside the «!» turns while the pick's check runs (finding 142, tcc#140)."""
+        spinner = getattr(self, "_critic_spinner", None)
+        if spinner is None:
+            return
+        if checking:
+            spinner.start()
+        else:
+            spinner.stop()
+        self._critic_spinner_tip.set_text(tip)
+
     def _refresh_critic_status(self) -> None:
         self._refresh_critic_warning()
+        self._show_critic_status()
+
+    def _show_critic_status(self) -> None:
+        """The status line and its wheel, not the «!»: a check that starts changes nothing the «!»
+        says, so `_probe_reviewer` asks no warning anew."""
         chosen = self._critic_pick()
+        checking = chosen is not None and self._critic_being_checked()
+        tip = i18n.t("criticCheckingTip").format(
+            label=chosen.label, minutes=round(_REVIEWER_PROBE_TIMEOUT_S / 60)) if checking else ""
+        self._show_critic_check(checking, tip)
         if chosen is not None:
             state = availability.status(chosen, reviewer=True)
-            if not state.ready:
+            # A refusal is the pick's own line and keeps it while it is asked again, the wheel
+            # beside it (tcc#129); «not checked yet» is what the check is finding out.
+            if not state.ready and not (checking and state.reason == availability.NOT_CHECKED):
                 self._critic_status.setText(f"{chosen.label} · {availability_view.phrase(state)}")
                 self._critic_status.set_tip(state.detail or availability_view.phrase(state))
                 self._paint_critic_status(state.reason != availability.NOT_CHECKED)
@@ -4842,12 +4897,19 @@ class MainWindow(QMainWindow):
         # red — nothing went wrong with the run.
         pins = availability.pins_set_aside(chosen.key) if chosen is not None else []
 
-        def say(text: str) -> None:
+        def say(text: str, tip: str = "") -> None:
             # `set_tip`, not `setToolTip`: the label's own eliding rewrites a plain tip on the next
             # resize, and where the pin lives was gone the moment the longer text was laid out.
             self._critic_status.setText(f"{text} · {_pins_short(pins)}" if pins else text)
-            self._critic_status.set_tip(_pins_tip(pins) if pins else "")
+            self._critic_status.set_tip("\n\n".join(
+                part for part in (tip, _pins_tip(pins) if pins else "") if part))
 
+        if checking:
+            # The pick by name, being checked: not the previous reviewer's last review in red,
+            # which is what the footer said for the minute a check takes (finding 142, tcc#140).
+            say(i18n.t("criticChecking").format(label=chosen.label), tip)
+            self._paint_critic_status(False)
+            return
         entry = critic.last_call(self._mcp_server.project_dir if self._mcp_server else None)
         if chosen is not None and availability.answered(chosen.key) and not (
                 entry and self_check.same_model(model_choices.reviewer_model(chosen),
@@ -5214,6 +5276,18 @@ class MainWindow(QMainWindow):
         self._update_session_button()
         self._refresh_project_button()
 
+    def _probe_target(self, key: str):
+        """The reviewer `_probe_reviewer` asks for `key`, or None when it asks nothing."""
+        if not key or os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0":
+            return None
+        # Only a reviewer something can reach — the RESOLVED one, as the probe sends it. Without a
+        # key or a CLI for its vendor the script can only compile a clipboard package: nothing to
+        # record, and a prompt on the clipboard at session start that nobody asked for.
+        _, reviewer = model_choices.resolve_critic(key)
+        if reviewer is None or not model_choices.critic_reaches(reviewer):
+            return None
+        return reviewer
+
     def _probe_reviewer(self) -> None:
         key = self._project_setting(_CRITIC_KEY)
         if not key or os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0":
@@ -5221,19 +5295,18 @@ class MainWindow(QMainWindow):
         if self._reviewer_probe is not None and self._reviewer_probe.isRunning():
             return  # one probe at a time; replacing a running QThread is the probe30 crash
         self._reprobe_reviewer = False
-        # Only a reviewer something can reach — the RESOLVED one, as the probe sends it. Without a
-        # key or a CLI for its vendor the script can only compile a clipboard package: nothing to
-        # record, and a prompt on the clipboard at session start that nobody asked for.
-        _, reviewer = model_choices.resolve_critic(key)
-        if reviewer is None or not model_choices.critic_reaches(reviewer):
+        if self._probe_target(key) is None:
             return
         self._clipboard_before_probe = _clipboard_snapshot()
         worker = _ReviewerProbeWorker(key, config.project_dir())
         worker.done.connect(self._on_reviewer_probed)
         self._reviewer_probe = worker
+        self._reviewer_checking = key
         worker.start()
+        self._show_critic_status()
 
     def _on_reviewer_probed(self, mode: str = "") -> None:
+        self._reviewer_checking = ""
         snapshot, self._clipboard_before_probe = self._clipboard_before_probe, None
         # The method script copies its prompt to the clipboard when no route answers — which is
         # what a refused reviewer looks like. Nobody asked for that at session start: give the
