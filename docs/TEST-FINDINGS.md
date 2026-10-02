@@ -3429,3 +3429,22 @@ is required too. Optional means both: TCC's check and the question's «Required�
 **Weight.** Low–medium: a tester who does not want to leave a contact cannot send at all.
 
 **Task.** For W-5's collection — the hint in four languages through the Advisor.
+
+### 136. No plain way to stop paying for the API: the reviewer key cannot be deleted or switched off in TCC
+
+**What.** The Arbiter, 2026-10-02: «як відключити роботу через API, наприклад Gemini, коли хочу далі використовувати
+безкоштовні токені чи пакет Pro замість API? складно видалити ключ?» — and his decision: «краще видаляти ключ, щоб
+користувач не переживав що будуть списувати гроші. а якщо вимикання явне зробити просто - то можна і вимикання і
+видалення».
+
+Today the reviewer-key window saves a key and removes a leftover exported copy, but has no way to delete the STORED
+key (W-5 took «Видалити» over `key rm` out of #117 because it hit the wrong copy); the only ways are the terminal's
+`autosound_ai.py key rm google` or a blank `GEMINI_API_KEY=` line in critic-env. To check first, not yet measured: a
+CLI pick in the footer («AGY · …») keeps the key out of the reviewer's environment (finding 32), but the method reads a
+key from the OS store too (`key_source` → `keystore`) — whether a stored key still sends a CLI pick down the API.
+
+**Weight.** Medium: money — a person who moved to a subscription cannot be sure the API is no longer charged.
+
+**Task.** For the next wave's collection — in the reviewer-key window, a «Видалити ключ» for the stored key (the
+method's `key rm <provider>`), and, if it stays simple, an explicit «не використовувати API» switch; the check above
+first.
