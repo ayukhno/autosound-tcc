@@ -90,12 +90,15 @@ that say only what is true, check boxes that show in the dark theme, and a TCC t
   names it as a whole code, read as the method reads evidence (a typed `w_L`, a bracketed code, a « + » list).
   An in-app «Update the method» is read by TCC at once, whole; if it cannot be, TCC keeps the old one and says to
   restart.
-- **A reviewer picked as a login never goes through the API** (tcc#127): a CLI, agy, codex or Claude SDK pick runs
-  as the method's `--via cli`, so a stored key no longer takes it to the API, and its child gets no vendor key.
+- **A reviewer TCC runs for a login pick never goes through the API** (tcc#127): a CLI, agy, codex or Claude SDK
+  pick runs as the method's `--via cli`, so a stored key no longer takes it to the API, and its child gets no
+  vendor key. A session that runs the method itself still reads the stored key until the method's own route
+  setting lands; deleting the key covers that too.
 - **The permission gate knows more ways to lose a disk** (tcc#128). Its shell reading is a module of its own, and
   it now asks about: a whole mounted disk (`/Volumes/…`, `/mnt/…`, `/media/…`) and `/root`; a relative climb out of
   the project (`rm -rf ../..`); PowerShell's `Remove-Item -Recurse` and its aliases on a wide target; `cmd /c`
-  with `rd /s` behind `if exist`; a home the line sets (`HOME=/ …`, `${HOME:=…}`) or spells another way
+  with `rd /s` behind `if exist`; a `cd` or `pushd` to a wide or unknown folder before a recursive delete
+  (`cd "$dir" && rm -rf *`); a home the line sets (`HOME=/ …`, `${HOME:=…}`) or spells another way
   (`//Users`); a bracket glob that bash widens (`/[^x]tc`); an interpreter option whose value comes from another
   command's output. A pipe into `rm` or `chmod -R` asks; `ls … | grep … | xargs chmod 755` on a narrow listing
   does not. Still not judged: cmd's redirect targets and `for /f` strings.
@@ -107,7 +110,7 @@ that say only what is true, check boxes that show in the dark theme, and a TCC t
 - **One radio ring that reads in both themes** (tcc#122): in the dark theme the unselected radios were invisible on
   Windows. The ring now shows on every surface, and a chosen radio is an orange disc.
 - **The light theme's blue reads at 4.5:1 or better as text** (tcc#122), on every panel and bubble.
-- **Polish and German for every new and changed string** of this release (86 keys), translated by the Advisor.
+- **Polish and German for every new and changed string** of this release (90 keys), translated by the Advisor.
 
 ### Fixed
 

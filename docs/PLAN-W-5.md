@@ -184,6 +184,10 @@ tasks build on the new module.
 - First the measurement (a stored key vs a CLI pick, with `--via` and without), its result in the report; a fix if a
   CLI pick reaches the API. Then «Видалити ключ» (the method's `key rm <provider>`, a confirm naming the provider) and,
   if simple, an explicit «не використовувати API» the pick respects. Secrets: never on argv, never logged.
+- *As built:* the switch was built (cce24f4) and reverted (0908e8b) on the Arbiter's word «або давай приберемо
+  вимикання і залишемо видалення ключів» (Ruling 36): v0.1.46 deletes the key, and a login pick runs `--via cli`
+  with no vendor key in its child. A session's own run of the method still reads the store until the method's route
+  variable lands (hub #236, TCC-046).
 
 **#129** reviewer hints and probes say only what is true. *~1.5 h*
 - A three-state `key help` probe off the UI thread; the 401 rejected-key note for Anthropic/OpenAI; an older method's

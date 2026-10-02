@@ -782,8 +782,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     /* Disabled, a box or a radio says so (tcc#131's review). None is disabled today; without this
     one would keep the live ring, the accent's fill and its words in full ink, since `QWidget`'s
-    `color` covers every state. Each list starts with the radio so VM-11's guard, which reads a
-    selector whole, still finds no radio ring that is not the type's own. */
+    `color` covers every state. */
     QRadioButton::indicator:disabled, QCheckBox::indicator:disabled,
     QAbstractItemView::indicator:disabled {{
         border-color: {t.mix('muted', 45, 'panel')};
