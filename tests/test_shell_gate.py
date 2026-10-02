@@ -219,6 +219,22 @@ def test_a_home_head_is_still_judged_by_its_name_and_nothing_else_unspelled_pass
     assert bash_is_dangerous(command, [tmp_path]) is True, command
 
 
+@pytest.mark.parametrize("command, asks", [
+    ("ls *.sh | xargs chmod 755", False),
+    ("find . -name '*.py' | xargs chmod 644", False),
+    ("find . -type d | xargs chmod -R 777", True),
+    ("echo / | xargs chmod -R 777", True),
+    ("find . -name '*.pyc' | xargs rm -f", True),
+    ("git ls-files -z | xargs -0 rm -f", True),
+])
+def test_a_pipe_into_chmod_without_r_passes_and_into_rm_or_chmod_r_asks(command, asks, tmp_path):
+    """Ruling 35. xargs appends what the line does not show, so `… | xargs rm` asks, as
+    `find -exec rm` always has. A mode on the files it names is undone by another chmod, so without
+    a spelled `-R` that word is read as a file, not as a chance at `-R /` — a needless question is
+    the Arbiter's own complaint (finding 123)."""
+    assert bash_is_dangerous(command, [tmp_path]) is asks, command
+
+
 def test_a_script_body_inherits_what_the_line_made_unknown(tmp_path):
     """A substitution's output exported to a `bash -c` body is as unknown inside it as outside:
     `rm "$f"` there deletes what curl printed (review of tcc#128, closed by the same thread)."""

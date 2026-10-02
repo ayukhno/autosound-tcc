@@ -1003,6 +1003,9 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
     if name == "dd":
         return any(text.startswith("of=/dev/") for text in texts)
     if name == "chmod":
+        # Ruling 35: what `xargs` appends to a chmod is read as one file, not as a chance at `-R /`
+        # — a mode on named files is undone by another chmod (finding 123). `-R` on the line asks.
+        arguments = [replace(a, quoted=True) if a.dynamic and a.text == "…" else a for a in arguments]
         return _reach_is_dangerous(arguments, lambda text: text.startswith("-"), _is_recursive_flag,
                                    bare=False)
     if name == "git":
