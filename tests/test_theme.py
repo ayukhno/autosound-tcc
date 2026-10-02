@@ -447,7 +447,11 @@ def test_every_radio_wears_one_ring_that_reads_in_both_themes():
 
     for name in ("dark", "light"):
         palette = theme.get_theme(name)
-        rules = _rules(theme.build_qss(palette))
+        # Each selector of a grouped rule on its own, as the check-box guard reads them: a class's
+        # ring placed second in a list (`QRadioButton::indicator, .x QRadioButton::indicator`)
+        # would pass a reading of the selector whole (task-21 re-review).
+        rules = [(one.strip(), body) for selector, body in _rules(theme.build_qss(palette))
+                 for one in selector.split(",")]
         rings = [(selector, body) for selector, body in rules
                  if "QRadioButton" in selector and "::indicator" in selector]
         assert rings, f"{name}: no radio indicator rule at all"
@@ -561,7 +565,6 @@ def test_a_row_s_check_box_is_drawn_by_the_sheet_in_either_theme(monkeypatch, mo
         host.close()
 
 
-
 @pytest.mark.parametrize("mode", ["dark", "light"])
 def test_a_disabled_check_box_or_radio_is_drawn_grey_in_either_theme(monkeypatch, mode):
     """tcc#131's review: the issue's «disabled looks disabled», applied to the boxes and radios it
@@ -613,6 +616,7 @@ def test_a_disabled_check_box_or_radio_is_drawn_grey_in_either_theme(monkeypatch
             assert words == palette.faint, f"{said}, words {words}"
     finally:
         host.close()
+
 
 def test_every_button_greys_when_it_is_disabled_in_both_themes(monkeypatch):
     """tcc#131: the feedback window's «Send →» stayed orange while disabled, because its rule comes
