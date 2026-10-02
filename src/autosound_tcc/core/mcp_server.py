@@ -1362,8 +1362,11 @@ def build_server(
         # answered, only the key note: the answer is the proof the route works — on the VM an
         # answered run's set-aside-pins line came back as «the reviewer CLI refused the model»
         # (VM-4, tcc#113) — but a key the API rejected before a CLI answered still costs every call.
-        fix = critic.fallback_note(result.detail) if result.ok else critic.remedy(
-            result.detail, harness=configured_critic_harness(project_dir), project_dir=project_dir)
+        # Its variable by the vendor the method called, read from the whole stderr: the line that
+        # names it is never in the answered run's six-line tail (review of #129).
+        fix = critic.fallback_note(result.detail, vendor=result.api_vendor) if result.ok else (
+            critic.remedy(result.detail, harness=configured_critic_harness(project_dir),
+                          project_dir=project_dir))
         if fix:
             detail = f"{detail}\n\nWhat to do: {fix}".strip() if detail else f"What to do: {fix}"
         if result.mode == critic.MODE_REFUSED and role != critic.ASK and not via and route != "omp":

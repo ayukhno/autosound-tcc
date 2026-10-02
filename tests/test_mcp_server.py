@@ -2353,25 +2353,40 @@ def test_an_answered_api_run_that_names_its_key_gets_no_key_note(tmp_path, monke
 
 # ── tcc#129: Anthropic's and OpenAI's rejected key, as urllib's bare «HTTP Error 401» ─────────────
 
-#: The method's lines for an Anthropic call whose key the API did not take: the vendor it called,
-#: then the step down with urllib's own words, which name no key.
-_ANTHROPIC_401 = (">> Підключення до API (anthropic, claude-opus-4-7), чекаю до 300 с...\n"
-                  ">> Помилка виклику API (HTTP Error 401: Unauthorized). Спроба локального CLI...")
+#: The method's stderr for an Anthropic call whose key the API did not take and whose CLI then
+#: answered, line for line as it prints it: the call, the step down with urllib's own words (no
+#: key named), the CLI, the route, and `_persist_review`'s three lines. The critic keeps the last
+#: six, so the line naming the vendor is cut — as on the machine (review of #129, Minor 1).
+_ANTHROPIC_401 = (
+    "rel = os.path.join('process', 'reviews', '2026-10-02T10-00-00-' + args[0] + '.md')\n"
+    "os.makedirs(os.path.dirname(rel), exist_ok=True)\n"
+    "open(rel, 'w', encoding='utf-8').write('pong')\n"
+    "for line in ('>> Підключення до API (anthropic, ' + pick + '), чекаю до 300 с...',\n"
+    "             '>> Помилка виклику API (HTTP Error 401: Unauthorized). Спроба локального CLI...',\n"
+    "             \">> Виклик локального CLI 'claude' (anthropic), чекаю до 600 с...\",\n"
+    "             '>> REVIEW_ROUTE: cli',\n"
+    "             '>> Текст рецензії збережено: ' + rel,\n"
+    "             '>> REVIEW_FILE: ' + rel,\n"
+    "             '>> Запиши посилання: process.py <project>/process reviewer <vendor> ' + pick\n"
+    "             + ' --review ' + rel):\n"
+    "    print(line, file=sys.stderr)\n"
+)
 
 
 def test_an_answer_after_a_bare_401_says_the_key_costs_time(tmp_path, monkeypatch):
     """No key word matched «HTTP Error 401: Unauthorized», so an Anthropic or OpenAI key the API
-    rejected never got the note, though every call spends that attempt first."""
+    rejected never got the note, though every call spends that attempt first. With the method's
+    real tail the line naming the vendor is gone; the variable is named all the same."""
     from autosound_tcc.core import availability, critic
 
     availability.reset()
     try:
-        answers = _reviewer_tools(tmp_path, monkeypatch,
-                                  f"print({_ANTHROPIC_401!r}, file=sys.stderr)\n" + _ANSWERS)
+        answers = _reviewer_tools(tmp_path, monkeypatch, _ANTHROPIC_401 + _ANSWERS)
     finally:
         availability.reset()
     for tool, out in answers.items():
         assert out["mode"] == critic.MODE_API_OR_CLI, (tool, out)
+        assert "Підключення до API" not in out["detail"], "the tail is the method's real one"
         assert "What to do: `ANTHROPIC_API_KEY` is set and the API rejected it" in out["detail"], (
             tool, out["detail"])
 

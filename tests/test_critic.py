@@ -1204,14 +1204,18 @@ def test_a_bare_401_from_anthropic_or_openai_is_a_rejected_key(vendor):
     assert f"`{var}` is set and the API rejected it" in note and "BEFORE" in note
 
 
-def test_a_403_is_the_key_for_anthropic_and_not_for_openai():
-    """Anthropic's 403 is `permission_error`, the key not allowed the model; OpenAI's is a country
-    it does not serve, and no key would change that. With no vendor named it is not told."""
+def test_a_403_is_not_read_as_a_rejected_key():
+    """401 only (review of #129, Important 1). Anthropic's 403 is most often «Request not allowed»
+    from a region, a proxy or a VPN — the key fine — and OpenAI's is a country it does not serve;
+    the bare words cannot tell those from a key's permissions, so no note sends the Arbiter to
+    replace a good key."""
     from autosound_tcc.core import critic
 
-    note = critic.fallback_note(f"{_connect('anthropic', 'claude-opus-4-7')}\n{_BARE_403}")
-    assert "`ANTHROPIC_API_KEY` is set and the API rejected it" in note
-    assert critic.fallback_note(f"{_connect('openai', 'gpt-5.5')}\n{_BARE_403}") == ""
+    for vendor, (model, _var) in _VENDOR_MODELS.items():
+        assert critic.fallback_note(f"{_connect(vendor, model)}\n{_BARE_403}") == "", vendor
+        assert critic.fallback_note(_BARE_403, vendor=vendor) == "", vendor
+        refused = f"· API {vendor}: HTTP Error 403: Forbidden\n· CLI 'x': not signed in"
+        assert "rejected it" not in critic.remedy(refused, harness="claude"), vendor
     assert critic.fallback_note(_BARE_403) == ""
 
 
@@ -1255,7 +1259,52 @@ def test_a_refusal_after_a_bare_401_says_the_key(vendor):
                "запуску (setup-critic-channel.md §7).")
     assert f"`{var}` is set and the API rejected it" in critic.remedy(refusal, harness="claude")
     forbidden = refusal.replace("401: Unauthorized", "403: Forbidden")
-    assert ("rejected it" in critic.remedy(forbidden, harness="claude")) == (vendor == "anthropic")
+    assert "rejected it" not in critic.remedy(forbidden, harness="claude"), "401 only"
+
+
+def _answered_tail(vendor: str, model: str, *, nested: bool = False) -> str:
+    """The method's stderr on a run whose API call was refused and whose CLI answered, as it prints
+    it: the call, the step down, the CLI, the route and `_persist_review`'s three lines. The
+    critic keeps the last six (`tail`), so the line naming the vendor is always cut."""
+    cli = ({"anthropic": "claude", "openai": "codex"}[vendor])
+    rel = "process/reviews/2026-10-02T10-00-00-critic.md"
+    calling = (f">> Всередині агент-сесії (маркер CLAUDECODE): CLI '{cli}' запускаю без маркерів "
+               "сесії, чекаю до 600 с" if nested else
+               f">> Виклик локального CLI '{cli}' ({vendor}), чекаю до 600 с...")
+    return "\n".join((
+        _connect(vendor, model), _BARE_401, calling, ">> REVIEW_ROUTE: cli",
+        f">> Текст рецензії збережено: {rel}", f">> REVIEW_FILE: {rel}",
+        f">> Запиши посилання: process.py <project>/process reviewer <vendor> {model} --review {rel}",
+    ))
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("vendor", list(_VENDOR_MODELS))
+def test_an_answered_run_names_the_variable_its_tail_lost(stubbed, tmp_path, vendor, nested):
+    """Review of #129, Minor 1: on an answered run the step-down line is the sixth from the end and
+    the line naming the vendor the seventh, so the note never named the variable. `run` reads the
+    vendor the method called from its whole stderr; the note takes it from there."""
+    model, var = _VENDOR_MODELS[vendor]
+    tail = _answered_tail(vendor, model, nested=nested)
+    stubbed(f"print({tail!r}, file=sys.stderr)\nprint('pong')\nprint('— [critic: {model}]')\n")
+    result = critic.run("package body", project_dir=_project(tmp_path),
+                        python_executable=sys.executable)
+
+    assert result.ok and result.api_vendor == vendor
+    assert _connect(vendor, model) not in result.detail, "the tail lost it, as on the machine"
+    assert critic.fallback_note(result.detail).startswith("The API key is set")
+    note = critic.fallback_note(result.detail, vendor=result.api_vendor)
+    assert f"`{var}` is set and the API rejected it" in note
+
+
+def test_a_vendor_the_line_contradicts_is_not_named():
+    """A bare 401 is Anthropic's or OpenAI's (`_post_json`): a vendor said to be Google names no
+    variable, rather than the wrong one. And the method's own line outranks the caller's word."""
+    from autosound_tcc.core import critic
+
+    assert "_API_KEY" not in critic.fallback_note(_BARE_401, vendor="google")
+    note = critic.fallback_note(f"{_connect('openai', 'gpt-5.5')}\n{_BARE_401}", vendor="anthropic")
+    assert "`OPENAI_API_KEY`" in note
 
 
 def test_the_api_lines_are_the_vendored_methods_own():
