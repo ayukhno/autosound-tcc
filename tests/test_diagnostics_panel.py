@@ -1099,6 +1099,91 @@ def test_a_report_during_a_re_check_carries_the_tools_last_delivered(monkeypatch
     _finish_report(dialog)
 
 
+def test_a_probe_running_when_an_update_lands_is_let_go(monkeypatch):
+    """tcc#130 (the re-review of VM fix A, Minor A): a tools probe already running when omp's update
+    landed went on being read, and when it answered the report sent omp from before the update with
+    nothing to say so. It is let go, as `_on_beta_toggled` lets the update probe go, and a new one
+    asks the tools as they are now."""
+    from autosound_tcc.core import install_report, updates
+
+    started, release = threading.Event(), threading.Event()
+
+    def before_the_update():
+        started.set()
+        release.wait(5)
+        return _tools_section(omp="17.3.8")
+
+    answers = iter([before_the_update, lambda: _tools_section(omp="18.2.4")])
+    monkeypatch.setattr(install_report, "tools", lambda: next(answers)())
+    dialog = _tools_shown(monkeypatch, _tool("omp", "17.3.8", "18.2.4"))
+    monkeypatch.setattr(updates, "update_tools", lambda names: updates.ToolsUpdate(
+        (updates.ToolUpdate("omp", True, "17.3.8", "18.2.4"),)))
+    dialog._tabs.setCurrentWidget(dialog._install_tab)
+    running = dialog._install_worker
+    assert started.wait(5) and running.running
+
+    dialog._tool_rows["omp"][1].click()
+    _finish_tools(dialog)
+    release.set()
+    running._thread.join(timeout=10)
+    _finish_report(dialog)
+
+    text = dialog._report_text()
+    assert "omp  18.2.4" in text and "17.3.8" not in text, text
+    assert dialog._install_worker is not running
+
+
+def _probe_given_up(monkeypatch, release):
+    """A dialog whose Installation tab was read, with a probe slower than the poll: the timer has
+    taken its last look and stopped, and the probe is still asking until `release` is set."""
+    from autosound_tcc.core import install_report
+    from autosound_tcc.ui.tcc import diagnostics_panel
+
+    monkeypatch.setattr(install_report, "tools",
+                        lambda: release.wait(5) and _tools_section(gh="2.102.0"))
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._tabs.setCurrentWidget(dialog._install_tab)
+    dialog._install_tries = diagnostics_panel._TOOLS_TRIES - 1
+    dialog._poll_tools()
+    assert not dialog._install_timer.isActive() and dialog._install_worker.running
+    return dialog
+
+
+def test_a_probe_slower_than_the_poll_is_sent_once_it_has_answered(monkeypatch):
+    """tcc#130 (the re-review of VM fix A, Minor B): a probe slower than the 15-s poll — a slow
+    Windows VM — answered after the timer had stopped reading it, and nobody read it: the report
+    said «not asked yet» for tools that were asked, and the box kept «reading…». The finished
+    probe's section is what both the report and Copy send."""
+    from PySide6.QtGui import QGuiApplication
+
+    release = threading.Event()
+    dialog = _probe_given_up(monkeypatch, release)
+    release.set()
+    dialog._install_worker._thread.join(timeout=10)
+
+    text = dialog._report_text()
+
+    assert "gh  2.102.0" in text and "not asked yet" not in text, text
+    dialog._copy_install()
+    assert "gh  2.102.0" in QGuiApplication.clipboard().text()
+
+
+def test_a_probe_the_poll_gave_up_on_is_said_not_to_have_answered_in_time(monkeypatch):
+    """tcc#130: once the poll's 15 s are up and the tools have not answered, the report says so —
+    not «not asked yet», and not «still being asked» for a probe nothing reads any more (one stuck
+    in a `communicate()`, tcc#31)."""
+    release = threading.Event()
+    dialog = _probe_given_up(monkeypatch, release)
+
+    text = dialog._report_text()
+
+    release.set()
+    dialog._install_worker._thread.join(timeout=10)
+    assert "[Command-line tools]" in text and "did not answer in time" in text, text
+    assert "not asked yet" not in text and "being asked" not in text, text
+
+
 def test_the_update_row_carries_the_version_and_not_the_commit():
     """F-036, narrowing HUB-001. The commit was appended to both numbers here; the brackets read
     as noise on the row exactly as they did in the title bar, and the identifier now lives in the

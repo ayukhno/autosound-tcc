@@ -606,6 +606,11 @@ class DiagnosticsDialog(QDialog):
         was_read = self._install_read
         self._install_read = False
         self._report_tools = None
+        # A probe still running asked the tools before this landed, and its answer would put the
+        # old versions back. It is let go as `_on_beta_toggled` lets the update probe go — a daemon
+        # thread holding no Qt object — and the re-read below starts a new one (tcc#130).
+        self._install_worker = None
+        self._install_timer.stop()
         if was_read or self._tabs.currentWidget() is self._install_tab:
             self.refresh_install()
 
@@ -1441,7 +1446,9 @@ class DiagnosticsDialog(QDialog):
         piece came from, which tools answer — is the half that decides whether the report can be
         answered at all (user, 2026-08-19: "дуже хочу обробляти їх напівавтоматично").
         """
-        running = self._install_worker is not None and self._install_worker.running
+        self._take_late_tools()
+        probe = self._install_worker
+        running = probe is not None and probe.running
         if self._install_read and self._report_tools is not None and not running:
             return self._install_text.toPlainText()
         # The box is not the whole answer: the tab was never opened, or it is being read again
@@ -1450,9 +1457,16 @@ class DiagnosticsDialog(QDialog):
         # and paths are file reads that cost nothing. Left out silently, a report sent straight
         # after an update read as one with no tools at all (review of VM fix A). In the report's
         # own English, like its other lines.
-        missing = install_report.Section("Command-line tools", [install_report.Item(
-            "probe", "still being asked" if running else "not asked yet",
-            "" if running else "the Installation tab reads them")])
+        if probe is None:
+            said, detail = "not asked yet", "the Installation tab reads them"
+        elif running and self._install_tries < _TOOLS_TRIES:
+            said, detail = "still being asked", ""
+        else:
+            # Asked, and the poll's 15 s ran out first: a slow Windows VM, or a probe stuck in a
+            # `communicate()` (tcc#31). Not «not asked yet», which this read before (tcc#130).
+            said, detail = "did not answer in time", f"{_TOOLS_TRIES * _TOOLS_POLL_MS // 1000} s"
+        missing = install_report.Section(
+            "Command-line tools", [install_report.Item("probe", said, detail)])
         try:
             return install_report.as_text(install_report.report(
                 extra=self._install_extra(), with_tools=False,
@@ -1470,7 +1484,19 @@ class DiagnosticsDialog(QDialog):
             github_link=lambda body: issue_url(body, report),
         ).exec()
 
+    def _take_late_tools(self) -> None:
+        """A probe slower than the poll (`_TOOLS_TRIES` looks, 15 s) answers after the timer has
+        stopped reading it, and nobody read it: the box kept «reading…» and the report said «not
+        asked yet» for tools that were asked (tcc#130). Its section is taken when the block is next
+        sent or copied, and the box is drawn with it — the box is what a complete report sends."""
+        probe = self._install_worker
+        if (self._report_tools is None and probe is not None and not probe.running
+                and probe.section is not None):
+            self._report_tools = probe.section
+            self._render_install(probe.section)
+
     def _copy_install(self) -> None:
+        self._take_late_tools()
         QGuiApplication.clipboard().setText(self._install_text.toPlainText())
         self._copy_btn.setText(i18n.t("diagInstallCopied"))
 
