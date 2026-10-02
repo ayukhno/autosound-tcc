@@ -577,14 +577,87 @@ def test_an_older_method_is_never_sent_the_drop(monkeypatch):
 
 
 def test_a_probe_with_no_answer_is_not_kept(monkeypatch):
-    """A probe killed at the timeout is no answer about `--drop`: False for this call, and asked
-    again on the next — never «update the method» until the script file changes."""
+    """A probe killed at the timeout is no answer about `--drop`: None for this call — not False,
+    which reads «update the method» (tcc#129) — and asked again on the next."""
     method = _Method(drops=None)
     _use(monkeypatch, method)
-    assert reviewer_key.drops_exports() is False
+    assert reviewer_key.drops_exports() is None
     method.drops = True
     assert reviewer_key.drops_exports() is True
     assert method.calls == [(["key", "help"], None), (["key", "help"], None)]
+
+
+def test_the_probe_has_three_answers(monkeypatch):
+    """tcc#129: has `--drop`, has not, did not answer. A crash and a missing script say nothing
+    about `--drop` either: no answer, not «too old»."""
+    for drops, want in ((True, True), (False, False), (None, None)):
+        _use(monkeypatch, _Method(drops=drops))
+        assert reviewer_key.drops_exports() is want, drops
+
+    def crashed(args, *, stdin=None):
+        return subprocess.CompletedProcess(args, 1, "", _TRACEBACK)
+
+    _use(monkeypatch, crashed)
+    assert reviewer_key.drops_exports() is None
+
+    from pathlib import Path
+
+    _use(monkeypatch, _Method())
+    monkeypatch.setattr(reviewer_key, "script_path", lambda: Path("/nowhere/autosound_ai.py"))
+    assert reviewer_key.drops_exports() is None
+
+
+def test_a_probe_with_no_answer_says_so_and_runs_once_a_window(monkeypatch):
+    """tcc#129: no answer read «the method is too old», and a save ran the 20-s probe twice in a
+    row on the window's thread — in the save, then in the repaint after it. Now the line says the
+    method did not answer, nothing is dropped, and the probe runs at most once while the window is
+    open; a new window asks again."""
+    from autosound_tcc.ui.tcc import i18n
+
+    method = _Method(status=_with(keystore="dpapi", exports=[_REGISTRY]), drops=None)
+    dialog, asked = _dialog(monkeypatch, method, answer=True)
+    assert dialog._drops == {}, "no Delete is offered on no answer"
+    for letter in "ab":
+        dialog._field.setText("AIza" + letter * 35)
+        dialog._on_save()
+    place = i18n.t("rkPlaceEnv").format(file="HKCU\\Environment")
+    said = i18n.t("rkDropProbeNoAnswer").format(var="GEMINI_API_KEY", place=place)
+    assert said in dialog._result.text()
+    assert i18n.t("rkDropUpdate").format(var="GEMINI_API_KEY", place=place) \
+        not in dialog._result.text()
+    assert asked == [] and not any(a[:2] == ["key", "move-shell"] for a, _ in method.calls)
+    assert [a for a, _ in method.calls].count(["key", "help"]) == 1
+    dialog.close()
+
+    again, _ = _dialog(monkeypatch, method, answer=True)
+    assert [a for a, _ in method.calls].count(["key", "help"]) == 2
+    again.close()
+
+
+def test_delete_with_a_probe_that_did_not_answer_deletes_nothing(monkeypatch):
+    """«Видалити ключ» with an exported copy and no answer about `--drop`: neither the drop nor
+    `key rm` (the copy would be stranded), and the line says the method did not answer."""
+    from autosound_tcc.ui.tcc import i18n
+
+    method = _Method(drops=None, after_rm=_GONE)
+    dialog, _ = _rm_dialog(monkeypatch, method)
+    dialog._removes["google"].click()
+    assert method.changes() == []
+    place = i18n.t("rkPlaceFile").format(file="~/.zshrc", line=3)
+    assert dialog._result.text() == " ".join((
+        i18n.t("rkRmStopped").format(provider="Google (Gemini)"),
+        i18n.t("rkDropProbeNoAnswer").format(var="GEMINI_API_KEY", place=place)))
+    assert [a for a, _ in method.calls].count(["key", "help"]) == 1
+    dialog.close()
+
+
+@pytest.mark.parametrize("lang", ["uk", "en"])
+def test_no_answer_is_not_called_too_old(lang):
+    from autosound_tcc.ui.tcc import i18n
+
+    said = i18n.T[lang]["rkDropProbeNoAnswer"]
+    assert any(word in said for word in ("не відповів", "did not answer")), said
+    assert not any(word in said for word in ("Онови", "Update")), said
 
 
 def test_the_fake_usage_and_nothing_found_are_the_vendored_method_s_own():

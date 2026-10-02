@@ -164,8 +164,9 @@ def set_key(provider: str, value: str) -> tuple[bool, str]:
     return proc.returncode == 0, said
 
 
-def drops_exports() -> bool:
-    """Does the method here take `key move-shell <provider> --drop` (v3.0.65, hub #230)?
+def drops_exports() -> Optional[bool]:
+    """Does the method here take `key move-shell <provider> --drop` (v3.0.65, hub #230)? True, it
+    has it; False, it has not — update the method; None, it did not answer (tcc#129).
 
     Asked of its usage, not of its version, as `process_writer._refuse_if_too_old` does: `key`
     with a word it does not know prints the usage line and exits 2 on every method that has `key`,
@@ -178,14 +179,15 @@ def drops_exports() -> bool:
     try:
         stat = script.stat()
     except OSError:
-        return False
+        return None
     seen = (str(script), stat.st_mtime_ns, stat.st_size)
     if _DROPS is None or _DROPS[0] != seen:
         proc = _run(["key", "help"])
-        if proc is None:
-            # No answer is not «no `--drop`»: kept, it would say «update the method» to a method
-            # that has it until the file changed. Asked again next time.
-            return False
+        if proc is None or "Traceback (most recent call last)" in (proc.stderr or ""):
+            # No answer — the timeout, or a crash before the usage line — is not «no `--drop`»:
+            # read as one, it said «update the method» to a method that may have it (tcc#129).
+            # Not kept: asked again next time.
+            return None
         _DROPS = (seen, "--drop" in f"{proc.stdout or ''}\n{proc.stderr or ''}")
     return _DROPS[1]
 

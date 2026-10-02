@@ -99,6 +99,8 @@ class ReviewerKeyDialog(QDialog):
         self._busy_depth = 0
         #: Whether the method here can take a key (`refresh`): the entry is off when it cannot.
         self._supported = False
+        #: The `--drop` probe went unanswered once while this window is open (`_takes_drop`).
+        self._probe_silent = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
@@ -268,6 +270,17 @@ class ReviewerKeyDialog(QDialog):
                 if focused in (self._field, self._provider, self._save) and focused.isEnabled():
                     focused.setFocus()
 
+    def _takes_drop(self) -> bool | None:
+        """`reviewer_key.drops_exports()` — True, False, or None for no answer — asked at most once
+        while this window is open (tcc#129). An answer the method gave is kept per script file
+        anyway; no answer is not, and each ask holds the window up to the 20-s timeout: a save ran
+        two in a row, in the save and in the repaint after it. A new window asks again."""
+        if self._probe_silent:
+            return None
+        answer = reviewer_key.drops_exports()
+        self._probe_silent = answer is None
+        return answer
+
     def _show_drops(self, providers: dict, exports: list[dict]) -> None:
         """«Видалити копію …» for each exported key the OS keystore also holds (finding 127).
 
@@ -283,7 +296,7 @@ class ReviewerKeyDialog(QDialog):
         held = [p for p in reviewer_key.PROVIDERS if isinstance(providers.get(p), dict)
                 and providers[p].get("keystore") is True and providers[p].get("var") in exported]
         # The method is asked only when there is something to offer: the question is a child.
-        if not held or not reviewer_key.drops_exports():
+        if not held or self._takes_drop() is not True:
             return
         for provider in held:
             button = QPushButton(i18n.t("rkDropCopy").format(var=providers[provider]["var"]))
@@ -331,7 +344,7 @@ class ReviewerKeyDialog(QDialog):
                 # Stored — and the same variable still exported: the copy every program reads
                 # stays behind unless asked about (finding 127, tcc#117).
                 copies = self._copies_left(provider)
-                drops = bool(copies) and reviewer_key.drops_exports()
+                drops = self._takes_drop() if copies else False
         if not stored:
             self._result.setText(i18n.t("rkRefused").format(why=said) if said
                                  else i18n.t("rkNoAnswer"))
@@ -343,7 +356,10 @@ class ReviewerKeyDialog(QDialog):
         tips = [said]
         if copies:
             var, place = copies[0].get("var", "?"), "; ".join(_place(e) for e in copies)
-            if not drops:
+            if drops is None:
+                # Not «too old»: the method did not say, and nothing is sent it may misread.
+                lines.append(i18n.t("rkDropProbeNoAnswer").format(var=var, place=place))
+            elif not drops:
                 # An older method would move and store EVERY export for this yes (hub #230).
                 lines.append(i18n.t("rkDropUpdate").format(var=var, place=place))
             elif self._confirm(i18n.t("rkRemoveAsk").format(var=var, place=place),
@@ -455,7 +471,10 @@ class ReviewerKeyDialog(QDialog):
         """The exported copies dropped before the key leaves the store (review I2): "" to go on,
         or the line that says why the delete stopped here."""
         place = "; ".join(_place(e) for e in exports)
-        if not reviewer_key.drops_exports():
+        drops = self._takes_drop()
+        if drops is None:
+            return i18n.t("rkDropProbeNoAnswer").format(var=var, place=place)
+        if not drops:
             # An older method would move and store every export for this (hub #230).
             return i18n.t("rkDropUpdate").format(var=var, place=place)
         happened, said = reviewer_key.drop_export(provider)
