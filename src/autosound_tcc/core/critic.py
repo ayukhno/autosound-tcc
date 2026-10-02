@@ -399,6 +399,10 @@ def session_env(project_dir: Path) -> dict:
     A session that runs the reviewer script itself — the route the method still documents — did
     not inherit the pick and was refused for "no model" (findings 17, 21; `#45` point 3). The
     reviewer reads `AUTOSOUND_CRITIC_MODEL` first, and the binary TCC would use goes with it.
+
+    And the pick's route, in `AUTOSOUND_CRITIC_VIA` (hub #236 TCC-046, the method's v3.1.0): a
+    session's own run names no `--via`, and with a key in the OS store such a run went to the
+    vendor's API whatever the footer said. The route is the one `run` asks for by `--via`.
     """
     model, route = configured(project_dir)
     if not model:
@@ -408,8 +412,14 @@ def session_env(project_dir: Path) -> dict:
         # model handed over here would reach the vendor's API under another name.
         if not omp_route_available():
             return {}
-        return {"AUTOSOUND_CRITIC_MODEL": model, "AUTOSOUND_CRITIC_BIN": "omp"}
+        return {"AUTOSOUND_CRITIC_MODEL": model, "AUTOSOUND_CRITIC_BIN": "omp",
+                "AUTOSOUND_CRITIC_VIA": "omp"}
     env = {"AUTOSOUND_CRITIC_MODEL": model}
+    # «API · …» is the key's route; a login's pick goes by its CLI, which the method starts with
+    # no vendor key (tcc#127). Any other route names none and leaves the method its own default.
+    via = "api" if route == "api" else "cli" if route in _LOGIN_ROUTES else ""
+    if via:
+        env["AUTOSOUND_CRITIC_VIA"] = via
     env.update(critic_bin_override(harness=route))
     return env
 

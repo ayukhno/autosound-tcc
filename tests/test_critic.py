@@ -683,6 +683,7 @@ def test_a_session_shell_inherits_the_reviewer_the_arbiter_picked(tmp_path, monk
     monkeypatch.setattr(critic, "configured", lambda _p: ("gemini-3.8-flash-high", "agy"))
     monkeypatch.setattr(critic, "critic_bin_override", lambda harness="": {"AUTOSOUND_CRITIC_BIN": "agy"})
     assert critic.session_env(tmp_path) == {"AUTOSOUND_CRITIC_MODEL": "gemini-3.8-flash-high",
+                                            "AUTOSOUND_CRITIC_VIA": "cli",
                                             "AUTOSOUND_CRITIC_BIN": "agy"}
     monkeypatch.setattr(critic, "configured", lambda _p: ("", ""))
     assert critic.session_env(tmp_path) == {}
@@ -747,7 +748,7 @@ def test_with_the_omp_route_an_omp_pick_runs_through_omp_only(tmp_path, monkeypa
                                "omp:google-antigravity/gemini-3.1-pro-high")
     assert critic.session_env(tmp_path) == {
         "AUTOSOUND_CRITIC_MODEL": "google-antigravity/gemini-3.1-pro-high",
-        "AUTOSOUND_CRITIC_BIN": "omp"}
+        "AUTOSOUND_CRITIC_BIN": "omp", "AUTOSOUND_CRITIC_VIA": "omp"}
 
 
 def test_one_call_can_ask_for_the_api_route_and_keeps_the_key_for_it(tmp_path, monkeypatch):
@@ -1402,10 +1403,11 @@ _STORED = ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")
 
 def _route_taken(tmp_path, monkeypatch, *, harness, model, provider, via="",
                  stored=_STORED, clis=("agy", "codex", "claude"), seen_keys=None,
-                 exported=()) -> str:
+                 exported=(), extra_env=None) -> str:
     """`api <vendor> stored` or `cli <binary>`: where the vendored method sent TCC's call, with
     `stored` in its OS key store, `exported` in TCC's environment and `clis` on PATH. `seen_keys`,
-    a list, gets the names of the vendor keys the CLI would have been started with."""
+    a list, gets the names of the vendor keys the CLI would have been started with. `extra_env`
+    is the call's own, as `critic.run` takes it."""
     import subprocess
 
     if not critic.is_available():
@@ -1418,7 +1420,8 @@ def _route_taken(tmp_path, monkeypatch, *, harness, model, provider, via="",
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "cfg"))
     for var in (*_STORED, "AUTOSOUND_CRITIC_BIN", "GEMINI_BIN", "AUTOSOUND_CRITIC_MODEL",
-                "GEMINI_CRITIC_MODEL", "AUTOSOUND_CRITIC_PROVIDER", "AUTOSOUND_KEYSTORE"):
+                "GEMINI_CRITIC_MODEL", "AUTOSOUND_CRITIC_PROVIDER", "AUTOSOUND_KEYSTORE",
+                "AUTOSOUND_CRITIC_VIA"):
         monkeypatch.delenv(var, raising=False)
     for var in exported:
         monkeypatch.setenv(var, "env-key-0123456789abcdef")
@@ -1437,7 +1440,7 @@ def _route_taken(tmp_path, monkeypatch, *, harness, model, provider, via="",
 
     monkeypatch.setattr(critic.subprocess, "run", through_the_probe)
     result = critic.run("# a question", project_dir=project, role=critic.ASK, model=model,
-                        harness=harness, provider=provider, via=via)
+                        harness=harness, provider=provider, via=via, extra_env=extra_env)
     said = seen.get("stderr", "")
     shown = " ".join(seen.get("argv", [])) + said + result.text
     assert "probe-" not in shown and "env-key-" not in shown, "a key in sight"
@@ -1505,3 +1508,59 @@ def test_an_api_pick_still_goes_through_the_stored_key(tmp_path, monkeypatch):
     """«API · …» is the key's route (tcc#74), and a key in the store is what it runs on."""
     assert _route_taken(tmp_path, monkeypatch, harness="api", model="gemini-pro-latest",
                         provider="google") == "api google stored"
+
+
+# ---- a session's own run of the method (hub #236 TCC-046, tcc#134) -----------------------------
+
+
+@pytest.mark.parametrize("harness,model,provider,cli", [
+    ("agy", "claude-sonnet-4-6", "anthropic", "agy"),
+    ("codex", "gpt-5.2-codex", "openai", "codex"),
+    ("sdk", "claude-sonnet-5", "anthropic", "claude"),
+])
+def test_a_sessions_own_run_of_the_method_follows_the_footers_route(tmp_path, monkeypatch, harness,
+                                                                     model, provider, cli):
+    """hub #236 (TCC-046), the method's v3.1.0: a session that runs the method itself names no
+    `--via`, and with a key in the OS store such a run went to the vendor's API whatever the footer
+    said — `call_critic` asks for the pick's CLI (tcc#127), a session's shell could not. The method
+    now takes the route of a run that names none from `AUTOSOUND_CRITIC_VIA`, and TCC puts it in
+    the session's environment beside the model: the run goes to the pick's CLI, which the method
+    starts with no vendor key."""
+    from autosound_tcc.core import claude_sdk
+
+    monkeypatch.setattr(claude_sdk, "cli_path", lambda: "/probe/bin/claude")
+    monkeypatch.setattr(critic.shutil, "which", lambda name, *a, **k: f"/probe/bin/{name}"
+                        if name in ("agy", "codex", "claude") else None)
+    monkeypatch.setattr(critic, "configured", lambda _p: (model, harness))
+    session = critic.session_env(tmp_path)
+    keys: list = []
+    # No harness, so no `--via` on the call, as from a session's own shell: its environment is all
+    # the run is told.
+    route = _route_taken(tmp_path, monkeypatch, harness="", model=model, provider=provider,
+                         seen_keys=keys, extra_env=session)
+    assert route == f"cli {cli}" and keys == [], (route, keys, session)
+
+
+def test_a_session_is_handed_the_footers_route_in_the_methods_own_words(tmp_path, monkeypatch):
+    """hub #236: «API · …» is the key's route, a login's pick its CLI and an OMP pick omp's — the
+    routes `run` asks for by `--via` — and each a word the vendored method takes in
+    `AUTOSOUND_CRITIC_VIA`: one it does not know it refuses, and every run of the session would
+    stop on it. No pick names no route, and the method keeps its own default."""
+    import re
+
+    if not critic.is_available():
+        pytest.skip("the method's submodule is not checked out")
+    monkeypatch.setattr(critic, "critic_bin_override", lambda harness="": {})
+    monkeypatch.setattr(critic, "omp_route_available", lambda: True)
+    said = {}
+    for route in ("api", "agy", "codex", "sdk", "omp"):
+        monkeypatch.setattr(critic, "configured", lambda _p, r=route: ("a-model", r))
+        said[route] = critic.session_env(tmp_path).get("AUTOSOUND_CRITIC_VIA")
+
+    assert said == {"api": "api", "agy": "cli", "codex": "cli", "sdk": "cli", "omp": "omp"}
+    text = critic.script_path().read_text(encoding="utf-8")
+    assert "AUTOSOUND_CRITIC_VIA" in text, "the vendored method reads the variable"
+    known = re.search(r"^VIA_ROUTES\s*=\s*\(([^)]*)\)", text, re.MULTILINE).group(1)
+    assert all(f'"{via}"' in known for via in set(said.values())), known
+    monkeypatch.setattr(critic, "configured", lambda _p: ("", ""))
+    assert critic.session_env(tmp_path) == {}
