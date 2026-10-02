@@ -101,7 +101,8 @@ committer at a time. Strings in four languages: uk and en by the builder, pl and
 
 **#134** the method at v3.1.0. *~1.5 h after the tag* — vendor the signed tag (the 2ec40ed habit); hub #233: TCC's
 `w_L` ↔ `w-L` binding (`f8ded2d`) checked against the method's, one rule, the `sw-f` answer; hub #236: the method's
-route variable set for the sessions TCC starts (`core/session` env), and the v0.1.46 CHANGELOG gap closes.
+route variable set for the sessions TCC starts (`core/session` env), and the v0.1.46 CHANGELOG gap closes. hub #237 (TCC-047, in this wave): upkeep names the newest
+agy and native Claude Code — the Updates rows read «up to date» / «→ x.y.z» for them; #138's row stays for the rest.
 
 **#135** agy through ADC. *~2 h after the skill's carrier* — the ONE carrier HUB-071 names, used for TCC's own
 `agy models` (`model_choices.py` ~505) and every reviewer run; the Critic recommendation from agy's ADC model list;
