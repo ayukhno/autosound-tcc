@@ -2066,6 +2066,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 - finding 142 — a new reviewer pick shows the old model's red line for about a minute; a spinner at the «!» while the check runs (the Arbiter);
 - tcc#94 reshaped by the Arbiter (2026-10-02): no addressing a capture by uuid («не стабільно»); when two captures share a title, warn the user, and nothing more;
 - hub #233 TCC-045 and hub #236 TCC-046: the skill says both are built on its wave branch (2026-10-02 evening); when its tag lands, TCC pins it, checks its own `w_L` ↔ `w-L` binding against the method's, and sets the route variable for the sessions it starts;
+- tcc#21 taken into W-6 by the Arbiter (2026-10-02): check the selected sweeps' quality at import, while the mic is in hand; for an unusable one TCC recommends a re-take OR the tuner confirms the capture as it is and it is taken — never a block (his words: «рекомендувати перезняти або підтвердити що те що є і беремо»);
 - hub #235 HUB-072 (from hub, to:tcc) — agy through ADC (the Google Cloud free trial): a TCC started from the Dock or Finder never reads `~/.zshrc`, so its `agy models` and every reviewer run go without `AGY_ADC_AUTH`; and the recommended Critic is a model ADC does not offer (the skill's half is hub HUB-071; the skill is changing agy's login in its W-6);
 
 ### F-091 — Left by W-5's reviews for a later wave
