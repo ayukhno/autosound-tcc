@@ -1133,14 +1133,14 @@ def test_a_probe_running_when_an_update_lands_is_let_go(monkeypatch):
     assert dialog._install_worker is not running
 
 
-def _probe_given_up(monkeypatch, release):
+def _probe_given_up(monkeypatch, tools):
     """A dialog whose Installation tab was read, with a probe slower than the poll: the timer has
-    taken its last look and stopped, and the probe is still asking until `release` is set."""
+    taken its last look and stopped, and the probe (`install_report.tools` is `tools`) is still
+    asking."""
     from autosound_tcc.core import install_report
     from autosound_tcc.ui.tcc import diagnostics_panel
 
-    monkeypatch.setattr(install_report, "tools",
-                        lambda: release.wait(5) and _tools_section(gh="2.102.0"))
+    monkeypatch.setattr(install_report, "tools", tools)
     _app()
     dialog = DiagnosticsDialog()
     dialog._tabs.setCurrentWidget(dialog._install_tab)
@@ -1150,38 +1150,147 @@ def _probe_given_up(monkeypatch, release):
     return dialog
 
 
+def _answers_on(release):
+    """The tools, once `release` is set: gh 2.102.0."""
+    return lambda: release.wait(5) and _tools_section(gh="2.102.0")
+
+
 def test_a_probe_slower_than_the_poll_is_sent_once_it_has_answered(monkeypatch):
     """tcc#130 (the re-review of VM fix A, Minor B): a probe slower than the 15-s poll — a slow
     Windows VM — answered after the timer had stopped reading it, and nobody read it: the report
-    said «not asked yet» for tools that were asked, and the box kept «reading…». The finished
-    probe's section is what both the report and Copy send."""
-    from PySide6.QtGui import QGuiApplication
-
+    said «not asked yet» for tools that were asked. The finished probe's section is sent."""
     release = threading.Event()
-    dialog = _probe_given_up(monkeypatch, release)
+    dialog = _probe_given_up(monkeypatch, _answers_on(release))
     release.set()
     dialog._install_worker._thread.join(timeout=10)
 
     text = dialog._report_text()
 
     assert "gh  2.102.0" in text and "not asked yet" not in text, text
+
+
+def test_copy_alone_takes_a_probe_that_answered_after_the_poll(monkeypatch):
+    """tcc#130, review Minor 2: Copy is the block's other route, and it takes the late answer by
+    itself — not only after a report has drawn it into the box."""
+    from PySide6.QtGui import QGuiApplication
+
+    release = threading.Event()
+    dialog = _probe_given_up(monkeypatch, _answers_on(release))
+    release.set()
+    dialog._install_worker._thread.join(timeout=10)
+
     dialog._copy_install()
+
     assert "gh  2.102.0" in QGuiApplication.clipboard().text()
 
 
 def test_a_probe_the_poll_gave_up_on_is_said_not_to_have_answered_in_time(monkeypatch):
     """tcc#130: once the poll's 15 s are up and the tools have not answered, the report says so —
     not «not asked yet», and not «still being asked» for a probe nothing reads any more (one stuck
-    in a `communicate()`, tcc#31)."""
+    in a `communicate()`, tcc#31). The box and Copy say the same, not a «reading…» nothing will
+    replace with no tools section at all (review Important 1)."""
+    from PySide6.QtGui import QGuiApplication
+
     release = threading.Event()
-    dialog = _probe_given_up(monkeypatch, release)
+    dialog = _probe_given_up(monkeypatch, _answers_on(release))
 
     text = dialog._report_text()
+    box = dialog._install_text.toPlainText()
+    dialog._copy_install()
+    copied = QGuiApplication.clipboard().text()
 
     release.set()
     dialog._install_worker._thread.join(timeout=10)
     assert "[Command-line tools]" in text and "did not answer in time" in text, text
     assert "not asked yet" not in text and "being asked" not in text, text
+    for shown in (box, copied):
+        assert "[Command-line tools]" in shown and "did not answer in time" in shown, shown
+        assert i18n.t("diagInstallReading") not in shown, shown
+
+
+def test_re_check_asks_again_past_a_probe_the_poll_gave_up_on(monkeypatch):
+    """tcc#130, review Important 2: a probe that never finishes — stuck in a `communicate()` on
+    Windows, tcc#31 — kept Re-check from asking the tools again until a restart, and the report on
+    «did not answer in time». Re-check lets it go and asks again."""
+    started, stuck, second = threading.Event(), threading.Event(), threading.Event()
+
+    def never_answers():
+        started.set()
+        stuck.wait(30)
+        return _tools_section(gh="2.101.0")
+
+    answers = iter([never_answers, _answers_on(second)])
+    dialog = _probe_given_up(monkeypatch, lambda: next(answers)())
+    assert started.wait(5)
+    given_up = dialog._install_worker
+    try:
+        dialog._on_refresh()
+
+        assert dialog._install_worker is not given_up
+        assert "still being asked" in dialog._report_text()
+        second.set()
+        _finish_report(dialog)
+        text = dialog._report_text()
+        assert "gh  2.102.0" in text and "did not answer in time" not in text, text
+    finally:
+        stuck.set()
+        given_up._thread.join(timeout=10)
+
+
+def test_a_probe_ending_while_the_report_reads_it_is_sent(monkeypatch):
+    """tcc#130, review Minor 1: a probe read as running by the late take and as ended a moment later
+    went to neither — the report said «did not answer in time» for a section that was there."""
+    from autosound_tcc.core import install_report
+
+    class _EndsBetweenReads:
+        """Running at the first look, ended with its section at every look after."""
+
+        def __init__(self):
+            self.section = _tools_section(gh="2.102.0")
+            self._reads = iter([True])
+
+        @property
+        def running(self):
+            return next(self._reads, False)
+
+    monkeypatch.setattr(install_report, "tools", lambda: _tools_section(gh="2.101.0"))
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._tabs.setCurrentWidget(dialog._install_tab)
+    dialog._install_worker._thread.join(timeout=30)
+    dialog._install_worker = _EndsBetweenReads()
+    dialog._report_tools = None
+
+    text = dialog._report_text()
+
+    assert "gh  2.102.0" in text and "did not answer in time" not in text, text
+
+
+def test_an_update_behind_another_tab_stops_the_poll_of_the_probe_it_lets_go(monkeypatch):
+    """tcc#130, review Minor 3: Re-check from the Updates tab while the tools are asked, then omp's
+    update lands. The probe is let go with no re-read — and the timer that read it stops, rather
+    than ticking at 4 Hz over nothing for as long as the window is open."""
+    from autosound_tcc.core import install_report, updates
+
+    release = threading.Event()
+    monkeypatch.setattr(install_report, "tools", _answers_on(release))
+    dialog = _tools_shown(monkeypatch, _tool("omp", "17.3.8", "18.2.4"))
+    monkeypatch.setattr(updates, "update_tools", lambda names: updates.ToolsUpdate(
+        (updates.ToolUpdate("omp", True, "17.3.8", "18.2.4"),)))
+    dialog._tabs.setCurrentWidget(dialog._install_tab)
+    running = dialog._install_worker
+    dialog._tabs.setCurrentWidget(dialog._updates_tab)
+    dialog._on_refresh()
+    _finish_tools(dialog)
+    assert dialog._install_timer.isActive() and running.running
+
+    dialog._tool_rows["omp"][1].click()
+    _finish_tools(dialog)
+
+    release.set()
+    running._thread.join(timeout=10)
+    assert dialog._install_worker is None
+    assert not dialog._install_timer.isActive()
 
 
 def test_the_update_row_carries_the_version_and_not_the_commit():

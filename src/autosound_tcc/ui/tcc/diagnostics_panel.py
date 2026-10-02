@@ -1143,9 +1143,14 @@ class DiagnosticsDialog(QDialog):
                              and probe.running):
             return
         self._install_timer.stop()
-        if probe is not None and probe.section is not None:
+        if probe.section is not None:
             self._report_tools = probe.section
-        self._render_install(probe.section if probe is not None else None)
+            self._render_install(probe.section)
+        else:
+            # Given up with the probe still asking: the box says so, as the report does — not a
+            # «reading…» nothing will replace, which Copy sent with no tools section (tcc#130).
+            # `_report_tools` stays empty, so a late answer is still taken (`_take_late_tools`).
+            self._render_install(self._tools_unanswered(probe, probe.running))
 
     def _build_log_tab(self) -> QWidget:
         """The end of the log file, and one button to take it away with.
@@ -1394,7 +1399,10 @@ class DiagnosticsDialog(QDialog):
         GitHub is not asked from here: that is the Updates tab's (`refresh_updates`), so a re-read
         straight after an update does not take the row's receipt away at the moment it was earned.
         """
-        if self._install_worker is not None and self._install_worker.running:
+        probe = self._install_worker
+        # A probe the poll gave up on is let go, as `_install_changed` lets one go: one stuck in a
+        # `communicate()` (tcc#31) would otherwise leave Re-check dead until a restart (tcc#130).
+        if probe is not None and probe.running and self._install_tries < _TOOLS_TRIES:
             return
         self._install_read = True
         self._render_install(None)
@@ -1446,17 +1454,28 @@ class DiagnosticsDialog(QDialog):
         piece came from, which tools answer — is the half that decides whether the report can be
         answered at all (user, 2026-08-19: "дуже хочу обробляти їх напівавтоматично").
         """
-        self._take_late_tools()
+        # Read once, before the late take: a probe that ends between two reads of `running` was
+        # neither taken nor «still being asked», and read as one that never answered (tcc#130).
         probe = self._install_worker
         running = probe is not None and probe.running
+        self._take_late_tools()
         if self._install_read and self._report_tools is not None and not running:
             return self._install_text.toPlainText()
         # The box is not the whole answer: the tab was never opened, or it is being read again
         # (Re-check, an update). Compose the report now with the tools as last delivered — or a
         # section that SAYS they have not answered: they start eight processes, and the versions
         # and paths are file reads that cost nothing. Left out silently, a report sent straight
-        # after an update read as one with no tools at all (review of VM fix A). In the report's
-        # own English, like its other lines.
+        # after an update read as one with no tools at all (review of VM fix A).
+        try:
+            return install_report.as_text(install_report.report(
+                extra=self._install_extra(), with_tools=False,
+                tools_section=self._report_tools or self._tools_unanswered(probe, running)))
+        except Exception as exc:  # noqa: BLE001 — a report that cannot be built still opens
+            return f"{type(exc).__name__}: {exc}"
+
+    def _tools_unanswered(self, probe, running: bool) -> install_report.Section:
+        """The tools section when there is no answer to send, built in one place so the box and
+        the report say the same (tcc#130). In the report's own English, like its other lines."""
         if probe is None:
             said, detail = "not asked yet", "the Installation tab reads them"
         elif running and self._install_tries < _TOOLS_TRIES:
@@ -1465,14 +1484,8 @@ class DiagnosticsDialog(QDialog):
             # Asked, and the poll's 15 s ran out first: a slow Windows VM, or a probe stuck in a
             # `communicate()` (tcc#31). Not «not asked yet», which this read before (tcc#130).
             said, detail = "did not answer in time", f"{_TOOLS_TRIES * _TOOLS_POLL_MS // 1000} s"
-        missing = install_report.Section(
+        return install_report.Section(
             "Command-line tools", [install_report.Item("probe", said, detail)])
-        try:
-            return install_report.as_text(install_report.report(
-                extra=self._install_extra(), with_tools=False,
-                tools_section=self._report_tools or missing))
-        except Exception as exc:  # noqa: BLE001 — a report that cannot be built still opens
-            return f"{type(exc).__name__}: {exc}"
 
     def _open_issue(self) -> None:
         """Ask for the words and send them the way the person can: the form without an account,
@@ -1486,9 +1499,10 @@ class DiagnosticsDialog(QDialog):
 
     def _take_late_tools(self) -> None:
         """A probe slower than the poll (`_TOOLS_TRIES` looks, 15 s) answers after the timer has
-        stopped reading it, and nobody read it: the box kept «reading…» and the report said «not
-        asked yet» for tools that were asked (tcc#130). Its section is taken when the block is next
-        sent or copied, and the box is drawn with it — the box is what a complete report sends."""
+        stopped reading it, and nobody read it: the report said «not asked yet» for tools that were
+        asked (tcc#130). Its section is taken when the block is next sent or copied, and the box —
+        which says it «did not answer in time» since the give-up — is drawn with it: the box is
+        what a complete report sends."""
         probe = self._install_worker
         if (self._report_tools is None and probe is not None and not probe.running
                 and probe.section is not None):
