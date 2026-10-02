@@ -3491,6 +3491,7 @@ updated Claude Code to 2.1.287 and omp to 18.4.12; at once every row and button 
 «2.1.287: already the newest» / «1.2.15: already the newest». After «Re-check» both are back to «→ unknown: its source
 cannot tell without installing» with «Update» live again — what the update just learned is forgotten, and a tool whose
 source cannot tell its newest version offers «Update» for ever.
+The same with one button: «Update» on Claude Code alone → «Claude Code 2.1.287: already the newest», greyed; «Re-check» → «2.1.287 → unknown: its source cannot tell without installing», «Update» live.
 
 **Weight.** Low–medium: no harm, but the window contradicts itself and invites a needless update.
 
