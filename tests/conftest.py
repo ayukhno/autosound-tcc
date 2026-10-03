@@ -116,6 +116,17 @@ def _no_console_keeper_threads(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_hover_filter_left_on_the_app(monkeypatch):
+    """`app.main()` installs one app-wide hover filter (tcc#137), and a test that runs `main` left
+    it on the application for every later test in the worker, answering their activations with the
+    real cursor -- 32 tests across three files (night review, M4). Installed by nobody here;
+    `test_hover_reset.py` overrides this fixture by name, because `install` is what it tests."""
+    from autosound_tcc.ui.tcc import hover_reset
+
+    monkeypatch.setattr(hover_reset, "install", lambda app, cursor_pos=None: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_mcp_call_outlives_its_test():
     """tcc#141: an MCP call runs on a daemon thread since tcc#132, which `asyncio.run` no longer
     joins at a test's end. One left running reached `availability` in the next test after its

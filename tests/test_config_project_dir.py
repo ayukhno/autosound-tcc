@@ -172,3 +172,10 @@ def test_the_launch_flag_becomes_the_remembered_choice(tmp_path, monkeypatch):
     assert [str(p) for p in remembered] == [str(tmp_path.resolve())]
     assert os.environ["AUTOSOUND_PROJECT_DIR"] == str(tmp_path.resolve())
     assert readings == ["created", "start"], "the start that builds the window reads models"
+    # And no app-wide hover filter is left on the application for the tests after this one
+    # (night review of tcc#137, M4): it would answer their activations with the real cursor.
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import hover_reset
+
+    assert QApplication.instance().findChild(hover_reset.HoverReset) is None

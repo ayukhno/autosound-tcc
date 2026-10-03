@@ -45,18 +45,34 @@ class HoverReset(QObject):
         if handle is None:
             return False
         if kind == QEvent.Type.WindowDeactivate:
+            # One of our windows to another (night review of tcc#137, I1): Qt activates the new one
+            # BEFORE it deactivates this one, and a leave here goes to Qt's one app-wide record of
+            # where the mouse is -- clearing the hover the new window was just given, with no
+            # enter to follow, since the mouse never left it. Qt's own enter/leave follows the
+            # mouse between our windows. A switch to another app has no active window by now.
+            active = QApplication.activeWindow()
+            if active is not None and active is not obj:
+                return False
             QApplication.sendEvent(handle, QEvent(QEvent.Type.Leave))
             return False
         where = self._cursor_pos()
-        local = obj.mapFromGlobal(where)
-        if obj.rect().contains(local):
-            point = QPointF(local)
+        # The window under the cursor, not merely one whose rectangle holds it (M1): with another
+        # window over that point -- the diagnostics over the main one -- the widget beneath would
+        # be entered and keep a stale hover until the mouse crossed it again.
+        if QApplication.topLevelAt(where) is obj:
+            point = QPointF(obj.mapFromGlobal(where))
             QApplication.sendEvent(handle, QEnterEvent(point, point, QPointF(where)))
         return False
 
 
-def install(app: QApplication) -> HoverReset:
-    """One filter for the whole application, parented to it so it lives as long as it does."""
-    reset = HoverReset(app)
+def install(app: QApplication,
+            cursor_pos: Optional[Callable[[], QPoint]] = None) -> HoverReset:
+    """One filter for the whole application, parented to it so it lives as long as it does.
+
+    A second call hands back the first rather than stacking a second filter (night review, M4)."""
+    found = app.findChild(HoverReset)
+    if found is not None:
+        return found
+    reset = HoverReset(app, cursor_pos=cursor_pos)
     app.installEventFilter(reset)
     return reset
