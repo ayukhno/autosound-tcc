@@ -669,3 +669,77 @@ def test_every_button_greys_when_it_is_disabled_in_both_themes(monkeypatch):
             assert live == [], f"{mode}: disabled and still drawn as when armed: {live}"
         finally:
             host.close()
+
+
+def _most(drawn, rect) -> str:
+    """The colour most of `rect` is drawn in."""
+    from collections import Counter
+
+    from PySide6.QtGui import QColor
+
+    return Counter(QColor(drawn.pixel(x, y)).name()
+                   for x in range(rect.left(), rect.right() + 1)
+                   for y in range(rect.top(), rect.bottom() + 1)).most_common(1)[0][0]
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_every_drop_down_box_reads_in_the_theme_s_own_colours(monkeypatch, mode):
+    """tcc#145 (finding 143, the Arbiter on the Windows VM): in the dark theme the reviewer-key
+    window's provider box and the import window's NEW NAME boxes were a light grey field with white
+    or pale words — the boxes without `.mini-select`, left to the native style, which paints the
+    field from a palette role the theme never sets. One rule draws every combo box now, as tcc#131
+    gave every check box the radios' rule: the closed field and the editable one in the theme's
+    `panel3` under its `text` (4.5:1 or more), the placeholder in its `faint`, the arrow in its
+    `muted`, and the open list on its `panel` under its `text`. Drawn under the sheet, in each
+    theme; the boxes hold no words, so no font is measured — the words' colour is the one Qt is
+    given to draw them with."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QPalette
+    from PySide6.QtWidgets import QApplication, QComboBox, QVBoxLayout, QWidget
+
+    from tests import _windows
+
+    app = QApplication.instance() or QApplication([])
+    host = QWidget()
+    palette = _windows.theme_on(monkeypatch, host, mode)
+    layout = QVBoxLayout(host)
+    closed = QComboBox()  # as the provider box: no class
+    closed.addItems(["", "", ""])
+    editable = QComboBox()  # as a NEW NAME box
+    editable.setEditable(True)
+    editable.lineEdit().setPlaceholderText(" ")
+    for box in (closed, editable):
+        box.setFixedSize(180, 28)
+        layout.addWidget(box)
+    host.show()
+    try:
+        app.processEvents()
+        drawn = host.grab().toImage()
+        for name, box, words in (
+                ("closed", closed, closed.palette().color(QPalette.ColorRole.ButtonText)),
+                ("editable", editable, editable.lineEdit().palette().color(QPalette.ColorRole.Text))):
+            at = box.mapTo(host, box.rect().topLeft())
+            field = _most(drawn, QRect(at.x() + 4, at.y() + 4, 60, box.height() - 8))
+            said = f"{mode} {name}: the field {field}, the words {words.name()}"
+            assert field == palette.panel3, said
+            assert words.name() == palette.text, said
+            assert _contrast(words.name(), field) >= 4.5, said
+            arrow = QRect(at.x() + box.width() - 18, at.y() + 2, 16, box.height() - 4)
+            muted = sum(drawn.pixelColor(x, y).name() == palette.muted
+                        for x in range(arrow.left(), arrow.right() + 1)
+                        for y in range(arrow.top(), arrow.bottom() + 1))
+            assert muted >= 8, f"{said}: no arrow in `muted` ({muted} px)"
+        hint = editable.lineEdit().palette().color(QPalette.ColorRole.PlaceholderText)
+        assert (hint.name(), hint.alpha()) == (palette.faint, 255), f"{mode}: the placeholder {hint}"
+
+        closed.showPopup()
+        app.processEvents()
+        view = closed.view()
+        listed = view.viewport().grab().toImage()
+        ground = _most(listed, listed.rect())
+        rows = view.palette().color(QPalette.ColorRole.Text).name()
+        assert ground == palette.panel, f"{mode}: the open list is drawn on {ground}"
+        assert rows == palette.text and _contrast(rows, ground) >= 4.5, f"{mode}: rows {rows}"
+        closed.hidePopup()
+    finally:
+        host.close()

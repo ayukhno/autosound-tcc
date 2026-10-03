@@ -596,9 +596,71 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         border: none;
     }}
 
+    /* Every combo box — `.mini-select`'s field and list, given to every box (tcc#145, finding 143).
+    A box without that class was left to the native style, which paints the closed field from the
+    palette's `Button`, a role `apply_theme` never sets: in the dark theme the reviewer-key
+    window's provider box and the import window's NEW NAME boxes came out a light grey field under
+    the theme's pale words, on the Windows VM. The closed field and the editable one (its line
+    edit draws nothing of its own, `QComboBox QLineEdit` below) are `panel3` under `text`, the
+    placeholder `faint` as in a plain field, and the open list `panel`, as tcc#131 gave every check
+    box the radios' rule. Ahead of `.mini-select`'s rules, which keep their own padding, size and
+    states, and outrank these by their class.
+
+    The arrow is the one thing `.mini-select` does not have: a box that had the native one keeps
+    one, in `muted`. Drawn from borders, since an `image:` would be a file per theme: a top border
+    over a box of no size, its side borders slanting it into a triangle. The sides are a colour of
+    no alpha that is not `transparent` itself — Qt draws an edge beside a `transparent` one as a
+    bar, not a slant. */
+    QComboBox {{
+        background: {t.panel3};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        border-radius: 5px;
+        padding: 3px 4px 3px 7px;
+        placeholder-text-color: {t.faint};
+    }}
+    QComboBox:hover {{
+        border-color: {t.accent_dim};
+    }}
+    QComboBox:disabled {{
+        background: {t.panel2};
+        color: {t.faint};
+        border-color: {t.border};
+    }}
+    QComboBox::drop-down {{
+        border: none;
+        width: 18px;
+    }}
+    QComboBox::down-arrow {{
+        width: 0;
+        height: 0;
+        border-top: 5px solid {t.muted};
+        border-left: 4px solid rgba(255, 255, 255, 0);
+        border-right: 4px solid rgba(255, 255, 255, 0);
+    }}
+    QComboBox::down-arrow:disabled {{
+        border-top-color: {t.mix('muted', 45, 'panel')};
+    }}
+    QComboBox QAbstractItemView {{
+        background: {t.panel};
+        color: {t.text};
+        border: 1px solid {t.border2};
+        selection-background-color: {t.mix('accent', 22)};
+        selection-color: {t.text};
+        outline: none;
+        padding: 3px;
+    }}
+    /* The left padding is room for the current row's check mark (`.mini-select`'s «E / U»). */
+    QComboBox QAbstractItemView::item {{
+        padding: 5px 14px 5px 28px;
+        min-height: 22px;
+    }}
     /* .mini-select — themed QComboBox (preset / language / AI-model pickers). Without this the
     combos render in the native platform style, which reads as an unstyled, wrong-font intrusion
     against the rest of the flat dark UI. */
+    QComboBox[class~="mini-select"]::down-arrow {{
+        border: none;
+    }}
     QComboBox[class~="mini-select"] {{
         background: {t.panel3};
         color: {t.text};
