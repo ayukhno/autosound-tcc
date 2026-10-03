@@ -68,11 +68,26 @@ does.
 
 ### Fixed
 
+- **No update offers a move back** (finding 144). With the method at a candidate newer than its latest
+  release (3.1.0 against 3.0.66), the Updates tab offered «a newer one is out: 3.0.66», and the press would
+  have rolled the method back. Versions are now compared as numbers: an install ahead of the newest release
+  reads «newer than the latest release (a candidate)», with no update offered, and the method's and TCC's
+  update presses refuse an older target before they touch anything.
+- **«Back up to GitHub» counts its two steps** (finding 145): «(0/2)», then «(1/2)» with a line that says
+  the next press makes the private copy on GitHub, then it hides.
+- **The card follows the import window's choice** (finding 147). A capture taken «as it is» reads green
+  («taken as it is»), a title left on «Re-take» reads yellow until a new sweep comes in, and an import into
+  a round that had closed opens a new one instead of being refused by the method.
+- **The terminal session gets the reviewer's route on Windows** (finding 148): the `cmd` line no longer
+  arrives with broken quotes, in Windows Terminal and in a plain console, so the model, the route and the
+  hint reach the session intact.
 - **Hover after a switch to another app and back** (tcc#137, finding 139). The widget that was under
   the mouse no longer keeps its hover look, and hover works at once on return, in every window.
 - **A test suite that cannot carry state across tests** (tcc#141): the MCP tool calls a test leaves
   running are drained before the next one, and a finished test's window stops its own catalogue read
   and reviewer probe.
+
+Known in v1.1.0 (W-7's pool): every drop-down box in the dark theme is a light grey field with pale words (finding 143); the capture check reads a band-limited sweep, such as a sub's, as «truncated» — «Take it as it is» takes it (finding 146).
 
 ## [v0.1.46] — 2026-10-02 · omp, agy, gh and Claude Code updated from TCC, the footer's reviewer is the one that runs, a «don't ask» that stops asking, the guides one click away, the reviewer key deleted in one place, the method at v3.0.66
 
