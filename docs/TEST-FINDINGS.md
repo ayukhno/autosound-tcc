@@ -3554,3 +3554,17 @@ comes next.
 **Weight.** Low–medium: the backup looks done after the first step.
 
 **Task.** On the Arbiter's word.
+
+### 146. #21's check calls every band-limited sweep «truncated», and does not see a title that names the wrong kind
+
+**What.** The Arbiter on the Windows VM, 2026-10-03, W-6's branch: a sub sweep (20–1001 Hz) taken as `sw_7 (sw)` reads
+red, «covers 20-1001 Hz, asked for 20-20000 — truncated». TCC asks the method's verdict over the full 20–20000 band, so
+every sub, midbass or woofer sweep with a limited range reads as truncated. The same sweep named `sw_7 (rta)` also reads
+red for the same reason — and that one is right to stop, for another reason: the title names an RTA, the data is a sweep.
+His rule: «перше брати не можна, а друге можна» — the sub sweep named `(sw)` is good; the sweep named `(rta)` is not.
+
+**Weight.** High for #21: a false red on every band-limited sweep.
+
+**Task.** W-6: the verdict is asked over the band the sweep itself was set to (its Start–End in REW), so «truncated»
+means a sweep that stopped short of its own range; a title whose kind (`sw` / `rta`) disagrees with the data reads red with
+that reason.
