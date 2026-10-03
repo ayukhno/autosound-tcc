@@ -113,6 +113,33 @@ def test_ten_is_newer_than_nine(monkeypatch, tmp_path):
     assert status.newer is True
 
 
+def test_a_method_candidate_ahead_of_the_newest_release_is_not_offered_it(monkeypatch, tmp_path):
+    """Finding 144 (the Arbiter, Windows VM, 2026-10-03): the method installed at its candidate
+    `beta-v3.1.0-rc3`, whose manifest says 3.1.0, read «a newer one is out: 3.0.66» with the button
+    live — the commits differ, and that was all `newer` asked. 3.0.66 is OLDER, and pressing would
+    have checked it out. Ahead of the newest release is said as such, and offered nothing; by
+    number, so 3.0.10 is past 3.0.9 the way `test_ten_is_newer_than_nine` keeps it."""
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
+    _git_answers(monkeypatch, {"ls-remote": (True, f"{_THERE}\trefs/tags/v3.0.66")})
+    _skill_at(monkeypatch, _HERE, "3.1.0")
+
+    status = updates.check_skill()
+
+    assert (status.newer, status.reason) == (False, "ahead")
+    assert (status.installed, status.latest) == ("3.1.0", "3.0.66"), "both numbers, for the row"
+
+    _git_answers(monkeypatch, {"ls-remote": (True, f"{_THERE}\trefs/tags/v3.0.9")})
+    _skill_at(monkeypatch, _HERE, "3.0.10")
+    assert (updates.check_skill().newer, updates.check_skill().reason) == (False, "ahead"), (
+        "a string compare would call 3.0.10 older than 3.0.9")
+
+    _skill_at(monkeypatch, _HERE, "3.0.9")
+    assert updates.check_skill().newer is True, "the same number, another commit: a newer build"
+    _skill_at(monkeypatch, _HERE, "3.0.8")
+    assert updates.check_skill().newer is True, "older is still offered the newest"
+
+
 def test_a_method_git_will_not_answer_for_is_not_up_to_date(monkeypatch, tmp_path):
     """No sha means the question could not be asked, and "could not ask" is not "nothing new"."""
     monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
@@ -233,6 +260,26 @@ def test_a_clean_clone_is_moved_by_upkeep_clone_then_libs(monkeypatch, tmp_path)
     assert done.libs_ok is True and done.libs == "numpy 2.0.2 → 2.1.0", "only what moved"
     assert done.patch == "" and done.sent is None, "nothing was kept: nothing was changed here"
     assert git == [], "TCC runs no git against the clone to move it"
+
+
+def test_the_method_is_never_moved_back_to_an_older_release(monkeypatch, tmp_path):
+    """Finding 144, the press itself: from the candidate 3.1.0 «Update the method» went to the
+    newest release, 3.0.66, and the skill's `clone` checks out whatever tag it is given. The row no
+    longer offers it; `apply_skill` refuses it too — the default «newest», and a tag a row offered
+    before the clone moved on under it — by the manifest of the clone it would move, before any
+    step runs: nothing kept, nothing reset. The same release, or a newer one, still goes."""
+    repo = _an_installed_clone(monkeypatch, tmp_path)
+    (repo / ".claude-plugin").mkdir(parents=True)
+    (repo / ".claude-plugin" / "plugin.json").write_text('{"version": "3.1.0"}', encoding="utf-8")
+    _git_answers(monkeypatch, {"ls-remote": (True, f"{_THERE}\trefs/tags/v3.0.66")})
+    calls = _fake_upkeep(monkeypatch, tmp_path, {"clone": (0, _CLONE_JSON), "libs": (0, _LIBS_JSON)})
+
+    for done in (updates.apply_skill(), updates.apply_skill("v3.0.66", keep_local=True)):
+        assert (done.ok, done.reason, done.detail) == (False, "ahead", "3.1.0 → v3.0.66")
+    assert calls == [], "no step ran: nothing kept, nothing reset, nothing checked out"
+
+    assert updates.apply_skill("v3.1.0").ok is True, "its own release goes"
+    assert calls == [["clone", "--tag", "v3.1.0"], ["libs"]]
 
 
 def test_upkeep_runs_on_tcc_s_python_with_json_and_the_clone_before_the_command(monkeypatch,
@@ -682,12 +729,40 @@ def test_a_build_ahead_of_the_releases_is_not_told_to_update_backwards(monkeypat
     "update" to an older release would be telling them to throw work away."""
     monkeypatch.setattr(install_report, "app_version", lambda: "0.1.12")
     monkeypatch.setattr(install_report, "install_source", lambda: ("u", "a" * 40))
+    monkeypatch.setattr(install_report, "requested_revision", lambda: "")
     monkeypatch.setattr(updates, "newest_tcc_tag", lambda: "v0.1.11")
 
     status = updates.check_tcc()
 
     assert status.newer is False
-    assert status.latest == "0.1.12", "and the row shows what is actually here"
+    # Said as ahead since finding 144, with the release it is ahead of — not as «up to date».
+    assert (status.installed, status.latest, status.reason) == ("0.1.12", "0.1.11", "ahead")
+
+
+def test_a_tcc_candidate_is_its_own_release_and_not_offered_an_older_one(monkeypatch):
+    """Finding 144, TCC's row. A candidate writes nothing (hub RELEASE-CHANNEL.md §11.3), so an
+    app installed from `beta-v0.2.0-rc1` may still say 0.1.38 — and on stable, by that number,
+    v0.1.45 read as newer, and the button would have installed it over the candidate. The tag it
+    was installed AT names its release: beta-v0.2.0-rc1 is 0.2.0, ahead of 0.1.45. A candidate of
+    the newest release itself is that release, up to date; and the beta box still offers the next
+    candidate."""
+    _tcc_installed(monkeypatch, "0.1.38", _RC1, "beta-v0.2.0-rc1")
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.1.45")
+
+    status = updates.check_tcc()
+
+    assert (status.newer, status.reason) == (False, "ahead")
+    assert (status.installed, status.latest) == ("0.1.38 (beta-v0.2.0-rc1)", "0.1.45")
+
+    _tcc_installed(monkeypatch, "0.1.45", _RC1, "beta-v0.1.45-rc2")
+    assert (updates.check_tcc().newer, updates.check_tcc().reason) == (False, ""), (
+        "the same release is up to date, not ahead")
+
+    _tcc_installed(monkeypatch, "0.1.38", _RC1, "beta-v0.2.0-rc1")
+    _tcc_tags(monkeypatch, f"{_RC1}\trefs/tags/beta-v0.2.0-rc1",
+              f"{_RC2}\trefs/tags/beta-v0.2.0-rc2", f"{_HERE}\trefs/tags/v0.1.45")
+    beta = updates.check_tcc(updates.BETA)
+    assert (beta.newer, beta.latest) == (True, "0.2.0-rc2"), "beta still offers the next candidate"
 
 
 def test_the_update_command_pins_the_release_it_is_offering(monkeypatch):
@@ -1054,7 +1129,9 @@ def test_on_beta_a_build_ahead_of_the_newest_tag_is_not_sent_back(monkeypatch):
 
     status = updates.check_tcc(updates.BETA)
 
-    assert status.newer is False and status.latest == "0.2.1"
+    assert status.newer is False
+    # Said as ahead since finding 144, with the tag it is ahead of — not as «up to date».
+    assert (status.installed, status.latest, status.reason) == ("0.2.1", "0.2.0", "ahead")
 
 
 def test_on_beta_a_candidate_already_carrying_its_version_is_offered_the_next(monkeypatch):

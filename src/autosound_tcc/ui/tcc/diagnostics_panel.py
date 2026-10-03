@@ -787,6 +787,10 @@ class DiagnosticsDialog(QDialog):
             # THAT there is a newer build and not which. The report below still names both.
             key = "updNewerBuildOn" if status.detail else "updNewerBuild"
             label.setText(i18n.t(key).format(what=title, here=here, date=status.detail))
+        elif status.reason == "ahead":
+            # Past the newest release — a candidate (finding 144). Said with the release it is past,
+            # over a button that stays off: «a newer one is out: 3.0.66» on 3.1.0 offered a rollback.
+            label.setText(i18n.t("updAhead").format(what=title, here=here, there=status.latest))
         elif status.latest and status.latest == here:
             # Up to date FIRST, whatever else is true of this installation. A caveat about why the
             # button cannot act — a submodule, a working tree — is an answer to "why can I not

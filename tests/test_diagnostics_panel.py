@@ -1381,6 +1381,48 @@ def test_the_reason_is_shown_when_there_IS_something_it_cannot_install():
     assert i18n.t("updWhy_submodule") in dialog._update_rows["skill"][0].text()
 
 
+@pytest.mark.parametrize("name", ["skill", "tcc"])
+def test_a_candidate_ahead_of_the_newest_release_says_so_and_offers_nothing(name):
+    """Finding 144: «The method 3.1.0 — a newer one is out: 3.0.66» with «Update the method» live,
+    on the method's candidate. Ahead of the newest release reads as that, in the reader's
+    language, over a button that stays off — on TCC's row as on the method's."""
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+    before = i18n.current_language()
+    try:
+        for lang in ("en", "uk"):
+            i18n.set_language(lang)
+            dialog._show_update(updates.Status(name, "3.1.0", "3.0.66", False, "ahead"))
+
+            label, button = dialog._update_rows[name]
+            title = i18n.t("updSkillName" if name == "skill" else "updTccName")
+            assert label.text() == i18n.t("updAhead").format(what=title, here="3.1.0",
+                                                             there="3.0.66")
+            assert "3.1.0" in label.text() and "3.0.66" in label.text()
+            assert not button.isEnabled()
+    finally:
+        i18n.set_language(before)
+    assert dialog._skill_latest == "", "no release to press for"
+
+
+def test_a_press_refused_as_a_move_back_says_why_in_words():
+    """`apply_skill`'s own refusal of an older release (finding 144) reaches the row through
+    `_reason`, as a sentence and not the bare key."""
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog._after_skill_update(updates.SkillUpdate(False, "ahead", "3.1.0 → v3.0.66"))
+
+    label, button = dialog._update_rows["skill"]
+    assert i18n.t("updWhy_ahead") != "updWhy_ahead", "a sentence of its own"
+    assert label.text() == i18n.t("updFailed").format(
+        why=f"{i18n.t('updWhy_ahead')}: 3.1.0 → v3.0.66")
+
+
 def test_the_rew_line_reads_the_v3017_shape(monkeypatch):
     """Skill v3.0.17 re-cut the REW cross-check: the count is now the verdict of the OPEN CAPTURE
     ROUND rather than of the ledger's HEAD (a baseline used to report `0/16 MISSING` forever, and a

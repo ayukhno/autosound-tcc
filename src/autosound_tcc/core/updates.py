@@ -327,7 +327,8 @@ class Status:
     latest: str
     #: True only when both are known AND they differ in the direction that matters.
     newer: bool
-    #: WHY, as a key and never as a sentence: "source_checkout", "no_network", "on_branch"… This
+    #: WHY, as a key and never as a sentence: "source_checkout", "no_network", "on_branch"… —
+    #: or "ahead": this installation is past `latest`, a candidate (finding 144). This
     #: module is Qt-free and language-free, and the panel that shows it is neither — a sentence
     #: composed here came out in English inside a Ukrainian window (user's screenshot, 2026-08-19).
     reason: str = ""
@@ -421,6 +422,33 @@ def channel_key(name: str) -> Optional[tuple[int, int, int, int, int]]:
     if match := _CANDIDATE_RE.fullmatch(name):
         return (int(match[1]), int(match[2]), int(match[3]), 0, int(match[4]))
     return None
+
+
+def _release_of(name: str) -> Optional[tuple[int, int, int]]:
+    """The release a version or a tag names: `3.1.0`, `v3.1.0` and `beta-v3.1.0-rc3` are all
+    (3, 1, 0) — a candidate counts as its own release, the way the skill's `release_key` reads it.
+    `channel_key`'s two shapes, plus the bare number a manifest or metadata holds; None for anything
+    else, which is never ahead of anything."""
+    name = (name or "").strip()
+    key = channel_key(name if name.startswith(("v", "beta-")) else f"v{name}")
+    return key[:3] if key else None
+
+
+def _ahead(here: Optional[tuple[int, int, int]], tag: str) -> bool:
+    """Whether the release `here` is past the one `tag` names — by number, so 3.0.10 is past 3.0.9.
+
+    Finding 144: the method at its candidate 3.1.0 was offered «a newer one is out: 3.0.66», and
+    the button would have checked the older release out. Either side unknown is not ahead."""
+    there = _release_of(tag)
+    return here is not None and there is not None and here > there
+
+
+def _tcc_release(version: str, revision: str) -> Optional[tuple[int, int, int]]:
+    """The release this TCC is: its version, or the release named by the tag it was installed AT
+    when that is further on — `beta-v0.2.0-rc1` is 0.2.0 while its metadata may still say 0.1.38
+    (a candidate writes nothing, hub RELEASE-CHANNEL.md §11.3)."""
+    known = [key for key in (_release_of(version), _release_of(revision)) if key]
+    return max(known, default=None)
 
 
 #: What the last `ls-remote` said when it failed, so a caller can put WHY in front of a person
@@ -552,8 +580,10 @@ def check_skill() -> Status:
     and a manifest bumped early would offer an installation an update to itself. The version stays
     on the row because it is what a person reads — signature beside identifier, never instead.
 
-    "Ahead of the newest tag" is not a case here the way it is in `check_tcc`: `_is_ours` has
-    already turned away everything except the detached clone the installer parked on a tag.
+    Another commit is newer only when its release is not BEHIND this one (finding 144): the
+    installer's clone can sit on a candidate tag, `beta-v3.1.0-rc3`, whose manifest says 3.1.0
+    while the newest release is 3.0.66. That reads as ahead (`reason` "ahead") and offers nothing —
+    the one place the version, compared as a number, decides; the sha still decides between equals.
     Whether that clone carries local changes is asked only when the button is pressed
     (`local_changes()`): the skill's `status` takes up to a minute, and every check would pay it.
     """
@@ -575,6 +605,9 @@ def check_skill() -> Status:
         return Status("skill", installed, latest_version, False,
                       "" if installed else "no_manifest",
                       installed_sha=sha, latest_sha=latest_sha)
+    if sha != latest_sha and _ahead(_release_of(installed), latest):
+        return Status("skill", installed, latest_version, False, "ahead",
+                      installed_sha=sha, latest_sha=latest_sha)
     return Status("skill", installed, latest_version, sha != latest_sha,
                   "" if installed else "no_manifest",
                   installed_sha=sha, latest_sha=latest_sha)
@@ -594,8 +627,10 @@ def check_tcc(channel: str = STABLE) -> Status:
     The commit is still what a bug report needs, and it is still in the installation block below;
     what this row carries is two version numbers a person can compare.
 
-    A build NEWER than the newest tag is not an update — that is a developer running ahead of the
-    releases, and telling them to "update" backwards would be wrong. It reads as up to date.
+    A build NEWER than the newest tag is not an update — a candidate, or a developer running ahead
+    of the releases — and telling them to "update" backwards would be wrong. It reads as ahead
+    (`reason` "ahead", finding 144), and the release it is past stays in `latest` for the row. A
+    candidate is the release its install tag names (`_tcc_release`), whatever its metadata says.
 
     On the beta channel the comparison is by commit instead (`_check_tcc_on_beta`).
     """
@@ -611,6 +646,10 @@ def check_tcc(channel: str = STABLE) -> Status:
         # that is down, and the window had git's own sentence in hand while saying the second.
         return Status("tcc", version, "", False, "probe_failed", last_probe_error())
     latest = tag.lstrip("v")
+    revision = install_report.requested_revision()
+    if _ahead(_tcc_release(version, revision), tag):
+        return Status("tcc", install_report.shown_version(version, revision), latest, False,
+                      "ahead")
     if not version:
         # No metadata to compare with: fall back to what is on offer, and let the person decide.
         return Status("tcc", version, latest, True)
@@ -625,20 +664,23 @@ def _check_tcc_on_beta(version: str, commit: str) -> Status:
     A candidate writes nothing — `make ship CANDIDATE=` tags HEAD — so an app built from
     `beta-v0.2.0-rc1` may carry the version of the release before it, and a version compare would
     offer rc1 to an installation that already is rc1, forever. So: the commit of the newest tag on
-    the channel is current; a version above that tag's X.Y.Z is a build ahead of the releases,
-    current too (the rule `check_tcc` keeps on stable); anything else is newer — rc2 over rc1, and
-    the release cut on top of its candidates. Equal X.Y.Z is NOT ahead: under waves the version is
-    committed before the tag (hub #148), so rc1 can already say 0.2.0.
+    the channel is current; a release above that tag's X.Y.Z is a build ahead of the releases,
+    offered nothing and said as ahead (the rule `check_tcc` keeps on stable, finding 144); anything
+    else is newer — rc2 over rc1, and the release cut on top of its candidates. Equal X.Y.Z is NOT
+    ahead: under waves the version is committed before the tag (hub #148), so rc1 can already say
+    0.2.0.
     """
     tag, sha = _newest_tag_in(TCC_REPO, TCC_TAG_GLOB, TCC_BETA_GLOB, key=channel_key)
     if not tag:
         return Status("tcc", version, "", False, "no_network")
-    installed = install_report.shown_version(version, install_report.requested_revision())
+    revision = install_report.requested_revision()
+    installed = install_report.shown_version(version, revision)
     latest = tag.removeprefix("beta-").removeprefix("v")
     if sha == commit:
         return Status("tcc", installed, latest, False, installed_sha=commit, latest_sha=sha)
-    if version and _version_key(version)[:3] > channel_key(tag)[:3]:
-        return Status("tcc", installed, version, False, installed_sha=commit, latest_sha=sha)
+    if _ahead(_tcc_release(version, revision), tag):
+        return Status("tcc", installed, latest, False, "ahead", installed_sha=commit,
+                      latest_sha=sha)
     return Status("tcc", installed, latest, True, installed_sha=commit, latest_sha=sha)
 
 
@@ -1002,6 +1044,16 @@ class SkillUpdate:
     libs: str = ""
 
 
+def _clone_version(repo: Path) -> str:
+    """The version in the manifest of the clone `apply_skill` would move, "" when it has none —
+    `install_report.skill_version`'s file, read from that clone itself."""
+    try:
+        data = json.loads((repo / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — no manifest: nothing to compare, nothing refused
+        return ""
+    return str(data.get("version") or "") if isinstance(data, dict) else ""
+
+
 def _libs_moved(data: dict) -> str:
     before, after = data.get("before") or {}, data.get("after") or {}
     return ", ".join(f"{name} {before.get(name) or '—'} → {version}"
@@ -1023,6 +1075,11 @@ def apply_skill(tag: str = "", *, keep_local: bool = False, send: bool = False) 
     the person's yes to sending that patch to the skill as an issue; only then does `--send` go,
     because it leaves the machine. A refusal at any step stops the steps after it, and whatever
     was already done (the kept patch) is still in the answer.
+
+    **Never back to an older release** (finding 144): the skill's `clone` checks out whatever tag it
+    is given, and from the candidate 3.1.0 «newest» meant 3.0.66. A target whose release is behind
+    the one in the clone's own manifest is refused (`ahead`) before any step runs — the default,
+    and a tag a row offered before the clone moved on under it.
     """
     repo = _skill_repo_dir()
     why, detail = _ours_to_run(repo)
@@ -1031,6 +1088,10 @@ def apply_skill(tag: str = "", *, keep_local: bool = False, send: bool = False) 
     target, said = _target(tag)
     if not target:
         return SkillUpdate(False, "probe_failed", said)
+    here = _clone_version(repo)
+    if _ahead(_release_of(here), target):
+        _log.warning("skill: %s is ahead of %s — not moved back", here, target)
+        return SkillUpdate(False, "ahead", f"{here} → {target}")
     with _upkeep_from_tag(repo, target) as got:
         if got.script is None:
             return SkillUpdate(False, got.reason, got.detail)
