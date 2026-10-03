@@ -452,6 +452,17 @@ def _tcc_release(version: str, revision: str) -> Optional[tuple[int, int, int]]:
     return max(known, default=None)
 
 
+def _shown_tcc(version: str, revision: str) -> str:
+    """The TCC a row names: a candidate as the release it is (`_tcc_release`, the ahead check's own
+    reading), its tag beside it — `1.1.0 (beta-v1.1.0-rc1)` while its metadata, never bumped for a
+    candidate, still says 0.1.46. That read «0.1.46 (beta-v1.1.0-rc1) — newer than the latest
+    release 0.1.46» (finding 150, tcc#146). Anything else as `install_report.shown_version` has it."""
+    release = _tcc_release(version, revision)
+    if release is not None and revision.startswith("beta-v"):
+        version = ".".join(str(part) for part in release)
+    return install_report.shown_version(version, revision)
+
+
 #: What the last `ls-remote` said when it failed, so a caller can put WHY in front of a person
 #: instead of "could not reach GitHub". Set by `_newest_tag_in` and read immediately after it, on
 #: the same thread — `check_all` asks its two questions in order, never at once.
@@ -650,7 +661,7 @@ def check_tcc(channel: str = STABLE) -> Status:
     latest = tag.lstrip("v")
     revision = install_report.requested_revision()
     if _ahead(_tcc_release(version, revision), tag):
-        return Status("tcc", install_report.shown_version(version, revision), latest, False,
+        return Status("tcc", _shown_tcc(version, revision), latest, False,
                       "ahead")
     if not version:
         # No metadata to compare with: fall back to what is on offer, and let the person decide.
@@ -676,7 +687,7 @@ def _check_tcc_on_beta(version: str, commit: str) -> Status:
     if not tag:
         return Status("tcc", version, "", False, "no_network")
     revision = install_report.requested_revision()
-    installed = install_report.shown_version(version, revision)
+    installed = _shown_tcc(version, revision)
     latest = tag.removeprefix("beta-").removeprefix("v")
     if sha == commit:
         return Status("tcc", installed, latest, False, installed_sha=commit, latest_sha=sha)
@@ -1329,7 +1340,7 @@ def prepare_tcc_update(channel: str = STABLE, *, pid: Optional[int] = None,
         return TccUpdate(None, "probe_failed", last_probe_error() or "no tag matched")
     version, revision = install_report.app_version(), install_report.requested_revision()
     if _ahead(_tcc_release(version, revision), tag):
-        shown = install_report.shown_version(version, revision)
+        shown = _shown_tcc(version, revision)
         _log.warning("tcc: %s is ahead of %s — not moved back", shown, tag)
         return TccUpdate(None, "ahead", f"{shown} → {tag}", tag=tag)
     ok, line, why, sha = check_tcc_tag(tag)

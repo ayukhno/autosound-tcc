@@ -1418,6 +1418,29 @@ def test_a_candidate_ahead_of_the_newest_release_says_so_and_offers_nothing(name
     assert dialog._skill_latest == "", "no release to press for"
 
 
+def test_a_tcc_candidate_s_row_reads_the_version_its_tag_names(monkeypatch):
+    """Finding 150 (tcc#146), the row itself: the candidate beta-v1.1.0-rc1, its metadata at
+    0.1.46, against the newest release 0.1.46 — read through `check_tcc`, no network."""
+    from autosound_tcc.core import install_report, updates
+
+    _app()
+    _tcc_at(monkeypatch, "0.1.46", "beta-v1.1.0-rc1")
+    monkeypatch.setattr(install_report, "install_source", lambda: ("u", "1" * 40))
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.1.46")
+    dialog = DiagnosticsDialog()
+    before = i18n.current_language()
+    try:
+        i18n.set_language("en")
+        dialog._show_update(updates.check_tcc())
+    finally:
+        i18n.set_language(before)
+
+    label, button = dialog._update_rows["tcc"]
+    assert label.text() == ("TCC 1.1.0 (beta-v1.1.0-rc1) — newer than the latest release 0.1.46 "
+                            "(a candidate)")
+    assert not button.isEnabled()
+
+
 def test_a_press_refused_as_a_move_back_says_why_in_words():
     """`apply_skill`'s own refusal of an older release (finding 144) reaches the row through
     `_reason`, as a sentence and not the bare key."""
@@ -1478,7 +1501,7 @@ def test_a_stale_update_tcc_press_says_ahead_and_installs_nothing(monkeypatch, t
 
     label, button = dialog._update_rows["tcc"]
     assert label.text() == i18n.t("updFailed").format(
-        why=f"{i18n.t('updWhy_ahead')}: 0.1.38 (beta-v0.2.0-rc1) → v0.1.45")
+        why=f"{i18n.t('updWhy_ahead')}: 0.2.0 (beta-v0.2.0-rc1) → v0.1.45")
     assert not button.isEnabled()
     assert list(temp.iterdir()) == []
 

@@ -752,7 +752,8 @@ def test_a_tcc_candidate_is_its_own_release_and_not_offered_an_older_one(monkeyp
     status = updates.check_tcc()
 
     assert (status.newer, status.reason) == (False, "ahead")
-    assert (status.installed, status.latest) == ("0.1.38 (beta-v0.2.0-rc1)", "0.1.45")
+    # Named as the release its tag names, since finding 150 (tcc#146).
+    assert (status.installed, status.latest) == ("0.2.0 (beta-v0.2.0-rc1)", "0.1.45")
 
     _tcc_installed(monkeypatch, "0.1.45", _RC1, "beta-v0.1.45-rc2")
     assert (updates.check_tcc().newer, updates.check_tcc().reason) == (False, ""), (
@@ -763,6 +764,29 @@ def test_a_tcc_candidate_is_its_own_release_and_not_offered_an_older_one(monkeyp
               f"{_RC2}\trefs/tags/beta-v0.2.0-rc2", f"{_HERE}\trefs/tags/v0.1.45")
     beta = updates.check_tcc(updates.BETA)
     assert (beta.newer, beta.latest) == (True, "0.2.0-rc2"), "beta still offers the next candidate"
+
+
+def test_a_tcc_candidate_s_row_names_the_version_its_tag_names(monkeypatch):
+    """Finding 150 (tcc#146): with beta-v1.1.0-rc1 installed, whose metadata still says 0.1.46 (a
+    candidate is not bumped), the row read «TCC 0.1.46 (beta-v1.1.0-rc1) — newer than the latest
+    release 0.1.46». The row names the release the install tag names — the reading the ahead check
+    already makes (`_tcc_release`, finding 144) — on stable and on beta, and in the refusal of a
+    stale press; a release, and a build not installed from a candidate, keep their version."""
+    _tcc_installed(monkeypatch, "0.1.46", _RC1, "beta-v1.1.0-rc1")
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.1.46")
+
+    status = updates.check_tcc()
+
+    assert (status.installed, status.latest, status.reason) == (
+        "1.1.0 (beta-v1.1.0-rc1)", "0.1.46", "ahead")
+    assert updates.prepare_tcc_update(updates.STABLE).detail == "1.1.0 (beta-v1.1.0-rc1) → v0.1.46"
+
+    _tcc_tags(monkeypatch, f"{_HERE}\trefs/tags/v0.1.46", f"{_RC1}\trefs/tags/beta-v1.1.0-rc1")
+    assert updates.check_tcc(updates.BETA).installed == "1.1.0 (beta-v1.1.0-rc1)"
+
+    _tcc_installed(monkeypatch, "1.1.1", _RC1, "beta-v1.1.1-rc1")
+    assert updates.check_tcc(updates.BETA).installed == "1.1.1 (beta-v1.1.1-rc1)", (
+        "a candidate already bumped says the same number")
 
 
 def test_the_update_command_pins_the_release_it_is_offering(monkeypatch):
@@ -1097,7 +1121,7 @@ def test_on_beta_the_installed_candidate_is_current(monkeypatch):
     status = updates.check_tcc(updates.BETA)
 
     assert status.newer is False
-    assert status.installed == "0.1.38 (beta-v0.2.0-rc1)"
+    assert status.installed == "0.2.0 (beta-v0.2.0-rc1)", "the tag's release (finding 150)"
     assert status.latest == "0.2.0-rc1"
 
 
@@ -1433,7 +1457,7 @@ def test_a_stale_update_tcc_press_does_not_install_an_older_release(monkeypatch,
     ready = updates.prepare_tcc_update(updates.STABLE, pid=4242, platform="darwin")
 
     assert (ready.script, ready.reason, ready.tag) == (None, "ahead", "v0.1.45"), ready
-    assert ready.detail == "0.1.38 (beta-v0.2.0-rc1) → v0.1.45"
+    assert ready.detail == "0.2.0 (beta-v0.2.0-rc1) → v0.1.45"
     assert ran == [], "nothing fetched"
     assert list(temp.iterdir()) == [], "no script written"
 
