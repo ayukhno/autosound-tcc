@@ -455,7 +455,8 @@ class _MeasRow(QWidget):
         #: Taken as it is in the import window (finding 147): green, and «taken as it is» beside it.
         self._as_is = bool(getattr(item, "as_is", False))
         #: Usable over its own range by the import window's check, «truncated» by the method's
-        #: (tcc#149): green, and the row says both. Until hub #247; drop with that patch.
+        #: (tcc#149): green, «usable over its own range» beside it, the method's view on hover.
+        #: Until hub #247; drop with that patch.
         self._own_range = bool(getattr(item, "own_range", False))
         if self._own_range:
             # The line that the method's own step check still counts it is the ROW's hover, not
