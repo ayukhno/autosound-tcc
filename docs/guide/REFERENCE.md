@@ -73,7 +73,7 @@ Windows drops the app's identity when it pins a shortcut.
 | **☰ Menu** | Projects, sessions and models, appearance, tools, help. See [The menu](#the-menu). |
 | **⌂ passat-b8-2026** | The project folder this window is bound to. |
 | **Preset** | Which preset the tree and the tables show. |
-| **Target curve** | The curve this project tunes to. Click it to open the [target-curve tool](HOUSE-CURVE.md) in a browser. The **?** after it opens the method's [target-curve guide](https://github.com/ayukhno/autosound-tuning-skill/blob/v3.1.0/skills/autosound-tuning/references/patterns/target-curves/target_curves_guide.md): what a target curve is and how to choose one. |
+| **Target curve** | The curve this project tunes to. Click it to open the [target-curve tool](HOUSE-CURVE.md) in a browser. The **?** after it opens the method's [target-curve guide](https://github.com/ayukhno/autosound-tuning-skill/blob/v3.1.1/skills/autosound-tuning/references/patterns/target-curves/target_curves_guide.md): what a target curve is and how to choose one. |
 | **Control mode** | Hands the session to a terminal. See [Control mode](#control-mode). |
 | **⟳** | Reloads the project from disk: the DSP profile and the ledger. |
 | **⚙** | Diagnostics: the project check, updates, installation and run logs. |
