@@ -1476,7 +1476,10 @@ def test_a_size_the_arbiter_dragged_is_kept(monkeypatch):
     QApplication.processEvents()
     dialog.resize(700, 650)
     QApplication.processEvents()
-    dialog._result.setText("x " * 400)
+    # One word: a line of content, never 650 px of it. «x » * 400 wrapped past 650 on the font-less
+    # Windows runner, where every glyph is drawn 100 000 px wide, so the window grew to its content
+    # and was then, rightly, not a size anybody dragged (CI, PR #142).
+    dialog._result.setText("x")
     QApplication.processEvents()
     dialog._result.setText("")
     QApplication.processEvents()
