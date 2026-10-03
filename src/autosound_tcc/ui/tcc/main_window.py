@@ -3113,7 +3113,9 @@ class MainWindow(QMainWindow):
         if not git.works:
             sub, tip = i18n.t("gitSubBroken"), i18n.t("gitTipBroken")
         elif not git.repo:
-            sub, tip = i18n.t("gitSubNoRepo"), i18n.t("gitTipNoRepo")
+            # The button by its own label, never written out (review of finding 145, M12).
+            sub, tip = i18n.t("gitSubNoRepo"), i18n.t("gitTipNoRepo").format(
+                button=_backup_label(0))
         elif not git.remote:
             sub, tip = i18n.t("gitSubNoRemote"), i18n.t("gitTipNoRemote").format(
                 name=config.chosen_project_dir().name)

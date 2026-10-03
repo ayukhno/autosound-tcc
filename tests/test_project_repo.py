@@ -171,3 +171,15 @@ def test_a_push_that_never_ends_is_killed_with_git_under_gh(monkeypatch, tmp_pat
     [gh] = spawns.hung
     assert gh.timeouts == [project_repo._TIMEOUT_S, child.REAP_TIMEOUT_S]
     assert spawns.taskkills == [["taskkill", "/T", "/F", "/PID", str(gh.pid)]]
+
+
+def test_the_no_repository_tip_names_the_button_by_its_own_label(tmp_path, monkeypatch):
+    """Review of finding 145, M12: the header's tip wrote «Back up to GitHub (0/2)» out in four
+    languages, so a new word for the button (the Advisor's pass on pl and de) would leave the tip
+    naming a button that is not there. It takes the button's label as the button has it."""
+    window = _window(tmp_path, monkeypatch)
+    monkeypatch.setitem(i18n.T["en"], "gitBackupBtn", "Copy to GitHub")
+    window._set_project_params(None)
+
+    assert "«Copy to GitHub (0/2)»" in window._project_section._sub_label.toolTip()
+    assert _backup_buttons(window) == ["Copy to GitHub (0/2)"]
