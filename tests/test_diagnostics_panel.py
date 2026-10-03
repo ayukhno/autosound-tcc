@@ -880,6 +880,7 @@ def test_updating_tcc_is_handed_to_a_terminal(monkeypatch, tmp_path):
     dialog._show_update(updates.Status("tcc", "0.1.1", "0.9.9", True))
     seen = []
     monkeypatch.setattr(terminal_launcher, "run_script", lambda path: seen.append(path))
+    _tcc_at(monkeypatch, "0.1.1")  # the row's own number, not this tree's (review I2)
     monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.9.9")
     asked = _tag_checked(monkeypatch)
 
@@ -1575,6 +1576,7 @@ def test_updating_tcc_on_beta_pins_the_candidate(monkeypatch, tmp_path):
     config.set_update_channel("beta")
     dialog = DiagnosticsDialog()
     dialog._show_update(updates.Status("tcc", "0.1.38", "0.2.0-rc2", True))
+    _tcc_at(monkeypatch, "0.1.38")  # the row's own number, not this tree's (review I2)
     seen = []
     monkeypatch.setattr(terminal_launcher, "run_script", lambda path: seen.append(path))
     monkeypatch.setattr(updates, "newest_tcc_tag",
