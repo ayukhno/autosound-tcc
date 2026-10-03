@@ -11,6 +11,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 
@@ -88,8 +89,9 @@ def test_two_measurements_under_one_name_tick_neither(tmp_path):
     assert "⧉" in dialog._table.item(1, 2).text(), "and both are marked in the row"
     # Said once, by the warning (tcc#94): the ambiguous-tick line names only what the warning does
     # not — two spellings the grammar reads alike — and the mark's hover says why neither is ticked.
-    assert i18n.t("capImportDupWarn").format(names="m_3 (sw)") in dialog._note.text()
-    assert dialog._note.text().count("m_3 (sw)") == 1, dialog._note.text()
+    assert i18n.t("capImportDupWarn").format(names="m_3 (sw)") in dialog._dup_note.text()
+    said = dialog._dup_note.text() + " " + dialog._note.text()
+    assert said.count("m_3 (sw)") == 1, said
 
 
 def test_a_title_rew_holds_twice_is_named_with_what_to_do_about_it(tmp_path):
@@ -102,8 +104,47 @@ def test_a_title_rew_holds_twice_is_named_with_what_to_do_about_it(tmp_path):
     twice = _dialog(answer, tmp_path)
     once = _dialog(_rew(3), tmp_path)
 
-    assert i18n.t("capImportDupWarn").format(names="m_3 (sw)") in twice._note.text()
-    assert i18n.t("capImportDupWarn").split("{")[0] not in once._note.text()
+    assert i18n.t("capImportDupWarn").format(names="m_3 (sw)") in twice._dup_note.text()
+    assert not twice._dup_note.isHidden()
+    # On its own line, not inside the grey note: the Arbiter missed it there (W-6 VM look).
+    assert i18n.t("capImportDupWarn").split("{")[0] not in twice._note.text()
+    assert once._dup_note.isHidden() and not once._dup_note.text()
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_the_pair_is_said_and_marked_in_the_stopper_orange_in_either_theme(
+        tmp_path, monkeypatch, mode):
+    """The Arbiter's rule for a stopper that is not an error is orange (VM-5, ruling 21). The line
+    under the table wears it, and so do the rows whose title REW holds twice: their title (⧉ kept)
+    and REW's number — the number is how the row is found in REW to rename or delete it. Other
+    rows keep the table's own colour. Proved by the colour each one carries, in each theme."""
+    from PySide6.QtGui import QColor, QPalette
+
+    from autosound_tcc.ui.tcc import capture_import_dialog as cid
+    from autosound_tcc.ui.tcc.theme import PALETTE_DARK, PALETTE_LIGHT
+    from tests import _windows
+
+    answer = _rew(3)
+    answer["2"]["title"] = "m_3 (sw)"
+    dialog = _dialog(answer, tmp_path)
+    _windows.theme_on(monkeypatch, dialog, mode)
+    dialog._render()
+    dialog._dup_note.ensurePolished()
+
+    caution = (PALETTE_DARK if mode == "dark" else PALETTE_LIGHT)["caution"]
+    assert dialog._dup_note.palette().color(QPalette.ColorRole.WindowText).name() == caution
+    marked = 0
+    for row in range(dialog._table.rowCount()):
+        title = dialog._table.item(row, cid._COL_TITLE)
+        number = dialog._table.item(row, cid._COL_NUM)
+        if "⧉" in title.text():
+            marked += 1
+            assert title.foreground().color() == QColor(caution), title.text()
+            assert number.foreground().color() == QColor(caution), title.text()
+        else:
+            assert title.foreground().style() == Qt.BrushStyle.NoBrush, title.text()
+            assert number.foreground().style() == Qt.BrushStyle.NoBrush, title.text()
+    assert marked == 2, "both of the pair, the ⧉ kept"
 
 
 def test_the_row_carries_rews_own_number(tmp_path):

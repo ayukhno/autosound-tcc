@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -53,7 +54,7 @@ from autosound_tcc.ui.tcc import i18n, qt_shutdown, sizing
 from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog
 from autosound_tcc.ui.tcc.protective_dialog import ProtectiveLegsDialog
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
-from autosound_tcc.ui.tcc.theme import apply_caps
+from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
 #: Where a row's uuid rides on its checkbox item, so a tick survives a re-render.
 _UUID = Qt.ItemDataRole.UserRole
@@ -324,6 +325,14 @@ class CaptureImportDialog(QDialog):
         # window changes what the API answers — 17, then 85, then 102 from one file — and a
         # filtered answer is renumbered with no gaps, so nothing in it reveals what is missing.
         # The dialog cannot see the filter; it can refuse to claim more than it knows.
+        #
+        # A title REW holds twice goes ABOVE it, on a line of its own in the stopper's orange
+        # (`caution-line`, tcc#94): inside the grey note the Arbiter missed it (W-6 VM look).
+        self._dup_note = QLabel("")
+        self._dup_note.setProperty("class", "caution-line")
+        self._dup_note.setWordWrap(True)
+        self._dup_note.setHidden(True)
+        layout.addWidget(self._dup_note)
         self._note = QLabel("")
         self._note.setProperty("class", "phead-sub")
         self._note.setWordWrap(True)
@@ -466,6 +475,11 @@ class CaptureImportDialog(QDialog):
                 # came out is the person's call (user, 2026-09-06).
                 title.setText(f"{row.title} ⧉")
                 title.setToolTip(i18n.t("capImportDupTip"))
+                # And in the stopper's orange, with REW's number — the number is how the row is
+                # found in REW to rename or delete it (tcc#94, the Arbiter's W-6 VM look).
+                caution = QColor(current_theme().caution)
+                title.setForeground(caution)
+                number.setForeground(caution)
             elif row.uuid in self._proposed and row.uuid not in self._ticked:
                 # Its New name was matched, not typed: said, and left for a conscious tick.
                 title.setText(f"{row.title}  ≈")
@@ -724,10 +738,11 @@ class CaptureImportDialog(QDialog):
             lines.append(i18n.t("capCheckWaiting"))
         if self._check_error:
             lines.append(i18n.t("capCheckFailed").format(error=self._check_error))
-        if self._dup_titles:
-            # Said, never resolved: which of the two is meant is the tuner's to settle in REW (the
-            # Arbiter, 2026-10-02 — a pair is not to be addressed by uuid, tcc#94).
-            lines.append(i18n.t("capImportDupWarn").format(names=", ".join(self._dup_titles)))
+        # Said, never resolved: which of the two is meant is the tuner's to settle in REW (the
+        # Arbiter, 2026-10-02 — a pair is not to be addressed by uuid, tcc#94). Its own line.
+        self._dup_note.setText(i18n.t("capImportDupWarn").format(names=", ".join(self._dup_titles))
+                               if self._dup_titles else "")
+        self._dup_note.setHidden(not self._dup_titles)
         lines.append(i18n.t("capImportShowing"))
         if self._picked:
             lines.append(i18n.t("capImportPicked").format(n=self._picked))

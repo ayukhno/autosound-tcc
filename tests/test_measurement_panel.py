@@ -186,18 +186,50 @@ def test_the_card_names_a_title_rew_holds_twice_while_rew_was_last_seen_holding_
     warning = i18n.t("capImportDupWarn")
 
     panel._on_import_offer(_TWICE)
-    assert warning.format(names="m-L_02 (sw)") in panel._status_label.text()
+    assert warning.format(names="m-L_02 (sw)") in panel._dup_label.text()
+    assert not panel._dup_label.isHidden()
+    # Its own line, not the blue line's third sentence: the Arbiter missed it there (W-6 VM look).
+    assert warning.split("{")[0] not in panel._status_label.text()
     # A switch of the grid (the first Apply that opens a round re-points the live session too)
     # drops what was counted against the grid, not what is known about REW.
     panel.show_session("v9")
-    assert warning.format(names="m-L_02 (sw)") in panel._status_label.text()
+    assert warning.format(names="m-L_02 (sw)") in panel._dup_label.text()
+    assert not panel._dup_label.isHidden()
 
     panel._on_import_offer({"1": dict(_TWICE["1"]), "2": {**_TWICE["2"], "title": "m-R_02 (sw)"}})
-    assert warning.split("{")[0] not in panel._status_label.text()
+    assert panel._dup_label.isHidden() and not panel._dup_label.text()
 
     panel._on_import_offer(_TWICE)
     panel._on_read_failed("URLError: <urlopen error [Errno 61] Connection refused>")
-    assert warning.split("{")[0] not in panel._status_label.text()
+    assert panel._dup_label.isHidden() and not panel._dup_label.text()
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_the_card_says_the_pairs_in_the_stopper_orange_in_either_theme(tmp_path, monkeypatch, mode):
+    """The Arbiter on the W-6 VM look missed the warning as the blue line's third sentence. His
+    rule for a stopper that is not an error is orange (VM-5, ruling 21): the `caution` token the
+    footer and the Updates tab already say a hold in. Proved by the colour the label is drawn in,
+    in each theme — not by its words, and not by a font."""
+    from PySide6.QtGui import QPalette
+
+    from autosound_tcc.core import config
+    from autosound_tcc.ui.tcc.theme import PALETTE_DARK, PALETTE_LIGHT
+    from tests import _windows
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    _rejecting_dialog(monkeypatch)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._on_import_offer(_TWICE)
+
+    _windows.theme_on(monkeypatch, panel, mode)
+    panel._dup_label.ensurePolished()
+    panel._status_label.ensurePolished()
+
+    caution = (PALETTE_DARK if mode == "dark" else PALETTE_LIGHT)["caution"]
+    assert panel._dup_label.palette().color(QPalette.ColorRole.WindowText).name() == caution
+    assert panel._status_label.palette().color(QPalette.ColorRole.WindowText).name() != caution
 
 
 def test_the_card_names_three_pairs_and_counts_the_rest(tmp_path, monkeypatch):
@@ -218,7 +250,7 @@ def test_the_card_names_three_pairs_and_counts_the_rest(tmp_path, monkeypatch):
 
     panel._on_import_offer(answer)
 
-    said = panel._status_label.text()
+    said = panel._dup_label.text()
     assert i18n.t("capImportDupWarn").format(names="a_1 (sw), b_1 (sw), c_1 (sw) (+2)") in said
     assert "d_1 (sw)" not in said
 
@@ -237,7 +269,7 @@ def test_a_rename_that_settles_the_pair_takes_the_warning_off(tmp_path, monkeypa
         panel = MeasurementPanel()
         panel.set_sessions(MEAS_SESSIONS)
         panel._on_import_offer(_TWICE)
-        assert warning.format(names="m-L_02 (sw)") in panel._status_label.text()
+        assert warning.format(names="m-L_02 (sw)") in panel._dup_label.text()
         panel._taking = capture_import.candidates(_TWICE, tmp_path)
         panel._renaming = [("u2", "m-R_02 (sw)"), ("u1", "w-L_02 (sw)")]
 
@@ -246,7 +278,7 @@ def test_a_rename_that_settles_the_pair_takes_the_warning_off(tmp_path, monkeypa
         else:
             panel._on_import_rename_failed("REW rejected the rename", [("u2", "m-R_02 (sw)")])
 
-        assert warning.split("{")[0] not in panel._status_label.text(), settle
+        assert panel._dup_label.isHidden() and not panel._dup_label.text(), settle
 
 
 def test_a_rew_holding_nothing_is_said_rather_than_shown_as_an_empty_table():

@@ -1425,6 +1425,10 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="meas-legend-label"] {{ color: {t.muted}; font-size: 10px; }}
     /* What the last import or read did, above the capture panel's row (finding 31): blue. */
     QLabel[class~="meas-status"] {{ color: {t.info}; font-size: 11px; }}
+    /* .caution-line — `kv-caution`'s stopper as a line of its own: a title REW holds twice, on the
+    card and under the import table (tcc#94). Missed as a sentence inside the blue line and the grey
+    note (the Arbiter, W-6 VM look); orange, not red, for a stopper that is not an error (ruling 21). */
+    QLabel[class~="caution-line"] {{ color: {t.caution}; font-size: 11px; font-weight: 600; }}
     /* «інша конфігурація» beside «порівняти з» (finding 66): blue, as what it marks is. */
     QLabel[class~="cmp-other"] {{
         color: {t.info};

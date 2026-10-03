@@ -592,8 +592,8 @@ class MeasurementPanel(QWidget):
         #: Extra sentences on the status line, kept as keys — see `_add_status`.
         self._status_extra: list = []
         #: REW's last answer to ⤓, and the titles it holds on more than one measurement. The pair
-        #: is said at the end of the status line until a read shows it gone (tcc#94): the import
-        #: window closes, and the curve window — opened from this card — reads by title.
+        #: is said on its own line under the status line until a read shows it gone (tcc#94): the
+        #: import window closes, and the curve window — opened from this card — reads by title.
         self._rew_answer: dict = {}
         self._dup_titles: list[str] = []
         self._rows: list[_MeasRow] = []
@@ -629,6 +629,13 @@ class MeasurementPanel(QWidget):
         self._status_label.setWordWrap(True)
         self._status_label.setHidden(True)
         layout.addWidget(self._status_label)
+        # A title REW holds twice (tcc#94), on a line of its own and in the stopper's orange
+        # (`caution-line`): the Arbiter missed it as the blue line's third sentence (W-6 VM look).
+        self._dup_label = QLabel("")
+        self._dup_label.setProperty("class", "caution-line")
+        self._dup_label.setWordWrap(True)
+        self._dup_label.setHidden(True)
+        layout.addWidget(self._dup_label)
 
         head_row = QHBoxLayout()
         # 4, not 8: the right column's floor is this row's (VM-15, Ruling 30), and at two thirds of
@@ -780,21 +787,22 @@ class MeasurementPanel(QWidget):
         self._render_status()
 
     def _render_status(self) -> None:
-        """The last read's sentences, then what is known about REW's pairs (tcc#94).
+        """The last read's sentences on the blue line, and REW's pairs on their own (tcc#94).
 
-        The pairs are said with no sentence before them too: a switch of the grid drops what was
+        The pairs are said with no sentence above them too: a switch of the grid drops what was
         counted against it (`show_session`), and a title REW holds twice is not about the grid.
         """
         parts = []
         if self._status is not None:
             for key, kwargs in [self._status, *self._status_extra]:
                 parts.append(i18n.t(key).format(**kwargs) if kwargs else i18n.t(key))
-        if self._dup_titles:
-            named = ", ".join(self._dup_titles[:_CARD_PAIRS])
-            if len(self._dup_titles) > _CARD_PAIRS:
-                named = f"{named} (+{len(self._dup_titles) - _CARD_PAIRS})"
-            parts.append(i18n.t("capImportDupWarn").format(names=named))
         self._status_label.setText(" ".join(parts))
+        named = ", ".join(self._dup_titles[:_CARD_PAIRS])
+        if len(self._dup_titles) > _CARD_PAIRS:
+            named = f"{named} (+{len(self._dup_titles) - _CARD_PAIRS})"
+        self._dup_label.setText(
+            i18n.t("capImportDupWarn").format(names=named) if self._dup_titles else "")
+        self._dup_label.setHidden(not self._dup_titles)
 
     def set_no_project(self, message: str) -> None:
         """Hide the (mock) capture grid and show a plain message instead -- called by MainWindow

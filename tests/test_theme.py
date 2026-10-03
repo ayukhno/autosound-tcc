@@ -362,22 +362,28 @@ def test_a_hold_is_said_in_orange_that_reads_in_both_themes():
     read red, like an error. The Arbiter: «не сірим - помаранчевим, бо це стопер але не помилка».
     Orange, then — and not the accent itself: as text the light accent reads 3.2–3.7:1 on these
     surfaces, under finding 51's 4.5. Computed from the colour the sheet draws, on every surface
-    the line can sit on, in both themes."""
+    the line can sit on, in both themes.
+
+    `caution-line` is the same stopper as a line of its own (tcc#94): a title REW holds twice, on
+    the measurement card and under the import table — missed as a sentence inside a blue line and
+    a grey note (the Arbiter, W-6 VM look)."""
     import colorsys
 
     from autosound_tcc.ui.tcc import theme
 
     for name in ("dark", "light"):
         palette = theme.get_theme(name)
-        drawn = _drawn(theme.build_qss(palette), 'QLabel[class~="kv-caution"]', "color")
-        r, g, b = theme._to_rgb(drawn)
-        hue = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)[0] * 360
-        assert 20 <= hue <= 45, f"{name}: {drawn} is not orange (hue {hue:.0f}°)"
-        assert drawn.lower() != palette.warn.lower(), f"{name}: the error's red"
-        for surface in ("panel", "panel2", "panel3", "ground"):
-            ground = palette.tokens[surface]
-            assert _contrast(drawn, ground) >= 4.5, (
-                f"{name}: {drawn} is {_contrast(drawn, ground):.2f}:1 on {surface} {ground}")
+        for selector in ('QLabel[class~="kv-caution"]', 'QLabel[class~="caution-line"]'):
+            drawn = _drawn(theme.build_qss(palette), selector, "color")
+            r, g, b = theme._to_rgb(drawn)
+            hue = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)[0] * 360
+            assert 20 <= hue <= 45, f"{name} {selector}: {drawn} is not orange (hue {hue:.0f}°)"
+            assert drawn.lower() != palette.warn.lower(), f"{name} {selector}: the error's red"
+            for surface in ("panel", "panel2", "panel3", "ground"):
+                ground = palette.tokens[surface]
+                assert _contrast(drawn, ground) >= 4.5, (
+                    f"{name} {selector}: {drawn} is {_contrast(drawn, ground):.2f}:1 on "
+                    f"{surface} {ground}")
 
 
 def _rules(sheet: str) -> list[tuple[str, str]]:
