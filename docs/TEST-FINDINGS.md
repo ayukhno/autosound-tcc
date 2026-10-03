@@ -3529,3 +3529,15 @@ disabled look; the box is live. «то не сіре, то білий шрифт
 **Weight.** Low: a look.
 
 **Task.** For the next wave's collection (a known bug in v1.1.0).
+
+### 144. The Updates tab offers to «update» the method from its candidate 3.1.0 back to 3.0.66
+
+**What.** The Arbiter on the Windows VM, 2026-10-03, W-6's branch (afc0494), the method installed at the skill's
+candidate (3.1.0): «The method 3.1.0 — a newer one is out: 3.0.66» with «Update the method» live. 3.0.66 is the newest
+stable tag, older than what is installed; pressing would most likely roll the method back. Gone once v3.1.0 is tagged,
+but there for the whole joint candidate run.
+
+**Weight.** Medium: a one-press downgrade offered as an update.
+
+**Task.** W-6, on the Arbiter's word «так, виправляй»: an installed version newer than the newest release reads as such
+(a candidate), with no update offered.
