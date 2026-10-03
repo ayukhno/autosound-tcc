@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 
 import pytest
 
@@ -225,7 +226,9 @@ def test_the_move_runs_only_in_a_terminal_the_arbiter_answers(monkeypatch):
     monkeypatch.setattr(terminal_launcher, "run_line", opened.append)
     dialog = ReviewerKeyDialog()
     dialog._move.click()
-    assert len(opened) == 1 and opened[0].endswith("key move-shell")
+    # On Windows every argument is double-quoted for cmd (finding 148, M7); elsewhere shell-quoted.
+    tail = '"key" "move-shell"' if sys.platform.startswith("win") else "key move-shell"
+    assert len(opened) == 1 and opened[0].endswith(tail), opened
     dialog.close()
 
 
