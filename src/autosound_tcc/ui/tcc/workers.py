@@ -241,15 +241,19 @@ class _CaptureCheckWorker(QThread):
 
     result = Signal(str)  # the checker's own output, or the refusal verbatim
 
-    def __init__(self, project_dir) -> None:
+    def __init__(self, project_dir, titles=None) -> None:
         super().__init__()
         self._project_dir = project_dir
+        #: The titles to check — the ones the round TOOK (tcc#21). None is the method's own
+        #: default, every expected title, and the method writes a `taken` entry for each title it
+        #: checks: a title REW merely shows would come back "taken" (`process.py` check_captures).
+        self._titles = list(titles) if titles is not None else None
         # Say who you were if you are destroyed before you finished (finding 35): Qt's own
         # fatal line names no class, and this app has eight kinds of worker.
         qt_shutdown.watch(self)
 
     def run(self) -> None:
         try:
-            self.result.emit(process_writer.check_captures(self._project_dir))
+            self.result.emit(process_writer.check_captures(self._project_dir, self._titles))
         except process_writer.ProcessWriterError as exc:
             self.result.emit(str(exc))

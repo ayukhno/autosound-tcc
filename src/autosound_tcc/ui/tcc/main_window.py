@@ -4196,16 +4196,21 @@ class MainWindow(QMainWindow):
             verdict = ((round_.get("taken") or {}).get(title) or {}).get("verified") or {}
             return bool(verdict.get("ok")) or not measurement_view.applicable(verdict)
 
+        # Only what the round TOOK (tcc#21): the method records a `taken` entry for every title it
+        # checks, so checking whatever REW shows made a dud left for a re-take «брак — знятий» and
+        # a good sweep nobody ticked green — a title in REW's list is not this project taking it in
+        # (the Arbiter, 2026-09-06). The titles are handed over, not left to the method's default.
+        taken = round_.get("taken") or {}
         outstanding = [
             title
             for title in round_.get("expected", [])
-            if title in titles and not settled(title)
+            if title in titles and title in taken and not settled(title)
         ]
         if not outstanding:
             return
         if self._capture_check is not None and self._capture_check.isRunning():
             return  # one check at a time; the next title change re-triggers it
-        self._capture_check = _CaptureCheckWorker(config.project_dir())
+        self._capture_check = _CaptureCheckWorker(config.project_dir(), titles=outstanding)
         self._capture_check.result.connect(self._on_capture_check_done)
         self._capture_check.start()
 

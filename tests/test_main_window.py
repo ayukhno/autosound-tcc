@@ -5537,6 +5537,77 @@ def test_an_rta_the_check_does_not_apply_to_is_not_checked_again(monkeypatch):
     assert started == []
 
 
+def _round_check_started(monkeypatch, round_: dict, known: list) -> list:
+    """What `_on_rew_titles_changed` hands the capture check, with the round and REW faked."""
+    from types import SimpleNamespace
+
+    from autosound_tcc.state import process_view
+    from autosound_tcc.ui.tcc import main_window as mw
+
+    _app()
+    window = MainWindow()
+    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: round_)
+    monkeypatch.setattr(window._meas_panel, "known_titles", lambda: list(known))
+    started: list = []
+
+    class _Worker:
+        def __init__(self, project_dir, titles=None):
+            started.append(titles)
+            self.result = SimpleNamespace(connect=lambda *_a: None)
+
+        def start(self) -> None:
+            pass
+
+        def isRunning(self) -> bool:  # noqa: N802 — Qt's name
+            return False
+
+        def isFinished(self) -> bool:  # noqa: N802 — Qt's name
+            return True
+
+    monkeypatch.setattr(mw, "_CaptureCheckWorker", _Worker)
+    window._on_rew_titles_changed()
+    window._capture_check = None
+    return started
+
+
+def test_the_after_import_check_asks_only_about_what_the_round_took(monkeypatch):
+    """tcc#21, review I3. The method's `check_captures` writes a `taken` entry for EVERY title it
+    checks, so checking all expected titles REW shows made them taken: a dud the import window left
+    for a re-take read «брак — знятий», and a good sweep nobody ticked turned green (the Arbiter,
+    2026-09-06: a title in REW's list is not this project taking it in). Only what the round took
+    is checked, and the titles are handed over, not left for the method to fill in."""
+    started = _round_check_started(monkeypatch, {
+        "id": "cap_001", "expected": ["m-L_1 (sw)", "m-R_1 (sw)", "sw_1 (sw)"],
+        "taken": {"m-L_1 (sw)": {"at": "2026-10-03T20:01:00", "planned": True}},
+    }, ["m-L_1 (sw)", "m-R_1 (sw)", "sw_1 (sw)"])
+
+    assert started == [["m-L_1 (sw)"]]
+
+
+def test_an_expected_title_in_rew_that_nobody_took_is_not_checked(monkeypatch):
+    started = _round_check_started(monkeypatch, {
+        "id": "cap_001", "expected": ["m-L_1 (sw)"], "taken": {},
+    }, ["m-L_1 (sw)"])
+
+    assert started == []
+
+
+def test_the_capture_check_worker_hands_the_method_its_titles(monkeypatch, tmp_path):
+    """An empty title list is the method's "every expected title" — so the titles go over as given."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import workers
+
+    asked = []
+    monkeypatch.setattr(process_writer, "check_captures",
+                        lambda project, titles=None, session=False: asked.append((project, titles))
+                        or "")
+
+    workers._CaptureCheckWorker(tmp_path, titles=["m-L_1 (sw)"]).run()
+
+    assert asked == [(tmp_path, ["m-L_1 (sw)"])]
+
+
 def test_a_session_that_closed_itself_is_not_asked_to_save_on_quit(monkeypatch, tmp_path):
     """TEST-FINDINGS 26: the session wrote everything and closed in order, and quitting still asked
     to spend a turn saving. The close marks it saved; a write after the close takes the mark back."""
