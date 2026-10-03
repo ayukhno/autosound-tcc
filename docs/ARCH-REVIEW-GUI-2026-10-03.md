@@ -489,3 +489,54 @@ well enough to rebuild:
   - unlocked module caches written by workers (`model_choices._CLI_CACHE`, `claude_sdk._SIGNED_IN`);
   - `ui/capture_order/<preset>` QSettings keys colliding across projects that share a preset name;
   - GUI-thread reads that grow with project history (`process_view.stale_channels`, `ledger_line.py:129`, `critic.last_call`).
+
+---
+
+## Appendix B — FF-01 status
+
+FF-01 is the external audit of 2026-09-06, run on v0.1.32. Each of its seven items is checked
+here at `f58d208`; this branch adds only this document on top of that commit. The audit's own
+figures are taken as stated and not re-derived.
+
+The guards named below were run offscreen with `-n 4`: `test_terminal_launcher`,
+`test_model_choices`, `test_doubles` and `test_packaging` gave **151 passed, 2 skipped**. The five
+named guard tests also passed when run alone, and `ruff@0.12.0 check src tests scripts` gave
+"All checks passed!".
+
+1. **`main_window.py` at about 4,300 lines; split it, moving the workers to `ui/tcc/workers.py` and the models to `state/models.py` — changed.**
+   - The split was done. The five workers are imported from `ui/tcc/workers.py` (`main_window.py:144-152`; the module is 281 lines), and the domain types live in `state/models.py` (101 lines; HUB-051, `state/models.py:1-7`).
+   - But `main_window.py` has since grown to **6,465 lines**, with 221 methods. It is still the problem described in this review's finding 8.
+2. **`core/` and `state/` importing from `ui/` in four places — fixed.**
+   - None of the four cited lines is an import any more: `core/config.py:152` is a docstring, `core/self_check.py:321` is blank, and `state/measurement_view.py:23` and `state/process_view.py:25` import from `state/`.
+   - The two core modules now take what they need through a hook. `config.use_settings` (`core/config.py:193-196`) is set by `ui/tcc/app_settings.py:31`, and `self_check.use_translator` (`core/self_check.py:371-373`) is set by `ui/tcc/diagnostics_panel.py:64`.
+   - The dataclasses come from `state/models.py` (`state/measurement_view.py:24`, `state/process_view.py:26`). `mock_data.py` only re-exports them (`ui/tcc/mock_data.py:15-16`).
+   - `grep` finds no `autosound_tcc.ui` import under `core/` or `state/`. `tests/test_packaging.py:95-103` enforces that, and `:106-115` shows the guard going red.
+3. **The `class Bus` stubs had no `pending_count`, which the 2 s timer reads — fixed.**
+   - `tests/test_main_window.py` has no `class Bus` any more; it uses the real `signal_bus.SignalBus` (`:2150`, `:2202`, `:6289`). The timer's read is at `main_window.py:4035`.
+   - `tests/test_doubles.py:121` checks that every double answers the whole bus protocol, and `:141` shows that check going red.
+   - `tests/conftest.py:33` fails any test in which a Qt slot raised (HUB-046).
+4. **`measurement_panel.py` annotates a non-existent `_RewReadWorker` (ruff F821) — fixed.**
+   - The name is gone from `measurement_panel.py`. Its workers are `_RewScanWorker` (`:151`), `_RewRenameWorker` (`:184`) and `_LedgerWriteWorker` (`:254`).
+   - ruff, whose selection includes `F`, passes on the whole tree.
+   - One stale mention remains in a docstring, not in code: `core/rew_bridge.py:52`.
+5. **An order-dependent Qt abort (exit 134) on Linux offscreen — still present.**
+   - The repository's own record keeps it open and unexplained. `docs/TESTING.md:282` says "no repro yet", under hub HUB-049.
+   - `.github/workflows/ci.yml:6` still describes it, and the Linux jobs carry `continue-on-error` "until HUB-049 is closed" (`:166`, `:227-230`).
+   - The `shiboken6.isValid` guard in `i18n.set_language` is still in place (`ui/tcc/i18n.py:5291`).
+   - **Not verified:** the full Linux suite was not run in this session. The targeted runs did not abort, but they are too small to say anything about a flake of this kind.
+6. **Model names hard-coded in `mock_data.py` and `i18n.py`, beside `tuning_session.py` and `model_choices.py` — changed.**
+   - The identifiers now live only in `core/model_choices.py`:
+     - `tests/test_model_choices.py:673` asserts it for each id at `:658`;
+     - `core/tuning_session.py:59` takes `DEFAULT_SDK_MODEL` from there;
+     - the picker's list is derived from `model_choices.SDK_MODELS` (`ui/tcc/mock_data.py:30`).
+   - `i18n.py` carries no model name except in a comment (`:1225`).
+   - Two **display names** are still hard-coded in `mock_data.py`:
+     - `CURRENT_GENERATOR_MODEL = "Claude Opus 5"` (`:29`), which labels the dialog until a session attaches (`dialog_panel.py:305`, replaced at `:891`);
+     - `AI_CRITIC_MODELS` (`:31`), which nothing imports.
+7. **`terminal_launcher.py` used `shell=True` with `project_dir` inside the command string — fixed.**
+   - No `shell=True` is left anywhere in `src/`.
+   - In the `cmd` fallback the folder is passed as `cwd`, never put in the command line, and the comment says why (`core/terminal_launcher.py:356-372`, HUB-053).
+   - On the `wt` path the folder is an argument of its own, with `;` escaped (`:143-144`, `:350-354`).
+   - Tests cover paths with `&` and `"` (`tests/test_terminal_launcher.py:317`, `:344`) and one console instead of two (`:368`).
+
+**Of the 7: 4 fixed (2, 3, 4, 7), 1 still present (5), 2 changed (1, 6).**
