@@ -337,3 +337,37 @@ def test_a_finished_test_s_window_leaves_no_worker_running():
     finally:
         read.requestInterruption()
         read.wait(5000)
+
+
+def test_a_window_whose_catalogue_read_never_started_leaves_nothing_held():
+    """Re-review of fix round 2 of #21, N1: tests build windows with `AUTOSOUND_TCC_MCP=0`, so a
+    window's catalogue read is built and never started. Quieting the window handed it to
+    `qt_shutdown` as a thread that might be about to run, and every window a test built left one
+    more there for the rest of the session. Only a running worker is stopped."""
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import qt_shutdown
+    from autosound_tcc.ui.tcc.main_window import MainWindow
+    from tests import _windows
+
+    QApplication.instance() or QApplication([])
+    window = MainWindow()
+    read = window._cli_catalogue
+    assert read is not None and read not in qt_shutdown.live(), "built, never started"
+
+    _windows.quiet(window)
+
+    assert read not in qt_shutdown.detached()
+
+
+def test_the_window_quieting_asks_for_the_tests_patches_itself():
+    """Re-review of fix round 2 of #21, N2: `quiet()` must run before `monkeypatch` undoes the
+    test's patches, so a worker it stops does what it still does under them. That held only
+    because an earlier autouse fixture happened to ask for `monkeypatch`; the fixture asks for it
+    itself, and the order is its own."""
+    import inspect
+    import sys
+
+    conftest = sys.modules["tests.conftest"]
+
+    assert "monkeypatch" in inspect.signature(conftest._quiet_windows_left_behind).parameters

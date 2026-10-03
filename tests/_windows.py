@@ -47,18 +47,21 @@ def quiet(window) -> None:
         paths = list(watcher.files()) + list(watcher.directories())
         if paths:
             watcher.removePaths(paths)
-    # And the two threads that write process-wide state — the CLI catalogue read and the reviewer
-    # probe — stopped as `stop_workers` stops them at a real close (fix round 2 of tcc#21, the
-    # tcc#140 flake). A catalogue read still running when its test's patches came off read the
-    # developer's own `~/.config/autosound-tcc/cli-catalogue.json` in the next test's setup, and
-    # every agy model in it read "not checked" for the rest of that xdist worker: the launch-failure
-    # test and the reviewer-pick tests, about one `-n 4` run in twelve. This runs before
-    # `monkeypatch` undoes anything (it is set up earlier, so it is torn down later), so what a
-    # worker still does here, it does under the test's own patches; and its answer is cut. Only
-    # real threads: a test may leave a stand-in in the attribute, and that is no thread to stop.
+    # And the two threads that have leaked process-wide state — the CLI catalogue read and the
+    # reviewer probe — stopped as `stop_workers` stops them at a real close (fix round 2 of
+    # tcc#21, the tcc#140 flake). A catalogue read still running when its test's patches came off
+    # read the developer's own `~/.config/autosound-tcc/cli-catalogue.json` in the next test's
+    # setup, and every agy model in it read "not checked" for the rest of that xdist worker: the
+    # launch-failure test and the reviewer-pick tests, about one `-n 4` run in twelve. This runs
+    # before `monkeypatch` undoes anything (the fixture that calls it asks for `monkeypatch`, so it
+    # is torn down later), so what a worker still does here, it does under the test's own patches;
+    # and its answer is cut. Only real threads that were STARTED (`live()`): a test may leave a
+    # stand-in in the attribute, and a window built under `AUTOSOUND_TCC_MCP=0` never starts its
+    # catalogue read — `stop_or_detach` cannot tell that from "not scheduled yet" and would hold
+    # it for the rest of the session, one more per window (re-review of that round, N1).
     for name in ("_cli_catalogue", "_reviewer_probe"):
         worker = getattr(window, name, None)
-        if isinstance(worker, QThread):
+        if isinstance(worker, QThread) and worker in qt_shutdown.live():
             qt_shutdown.stop_or_detach(worker, 5000, mute=(worker.done,))
 
 

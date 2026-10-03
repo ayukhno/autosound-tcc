@@ -229,9 +229,13 @@ def _no_live_rew():
 
 
 @pytest.fixture(autouse=True)
-def _quiet_windows_left_behind():
+def _quiet_windows_left_behind(monkeypatch):
     """TODO F-053: a window a test leaves alive stops acting once its test is over — its timers,
-    its watchers, its writes — without being deleted (see `tests/_windows.py` for why not)."""
+    its watchers, its writes — without being deleted (see `tests/_windows.py` for why not).
+
+    It asks for `monkeypatch` so that it is torn down first: a worker `quiet()` stops does what it
+    still does under the test's own patches. That order was borrowed from an earlier autouse
+    fixture until the re-review of fix round 2 of #21 (N2)."""
     from tests import _windows
 
     # The windows themselves are held, not just their ids. An id alone can be handed to the
