@@ -2055,7 +2055,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-093 — W-7's pool: found after W-6's milestone
 
-**Статус**: open · on the milestone `W-7 · v1.1.1` (#7), all ok by the Arbiter 2026-10-03: #145 (143), #146 (150), #147 (149), #148 (146); plan `docs/PLAN-W-7.md` · was: recorded 2026-10-03 during W-6's VM look; left as known bugs of v1.1.0 by the Arbiter
+**Статус**: done v1.1.1 · W-7 released, paired with the method's v3.1.1 (e8dabf7): #145 (143, and 151 from the VM look), #146 (150), #147 (149), #148 (146), #149 (the card with the window, until hub #247) · was: open · on the milestone `W-7 · v1.1.1` (#7), all ok by the Arbiter 2026-10-03: #145 (143), #146 (150), #147 (149), #148 (146); plan `docs/PLAN-W-7.md` · was: recorded 2026-10-03 during W-6's VM look; left as known bugs of v1.1.0 by the Arbiter
 
 - finding 143 — every drop-down box in the dark theme (the key window's provider box, the import window's NEW NAME
   boxes): a light grey field with white or pale words.
@@ -2063,6 +2063,17 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 - finding 149 — a hand tick on a red row takes the capture «as it is» without the button saying so;
 - finding 146 — the import window's capture check reads a band-limited sweep (a sub at 20–1001 Hz) as «truncated»: noted, not fixed (the
   Arbiter: «ми не керуємо діапазоном явно, нехай буде»).
+
+### F-094 — the next wave's pool: what W-7 left on purpose
+
+**Статус**: open · recorded 2026-10-03 during W-7; waits for the next wave's collection
+
+- finding 152 — the import table's current-cell frame stands beside the TAKE tick, like a second box;
+- finding 151's limit — at the app's zoom 1.3–1.5 the import table's row (30 px) is too short for the NEW NAME field and
+  the plain cells;
+- W-7's final review m1 (`check_sweeps` reuses `answer`) and m2 (the as-is line names REW's title, not the New name);
+  round-1 M1 (a test's colour assertion proves nothing) and M2 (`.mini-select` rules repeat the generic ones);
+- at the re-pin that carries hub #247 (TCC-049): drop the W-7 card patch's band half (marked «until hub #247»), keep its clash half unless the method reads titles.
 
 ### F-092 — W-6: the pool, now on the milestone `W-6 · v1.1.0`
 
