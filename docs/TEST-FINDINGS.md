@@ -3568,3 +3568,24 @@ His rule: «перше брати не можна, а друге можна» �
 **Task.** Not fixed — the Arbiter, 2026-10-03: «не треба це правити - ми не керуємо діапазоном явно, нехай буде. можеш
 занотувати». A known limit of v1.1.0: a band-limited sweep reads «truncated», and «Take it as it is» takes it. For W-7's pool
 if it comes back.
+
+### 147. The card does not show «Take it as it is» as taken, nor «Re-take» as waiting
+
+**What.** The Arbiter on the Windows VM, 2026-10-03, W-6's branch: he took `sw_7 (sw)` «as it is» and left `sw_7 (rta)` on
+«Re-take», then Applied. The import window, reopened, shows `sw_7 (sw)` «taken as it is»; the card's checklist shows both
+blue («in REW»). His questions: «чому (sw) не зелений? чому (rta) не жовтий». An «as is» capture is not recorded as taken
+in the round, and a re-take reads as one waiting to be taken from REW rather than one waiting to be measured again.
+
+**Weight.** Medium: the card contradicts the choice just made.
+
+**Task.** W-6, on the Arbiter's word «так виправляй»: «Take it as it is» → green (done), «Re-take» → yellow (waiting).
+
+### 148. On Windows without Windows Terminal the terminal session gets no reviewer route
+
+**What.** The VM check of #134's M9, 2026-10-03: `cmd /k` started with `set "AUTOSOUND_CRITIC_MODEL=…" && set AUTOSOUND`
+answered «Environment variable AUTOSOUND not defined». Python's argv quoting turns `"` into `\"`, which cmd does not read,
+so the `set` lines (and the hint and model arguments before them) arrive broken.
+
+**Weight.** Medium: hub #236's route never reaches a terminal session on such a machine.
+
+**Task.** W-6: the `cmd /k` line passed verbatim (and the `wt` branch checked the same way).
