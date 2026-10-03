@@ -2783,6 +2783,37 @@ def test_the_replacement_list_holds_its_models_whole(tmp_path, monkeypatch):
     assert seen[0][1] == [], seen
 
 
+def test_the_nudge_can_fire_while_the_window_is_still_being_built(tmp_path, monkeypatch):
+    """The replacement question is asked inside the constructor, and its event loop can fire the
+    nudge timer before `_start_mcp` has run: CI on W-7's version commit, an AttributeError on
+    `_mcp_server` escaped from the slot. The nudge finds no server and does nothing."""
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    from autosound_tcc.core import config, model_choices as mc, project_settings
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "cli_available", lambda harness: False)
+    project_settings.set_value(config.tcc_dir(tmp_path), "generator", "sdk:claude-opus-4-1")
+    fired = []
+
+    def asked(box):
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, MainWindow):
+                widget._nudge_for_open_signals()  # what the timer does mid-question
+                fired.append(widget)
+        return QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(QMessageBox, "exec", asked)
+
+    _app()
+    MainWindow()
+
+    assert fired, "the replacement question was asked while the window was being built"
+
+
 def test_declining_the_replacement_writes_nothing(tmp_path, monkeypatch):
     """The model may come back, or the Arbiter may want to choose deliberately later."""
     from PySide6.QtWidgets import QMessageBox

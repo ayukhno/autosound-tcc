@@ -801,6 +801,10 @@ class MainWindow(QMainWindow):
         # than pushed from the bus, because `push()` is called on the GUI thread but `ack()` is
         # not, and a timer here asks the question where the answer can be acted on.
         self._nudged_signal_ids: set[str] = set()
+        # The nudge reads the server, and a modal question asked further down this constructor (a
+        # retired model's replacement) runs an event loop that can fire the timer before
+        # `_start_mcp` sets it: CI, W-7's version commit. None until then, as `_start_mcp` says.
+        self._mcp_server = None
         self._nudge_timer = QTimer(self)
         self._nudge_timer.setInterval(2000)
         self._nudge_timer.timeout.connect(self._nudge_for_open_signals)
