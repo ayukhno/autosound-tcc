@@ -4450,7 +4450,11 @@ class MainWindow(QMainWindow):
             # left working: an import with no round open asks for the number.
             self._meas_panel.set_series_unknown()
             return
-        sessions = measurement_view.build_sessions(phase, version, titles, taken=taken)
+        # And a third: what the import window left on «Re-take» waits, rather than being offered
+        # for import (finding 147).
+        retake = getattr(self._meas_panel, "retake_titles", lambda: [])()
+        sessions = measurement_view.build_sessions(phase, version, titles, taken=taken,
+                                                   retake=retake)
         if sessions:
             self._meas_panel.set_sessions(sessions, version=version)
             # The plan's per-step measurement icon reads the same list: a step gets one when a

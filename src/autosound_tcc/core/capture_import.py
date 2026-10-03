@@ -123,12 +123,73 @@ def load_imported(project_dir: Optional[Path] = None) -> dict[str, dict]:
     degrades to "nothing imported" rather than taking the dialog down: the worst that follows is a
     list showing rows the tuner has seen before, which they can read.
     """
+    return _section(project_dir, "measurements")
+
+
+def _section(project_dir: Optional[Path], name: str) -> dict[str, dict]:
+    """One `uuid -> entry` map of the store, `{}` when the file or the map is missing or broken."""
     try:
         raw = json.loads(store_path(project_dir).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    entries = raw.get("measurements") if isinstance(raw, dict) else None
+    entries = raw.get(name) if isinstance(raw, dict) else None
     return {str(k): v for k, v in entries.items() if isinstance(v, dict)} if isinstance(entries, dict) else {}
+
+
+def _write_store(measurements: dict, retake: dict, project_dir: Optional[Path]) -> None:
+    """The whole store, atomically — see `record_imported` for why."""
+    directory = config.tcc_dir(project_dir)
+    data: dict[str, Any] = {"schema": SCHEMA, "measurements": measurements}
+    if retake:
+        data["retake"] = retake
+    directory.mkdir(parents=True, exist_ok=True)
+    handle, tmp = tempfile.mkstemp(dir=str(directory), prefix=".imported-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, store_path(project_dir))
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def retakes(project_dir: Optional[Path] = None) -> dict[str, str]:
+    """`uuid -> title` of the sweeps the tuner left on «Re-take» in the import window (tcc#21).
+
+    The other half of «Take it as it is», and kept beside it for the same reason: it is the
+    tuner's answer about one capture. Not an import — the capture stays unprocessed and comes
+    back in the window — but the card reads it: a title whose curve in REW is one left for a
+    re-take waits for a new sweep rather than offering that one for import (finding 147).
+    """
+    return {uuid: str(entry.get("title") or "") for uuid, entry in
+            _section(project_dir, "retake").items()}
+
+
+def record_retakes(rows: Iterable["Candidate"], project_dir: Optional[Path] = None) -> int:
+    """Remember these captures as left for a re-take. Returns how many were added."""
+    left = _section(project_dir, "retake")
+    stamp = datetime.now().replace(microsecond=0).isoformat()
+    added = 0
+    for row in rows:
+        if row.identified and row.uuid not in left:
+            left[row.uuid] = {"title": row.title, "when": stamp}
+            added += 1
+    if added:
+        _write_store(load_imported(project_dir), left, project_dir)
+    return added
+
+
+def retake_titles(measurements: dict, project_dir: Optional[Path] = None) -> list[str]:
+    """Titles still waiting for their re-take: every curve REW's `measurements` holds under the
+    title is one left for a re-take. A new sweep under the same title is a new uuid, and from then
+    on the title is there to be imported. With nothing read from REW, the answer alone decides."""
+    left = retakes(project_dir)
+    held: dict[str, set[str]] = {}
+    for raw in (measurements or {}).values():
+        raw = raw or {}
+        held.setdefault(str(raw.get("title") or ""), set()).add(str(raw.get("uuid") or ""))
+    return sorted({title for title in left.values()
+                   if title.strip() and held.get(title, set()) <= set(left)})
 
 
 def imported_titles(project_dir: Optional[Path] = None) -> list[str]:
@@ -154,8 +215,8 @@ def record_imported(rows: Iterable["Candidate"], round_id: str = "",
     half-written store would read as "nothing was imported" and put the whole round back on the
     checklist.
     """
-    directory = config.tcc_dir(project_dir)
-    data = {"schema": SCHEMA, "measurements": dict(load_imported(project_dir))}
+    measurements = dict(load_imported(project_dir))
+    left = _section(project_dir, "retake")
     stamp = datetime.now().replace(microsecond=0).isoformat()
     written = 0
     for row in rows:
@@ -166,21 +227,14 @@ def record_imported(rows: Iterable["Candidate"], round_id: str = "",
         # «Take it as it is» is pinned here, beside the uuid this store already keys by (tcc#21):
         # it is a fact about one capture, like everything else in this log, and a later import of
         # the same capture must not quietly forget that the tuner already answered for it.
-        if row.as_is or (data["measurements"].get(row.uuid) or {}).get("as_is"):
+        if row.as_is or (measurements.get(row.uuid) or {}).get("as_is"):
             entry["as_is"] = True
-        data["measurements"][row.uuid] = entry
+        measurements[row.uuid] = entry
+        left.pop(row.uuid, None)  # taken in after all: no longer waiting for a re-take
         written += 1
     if not written:
         return 0
-    directory.mkdir(parents=True, exist_ok=True)
-    handle, tmp = tempfile.mkstemp(dir=str(directory), prefix=".imported-", suffix=".tmp")
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False, indent=2)
-        os.replace(tmp, store_path(project_dir))
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    _write_store(measurements, left, project_dir)
     return written
 
 

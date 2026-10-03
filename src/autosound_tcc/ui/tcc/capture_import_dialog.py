@@ -907,6 +907,12 @@ class CaptureImportDialog(QDialog):
         return [replace(row, as_is=True) if capture_import.unusable(self._verdicts.get(row.uuid))
                 else row for row in self.ticked_rows()]
 
+    def left_for_retake(self) -> list[capture_import.Candidate]:
+        """The sweeps the check called unusable and the tuner left on «Re-take» — the panel
+        remembers them, so the card says the title waits for a new sweep (finding 147)."""
+        to_retake = self._to_retake()
+        return [row for row in self._all if row.uuid in to_retake]
+
     def protective(self) -> dict:
         """`{channel: legs}` for every ticked row that names a chain — the round's own record.
 

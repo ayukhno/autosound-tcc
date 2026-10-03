@@ -452,6 +452,8 @@ class _MeasRow(QWidget):
         self._protective = getattr(item, "protective", "")
         #: A title the grammar cannot read (tcc#122): «не розібрано» beside it, no method added.
         self._unread = bool(getattr(item, "unread", False))
+        #: Taken as it is in the import window (finding 147): green, and «taken as it is» beside it.
+        self._as_is = bool(getattr(item, "as_is", False))
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 1, 0, 1)
         layout.setSpacing(6)
@@ -477,6 +479,8 @@ class _MeasRow(QWidget):
         extra = self._extra
         if self._unread:  # the check's own words, if it has any, after the mark
             extra = " · ".join(part for part in (i18n.t("measUnread"), self._extra) if part)
+        if self._as_is:  # the import window's own words for the answer
+            extra = " · ".join(part for part in (extra, i18n.t("capCheckAsIsDone")) if part)
         # Class first, text second: the class carries the font (`.mn` is the monospace face), and
         # eliding against the font the label had a moment ago cuts at the wrong character.
         self._name_label.setProperty("class", f"mn mn-{self._status}")
@@ -1117,6 +1121,11 @@ class MeasurementPanel(QWidget):
         """
         return sorted(capture_import.imported_titles())
 
+    def retake_titles(self) -> list[str]:
+        """Titles whose curve in REW was left on «Re-take» in the import window, until REW holds
+        another curve under the name (finding 147). REW's last answer says which curves those are."""
+        return capture_import.retake_titles(self._rew_answer, config.project_dir())
+
     def outstanding_titles(self) -> list[str]:
         """The full REW names this round is still waiting for, in the grid's own order.
 
@@ -1241,7 +1250,10 @@ class MeasurementPanel(QWidget):
             (m or {}).get("title", "") for m in measurements.values()
         )
         round_ = process_view.capture_round() or {}
-        self._round_id = str(round_.get("id") or "")
+        # A closed round is none (finding 147): the method keeps the last round in its state with
+        # `closed` set, and handing the ledger its id made every capture of the pass refused —
+        # «no capture round is open» — so nothing was taken. With no id the pass opens its own.
+        self._round_id = "" if round_.get("closed") else str(round_.get("id") or "")
         # Read once, HERE, and kept: this is what the pass is about. By the time the batch is
         # written down the grid has already been rebuilt off the store, so asking again would
         # answer with what is STILL outstanding — and open a round expecting the leftovers.
@@ -1267,6 +1279,8 @@ class MeasurementPanel(QWidget):
         self._taking = list(dialog.taken())
         self._renaming = dialog.renames()
         self._protective = dialog.protective()
+        # «Re-take» is an answer too: the card reads the title as waiting, not as one to import.
+        capture_import.record_retakes(dialog.left_for_retake(), project_dir=config.project_dir())
         if not self._renaming:
             self._finish_import({})
             return

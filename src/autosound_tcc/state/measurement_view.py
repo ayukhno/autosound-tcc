@@ -237,6 +237,32 @@ def absent(verdict: dict) -> bool:
                for issue in (verdict or {}).get("issues") or [])
 
 
+def taken_as_is(project_dir: Optional[Path] = None) -> dict[str, str]:
+    """`uuid -> title` of the captures the tuner took «as it is» in the import window (tcc#21).
+
+    The method's verdict on such a capture stays its own — unusable, and its step gate counts it
+    so (the Arbiter accepted that). The card is TCC's checklist of what the tuner did, and he took
+    it: green, with the reason on the row (finding 147).
+    """
+    from autosound_tcc.core import capture_import
+
+    return {uuid: str(entry.get("title") or "")
+            for uuid, entry in capture_import.load_imported(project_dir).items()
+            if entry.get("as_is")}
+
+
+def _answered_as_is(verdict: dict, title: str, marked: dict, keys: set, key) -> bool:
+    """Whether a failing verdict is about a capture taken as it is. By the uuid the verdict pins:
+    a re-take under the same title is another capture and is judged on its own. By the title only
+    when the verdict pins no uuid at all."""
+    if not verdict or verdict.get("ok") or not applicable(verdict) or absent(verdict):
+        return False
+    uuid = str(verdict.get("uuid") or "")
+    if uuid:
+        return uuid in marked
+    return title in marked.values() or (key is not None and key in keys)
+
+
 def _round_is_at(round_: dict, version, naming, glossary) -> bool:
     """Whether a round was captured at series `version`: by its own `version`, or by the `_N` its
     titles carry (hub #153 C).
@@ -262,8 +288,12 @@ def build_session(
     titles: list[str],
     project_dir: Optional[Path] = None,
     taken: Optional[list[str]] = None,
+    retake: Optional[list[str]] = None,
 ) -> Optional[MeasSession]:
     """One capture task: what `phase` expects at `version`, checked against `titles` from REW.
+
+    `retake` names the titles whose curve in REW the tuner left on «Re-take» in the import window:
+    yellow, waiting for a new sweep, rather than blue, offered for import (finding 147).
 
     `titles` is what REW is SHOWING; `taken` is what this project has actually taken in (the
     import store). They used to be one list, and that is what made a slot go green the moment REW
@@ -389,10 +419,22 @@ def build_session(
     elif not round_.get("closed"):
         asked_again = {_key(t) for t in (round_.get("expected") or [])} - {None}
     taken_here = {_key(t) for t in recorded_taken} - {None}
+    retake_keys = {_key(t) for t in retake or ()} - {None}
+    as_is_marked = taken_as_is(project)
+    as_is_keys = {_key(t) for t in as_is_marked.values()} - {None}
 
     def not_taken(key) -> str:
-        """Blue while REW holds it under this name, yellow while it does not (F-056)."""
-        return STATUS_FOUND if key is not None and key in parsed else STATUS_WAIT
+        """Blue while REW holds it under this name, yellow while it does not (F-056) — or while
+        what it holds is the curve left for a re-take (finding 147)."""
+        if key is not None and key in parsed and key not in retake_keys:
+            return STATUS_FOUND
+        return STATUS_WAIT
+
+    def as_is_for(name: str) -> bool:
+        entry = naming.parse_name(name, glossary)
+        key = naming.name_key(entry) if entry else None
+        verdict = verdicts.get(name) or verdicts_by_key.get(key) or {}
+        return _answered_as_is(verdict, name, as_is_marked, as_is_keys, key)
 
     def status_for(name: str) -> str:
         entry = naming.parse_name(name, glossary)
@@ -402,9 +444,11 @@ def build_session(
         verdict = verdicts.get(name) or verdicts_by_key.get(key)
         if verdict and absent(verdict):
             return not_taken(key)  # not there: yellow, waiting — not a bad curve
-        if verdict and not verdict.get("ok") and applicable(verdict):
+        if (verdict and not verdict.get("ok") and applicable(verdict)
+                and not _answered_as_is(verdict, name, as_is_marked, as_is_keys, key)):
             # The panel's own legend already calls this "taken, unusable" -- which is exactly what
-            # a capture that came back and failed the check is.
+            # a capture that came back and failed the check is. Unless the tuner took it as it is:
+            # then it is taken like any other, below (finding 147).
             return STATUS_STALE
         if key is not None and key in asked_again:
             if key not in taken_here and name not in recorded_taken:
@@ -424,9 +468,10 @@ def build_session(
         """Why a capture is unusable, in the checker's own words — the panel shows it on hover.
 
         Nothing for a capture the check does not apply to (an RTA): "this check does not apply"
-        trailed every RTA row, cut off, and said nothing anyone needed (finding 30)."""
+        trailed every RTA row, cut off, and said nothing anyone needed (finding 30). Nothing for
+        a capture taken as it is either: the row says that instead (finding 147)."""
         verdict = verdicts.get(name) or {}
-        if not applicable(verdict):
+        if not applicable(verdict) or as_is_for(name):
             return None
         issues = verdict.get("issues") or []
         return "; ".join(str(i) for i in issues) or None
@@ -450,12 +495,12 @@ def build_session(
     for spec in groups_spec:
         items = tuple(
             MeasItem(name=name, status=status_for(name), extra=issues_for(name),
-                     protective=protective_for(name))
+                     protective=protective_for(name), as_is=as_is_for(name))
             for name in spec["names"]
         )
         groups.append(MeasGroup(type=spec["label"], items=items, method=spec.get("method")))
 
-    extras = _extras(naming, glossary, parsed, groups_spec, version, taken_keys)
+    extras = _extras(naming, glossary, parsed, groups_spec, version, taken_keys, retake_keys)
     if round_open:
         # Captured in this round though nobody asked, under a title the grammar cannot read --
         # `D_L w+m_7 (rta) inv`, the `D_` refused (S-042; read for one release, v3.0.65, and
@@ -465,7 +510,7 @@ def build_session(
         listed |= {str(t) for t in round_.get("expected") or []}
         extras += tuple(
             MeasItem(name=title, status=status_for(title), extra=issues_for(title),
-                     additional=True, unread=True)
+                     additional=True, unread=True, as_is=as_is_for(title))
             for title in sorted(recorded_taken - listed) if _key(title) is None
         )
     if extras:
@@ -498,6 +543,7 @@ def build_sessions(
     titles: list[str],
     project_dir: Optional[Path] = None,
     taken: Optional[list[str]] = None,
+    retake: Optional[list[str]] = None,
 ) -> Optional[tuple[MeasSession, ...]]:
     """The live capture task, followed by every past round, newest first.
 
@@ -507,21 +553,23 @@ def build_sessions(
     time, in the journal.
     """
     project = Path(project_dir or config.project_dir())
-    live = build_session(phase, version, titles, project, taken)
+    live = build_session(phase, version, titles, project, taken, retake)
     if live is None:
         return None
     state = process_view.load_state(project)
+    marked = taken_as_is(project)
     past = [
         session
         for round_ in process_view.capture_rounds(project)
         if str(round_.get("id") or "") != live.id
-        for session in (_session_for_round(round_, state),)
+        for session in (_session_for_round(round_, state, marked),)
         if session is not None
     ]
     return (live, *past)
 
 
-def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSession]:
+def _session_for_round(round_: dict, state: Optional[dict],
+                       as_is: Optional[dict] = None) -> Optional[MeasSession]:
     """One past round as a read-only session: what it asked for, and what became of each item.
 
     Statuses come from the round's own record and nothing else — REW is not consulted. A series
@@ -537,6 +585,13 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
         if title not in expected:
             expected.append(title)  # captured though nobody asked: still part of what happened
 
+    marked = dict(as_is or {})
+
+    def as_is_for(name: str) -> bool:
+        """Taken as it is, as on the live card (finding 147): history does not turn it red."""
+        verdict = (taken.get(name) or {}).get("verified") or {}
+        return _answered_as_is(verdict, name, marked, set(), None)
+
     def status_for(name: str) -> str:
         if name in skipped:
             return STATUS_SKIPPED
@@ -546,7 +601,9 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
         verdict = entry.get("verified") or {}
         if absent(verdict):
             return STATUS_WAIT
-        return STATUS_DONE if verdict.get("ok", True) or not applicable(verdict) else STATUS_STALE
+        if verdict.get("ok", True) or not applicable(verdict) or as_is_for(name):
+            return STATUS_DONE
+        return STATUS_STALE
 
     def issues_for(name: str) -> Optional[str]:
         # The skip reason comes first, and the order is the point: a skipped capture is ALSO
@@ -555,7 +612,7 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
         if name in skipped:
             return (round_.get("skipped") or {}).get(name, {}).get("reason")
         verdict = (taken.get(name) or {}).get("verified") or {}
-        if not applicable(verdict):
+        if not applicable(verdict) or as_is_for(name):
             return None  # an RTA: the check has nothing to say about it (finding 30)
         issues = verdict.get("issues") or []
         return "; ".join(str(i) for i in issues) or None
@@ -576,7 +633,7 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
             method=spec.get("method"),
             items=tuple(
                 MeasItem(name=name, status=status_for(name), extra=issues_for(name),
-                         protective=protective_for(name))
+                         protective=protective_for(name), as_is=as_is_for(name))
                 for name in spec["names"]
             ),
         )
@@ -599,7 +656,8 @@ def _session_for_round(round_: dict, state: Optional[dict]) -> Optional[MeasSess
 
 
 def _extras(naming, glossary, parsed: dict, groups_spec: list, version,
-            taken_keys: Optional[set] = None) -> tuple[MeasItem, ...]:
+            taken_keys: Optional[set] = None,
+            retake_keys: Optional[set] = None) -> tuple[MeasItem, ...]:
     wanted = {
         naming.name_key(naming.parse_name(name, glossary))
         for spec in groups_spec
@@ -618,12 +676,18 @@ def _extras(naming, glossary, parsed: dict, groups_spec: list, version,
         # only at this series.
         if entry.get("method") != "imp" and (entry["version_n"] or entry["version"]) != version_n:
             continue
+        if taken_keys is None or key in taken_keys:
+            status = STATUS_DONE
+        elif key in (retake_keys or ()):
+            status = STATUS_WAIT  # the curve REW holds was left for a re-take (finding 147)
+        else:
+            status = STATUS_FOUND
         out.append(
             MeasItem(
                 name=entry["title"],
                 # Ours, at this version, off the checklist — and green only once it was taken in.
                 # A curve REW is holding is an offer, not a capture: blue (see `build_session`).
-                status=STATUS_DONE if taken_keys is None or key in taken_keys else STATUS_FOUND,
+                status=status,
                 extra=entry["modifier"],
                 additional=True,
             )

@@ -56,6 +56,9 @@ class MeasItem:
     # A title the naming grammar cannot read, shown as typed: the panel says «не розібрано» beside
     # it, in the window's language, and adds no method of its own (tcc#122).
     unread: bool = False
+    # Taken although the method's check called it unusable — the tuner's «Take it as it is» in the
+    # import window (tcc#21). Done on the card, and the row says why (finding 147).
+    as_is: bool = False
 
 
 @dataclass(frozen=True)

@@ -893,3 +893,81 @@ def test_the_next_round_is_a_new_pass_not_the_last_one_s_results(project):
 
     statuses = {item.name: item.status for group in session.groups for item in group.items}
     assert statuses["sw_1 (sw)"] == mv.STATUS_WAIT
+
+
+# ---- the card follows the import window's answer (finding 147, tcc#21) ------------------------
+
+_TRUNCATED = "covers 20-1001 Hz, asked for 20-20000 — truncated"
+
+
+def _as_is_round(project, uuid="u-sw"):
+    """The Arbiter's VM case, 2026-10-03: `sw_7 (sw)` taken «as it is», `sw_7 (rta)` left on
+    «Re-take». The round took the first, and the method's check judged it — its own verdict,
+    pinned to the capture's uuid, which stays as the method wrote it."""
+    from autosound_tcc.core import capture_import
+
+    process = _round(project, version=7, expected=["sw_7 (sw)", "sw_7 (rta)"],
+                     taken=["sw_7 (sw)"])
+    sw = _as_typed("sw_7 (sw)")
+    state = process.load()
+    state["capture"]["taken"][sw]["verified"] = {
+        "ok": False, "exists": True, "applicable": True, "uuid": uuid, "issues": [_TRUNCATED]}
+    process._write(state)
+    capture_import.record_imported([capture_import.Candidate(
+        ordinal="1", title=sw, uuid="u-sw", date="", when=None, imported=False, as_is=True)],
+        project_dir=project)
+    return process, sw
+
+
+def test_a_capture_taken_as_it_is_reads_done_and_the_methods_verdict_stays(project):
+    """Finding 147: «чому (sw) не зелений?» The tuner answered for that capture in the import
+    window; the card says what he chose. The method's verdict is its own and is not rewritten."""
+    process, sw = _as_is_round(project)
+
+    session = mv.build_session("0", 7, [sw, _as_typed("sw_7 (rta)")], project, taken=[sw])
+    item = {i.name: i for g in session.groups for i in g.items}["sw_7 (sw)"]
+
+    assert item.status == mv.STATUS_DONE
+    assert item.as_is, "the card says why it is green: taken as it is"
+    assert item.extra is None, "not the method's reasons trailing a green row"
+    assert process.load()["capture"]["taken"][sw]["verified"]["ok"] is False
+
+
+def test_a_retake_under_the_same_title_is_judged_on_its_own(project):
+    """«Take it as it is» belongs to one capture, by its uuid: a re-take under the same title that
+    the check calls unusable is red, whatever was answered for the capture before it."""
+    _process, sw = _as_is_round(project, uuid="u-retaken")
+
+    session = mv.build_session("0", 7, [sw], project, taken=[sw])
+    item = {i.name: i for g in session.groups for i in g.items}["sw_7 (sw)"]
+
+    assert item.status == mv.STATUS_STALE
+    assert not item.as_is
+
+
+def test_a_title_left_for_a_retake_waits_rather_than_reading_in_rew(project):
+    """Finding 147: «чому (rta) не жовтий?» REW still holds the curve left for a re-take, and
+    «in REW — import it» is exactly what the tuner just decided not to do. It waits, as a title
+    nothing was captured for yet does."""
+    _process, sw = _as_is_round(project)
+    rta = _as_typed("sw_7 (rta)")
+
+    session = mv.build_session("0", 7, [sw, rta], project, taken=[sw], retake=[rta])
+    statuses = {i.name: i.status for g in session.groups for i in g.items}
+
+    assert statuses["sw_7 (rta)"] == mv.STATUS_WAIT
+    without = mv.build_session("0", 7, [sw, rta], project, taken=[sw])
+    assert {i.name: i.status for g in without.groups for i in g.items}["sw_7 (rta)"] \
+        == mv.STATUS_FOUND, "a curve nobody answered for is still blue"
+
+
+def test_a_past_round_reads_a_capture_taken_as_it_is_as_done(project):
+    """The same answer once the round has closed: history does not turn it red."""
+    process, _sw = _as_is_round(project)
+    process.close_capture("done")
+
+    past = mv.build_sessions("0", 7, [], project, taken=[])[1]
+    item = {i.name: i for g in past.groups for i in g.items}[_as_typed("sw_7 (sw)")]
+
+    assert item.status == mv.STATUS_DONE
+    assert item.as_is

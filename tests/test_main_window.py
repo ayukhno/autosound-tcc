@@ -4897,6 +4897,30 @@ def test_the_ear_button_follows_the_active_phase(tmp_path, monkeypatch):
     assert window._dialog._listen_btn.isHidden()
 
 
+def test_the_card_hears_which_titles_were_left_for_a_retake(tmp_path, monkeypatch):
+    """Finding 147: the card is built here, and a title the import window left on «Re-take» is
+    the panel's to name — passed in beside what REW shows and what the project took."""
+    from autosound_tcc.state import measurement_view, process_view
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(process_view, "capture_round", lambda *_a, **_k: None)
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    asked = {}
+    monkeypatch.setattr(window._meas_panel, "retake_titles", lambda: ["sw_7 (rta)"])
+    monkeypatch.setattr(window, "_capture_version", lambda state=None: 7)
+    monkeypatch.setattr(measurement_view, "build_sessions",
+                        lambda *a, **k: asked.update(k) or None)
+
+    window._refresh_capture_task({"active_phase": "0"})
+
+    assert asked["retake"] == ["sw_7 (rta)"]
+
+
 def test_a_refusal_naming_a_long_path_does_not_widen_the_left_column(tmp_path, monkeypatch):
     """A word-wrapping label's minimum is its longest unbreakable token, and an exception's own
     words are full of Windows paths. The method's refusal for a non-UTF-8 ledger (v3.0.46) named

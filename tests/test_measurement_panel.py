@@ -113,6 +113,9 @@ def test_read_offers_the_list_instead_of_folding_it_into_the_card(tmp_path, monk
         def protective(self):
             return {}
 
+        def left_for_retake(self):
+            return []
+
     monkeypatch.setattr(mp, "CaptureImportDialog", _Dialog)
     panel._on_import_offer({"1": {"title": "somebody-elses_99 (sw)", "uuid": "z",
                                   "date": "2026-Aug-25 20:11:31"}})
@@ -1677,3 +1680,73 @@ def test_a_capture_taken_and_found_unusable_is_still_outstanding():
     )], version=1)
 
     assert panel.outstanding_titles() == ["w-L_1 (sw)", "w-R_1 (sw)"]
+
+
+def test_an_import_after_the_round_closed_takes_its_captures_into_a_new_round(tmp_path, monkeypatch):
+    """Finding 147, on the Arbiter's VM: `sw_7 (sw)` taken «as it is», `sw_7 (rta)` left on
+    «Re-take», Applied — and the card showed both blue. The last round was closed and its id was
+    still the panel's, so the ledger was told to write into it, and the method refused every
+    capture («no capture round is open»). A closed round is none: the pass opens its own, the
+    capture taken as it is is taken in it, and the re-take is remembered as one."""
+    from dataclasses import replace
+
+    from autosound_tcc.core import config, vendor_loader
+    from autosound_tcc.state import process_view
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                           encoding="utf-8")
+    process = vendor_loader.load_process().Process(str(tmp_path / "process"))
+    process.start_capture("7", ["sw_7 (sw)", "sw_7 (rta)"])
+    process.close_capture("the earlier pass")
+    answer = {"1": {"title": "sw_7 (sw)", "uuid": "u-sw", "date": "2026-Oct-03 12:00:00"},
+              "2": {"title": "sw_7 (rta)", "uuid": "u-rta", "date": "2026-Oct-03 12:00:10"}}
+    rows = capture_import.candidates(answer, tmp_path)
+
+    class _Dialog:
+        def __init__(self, measurements, **kwargs):
+            pass
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def taken(self):
+            return [replace(rows[0], as_is=True)]
+
+        def renames(self):
+            return []
+
+        def protective(self):
+            return {}
+
+        def left_for_retake(self):
+            return [rows[1]]
+
+    monkeypatch.setattr(mp, "CaptureImportDialog", _Dialog)
+    # The ledger's thread, run here: the writes are the method's own CLI either way.
+    monkeypatch.setattr(mp._LedgerWriteWorker, "start", lambda self: self.run())
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS, version=7)
+
+    panel._on_import_offer(answer)
+
+    round_ = process_view.capture_round(tmp_path)
+    assert not round_.get("closed") and round_["id"] != "cap_001", panel._status_label.text()
+    assert "sw_7 (sw)" in round_["taken"], panel._status_label.text()
+    assert "sw_7 (rta)" not in round_["taken"]
+    assert panel.retake_titles() == ["sw_7 (rta)"]
+
+
+def test_a_row_taken_as_it_is_says_so_on_the_card():
+    """Finding 147: green for the tuner's answer, and the import window's own words beside it —
+    a green row the method calls unusable says why it is green."""
+    from autosound_tcc.state.models import MeasItem
+    from autosound_tcc.ui.tcc.measurement_panel import _MeasRow
+
+    _app()
+    row = _MeasRow(MeasItem(name="sw_7", status="done", as_is=True), "sw")
+
+    assert row.status == "done"
+    assert row._name_label.full_text() == f"sw_7 (sw) {i18n.t('capCheckAsIsDone')}"

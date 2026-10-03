@@ -753,3 +753,34 @@ def test_a_check_told_to_stop_asks_about_no_further_sweep():
 
     assert [name for name, _ in asked] == ["m-L_1 (sw)"]
     assert set(found) == {"a"}
+
+
+def test_a_sweep_left_for_a_retake_is_remembered_by_its_uuid_until_it_is_taken(tmp_path):
+    """Finding 147: «Re-take» was an answer only the import window knew, so the card read the
+    curve REW still holds as one to import (blue). Kept beside «Take it as it is», by uuid; it is
+    not an import, and taking that capture in after all ends it."""
+    from dataclasses import replace
+
+    rows = ci.candidates(_rew(("sw_7 (sw)", "u-sw", "2026-Oct-03 12:00:00"),
+                              ("sw_7 (rta)", "u-rta", "2026-Oct-03 12:00:10")), tmp_path)
+    ci.record_retakes([rows[1]], project_dir=tmp_path)
+    ci.record_imported([replace(rows[0], as_is=True)], project_dir=tmp_path)
+
+    assert ci.retakes(tmp_path) == {"u-rta": "sw_7 (rta)"}, "another capture's import keeps it"
+    assert not ci.candidates(_rew(("sw_7 (rta)", "u-rta", "")), tmp_path)[0].imported
+    assert ci.imported_titles(tmp_path) == ["sw_7 (sw)"]
+
+    ci.record_imported([replace(rows[1], as_is=True)], project_dir=tmp_path)
+    assert ci.retakes(tmp_path) == {}
+
+
+def test_a_title_waits_for_its_retake_until_rew_holds_another_curve_under_it(tmp_path):
+    """The dud stays in REW under the name; a new sweep under the same name is a new uuid, and
+    from then on the title is there to be imported again."""
+    rows = ci.candidates(_rew(("sw_7 (rta)", "u-rta", "2026-Oct-03 12:00:10")), tmp_path)
+    ci.record_retakes(rows, project_dir=tmp_path)
+
+    assert ci.retake_titles(_rew(("sw_7 (rta)", "u-rta", "")), tmp_path) == ["sw_7 (rta)"]
+    assert ci.retake_titles({}, tmp_path) == ["sw_7 (rta)"], "REW not read: still waiting"
+    assert ci.retake_titles(_rew(("sw_7 (rta)", "u-rta", ""), ("sw_7 (rta)", "u-new", "")),
+                            tmp_path) == []

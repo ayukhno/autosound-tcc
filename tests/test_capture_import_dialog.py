@@ -704,6 +704,21 @@ def test_an_unusable_sweep_is_left_for_a_retake_unless_taken_as_it_is(tmp_path):
     assert [row.uuid for row in dialog.taken()] == ["u2"]
 
 
+def test_the_sweeps_left_for_a_retake_are_handed_back_by_the_window(tmp_path):
+    """Finding 147: the panel remembers «Re-take» so the card can say the title waits — the
+    window says which captures got that answer, and «Take it as it is» takes one off the list."""
+    check, _asked = _checker({"u2": _USABLE, "u3": _unusable("flat to 0.4 dB across the band")})
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_2 (sw)", "m_3 (sw)"], check=check)
+    _settle(dialog)
+
+    assert [row.uuid for row in dialog.left_for_retake()] == ["u3"]
+
+    _answer_buttons(dialog, "u3")[i18n.t("capCheckAsIs")].click()
+    _app().processEvents()
+
+    assert dialog.left_for_retake() == []
+
+
 def test_a_tick_on_a_red_row_is_taking_it_as_it_is(tmp_path):
     """The tick and the answer are one decision: a tick by hand on a row the check marked is the
     tuner taking it knowingly, and Select all does not answer red rows for them."""
