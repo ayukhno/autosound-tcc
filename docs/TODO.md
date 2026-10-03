@@ -2061,7 +2061,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
   boxes): a light grey field with white or pale words.
 - finding 150 — a TCC candidate's row names the metadata's 0.1.46, «newer than the latest release 0.1.46»; name the tag's 1.1.0;
 - finding 149 — a hand tick on a red row takes the capture «as it is» without the button saying so;
-- finding 146 — #21's check reads a band-limited sweep (a sub at 20–1001 Hz) as «truncated»: noted, not fixed (the
+- finding 146 — the import window's capture check reads a band-limited sweep (a sub at 20–1001 Hz) as «truncated»: noted, not fixed (the
   Arbiter: «ми не керуємо діапазоном явно, нехай буде»).
 
 ### F-092 — W-6: the pool, now on the milestone `W-6 · v1.1.0`
