@@ -113,6 +113,32 @@ def _win_setting(env: Optional[dict]) -> str:
     return "".join(f'set "{key}={value}" && ' for key, value in (env or {}).items())
 
 
+def _cmd_command(line: str) -> str:
+    """`cmd /s /k "<line>"`: the whole command line cmd is started with, as ONE string.
+
+    Never an argv. Python joins an argv with the C runtime's quoting (`list2cmdline`), which
+    writes a `"` inside an argument as `\\"` — and cmd does not read that escape: `set "K=V"`
+    arrived as `set \\"K=V\\"`, and on the Arbiter's VM the session's `set AUTOSOUND` answered
+    «Environment variable AUTOSOUND not defined», the hint and the model broken the same way
+    (finding 148). With `/s`, cmd takes the first and the last quote off what follows `/k` and runs
+    the rest exactly as written.
+    """
+    return f'cmd /s /k "{line}"'
+
+
+def _wt_command(line: str, folder: Optional[str] = None) -> str:
+    """`wt [-d <folder>] cmd /s /k …` as ONE string, written for how wt reads it (finding 148).
+
+    wt splits its own command line the C runtime's way (`CommandLineToArgvW`), so here the C
+    runtime's quoting IS the right one: the line travels as one argument, `\\"` inside, and wt
+    has it back exactly. wt then writes the tab's command line out again and wraps an argument
+    that holds a space in quotes — the pair `cmd /s` takes off. A `;` is wt's separator between
+    its own commands, so it goes over as `\\;`, wt's escape for a literal one.
+    """
+    argv = ["wt", *(["-d", folder] if folder else []), "cmd", "/s", "/k", line]
+    return subprocess.list2cmdline([arg.replace(";", "\\;") for arg in argv])
+
+
 def run_line(line: str) -> None:
     """Open a terminal running one shell line, and LEAVE it open when the line finishes.
 
@@ -141,16 +167,16 @@ def run_line(line: str) -> None:
         # entire purpose is a window somebody types in. Saying so beats being an exception
         # somebody has to remember.
         if shutil.which("wt"):
-            log.info("terminal: windows terminal (wt cmd /k), line=%s", line)
-            subprocess.Popen(["wt", "cmd", "/k", line], close_fds=True, **child.wants_a_console())
+            log.info("terminal: windows terminal (wt cmd /s /k), line=%s", line)
+            subprocess.Popen(_wt_command(line), close_fds=True, **child.wants_a_console())
             return
         # ONE console, and no shell. `start "" cmd /k …` run with `shell=True` opened TWO by
         # construction — cmd.exe's own, which exits at once, and the one `start` keeps — and that
         # is the likeliest reading of the two windows reported on Windows (TCC-006). `start` was
         # there only to detach the process, which `CREATE_NEW_CONSOLE` does directly; a shell in
         # between buys nothing and costs a window.
-        log.info("terminal: cmd /k in a new console, line=%s", line)
-        subprocess.Popen(["cmd", "/k", line], close_fds=True, **child.wants_a_console())
+        log.info("terminal: cmd /s /k in a new console, line=%s", line)
+        subprocess.Popen(_cmd_command(line), close_fds=True, **child.wants_a_console())
         return
     for argv, wants_shell_string in (
         (["x-terminal-emulator", "-e"], True),
@@ -310,16 +336,15 @@ def _launch_windows(
     extra: tuple[str, ...] = (),
     env: Optional[dict] = None,
 ) -> None:
+    inner = _win_setting(env) + _win_cli_invocation(cli, hint, model, extra)
     if shutil.which("wt"):
-        argv = ["wt", "-d", str(project_dir)]
-        # Plain case stays exactly the original bare-argv shape; a hint or model needs a single
-        # `wt` argument, which only cmd /k can express as one string.
-        argv += (
-            ["cmd", "/k", _win_setting(env) + _win_cli_invocation(cli, hint, model, extra)]
-            if (hint or model or extra or env)
-            else [cli]
-        )
-        subprocess.Popen(argv, close_fds=True)
+        # Plain case stays exactly the original bare-argv shape; a hint, a model or the
+        # reviewer's route needs one line, which only cmd /k can run — handed over as a string
+        # wt and then cmd read back exactly (`_wt_command`, finding 148).
+        if hint or model or extra or env:
+            subprocess.Popen(_wt_command(inner, str(project_dir)), close_fds=True)
+        else:
+            subprocess.Popen(["wt", "-d", str(project_dir), cli], close_fds=True)
         return
     # ONE console, no shell, no `start`. The old line ran `start "" … cmd /k …` through
     # `shell=True`, which opens two consoles by construction (TCC-006); `start` was only ever
@@ -333,9 +358,10 @@ def _launch_windows(
     # this is self-harm rather than an attack — which is the kind that actually happens.
     #
     # `cwd` is not an escaping trick that has to be got right; it is the path not being text.
-    inner = _win_setting(env) + _win_cli_invocation(cli, hint, model, extra)
+    #
+    # And the line is handed over as cmd's own command line, not as an argv (finding 148).
     subprocess.Popen(
-        ["cmd", "/k", inner], close_fds=True, cwd=str(project_dir), **child.wants_a_console()
+        _cmd_command(inner), close_fds=True, cwd=str(project_dir), **child.wants_a_console()
     )
 
 

@@ -40,6 +40,57 @@ def recorded(monkeypatch):
     return calls
 
 
+def _argv_the_c_runtime_way(command: str) -> list[str]:
+    """How a Windows program splits its command line (`CommandLineToArgvW`, which `wt` uses):
+    quotes group, `\\"` is a literal quote, backslashes count only before a quote."""
+    args, word, quoted, have, i = [], [], False, False, 0
+    while i < len(command):
+        char = command[i]
+        if char == "\\":
+            run = len(command[i:]) - len(command[i:].lstrip("\\"))
+            i += run
+            if command[i:i + 1] == '"':
+                word.append("\\" * (run // 2))
+                if run % 2:
+                    word.append('"')
+                    i += 1
+            else:
+                word.append("\\" * run)
+            have = True
+        elif char == '"':
+            quoted, have, i = not quoted, True, i + 1
+        elif char in " \t" and not quoted:
+            if have:
+                args.append("".join(word))
+            word, have, i = [], False, i + 1
+        else:
+            word.append(char)
+            have, i = True, i + 1
+    if have:
+        args.append("".join(word))
+    return args
+
+
+def _as_wt_starts_it(command: str) -> tuple[str, str]:
+    """`(folder, the tab's command line)` the way wt builds them: its own argv, `\\;` back to
+    `;`, and the command written back out with an argument that holds a space wrapped in quotes."""
+    argv = [arg.replace("\\;", ";") for arg in _argv_the_c_runtime_way(command)]
+    assert argv[0] == "wt" and ";" not in command.replace("\\;", ""), command
+    folder = argv[argv.index("-d") + 1] if "-d" in argv else ""
+    rest = argv[argv.index("-d") + 2:] if "-d" in argv else argv[1:]
+    return folder, " ".join(f'"{arg}"' if " " in arg else arg for arg in rest)
+
+
+def _as_cmd_runs_it(command: str) -> str:
+    """What `cmd /s /k` runs: what follows `/k`, its first and its last quote taken off."""
+    assert command.startswith("cmd /s /k "), command
+    rest = command[len("cmd /s /k "):]
+    if rest.startswith('"'):
+        last = rest.rfind('"')
+        rest = rest[1:last] + rest[last + 1:]
+    return rest
+
+
 @pytest.mark.skipif(os.name == "nt", reason="AppleScript: the command this builds exists only on macOS")
 def test_macos_builds_an_applescript_that_cds_then_runs_the_cli(recorded, monkeypatch, tmp_path):
     monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
@@ -88,11 +139,11 @@ def test_windows_falls_back_to_cmd_when_wt_is_missing(recorded, monkeypatch, tmp
 
     launch(tmp_path, "claude")
 
-    assert recorded[0][:2] == ["cmd", "/k"], recorded[0]
+    assert _as_cmd_runs_it(recorded[0]) == '"claude"', recorded[0]
     # The folder is NOT in the line: `cmd` splits on `&` before it looks at quotes, so a path
     # travelling as text is a path that breaks on an ordinary folder name (HUB-053).
     assert recorded.kwargs["cwd"] == str(tmp_path)
-    assert str(tmp_path) not in " ".join(recorded[0])
+    assert str(tmp_path) not in recorded[0]
 
 
 def test_linux_uses_the_first_terminal_on_path(recorded, monkeypatch, tmp_path):
@@ -196,9 +247,9 @@ def test_windows_terminal_hint_is_passed_as_the_clis_own_argument(recorded, monk
 
     launch(tmp_path, "codex", hint="onboarding a Musway M6V4")
 
-    assert recorded[0][:2] == ["wt", "-d"]
-    assert recorded[0][3:5] == ["cmd", "/k"]
-    assert recorded[0][-1] == '"codex" "onboarding a Musway M6V4"'
+    folder, tab = _as_wt_starts_it(recorded[0])
+    assert folder == str(tmp_path)
+    assert _as_cmd_runs_it(tab) == '"codex" "onboarding a Musway M6V4"'
 
 
 def test_windows_terminal_without_a_hint_is_unchanged(recorded, monkeypatch, tmp_path):
@@ -216,8 +267,7 @@ def test_windows_model_alone_still_switches_to_cmd_k(recorded, monkeypatch, tmp_
 
     launch(tmp_path, "claude", model="opus")
 
-    assert recorded[0][3:5] == ["cmd", "/k"]
-    assert recorded[0][-1] == '"claude" --model "opus"'
+    assert _as_cmd_runs_it(_as_wt_starts_it(recorded[0])[1]) == '"claude" --model "opus"'
 
 
 def test_no_console_is_the_processes_default_and_the_terminal_opts_out(monkeypatch):
@@ -327,7 +377,7 @@ def test_windows_opens_ONE_console_not_two(recorded, monkeypatch, tmp_path):
 
     launch(tmp_path, "claude")
 
-    assert recorded[0][:2] == ["cmd", "/k"], recorded[0]
+    assert recorded[0].startswith("cmd /s /k "), recorded[0]
     assert recorded.kwargs.get("shell") is not True
     assert recorded.kwargs["cwd"] == str(tmp_path)
 
@@ -344,7 +394,7 @@ def test_the_plain_terminal_also_opens_one_console(monkeypatch):
 
     terminal_launcher.run_line("echo hi")
 
-    assert seen["argv"][:2] == ["cmd", "/k"], seen["argv"]
+    assert seen["argv"] == 'cmd /s /k "echo hi"', seen["argv"]
     assert seen["kwargs"].get("shell") is not True
 
 
@@ -480,10 +530,11 @@ def test_windows_terminal_session_gets_the_reviewers_model_and_route(recorded, m
 
     launch(tmp_path, "claude", env=_PICK_ENV)
 
-    assert recorded[0][:5] == ["wt", "-d", str(tmp_path), "cmd", "/k"], recorded[0]
-    assert recorded[0][5].startswith(
+    folder, tab = _as_wt_starts_it(recorded[0])
+    assert folder == str(tmp_path)
+    assert _as_cmd_runs_it(tab) == (
         'set "AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high" && '
-        'set "AUTOSOUND_CRITIC_VIA=cli" && "claude"'), recorded[0][5]
+        'set "AUTOSOUND_CRITIC_VIA=cli" && "claude"'), recorded[0]
 
 
 def test_windows_console_session_gets_them_too(recorded, monkeypatch, tmp_path):
@@ -493,8 +544,8 @@ def test_windows_console_session_gets_them_too(recorded, monkeypatch, tmp_path):
 
     launch(tmp_path, "claude", env=_PICK_ENV)
 
-    assert recorded[0][:2] == ["cmd", "/k"]
-    assert recorded[0][2].startswith('set "AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high" && ')
+    assert _as_cmd_runs_it(recorded[0]).startswith(
+        'set "AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high" && ')
 
 
 def test_linux_terminal_session_gets_them_too(recorded, monkeypatch, tmp_path):
@@ -554,9 +605,9 @@ def test_a_value_that_needs_quoting_is_set_whole_on_windows(recorded, monkeypatc
 
     launch(tmp_path, "claude", env={**_PICK_ENV, "AUTOSOUND_CRITIC_BIN": _AWKWARD_BIN["win32"]})
 
-    line = recorded[0][-1]
+    line = _as_cmd_runs_it(_as_wt_starts_it(recorded[0])[1] if wt else recorded[0])
     assert f'set "AUTOSOUND_CRITIC_BIN={_AWKWARD_BIN["win32"]}" && ' in line
-    assert "_API_KEY" not in " ".join(recorded[0])
+    assert "_API_KEY" not in recorded[0]
 
 
 def test_no_env_keeps_every_line_as_it_was(recorded, monkeypatch, tmp_path):
@@ -565,3 +616,67 @@ def test_no_env_keeps_every_line_as_it_was(recorded, monkeypatch, tmp_path):
     launch(tmp_path, "claude", env={})
 
     assert recorded[0] == ["wt", "-d", str(tmp_path), "claude"]
+
+
+# --- the line reaches cmd as it was written (finding 148) -----------------------------------------
+
+_LINE = ('set "AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high" && set "AUTOSOUND_CRITIC_VIA=cli" && '
+         '"claude" --model "opus" "tune the car"')
+
+
+def test_cmd_is_handed_the_line_verbatim(recorded, monkeypatch, tmp_path):
+    """Finding 148, on the Arbiter's VM: `cmd /k` started from an argv got `set \\"K=V\\"` —
+    Python's argv quoting writes `"` as `\\"`, which cmd does not read — and answered «Environment
+    variable AUTOSOUND not defined». The command line is one string now, written for cmd: `/s`,
+    then the line in one pair of quotes that cmd takes off. The folder is still `cwd` (HUB-053)."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(
+        terminal_launcher.shutil, "which", lambda name: None if name == "wt" else f"C:/{name}")
+
+    launch(tmp_path, "claude", hint="tune the car", model="opus", env=_PICK_ENV)
+
+    assert recorded[0] == f'cmd /s /k "{_LINE}"'
+    assert _as_cmd_runs_it(recorded[0]) == _LINE
+    assert recorded.kwargs["cwd"] == str(tmp_path)
+
+
+def test_windows_terminal_hands_cmd_the_same_line(recorded, monkeypatch, tmp_path):
+    """wt reads its own command line the C runtime's way and writes the tab's back out, so the
+    line goes to wt as one argument in that quoting and reaches cmd as it was written."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    folder = tmp_path / "Golf R & Passat"
+    folder.mkdir()
+
+    launch(folder, "claude", hint="tune the car", model="opus", env=_PICK_ENV)
+
+    escaped = _LINE.replace('"', '\\"')
+    assert recorded[0] == f'wt -d "{folder}" cmd /s /k "{escaped}"'
+    assert _as_wt_starts_it(recorded[0]) == (str(folder), f'cmd /s /k "{_LINE}"')
+    assert _as_cmd_runs_it(_as_wt_starts_it(recorded[0])[1]) == _LINE
+
+
+def test_a_semicolon_is_not_taken_by_windows_terminal_for_its_own(recorded, monkeypatch, tmp_path):
+    """`;` separates wt's own commands: a hint holding one would open a second tab running the
+    rest. It goes over as `\\;`, wt's escape."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+
+    launch(tmp_path, "claude", hint="sub first; then the doors")
+
+    assert "\\;" in recorded[0]
+    assert _as_cmd_runs_it(_as_wt_starts_it(recorded[0])[1]) == \
+        '"claude" "sub first; then the doors"'
+
+
+@pytest.mark.parametrize("wt", [True, False])
+def test_the_plain_terminal_hands_cmd_the_line_verbatim_too(recorded, monkeypatch, wt):
+    """`run_line` is the reviewer-key window's door (`key move-shell`), and its line is quoted
+    for cmd the same way: an interpreter under a folder with a space is `"…"` in it."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(terminal_launcher.shutil, "which",
+                        lambda name: f"C:/{name}" if (wt or name != "wt") else None)
+    line = '"C:\\Program Files\\Python\\python.exe" "C:\\a b\\key.py" key move-shell'
+
+    terminal_launcher.run_line(line)
+
+    tab = _as_wt_starts_it(recorded[0])[1] if wt else recorded[0]
+    assert _as_cmd_runs_it(tab) == line
