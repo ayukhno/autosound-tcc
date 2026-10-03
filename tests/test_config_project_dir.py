@@ -166,16 +166,23 @@ def test_the_launch_flag_becomes_the_remembered_choice(tmp_path, monkeypatch):
     monkeypatch.setattr(
         project_gate_dialog, "ensure_project_chosen", lambda **_: False  # stop before the window
     )
+    # The app-wide hover filter (tcc#137) is installed here, once, on the application. Recorded
+    # rather than installed: a real one left on the application answers every later test's
+    # activations with the real cursor (night review of tcc#137, M4 and N1).
+    from autosound_tcc.ui.tcc import hover_reset
+
+    installed: list = []
+    monkeypatch.setattr(hover_reset, "install",
+                        lambda app_, cursor_pos=None: installed.append(app_))
 
     app.main()
 
     assert [str(p) for p in remembered] == [str(tmp_path.resolve())]
     assert os.environ["AUTOSOUND_PROJECT_DIR"] == str(tmp_path.resolve())
     assert readings == ["created", "start"], "the start that builds the window reads models"
-    # And no app-wide hover filter is left on the application for the tests after this one
-    # (night review of tcc#137, M4): it would answer their activations with the real cursor.
+    # The start installs the hover filter once, on the application (night review of tcc#137, N1)
+    # — and none is left on it for the tests after this one (M4).
     from PySide6.QtWidgets import QApplication
 
-    from autosound_tcc.ui.tcc import hover_reset
-
+    assert installed == [QApplication.instance()], "the start did not install the hover filter"
     assert QApplication.instance().findChild(hover_reset.HoverReset) is None
