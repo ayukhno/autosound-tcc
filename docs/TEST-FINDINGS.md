@@ -3611,3 +3611,15 @@ update offered, finding 144 holds), but it names the package metadata's 0.1.46 �
 **Weight.** Low: wording only.
 
 **Task.** Noted for W-7's pool (no fixes unless something serious, the Arbiter).
+
+### 151. The import window's NEW NAME field cuts the bottom of its text: «r-L 7 (rta)» for «r-L_7 (rta)»
+
+**What.** The Arbiter on the Windows VM, 2026-10-03, W-7's look on `wave-7` 4002759: the closed NEW NAME field reads
+«r-L 7 (rta)» and «tw-R 7 (sw)» — the underscore is gone; the open list shows it. The field's line edit is shorter than
+a line of text (offscreen, Windows style: box 21 px, line edit 13 px, font 16 px), so the descenders and `_` are cut.
+The same at 5218910 (v1.1.0): not W-7's regression. `_` begins the series in a name, so the field misreads the name.
+
+**Weight.** Medium: the name the tuner checks before Apply reads wrong.
+
+**Task.** W-7, under #145 (every drop-down box reads), with the Arbiter's OK before the candidate (2026-10-03: «В W-7,
+до кандидата»).
