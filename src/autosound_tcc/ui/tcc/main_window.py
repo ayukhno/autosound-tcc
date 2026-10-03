@@ -4319,12 +4319,16 @@ class MainWindow(QMainWindow):
         # made. The verdict the method recorded is read back, so the match is by its uuid.
         recorded = (process_view.capture_round() or {}).get("taken") or {}
         as_is = measurement_view.taken_as_is()
+        # Nor a sweep the import window passed over its own range, which the method's check, over
+        # 20-20000 Hz, calls «truncated» alone (tcc#149) — until hub #247; drop with that patch.
+        window = measurement_view.window_checked()
 
         def answered(line: str) -> bool:
             title = next((t for t in asked if line.startswith(f"UNUSABLE {t} — ")),
                          line[len("UNUSABLE"):].strip().split(" — ", 1)[0])
             verdict = (recorded.get(title) or {}).get("verified") or {}
-            return measurement_view.answered_as_is(verdict, title, as_is)
+            return (measurement_view.answered_as_is(verdict, title, as_is)
+                    or measurement_view.held_by_the_window(verdict, window))
 
         bad = [line for line in (output or "").splitlines() if line.startswith("UNUSABLE")
                and "no measurement titled" not in line.lower()

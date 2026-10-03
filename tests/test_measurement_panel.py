@@ -1750,3 +1750,19 @@ def test_a_row_taken_as_it_is_says_so_on_the_card():
 
     assert row.status == "done"
     assert row._name_label.full_text() == f"sw_7 (sw) {i18n.t('capCheckAsIsDone')}"
+
+
+def test_a_row_held_by_the_window_says_its_verdict_and_that_it_is_a_patch():
+    """tcc#149: green for a sweep the import window found usable over its own range, the window's
+    verdict beside it, and the one line that says the method's own check still counts it until the
+    skill reads the sweep's range (hub #247)."""
+    from autosound_tcc.state.models import MeasItem
+    from autosound_tcc.ui.tcc.measurement_panel import _MeasRow
+
+    _app()
+    row = _MeasRow(MeasItem(name="sw_7", status="done", own_range=True), "sw")
+
+    assert row.status == "done"
+    assert row._name_label.full_text() == (
+        f"sw_7 (sw) {i18n.t('measOwnRange')} · {i18n.t('measOwnRangeUntil')}")
+    assert "#247" in i18n.t("measOwnRangeUntil")

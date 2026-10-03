@@ -7412,6 +7412,41 @@ def test_a_capture_taken_as_it_is_is_not_checked_again(monkeypatch):
     assert _round_check_started(monkeypatch, round_, ["sw_7 (sw)"]) == [["sw_7 (sw)"]]
 
 
+def test_the_strip_leaves_out_a_sweep_the_import_window_passed_over_its_own_range(monkeypatch):
+    """tcc#149: after Apply the strip said «1 unusable: sw_7 (sw) — covers 20-1001 Hz, asked for
+    20-20000 — truncated» for a sub the import window had just passed over its own range. Until
+    the method reads the sweep's range (hub #247) that line alone, on that capture, is not a
+    warning — read from TCC's own store by the uuid the method's verdict pins. Another capture's
+    failure still is."""
+    from autosound_tcc.core import capture_import, config
+    from autosound_tcc.state import process_view
+
+    _app()
+    window = MainWindow()
+    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
+    capture_import.record_imported([capture_import.Candidate(
+        ordinal="1", title="sw_7 (sw)", uuid="u-sw", date="", when=None, imported=False,
+        checked="usable")], project_dir=config.project_dir())
+    silence = {"ok": False, "exists": True, "applicable": True, "uuid": "u-wl",
+               "issues": ["in-band mean -96.1 dB — silence, not a sweep"]}
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
+        "id": "cap_002", "expected": ["sw_7 (sw)", "w-L_7 (sw)"],
+        "taken": {"sw_7 (sw)": {"verified": dict(_AS_IS_VERDICT)},
+                  "w-L_7 (sw)": {"verified": silence}}})
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **k: said.append(text))
+    own_range = "UNUSABLE sw_7 (sw) — " + _AS_IS_VERDICT["issues"][0]
+
+    window._on_capture_check_done(own_range + "\n0/1 придатні", ["sw_7 (sw)"])
+    assert said == []
+
+    window._on_capture_check_done(
+        own_range + "\nUNUSABLE w-L_7 (sw) — in-band mean -96.1 dB — silence, not a sweep\n"
+        "0/2 придатні", ["sw_7 (sw)", "w-L_7 (sw)"])
+    assert said == [i18n.t("unusableSummary").format(
+        n=1, first="w-L_7 (sw) — in-band mean -96.1 dB — silence, not a sweep")], said
+
+
 def test_the_strip_does_not_call_a_capture_taken_as_it_is_unusable(monkeypatch):
     """Review I1: right after Apply the strip said «1 unusable: sw_7 (sw) — … truncated» while the
     card's row read green «взято як є». The method's verdict stays recorded as it is; the strip

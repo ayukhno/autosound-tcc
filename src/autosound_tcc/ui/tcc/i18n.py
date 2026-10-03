@@ -760,6 +760,8 @@ answers the first five questions anybody would ask.",
         "measProtTip": "Measured behind a protective filter: {legs}. It is IN the curve — the analysis takes it out before reading.",
         # Beside a take whose title the naming grammar cannot read (tcc#122).
         "measUnread": "not parsed",
+        "measOwnRange": "usable over its own range",
+        "measOwnRangeUntil": "the method's own check still counts it unusable until the skill reads the sweep's range (hub #247)",
         "stepTagOkTip": "Closed, and its evidence is really on disk — the file or capture it names "
                         "was found.",
         "stepTagUnprovenTip": "Closed by the skill, but the evidence it named resolves to nothing "
@@ -2061,6 +2063,8 @@ Choose sweeps (sw) above to read this.",
         "legSkip": "пропущено",
         "measProtTip": "Знято за захисним фільтром: {legs}. Він У КРИВІЙ — математика знімає його перед читанням.",
         "measUnread": "не розібрано",
+        "measOwnRange": "придатний у своєму діапазоні",
+        "measOwnRangeUntil": "власна перевірка методу ще вважає його непридатним, доки скіл не читатиме діапазон свіпу (hub #247)",
         "stepTagOkTip": "Закрито, і доказ справді є на диску — названий файл або захват знайдено.",
         "stepTagUnprovenTip": "Скіл закрив крок, але доказ, який він назвав, ні на що на диску не "
                               "вказує: такого файлу немає, і захвату з такою назвою теж.\n\nЦе не "
@@ -3336,6 +3340,8 @@ Choose sweeps (sw) above to read this.",
         "legSkip": 'pominięto',
         "measProtTip": 'Nagrane za filtrem ochronnym: {legs}. Jest W krzywej — matematyka zdejmuje go przed odczytem.',
         "measUnread": "nieprzetworzone",
+        "measOwnRange": "usable over its own range",
+        "measOwnRangeUntil": "the method's own check still counts it unusable until the skill reads the sweep's range (hub #247)",
         "stepTagOkTip": 'Zamknięty, a jego dowód naprawdę jest na dysku — nazwany plik lub pomiar znaleziono.',
         "stepTagUnprovenTip": 'Skill zamknął krok, ale dowód, który nazwał, nie wskazuje na nic na dysku: nie ma takiego '
                               'pliku ani pomiaru o tej nazwie.\n\nTo nie to samo, co krok bez ptaszka. Tamten po prostu nie '
@@ -4643,6 +4649,8 @@ Choose sweeps (sw) above to read this.",
         "legSkip": 'übersprungen',
         "measProtTip": 'Hinter einem Schutzfilter gemessen: {legs}. Er steckt IN der Kurve — die Rechnung nimmt ihn vor dem Lesen heraus.',
         "measUnread": "nicht eingelesen",
+        "measOwnRange": "usable over its own range",
+        "measOwnRangeUntil": "the method's own check still counts it unusable until the skill reads the sweep's range (hub #247)",
         "stepTagOkTip": 'Geschlossen, und der Beleg liegt wirklich auf der Platte — die genannte Datei oder Messung '
                         'wurde gefunden.',
         "stepTagUnprovenTip": 'Vom Skill geschlossen, aber der genannte Beleg löst sich auf der Platte zu nichts auf: keine '

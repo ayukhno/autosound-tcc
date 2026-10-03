@@ -454,6 +454,9 @@ class _MeasRow(QWidget):
         self._unread = bool(getattr(item, "unread", False))
         #: Taken as it is in the import window (finding 147): green, and «taken as it is» beside it.
         self._as_is = bool(getattr(item, "as_is", False))
+        #: Usable over its own range by the import window's check, «truncated» by the method's
+        #: (tcc#149): green, and the row says both. Until hub #247; drop with that patch.
+        self._own_range = bool(getattr(item, "own_range", False))
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 1, 0, 1)
         layout.setSpacing(6)
@@ -481,6 +484,9 @@ class _MeasRow(QWidget):
             extra = " · ".join(part for part in (i18n.t("measUnread"), self._extra) if part)
         if self._as_is:  # the import window's own words for the answer
             extra = " · ".join(part for part in (extra, i18n.t("capCheckAsIsDone")) if part)
+        if self._own_range:  # the window's verdict, and the line that it is a patch (tcc#149)
+            extra = " · ".join(part for part in (extra, i18n.t("measOwnRange"),
+                                                 i18n.t("measOwnRangeUntil")) if part)
         # Class first, text second: the class carries the font (`.mn` is the monospace face), and
         # eliding against the font the label had a moment ago cuts at the wrong character.
         self._name_label.setProperty("class", f"mn mn-{self._status}")

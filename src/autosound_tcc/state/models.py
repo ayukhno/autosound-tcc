@@ -59,6 +59,10 @@ class MeasItem:
     # Taken although the method's check called it unusable — the tuner's «Take it as it is» in the
     # import window (tcc#21). Done on the card, and the row says why (finding 147).
     as_is: bool = False
+    # Failing the method's check for «truncated» alone, on a sweep the import window found usable
+    # over its own range: done on the card, and the row says so (tcc#149). Until hub #247 — the
+    # method reading a sweep's range — lands; drop with that patch.
+    own_range: bool = False
 
 
 @dataclass(frozen=True)

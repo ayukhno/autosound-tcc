@@ -251,6 +251,46 @@ def taken_as_is(project_dir: Optional[Path] = None) -> dict[str, str]:
             if entry.get("as_is")}
 
 
+# ---- tcc#149: the card agrees with the import window on a sweep's own range ------------------
+# A patch until the method's own check reads a sweep's range (hub #247, TCC-049). At the re-pin
+# that carries it, drop this block and its uses (`window_checked`, `held_by_the_window`,
+# `flagged_for_kind` below and in `main_window._on_capture_check_done`), `MeasItem.own_range`,
+# `measOwnRange*`, and `Candidate.checked` with what writes it.
+
+
+def window_checked(project_dir: Optional[Path] = None) -> dict[str, str]:
+    """`uuid -> what the import window's check said` (`capture_import.window_verdicts`)."""
+    from autosound_tcc.core import capture_import
+
+    return capture_import.window_verdicts(project_dir)
+
+
+def held_by_the_window(verdict: dict, checked: dict) -> bool:
+    """Whether a failing verdict of the method's is its «covers … — truncated» alone, on a capture
+    the import window found usable over its own range — by the uuid the verdict pins, never by
+    title, so a re-take under the same name is judged on its own. The method asks over 20-20000 Hz
+    and every band-limited sweep reads truncated there (finding 146); the window asked over the
+    sweep's own range. The verdict itself stays the method's, and so does its step gate."""
+    from autosound_tcc.core import capture_import
+
+    if not verdict or verdict.get("ok") or not applicable(verdict) or absent(verdict):
+        return False
+    uuid = str(verdict.get("uuid") or "")
+    return (bool(uuid) and checked.get(uuid) == capture_import.CHECKED_USABLE
+            and capture_import.only_truncated(verdict.get("issues")))
+
+
+def flagged_for_kind(verdict: dict, checked: dict, marked: dict) -> bool:
+    """Whether the import window called this capture's title the wrong kind — a sweep titled
+    `(rta)`, an RTA titled `(sw)` — and the tuner took it as it is there. The method reads no
+    titles, so its verdict is a plain pass or no judgement at all; the card says what the window
+    said. By the uuid the verdict pins."""
+    from autosound_tcc.core import capture_import
+
+    uuid = str((verdict or {}).get("uuid") or "")
+    return bool(uuid) and uuid in marked and checked.get(uuid) in capture_import.KIND_CLASHES
+
+
 def _answered_as_is(verdict: dict, title: str, marked: dict, keys: set, key) -> bool:
     """Whether a failing verdict is about a capture taken as it is. By the uuid the verdict pins:
     a re-take under the same title is another capture and is judged on its own. By the title only
@@ -263,12 +303,15 @@ def _answered_as_is(verdict: dict, title: str, marked: dict, keys: set, key) -> 
     return title in marked.values() or (key is not None and key in keys)
 
 
-def _row(name: str, status: str, issues: Optional[str], as_is: bool, **fields) -> MeasItem:
+def _row(name: str, status: str, issues: Optional[str], as_is: bool, own_range: bool = False,
+         **fields) -> MeasItem:
     """One checklist row. «Taken as it is» explains a GREEN row — the tuner's answer, in place of
     the method's reasons; on a row a skip or a change turned another colour, that row's own
-    reason stands (review of finding 147, M3)."""
+    reason stands (review of finding 147, M3). So does «usable over its own range» (tcc#149)."""
     said = as_is and status == STATUS_DONE
-    return MeasItem(name=name, status=status, extra=None if said else issues, as_is=said, **fields)
+    own = own_range and status == STATUS_DONE and not said
+    return MeasItem(name=name, status=status, extra=None if said or own else issues, as_is=said,
+                    own_range=own, **fields)
 
 
 def answered_as_is(verdict: dict, title: str, marked: dict) -> bool:
@@ -437,6 +480,7 @@ def build_session(
     retake_keys = {_key(t) for t in retake or ()} - {None}
     as_is_marked = taken_as_is(project)
     as_is_keys = {_key(t) for t in as_is_marked.values()} - {None}
+    window = window_checked(project)  # tcc#149, until hub #247
 
     def not_taken(key) -> str:
         """Blue while REW holds it under this name, yellow while it does not (F-056) — or while
@@ -449,7 +493,13 @@ def build_session(
         entry = naming.parse_name(name, glossary)
         key = naming.name_key(entry) if entry else None
         verdict = verdicts.get(name) or verdicts_by_key.get(key) or {}
-        return _answered_as_is(verdict, name, as_is_marked, as_is_keys, key)
+        return (_answered_as_is(verdict, name, as_is_marked, as_is_keys, key)
+                or flagged_for_kind(verdict, window, as_is_marked))
+
+    def own_range_for(name: str) -> bool:
+        entry = naming.parse_name(name, glossary)
+        key = naming.name_key(entry) if entry else None
+        return held_by_the_window(verdicts.get(name) or verdicts_by_key.get(key) or {}, window)
 
     def status_for(name: str) -> str:
         entry = naming.parse_name(name, glossary)
@@ -460,7 +510,8 @@ def build_session(
         if verdict and absent(verdict):
             return not_taken(key)  # not there: yellow, waiting — not a bad curve
         if (verdict and not verdict.get("ok") and applicable(verdict)
-                and not _answered_as_is(verdict, name, as_is_marked, as_is_keys, key)):
+                and not _answered_as_is(verdict, name, as_is_marked, as_is_keys, key)
+                and not held_by_the_window(verdict, window)):
             # The panel's own legend already calls this "taken, unusable" -- which is exactly what
             # a capture that came back and failed the check is. Unless the tuner took it as it is:
             # then it is taken like any other, below (finding 147).
@@ -509,7 +560,7 @@ def build_session(
     groups = []
     for spec in groups_spec:
         items = tuple(
-            _row(name, status_for(name), issues_for(name), as_is_for(name),
+            _row(name, status_for(name), issues_for(name), as_is_for(name), own_range_for(name),
                  protective=protective_for(name))
             for name in spec["names"]
         )
@@ -525,7 +576,7 @@ def build_session(
         listed |= {str(t) for t in round_.get("expected") or []}
         extras += tuple(
             _row(title, status_for(title), issues_for(title), as_is_for(title),
-                 additional=True, unread=True)
+                 own_range_for(title), additional=True, unread=True)
             for title in sorted(recorded_taken - listed) if _key(title) is None
         )
     if extras:
@@ -573,18 +624,19 @@ def build_sessions(
         return None
     state = process_view.load_state(project)
     marked = taken_as_is(project)
+    window = window_checked(project)  # tcc#149, until hub #247
     past = [
         session
         for round_ in process_view.capture_rounds(project)
         if str(round_.get("id") or "") != live.id
-        for session in (_session_for_round(round_, state, marked),)
+        for session in (_session_for_round(round_, state, marked, window),)
         if session is not None
     ]
     return (live, *past)
 
 
-def _session_for_round(round_: dict, state: Optional[dict],
-                       as_is: Optional[dict] = None) -> Optional[MeasSession]:
+def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict] = None,
+                       checked: Optional[dict] = None) -> Optional[MeasSession]:
     """One past round as a read-only session: what it asked for, and what became of each item.
 
     Statuses come from the round's own record and nothing else — REW is not consulted. A series
@@ -601,11 +653,16 @@ def _session_for_round(round_: dict, state: Optional[dict],
             expected.append(title)  # captured though nobody asked: still part of what happened
 
     marked = dict(as_is or {})
+    window = dict(checked or {})  # tcc#149, until hub #247
 
     def as_is_for(name: str) -> bool:
         """Taken as it is, as on the live card (finding 147): history does not turn it red."""
         verdict = (taken.get(name) or {}).get("verified") or {}
-        return _answered_as_is(verdict, name, marked, set(), None)
+        return (_answered_as_is(verdict, name, marked, set(), None)
+                or flagged_for_kind(verdict, window, marked))
+
+    def own_range_for(name: str) -> bool:
+        return held_by_the_window((taken.get(name) or {}).get("verified") or {}, window)
 
     def status_for(name: str) -> str:
         if name in skipped:
@@ -616,7 +673,8 @@ def _session_for_round(round_: dict, state: Optional[dict],
         verdict = entry.get("verified") or {}
         if absent(verdict):
             return STATUS_WAIT
-        if verdict.get("ok", True) or not applicable(verdict) or as_is_for(name):
+        if (verdict.get("ok", True) or not applicable(verdict) or as_is_for(name)
+                or own_range_for(name)):
             return STATUS_DONE
         return STATUS_STALE
 
@@ -648,7 +706,7 @@ def _session_for_round(round_: dict, state: Optional[dict],
             method=spec.get("method"),
             items=tuple(
                 _row(name, status_for(name), issues_for(name), as_is_for(name),
-                     protective=protective_for(name))
+                     own_range_for(name), protective=protective_for(name))
                 for name in spec["names"]
             ),
         )

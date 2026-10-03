@@ -1250,3 +1250,22 @@ def test_a_row_red_only_for_its_title_does_not_lay_it_on_the_method(tmp_path, la
         assert "sw_7 (rta)" in said and method not in said.lower(), said
     finally:
         i18n.set_language(before)
+
+
+def test_what_the_window_judged_goes_with_what_it_takes(tmp_path):
+    """tcc#149: each capture taken carries the window's verdict on it, for the card — `usable`
+    for a sweep it found usable over its own range, the clash's own name for a title of the wrong
+    kind taken as it is, and nothing where the window had nothing to say."""
+    _needs_the_method()
+    check, _asked = _checker({"u2": dict(_USABLE, kind="sweep"),
+                              "u3": dict(_USABLE, kind="sweep")})
+    answer = _rew(3)
+    answer["3"]["title"] = "sw_7 (rta)"
+    dialog = _dialog(answer, tmp_path, expected=["m_1 (sw)", "m_2 (sw)", "sw_7 (rta)"],
+                     check=check)
+    _settle(dialog)
+    _answer_buttons(dialog, "u3")[i18n.t("capCheckAsIs")].click()
+    _app().processEvents()
+
+    assert [(row.uuid, row.as_is, row.checked) for row in dialog.taken()] == [
+        ("u1", False, ""), ("u2", False, "usable"), ("u3", True, "sweep_named_rta")]

@@ -946,8 +946,13 @@ class CaptureImportDialog(QDialog):
 
         A sweep the check called unusable and the tuner took anyway goes as `as_is`, so the store
         remembers that answer for that capture (tcc#21, `record_imported`)."""
-        return [replace(row, as_is=True) if capture_import.unusable(self._verdict(row.uuid))
-                else row for row in self.ticked_rows()]
+        taken = []
+        for row in self.ticked_rows():
+            verdict = self._verdict(row.uuid)
+            # And what the window said about it, for the card until hub #247 (tcc#149).
+            row = replace(row, checked=capture_import.window_said(verdict))
+            taken.append(replace(row, as_is=True) if capture_import.unusable(verdict) else row)
+        return taken
 
     def left_for_retake(self) -> list[capture_import.Candidate]:
         """The sweeps the check called unusable and the tuner left on «Re-take» — the panel

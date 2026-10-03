@@ -988,3 +988,39 @@ def test_finding_146_as_the_arbiter_met_it(monkeypatch, tmp_path):
     assert ci.unusable(shown["u-rta"])
     assert shown["u-rta"]["clashes"] == [{"why": "sweep_named_rta"}]
     assert not any("truncated" in issue for issue in shown["u-rta"]["issues"])
+
+
+# ---- the card agrees with the window until hub #247 (tcc#149) ------------------------------------
+
+
+def test_what_the_window_judged_is_kept_by_the_capture_s_uuid(tmp_path):
+    """tcc#149: the window's verdict on a capture it took — usable over its own range, or a title
+    of the wrong kind — is kept beside «as it is», by REW's uuid as the method keys its own verdict.
+    A later import of the same capture with nothing to say keeps it; another capture has none."""
+    from dataclasses import replace
+
+    rows = ci.candidates(_rew(("sw_7 (sw)", "u-sw", "2026-Oct-03 12:00:00"),
+                              ("sw_7 (rta)", "u-rta", "2026-Oct-03 12:00:10"),
+                              ("w-L_7 (sw)", "u-wl", "2026-Oct-03 12:00:20")), tmp_path)
+    ci.record_imported([replace(rows[0], checked="usable"),
+                        replace(rows[1], as_is=True, checked="sweep_named_rta"), rows[2]],
+                       project_dir=tmp_path)
+
+    assert ci.window_verdicts(tmp_path) == {"u-sw": "usable", "u-rta": "sweep_named_rta"}
+
+    ci.record_imported([rows[0]], project_dir=tmp_path)
+    assert ci.window_verdicts(tmp_path)["u-sw"] == "usable", "not forgotten by a later import"
+
+
+@needs_the_method
+def test_only_truncated_reads_the_method_s_own_line(monkeypatch):
+    """The card's drop (tcc#149) and the window's (tcc#148) are one match, made against the
+    method's real wording: a verdict failing for «covers … — truncated» alone, and nothing else."""
+    _rew_fr(monkeypatch, 20.0, 1001.0)
+    listing = {"1": _listed("sw_7 (sw)", "u1")}
+    line = vendor_loader.load_verify().verdict("sw_7 (sw)", measurements=listing)["issues"]
+
+    assert ci.only_truncated(line), line
+    assert not ci.only_truncated(line + ["in-band mean -96.1 dB — silence, not a sweep"])
+    assert not ci.only_truncated(["in-band mean -96.1 dB — silence, not a sweep"])
+    assert not ci.only_truncated([])

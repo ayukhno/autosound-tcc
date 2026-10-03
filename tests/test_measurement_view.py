@@ -993,3 +993,117 @@ def test_taken_as_it_is_is_said_only_on_a_row_that_reads_done(project):
         None, mv.taken_as_is(project))
     item = past.groups[0].items[0]
     assert (item.status, item.as_is, item.extra) == (mv.STATUS_SKIPPED, False, "sub disconnected")
+
+
+# ---- the card agrees with the import window until hub #247 (tcc#149) ---------------------------
+
+
+def _methods_truncated_line(monkeypatch) -> str:
+    """The method's own «covers … — truncated», as its real `verify.verdict` words it for a sub
+    swept over 20-1001 Hz and judged over its default 20-20000 — REW faked at the method's edge."""
+    import math
+
+    verify = vendor_loader.load_verify()
+    freqs = [20.0 * 2 ** (i / 12) for i in range(int(math.log2(1001 / 20) * 12) + 1)]
+    monkeypatch.setattr(verify._api, "get_fr",
+                        lambda mid, smoothing=None: (freqs, [85.0 - i * 0.2 for i in range(len(freqs))],
+                                                     None))
+    monkeypatch.setattr(verify._api, "get_impulse_response",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no impulse here")))
+    listing = {"1": {"title": "sw_7 (sw)", "uuid": "u-sw", "notes": "DELAY 6.1 ms"}}
+    issues = verify.verdict("sw_7 (sw)", measurements=listing)["issues"]
+    assert len(issues) == 1 and "truncated" in issues[0], issues
+    return issues[0]
+
+
+def _own_range_round(project, monkeypatch, *, uuid="u-sw", also=None, checked="usable"):
+    """A sub sweep the import window judged usable over its own range (tcc#148), taken in
+    normally, and the method's own check judging it over 20-20000 Hz after the import: its verdict,
+    pinned to the capture's uuid, as the method writes it."""
+    from autosound_tcc.core import capture_import
+
+    line = _methods_truncated_line(monkeypatch)
+    process = _round(project, version=7, expected=["sw_7 (sw)"], taken=["sw_7 (sw)"])
+    sw = _as_typed("sw_7 (sw)")
+    state = process.load()
+    state["capture"]["taken"][sw]["verified"] = {
+        "ok": False, "exists": True, "applicable": True, "uuid": uuid,
+        "issues": [line] + ([also] if also else [])}
+    process._write(state)
+    capture_import.record_imported([capture_import.Candidate(
+        ordinal="1", title=sw, uuid="u-sw", date="", when=None, imported=False, checked=checked)],
+        project_dir=project)
+    return process, sw, line
+
+
+def _item(session, name):
+    return {i.name: i for g in session.groups for i in g.items}[name]
+
+
+def test_a_sweep_the_window_judged_over_its_own_range_is_not_red_on_the_card(project, monkeypatch):
+    """tcc#149 (the W-7 review of #148, I2): the window passed a sub swept over 20-1001 Hz; the
+    method's own check, over 20-20000 Hz, called it «truncated» and the card painted it red. Until
+    the method reads the sweep's range (hub #247), a verdict failing for that line alone, on a
+    capture the window judged usable over its own range, is done on the card — said so, with the
+    method's verdict left as the method wrote it."""
+    process, sw, _line = _own_range_round(project, monkeypatch)
+
+    item = _item(mv.build_session("0", 7, [sw], project, taken=[sw]), "sw_7 (sw)")
+
+    assert item.status == mv.STATUS_DONE
+    assert item.own_range, "the row says why: usable over its own range, until hub #247"
+    assert item.extra is None and not item.as_is
+    assert process.load()["capture"]["taken"][sw]["verified"]["ok"] is False
+
+
+@pytest.mark.parametrize("case", [{"uuid": "u-retaken"}, {"checked": ""},
+                                  {"also": "in-band mean -96.1 dB — silence, not a sweep"}])
+def test_a_capture_the_window_did_not_pass_stays_red_on_the_card(project, monkeypatch, case):
+    """Only what the window passed, by the uuid the method's verdict pins: a re-take under the
+    same title is another capture; a capture the window had nothing to say about is the method's;
+    a verdict with anything beside «truncated» is the method's too."""
+    _process, sw, _line = _own_range_round(project, monkeypatch, **case)
+
+    item = _item(mv.build_session("0", 7, [sw], project, taken=[sw]), "sw_7 (sw)")
+
+    assert (item.status, item.own_range) == (mv.STATUS_STALE, False), case
+
+
+def test_a_past_round_reads_the_window_s_verdict_the_same_way(project, monkeypatch):
+    process, _sw, _line = _own_range_round(project, monkeypatch)
+    process.close_capture("done")
+
+    item = _item(mv.build_sessions("0", 7, [], project, taken=[])[1], _as_typed("sw_7 (sw)"))
+
+    assert (item.status, item.own_range) == (mv.STATUS_DONE, True)
+
+
+def test_a_capture_the_window_flagged_for_its_kind_reads_as_in_the_window(project):
+    """tcc#149: a sweep titled `(rta)` — fine by the method, which reads no titles — and an RTA
+    titled `(sw)` — which the method does not judge at all — were red in the window and taken
+    there «as it is». The card says the same, not a plain green."""
+    from autosound_tcc.core import capture_import
+
+    process = _round(project, version=7, expected=["sw_7 (rta)", "w-L_7 (sw)"],
+                     taken=["sw_7 (rta)", "w-L_7 (sw)"])
+    rta, wl = _as_typed("sw_7 (rta)"), _as_typed("w-L_7 (sw)")
+    state = process.load()
+    state["capture"]["taken"][rta]["verified"] = {
+        "ok": True, "exists": True, "applicable": True, "uuid": "u-rta", "issues": []}
+    state["capture"]["taken"][wl]["verified"] = {
+        "ok": False, "exists": True, "applicable": False, "uuid": "u-wl",
+        "issues": ["this check is for swept captures; REW says this one is rta — nothing here "
+                   "was checked"]}
+    process._write(state)
+    capture_import.record_imported([
+        capture_import.Candidate(ordinal="1", title=rta, uuid="u-rta", date="", when=None,
+                                 imported=False, as_is=True, checked="sweep_named_rta"),
+        capture_import.Candidate(ordinal="2", title=wl, uuid="u-wl", date="", when=None,
+                                 imported=False, as_is=True, checked="rta_named_sweep")],
+        project_dir=project)
+
+    session = mv.build_session("0", 7, [rta, wl], project, taken=[rta, wl])
+
+    for name in ("sw_7 (rta)", "w-L_7 (sw)"):
+        item = _item(session, name)
+        assert (item.status, item.as_is) == (mv.STATUS_DONE, True), name
