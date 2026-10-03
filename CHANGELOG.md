@@ -12,7 +12,9 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [Unreleased]
+## [v1.1.0] — 2026-10-03 · capture quality at import, agy through Google Cloud's ADC, the reviewer's route for every session, the method at v3.1.0
+
+Paired with method `705ab3e63c08912f8942c8369b439cda4259bdf3` — the tag on that commit is **`v3.1.0`**.
 
 The wave W-6 · v1.1.0, one wave with the method's W-6 · v3.1.0: TCC v1.1.0 pins the method's v3.1.0
 and is released the same day. **Update both** — TCC's Updates tab offers the method's update beside
