@@ -114,23 +114,48 @@ class _DaemonCalls(concurrent.futures.Executor):
                 except BaseException as exc:  # noqa: BLE001 — handed to the awaiting caller
                     future.set_exception(exc)
 
-        threading.Thread(target=run, name="tcc-mcp-call", daemon=True).start()
+        thread = threading.Thread(target=run, name=_CALL_THREAD, daemon=True)
+        thread.tcc_call = _tool_of(fn)  # type: ignore[attr-defined] — read by `call_name`
+        thread.start()
         return future
 
 
+_CALL_THREAD = "tcc-mcp-call"
 _CALLS = _DaemonCalls()
 
 
-def drain_calls(timeout: float = 2.0) -> int:
-    """Wait, up to `timeout` in all, for the blocking calls still out; how many are left (tcc#141).
+def _tool_of(fn) -> str:
+    """The tool function a call runs. `_in_thread` hands the executor `partial(context.run, tool,
+    …)`, and the context's `run` names nothing."""
+    if isinstance(fn, functools.partial) and fn.args \
+            and isinstance(getattr(fn.func, "__self__", None), contextvars.Context):
+        fn = fn.args[0]
+    return getattr(fn, "__qualname__", None) or repr(fn)
+
+
+def calls_out() -> frozenset:
+    """The blocking calls still running, as their threads."""
+    return frozenset(t for t in threading.enumerate() if t.name == _CALL_THREAD and t.is_alive())
+
+
+def call_name(thread: threading.Thread) -> str:
+    """Which tool a call still out is running, for the line that names it."""
+    return getattr(thread, "tcc_call", thread.name)
+
+
+def drain_calls(timeout: float = 2.0, ignore: frozenset = frozenset()) -> int:
+    """Wait, up to `timeout` in all, for the blocking calls still out but `ignore`; how many of
+    them are left (tcc#141).
 
     A call on `_CALLS` is no longer joined by `asyncio.run` at a test's end, so one a test left
     running could touch process-wide state in the next test, after its monkeypatches were undone
-    (the serial suite's flaky six, W-5's release). The suite drains them after every test."""
+    (the serial suite's flaky six, W-5's release). The suite drains them after every test --
+    each test only the calls it started, `ignore` being those out before it (night review, M11):
+    a call that never ends is waited for once, by its own test, not by every test after it."""
     deadline = time.monotonic() + timeout
-    for thread in [t for t in threading.enumerate() if t.name == "tcc-mcp-call"]:
+    for thread in calls_out() - ignore:
         thread.join(max(0.0, deadline - time.monotonic()))
-    return sum(1 for t in threading.enumerate() if t.name == "tcc-mcp-call" and t.is_alive())
+    return len(calls_out() - ignore)
 
 
 async def _in_thread(fn, /, *args, **kwargs):

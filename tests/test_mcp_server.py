@@ -2516,3 +2516,56 @@ def test_draining_gives_up_at_its_limit_and_says_how_many_are_left():
     finally:
         release.set()
         assert mcp_server.drain_calls(timeout=2.0) == 0
+
+
+def test_a_call_an_earlier_test_left_stuck_costs_a_later_drain_nothing():
+    """Night review of tcc#141, M11: the drain joined every live call, so one that never ends -- a
+    confirm waiting out its 600 s -- added the whole 2 s to every later test in the worker, and
+    named nobody. A test waits for the calls it started, and only those."""
+    import threading
+    import time
+
+    from autosound_tcc.core import mcp_server
+
+    release = threading.Event()
+    mcp_server._CALLS.submit(release.wait)  # an earlier test's, never ending
+    try:
+        before = mcp_server.calls_out()
+        started = time.monotonic()
+
+        left = mcp_server.drain_calls(timeout=2.0, ignore=before)
+
+        assert left == 0 and time.monotonic() - started < 0.5
+    finally:
+        release.set()
+        assert mcp_server.drain_calls(timeout=2.0) == 0
+
+
+def test_a_call_still_out_is_named_by_the_tool_it_runs():
+    """Said once, at its source: which call it is, not only how many (M11)."""
+    import asyncio
+    import threading
+
+    from autosound_tcc.core import mcp_server
+
+    release = threading.Event()
+
+    def confirm_on_the_arbiter():
+        release.wait(10)
+
+    caller = threading.Thread(
+        target=lambda: asyncio.run(mcp_server._in_thread(confirm_on_the_arbiter)), daemon=True)
+    before = mcp_server.calls_out()
+    caller.start()
+    try:
+        for _ in range(100):
+            out = mcp_server.calls_out() - before
+            if out:
+                break
+            threading.Event().wait(0.02)
+        assert [mcp_server.call_name(t) for t in out] == [
+            "test_a_call_still_out_is_named_by_the_tool_it_runs.<locals>.confirm_on_the_arbiter"]
+    finally:
+        release.set()
+        caller.join(10)
+        assert mcp_server.drain_calls(timeout=2.0) == 0

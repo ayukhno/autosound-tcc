@@ -131,11 +131,22 @@ def _no_mcp_call_outlives_its_test():
     """tcc#141: an MCP call runs on a daemon thread since tcc#132, which `asyncio.run` no longer
     joins at a test's end. One left running reached `availability` in the next test after its
     monkeypatches were undone — the serial suite's flaky six at W-5's release. Drained here, so
-    whatever a late call wrote is there before the next test's `_fresh_availability` resets it."""
-    yield
+    whatever a late call wrote is there before the next test's `_fresh_availability` resets it.
+
+    Only the calls this test started (night review of tcc#141, M11). A call that never ends -- a
+    confirm waiting out its 600 s -- added 2 s to every later test in the worker and named nobody;
+    now it fails its own test, once, by the tool it runs. Imported at setup, not at teardown: a
+    test that patches `sys.platform` made the first import of `mcp` take another OS's branch
+    (`test_terminal_launcher.py` on its own: five errors at teardown)."""
     from autosound_tcc.core import mcp_server
 
-    mcp_server.drain_calls(timeout=2.0)
+    before = mcp_server.calls_out()
+    yield
+    left = mcp_server.drain_calls(timeout=2.0, ignore=before)
+    if left:
+        stuck = sorted(mcp_server.call_name(t) for t in mcp_server.calls_out() - before)
+        pytest.fail(f"{left} MCP call(s) outlived this test, still running: {', '.join(stuck)}",
+                    pytrace=False)
 
 
 @pytest.fixture(autouse=True)
