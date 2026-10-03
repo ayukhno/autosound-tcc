@@ -6039,7 +6039,7 @@ def test_a_session_that_never_started_is_not_asked_to_save_before_the_swap(monke
 # ---- the reviewer picker's own three colours, and the params following it (tcc#58) --------------
 
 def _reviewer_window(monkeypatch, *entries):
-    from autosound_tcc.core import availability
+    from autosound_tcc.core import availability, model_choices
 
     _catalogue(monkeypatch, [])
     _app()
@@ -6047,6 +6047,10 @@ def _reviewer_window(monkeypatch, *entries):
     _KEEP_WINDOWS.append(window)
     window._critic_choices = list(entries)
     MainWindow._fill_combo(window._ai_critic_combo, list(entries), entries[0].key, critic=True)
+    # And the registry, which every refill reads: with only the picker faked, a refill while the
+    # test pumps events found the stored pick gone and opened «model gone» (the #140 flake's
+    # carrier, re-review of fix round 2 of #21).
+    monkeypatch.setattr(model_choices, "critic_choices", lambda active_omp: list(entries))
     availability.reset()
     return window
 
@@ -6135,6 +6139,24 @@ def test_picking_a_reviewer_puts_it_in_the_project_params_at_once(monkeypatch):
     QApplication.processEvents()
 
     assert refreshed, "the panel names the reviewer, so it must not lag the picker"
+
+
+def test_a_picker_refill_after_a_pick_keeps_it_without_asking(monkeypatch):
+    """Re-review of fix round 2 (#21), on the #140 flake: `_reviewer_window` filled the window's
+    picker and not the registry, so a refill while a test pumped events — a catalogue answer, a
+    probe's, a late one from an earlier test's window — found the stored pick gone and opened
+    «model gone». The registry holds what the picker holds; a refill asks nothing."""
+    from autosound_tcc.core import model_choices
+
+    pro = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro")
+    flash = model_choices.Choice(harness="agy", model="gemini-3.1-flash", label="Gemini 3.1 Flash")
+    window = _reviewer_window(monkeypatch, pro, flash)
+    window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData(flash.key))
+    QApplication.processEvents()
+
+    window._reload_model_choices()
+
+    assert window._ai_critic_combo.currentData() == flash.key
 
 
 def test_a_running_session_is_told_the_reviewer_changed(monkeypatch):
