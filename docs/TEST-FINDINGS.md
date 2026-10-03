@@ -3589,3 +3589,14 @@ so the `set` lines (and the hint and model arguments before them) arrive broken.
 **Weight.** Medium: hub #236's route never reaches a terminal session on such a machine.
 
 **Task.** W-6: the `cmd /k` line passed verbatim (and the `wt` branch checked the same way).
+
+### 149. A hand tick on a red row takes the capture «as it is» without the button
+
+**What.** The Arbiter on the Windows VM, 2026-10-03, W-6's branch (c22fa27): in the import window he ticked the red
+`sw_7 (rta)` row by hand, did not press «Take it as it is», and pressed Apply. The card then read `sw_7 (rta)` green,
+«taken as it is». A hand tick on a red row counts as «as it is» (the builder's choice in #21, approved by its review),
+but nothing on screen says so before Apply.
+
+**Weight.** Low: the tuner did tick it; the choice is just not said.
+
+**Task.** Noted — the Arbiter: «занотуй, правити вже не будемо якщо чогось нового не вилізе більш серьозного». W-7's pool.

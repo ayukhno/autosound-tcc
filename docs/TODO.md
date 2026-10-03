@@ -2059,6 +2059,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 - finding 143 — every drop-down box in the dark theme (the key window's provider box, the import window's NEW NAME
   boxes): a light grey field with white or pale words.
+- finding 149 — a hand tick on a red row takes the capture «as it is» without the button saying so;
 - finding 146 — #21's check reads a band-limited sweep (a sub at 20–1001 Hz) as «truncated»: noted, not fixed (the
   Arbiter: «ми не керуємо діапазоном явно, нехай буде»).
 
