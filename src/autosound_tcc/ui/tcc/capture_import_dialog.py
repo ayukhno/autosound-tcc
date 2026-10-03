@@ -71,13 +71,14 @@ class _SweepCheckWorker(QThread):
     `verify.verdict` pulls a frequency response and an impulse per sweep over HTTP, hundreds of
     milliseconds apiece — four to eight ticked is a second or two, fine on a thread and not on the
     one that repaints. `check` is whatever the panel handed the dialog (`check_sweeps` over its
-    REW): this file knows nothing about REW.
+    REW): this file knows nothing about REW. It is handed `stop`, the thread's own interruption
+    flag, so a window that closes stops the pulls between two sweeps rather than after the last.
     """
 
     done = Signal(dict)
     failed = Signal(str)
 
-    def __init__(self, check: Callable[[list], dict], rows: list) -> None:
+    def __init__(self, check: Callable[..., dict], rows: list) -> None:
         super().__init__()
         self._check = check
         self._rows = list(rows)
@@ -87,7 +88,7 @@ class _SweepCheckWorker(QThread):
 
     def run(self) -> None:
         try:
-            self.done.emit(dict(self._check(self._rows) or {}))
+            self.done.emit(dict(self._check(self._rows, stop=self.isInterruptionRequested) or {}))
         except Exception as exc:  # noqa: BLE001 — REW gone, a method that failed: said, not raised
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
@@ -169,7 +170,7 @@ class CaptureImportDialog(QDialog):
         project_dir: Optional[Path] = None,
         parent=None,
         save_order=None,
-        check: Optional[Callable[[list], dict]] = None,
+        check: Optional[Callable[..., dict]] = None,
     ) -> None:
         super().__init__(parent)
         self.setModal(True)
@@ -203,8 +204,8 @@ class CaptureImportDialog(QDialog):
         self._plan_note = ""
         #: Channels whose two rows described two different chains. Filled by `protective()`.
         self.protective_conflicts: list[str] = []
-        #: The capture check (tcc#21): `check(rows) -> {uuid: the method's verdict}`, run on a
-        #: worker over the ticked sweeps. None — a test, or no panel to reach REW — checks nothing.
+        #: The capture check (tcc#21): `check(rows, stop=…) -> {uuid: the method's verdict}`, run
+        #: on a worker over the ticked sweeps. None — a test, or no panel to reach REW — checks nothing.
         self._check = check
         #: Every verdict this window has received, by uuid. A row is checked once per window; an
         #: empty verdict is "asked, nothing to say" (gone from REW, or the check could not run).
@@ -218,6 +219,9 @@ class CaptureImportDialog(QDialog):
         #: unless one turns out unusable — then the window stays for the tuner to see it once.
         self._apply_waiting = False
         self._to_retake_at_apply: set[str] = set()
+        #: How many times the check could not run; an Apply that waited through a new one stays.
+        self._check_failures = 0
+        self._failures_at_apply = 0
         self._closed = False
 
         self._all = capture_import.candidates(self._measurements, project_dir)
@@ -394,7 +398,10 @@ class CaptureImportDialog(QDialog):
         """What was in this row's chain: a `{hp, lp}` dict, or None for "read it as measured"."""
         if legs:
             self._legs[uuid] = dict(legs)
-            self._ticked.add(uuid)  # a record nobody takes in is none
+            # A record nobody takes in is none — but a row the check left out for a re-take is
+            # answered with its own buttons, not by entering its chain (tcc#21, review M1).
+            if uuid not in self._to_retake():
+                self._ticked.add(uuid)
         else:
             self._legs.pop(uuid, None)
         self._render()
@@ -625,6 +632,8 @@ class CaptureImportDialog(QDialog):
         self._refresh_checks()
 
     def _on_checked(self, verdicts: dict) -> None:
+        if self._closed:
+            return  # queued before `done()` cut the line: the window's answer is already given
         asked, self._checking = self._checking, set()
         for uuid in asked:
             verdict = dict(verdicts.get(uuid) or {})
@@ -638,10 +647,13 @@ class CaptureImportDialog(QDialog):
         self._resolve_wait()
 
     def _on_check_failed(self, error: str) -> None:
+        if self._closed:
+            return
         asked, self._checking = self._checking, set()
         for uuid in asked:
             self._verdicts[uuid] = {}  # not checked: no mark, and not asked again in this window
         self._check_error = error
+        self._check_failures += 1
         self._refresh_checks()
         self._check_selected()
         self._resolve_wait()
@@ -651,16 +663,19 @@ class CaptureImportDialog(QDialog):
         if not self._apply_waiting or self.checking():
             return
         self._apply_waiting = False
-        if self._to_retake() - self._to_retake_at_apply:
-            # The window stays, once: the mark and the line under the table say what to re-take,
-            # and the next Apply goes whatever is chosen.
+        if (self._to_retake() - self._to_retake_at_apply
+                or self._check_failures > self._failures_at_apply):
+            # The window stays, once: the mark and the line under the table say what to re-take
+            # — or that the sweeps were NOT checked, which a closed window would say to nobody
+            # (review M2). The next Apply goes whatever is chosen.
             self._render_note(self._table.rowCount())
             return
         self._on_apply()
 
     def done(self, result: int) -> None:  # noqa: N802 — Qt's name; Apply and Cancel both end here
-        """A check still running is let go rather than waited on: it only reads, and the Apply
-        that closed the window must not freeze it. `qt_shutdown` holds the thread until it ends."""
+        """A check still running is told to stop and let go rather than waited on: it only reads,
+        and the Apply that closed the window must not freeze it. `qt_shutdown` holds the thread
+        until it ends, and a verdict already queued is dropped on arrival (`_closed`)."""
         self._closed = True
         self._apply_waiting = False
         worker = self._check_worker
@@ -757,14 +772,21 @@ class CaptureImportDialog(QDialog):
             if typed:
                 self._names[uuid] = typed
                 # Typing a name is asking for that measurement, so it stops being unticked by
-                # accident: a rename nobody takes in is a rename for nothing.
-                self._ticked.add(uuid)
+                # accident: a rename nobody takes in is a rename for nothing. Not a row the check
+                # left out for a re-take: taking that one is «Take it as it is», given with its own
+                # button and seen, as «Give names» and «Select all» already leave it (tcc#21, I1).
+                if uuid not in self._to_retake():
+                    self._ticked.add(uuid)
             else:
                 self._names.pop(uuid, None)
             # Deferred: this runs inside the editor's own commit, and repopulating that editor
             # while it is still emitting is not something to do under Qt.
             # Bound to this dialog, so a timer outliving a closed window does nothing.
             QTimer.singleShot(0, self, self._refresh_name_lists)
+            # The tick a name gives is shown in the tick box, and the sweep it took is checked
+            # like any ticked one (tcc#21, I2): it was neither, and Apply then waited on nothing.
+            QTimer.singleShot(0, self, self._refresh_checks)
+            self._schedule_check()
             self._render_note(self._table.rowCount())
 
     def _on_give_names(self) -> None:
@@ -842,6 +864,10 @@ class CaptureImportDialog(QDialog):
             # goes by itself when they are in; a second one goes now. Never refused.
             self._apply_waiting = True
             self._to_retake_at_apply = self._to_retake()
+            self._failures_at_apply = self._check_failures
+            # And starts the check itself, so a wait always has a worker behind it, whichever
+            # door ticked the row (review I2). A check already running is left to finish.
+            self._check_selected()
             self._render_note(self._table.rowCount())
             return
         self._apply_waiting = False

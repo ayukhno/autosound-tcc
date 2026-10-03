@@ -146,8 +146,9 @@ def test_the_dialog_is_told_what_the_round_is_waiting_for(tmp_path, monkeypatch)
     panel._on_import_offer({"1": {"title": "x", "uuid": "z", "date": ""}})
 
     assert seen["expected"] == panel.outstanding_titles()
+    # «bad» counts too since tcc#21 (review M5): a capture found unusable is still waited for.
     assert len(seen["expected"]) == sum(
-        1 for row in panel._rows if row.status in ("wait", "found") and not row.additional)
+        1 for row in panel._rows if row.status in ("wait", "found", "bad") and not row.additional)
     assert seen["has_task"] is True
 
 
@@ -1618,7 +1619,29 @@ def test_the_import_window_is_handed_a_check_through_the_panel_s_rew(tmp_path, m
     panel.set_sessions(MEAS_SESSIONS)
 
     panel._on_import_offer(answer)
-    found = seen["check"](capture_import.candidates(answer, tmp_path))
+    # Called the way the dialog's worker calls it: with the thread's own stop flag (review M4).
+    found = seen["check"](capture_import.candidates(answer, tmp_path), stop=lambda: False)
 
     assert asked == [("m-L_2 (sw)", {"4": answer["4"]})]
     assert capture_import.unusable(found["u"])
+
+
+def test_a_capture_taken_and_found_unusable_is_still_outstanding():
+    """Review M5 (tcc#21): «брак» is a capture the round still waits for a usable one of — the
+    method's own `unusable_captures` counts it so. Offered by name, a re-take under that name opens
+    ticked; a copy already taken in is not ticked again (`preselect` skips imported rows)."""
+    from autosound_tcc.state.models import MeasGroup, MeasItem
+    from autosound_tcc.ui.tcc.mock_data import MeasSession
+
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions([MeasSession(
+        id="cap_001", version={"en": "Series 1", "uk": "Серія 1"},
+        groups=(MeasGroup(type="sw", method="sw", items=(
+            MeasItem(name="w-L_1 (sw)", status="bad"),
+            MeasItem(name="w-R_1 (sw)", status="wait"),
+            MeasItem(name="sw_1 (sw)", status="done"),
+        )),),
+    )], version=1)
+
+    assert panel.outstanding_titles() == ["w-L_1 (sw)", "w-R_1 (sw)"]

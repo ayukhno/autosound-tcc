@@ -1113,10 +1113,12 @@ class MeasurementPanel(QWidget):
         """The full REW names this round is still waiting for, in the grid's own order.
 
         What the import window opens ticked on. Extras are left out on purpose: they are graphs
-        REW holds that this checklist never asked for.
+        REW holds that this checklist never asked for. «bad» is in: a capture taken and found
+        unusable is still waited for — the method's `unusable_captures` counts it so — and a
+        re-take under its name should open ticked (tcc#21).
         """
         return [with_method(row.item_name, row.method_suffix) for row in self._rows
-                if row.status in ("wait", "found") and not row.additional]
+                if row.status in ("wait", "found", "bad") and not row.additional]
 
     def rew_titles(self) -> list[str]:
         """What REW showed this session — not what the project imported. For the title fixes
@@ -1246,8 +1248,10 @@ class MeasurementPanel(QWidget):
             parent=self,
             save_order=self._store_order,
             # The ticked sweeps are checked while the microphone is still in place (tcc#21): the
-            # method's verdict, REW's answer through this panel's bridge, on the dialog's worker.
-            check=lambda rows: capture_import.check_sweeps(rows, listing=self._bridge.measurements),
+            # method's verdict, REW's answer through this panel's bridge, on the dialog's worker,
+            # which hands in its own stop flag.
+            check=lambda rows, stop=None: capture_import.check_sweeps(
+                rows, listing=self._bridge.measurements, stop=stop),
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             self._set_status("measReadCancelled", n=len(measurements))

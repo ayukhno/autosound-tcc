@@ -737,3 +737,19 @@ def test_taken_as_it_is_is_remembered_for_that_capture_and_not_for_its_title(tmp
     listing = {"1": {"title": "m-L_2 (sw)", "uuid": "dud"},
                "2": {"title": "m-L_2 (sw)", "uuid": "retake"}}
     assert set(ci.check_sweeps(again, listing=lambda: listing, verdict=verdict)) == {"retake"}
+
+
+def test_a_check_told_to_stop_asks_about_no_further_sweep():
+    """Review M4: the window closed, so the rest of the batch is pulled for nobody — up to five
+    seconds a sweep against a hung REW. `stop` is asked between two sweeps."""
+    rows = ci.candidates(_rew(("m-L_1 (sw)", "a", "2026-Aug-25 20:10:00"),
+                              ("m-R_1 (sw)", "b", "2026-Aug-25 20:10:10"),
+                              ("sw_1 (sw)", "c", "2026-Aug-25 20:10:20")), imported={})
+    listing = {str(i): {"title": r.title, "uuid": r.uuid} for i, r in enumerate(rows, start=1)}
+    verdict, asked = _asking()
+
+    found = ci.check_sweeps(rows, listing=lambda: listing, verdict=verdict,
+                            stop=lambda: len(asked) >= 1)
+
+    assert [name for name, _ in asked] == ["m-L_1 (sw)"]
+    assert set(found) == {"a"}

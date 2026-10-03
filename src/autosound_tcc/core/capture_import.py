@@ -116,7 +116,8 @@ def store_path(project_dir: Optional[Path] = None) -> Path:
 
 
 def load_imported(project_dir: Optional[Path] = None) -> dict[str, dict]:
-    """`uuid -> {title, round, when, date}`, or `{}`.
+    """`uuid -> {title, round, when, date[, as_is]}`, or `{}` — `as_is` once a capture the check
+    called unusable was taken anyway (tcc#21).
 
     A missing file is the normal state of a project nobody has imported into yet, and a corrupt one
     degrades to "nothing imported" rather than taking the dialog down: the worst that follows is a
@@ -318,7 +319,8 @@ def to_check(rows: Iterable[Candidate]) -> list[Candidate]:
 
 
 def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]] = None,
-                 verdict: Optional[Callable[..., dict]] = None) -> dict[str, dict]:
+                 verdict: Optional[Callable[..., dict]] = None,
+                 stop: Optional[Callable[[], bool]] = None) -> dict[str, dict]:
     """`{uuid: the method's verdict}` for every row of `rows` the check applies to (`to_check`).
 
     HTTP throughout — one `listing()` and an FR and an impulse per sweep — so it is called from a
@@ -329,6 +331,9 @@ def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]
     is deleted — is exactly where a title cannot say which; the ordinal is read fresh because a
     hand can have moved it since the list was drawn (`resolve_ordinals`). A row REW no longer shows
     gets no verdict: there is nothing there to judge.
+
+    `stop` is asked between two sweeps: a window that closed wants no more of them, and each is up
+    to five seconds against a REW that hangs (review M4).
     """
     wanted = to_check(rows)
     if not wanted:
@@ -341,6 +346,8 @@ def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]
                for ordinal, raw in answer.items()}
     found: dict[str, dict] = {}
     for row in wanted:
+        if stop is not None and stop():
+            break
         if row.uuid not in by_uuid:
             continue
         ordinal, raw = by_uuid[row.uuid]

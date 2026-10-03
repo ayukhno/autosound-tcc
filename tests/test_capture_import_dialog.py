@@ -555,7 +555,7 @@ def _checker(verdicts: dict, gate=None, fail: str = ""):
     method's answers by uuid. The method itself is faked in `test_capture_import.py`; REW nowhere."""
     asked: list = []
 
-    def check(rows):
+    def check(rows, stop=None):
         asked.extend(row.uuid for row in rows)
         if gate is not None:
             gate.wait(10)
@@ -805,3 +805,159 @@ def test_the_pair_of_answers_is_drawn_whole_in_its_cell(tmp_path):
     box = dialog._table.cellWidget(_row_of(dialog, "u3"), _COL_CHECK)
     assert box.width() >= box.sizeHint().width(), (box.width(), box.sizeHint().width())
     dialog.hide()
+
+
+# ---- fix round 1 of the review (tcc#21) -------------------------------------------------------
+
+_TRUNCATED = "covers 20-2000 Hz, asked for 20-20000 — truncated"
+
+
+def test_a_name_typed_on_a_red_row_leaves_it_for_the_re_take(tmp_path):
+    """Review I1: typing a New name asks for that measurement — except on a row the check left out
+    for a re-take. Taking that one is «Взяти як є», given with its own button and seen; «Дати
+    назву» and «Вибрати все» already leave it alone. This door took it silently, and for good: the
+    store pins `as_is` for that capture. The tick box itself is asserted, where the screen lied."""
+    check, _asked = _checker({"u3": _unusable(_TRUNCATED)})
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _settle(dialog)
+
+    dialog._table.item(_row_of(dialog, "u3"), 4).setText("m-L_3 (sw)")
+    _app().processEvents()
+
+    assert "u3" not in {row.uuid for row in dialog.taken()}
+    assert not _tick_state(dialog, _row_of(dialog, "u3"))
+    assert _answer_buttons(dialog, "u3")[i18n.t("capCheckRetake")].isChecked()
+    assert i18n.t("capCheckRetakeList").format(names="m_3 (sw)") in dialog._note.text()
+
+
+def test_a_sweep_taken_by_typing_its_name_is_checked_like_a_ticked_one(tmp_path):
+    """Review I2: the New name is the ordinary way to take a sweep REW holds under a wrong title,
+    and it ticks the row — so it is a selected sweep, and it is checked. Apply right after waits
+    for that verdict and goes when it lands; it never waits on a check nobody started."""
+    check, asked = _checker({"u2": _USABLE})
+    dialog = _dialog(_rew(3), tmp_path, check=check)
+    _app().processEvents()
+
+    dialog._table.item(_row_of(dialog, "u2"), 4).setText("m-L_2 (sw)")
+    dialog._on_apply()
+    _settle(dialog)
+
+    assert asked == ["u2"]
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+    assert _tick_state(dialog, _row_of(dialog, "u2")), "and the tick box says it was taken"
+
+
+def test_an_apply_that_starts_to_wait_has_a_check_behind_it(tmp_path):
+    """Whatever ticked the row — a door added later included — the wait starts the check itself, so
+    a wait can never be on nothing."""
+    import threading
+
+    gate = threading.Event()
+    check, _asked = _checker({"u2": _USABLE}, gate=gate)
+    dialog = _dialog(_rew(3), tmp_path, check=check)
+    dialog._ticked.add("u2")  # ticked by no path that schedules a check
+
+    try:
+        dialog._on_apply()
+        assert dialog._checking == {"u2"}, "a worker is asking about it"
+    finally:
+        gate.set()  # never leave a worker parked on the gate for a later test to inherit
+    _settle(dialog)
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+
+
+def test_the_protection_form_does_not_answer_a_red_row(tmp_path):
+    """Review M1: entering a chain ticks a row (a record nobody takes in is none) — but not one the
+    check left out: that answer is the row's own buttons."""
+    check, _asked = _checker({"u3": _unusable(_TRUNCATED)})
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _settle(dialog)
+
+    dialog.set_legs("u3", {"hp": {"f": 80.0, "type": "LR", "slope": 24}})
+    _app().processEvents()
+
+    assert "u3" not in {row.uuid for row in dialog.taken()}
+    assert not _tick_state(dialog, _row_of(dialog, "u3"))
+
+
+def test_an_apply_that_waited_stays_open_when_the_check_could_not_run(tmp_path):
+    """Review M2: «Свіпи не перевірено» written into a window that has already closed is read by
+    nobody, and the tuner leaves believing the sweeps were checked. Said once; the next Apply goes."""
+    import threading
+
+    gate = threading.Event()
+    check, _asked = _checker({}, gate=gate, fail="URLError: timed out")
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _app().processEvents()
+
+    try:
+        dialog._on_apply()
+    finally:
+        gate.set()
+    _settle(dialog)
+
+    assert dialog.result() != int(QDialog.DialogCode.Accepted)
+    assert i18n.t("capCheckFailed").format(error="RuntimeError: URLError: timed out") \
+        in dialog._note.text()
+
+    dialog._on_apply()
+
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+
+
+def test_closing_the_window_tells_a_running_check_to_stop(tmp_path):
+    """Review M4: a cancelled check went on pulling an FR and an impulse for every sweep left, up to
+    five seconds each against a hung REW. The check is asked to stop when the window closes."""
+    import threading
+
+    gate = threading.Event()
+    told = []
+
+    def check(rows, stop=None):
+        gate.wait(10)
+        told.append(bool(stop is not None and stop()))
+        return {}
+
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _app().processEvents()
+    worker = dialog._check_worker
+
+    try:
+        dialog.reject()
+    finally:
+        gate.set()
+    worker.wait(5000)
+
+    assert told == [True]
+
+
+def test_a_verdict_that_lands_after_the_window_closed_changes_nothing(tmp_path):
+    """Review M4/M8: a verdict already queued when the window closes still arrives. It must not
+    untick a row of a window the panel may yet read."""
+    check, _asked = _checker({"u3": _unusable(_TRUNCATED)})
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _app().processEvents()
+    dialog._check_worker.wait(5000)  # answered; the answer waits in the queue
+
+    dialog.reject()
+    _app().processEvents()
+
+    assert dialog._verdicts == {}
+    assert "u3" in dialog._ticked
+
+
+def test_the_tick_box_shows_what_the_verdict_and_the_answer_decided(tmp_path):
+    """Review M8: the other tests read `taken()` and the buttons; the tick box is a third view of
+    the same decision, and a view that can disagree with the other two is how I1 went unseen."""
+    check, _asked = _checker({"u3": _unusable(_TRUNCATED)})
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _settle(dialog)
+    assert not _tick_state(dialog, _row_of(dialog, "u3")), "the recommendation unticks it"
+
+    _answer_buttons(dialog, "u3")[i18n.t("capCheckAsIs")].click()
+    _app().processEvents()
+    assert _tick_state(dialog, _row_of(dialog, "u3"))
+
+    _answer_buttons(dialog, "u3")[i18n.t("capCheckRetake")].click()
+    _app().processEvents()
+    assert not _tick_state(dialog, _row_of(dialog, "u3"))
