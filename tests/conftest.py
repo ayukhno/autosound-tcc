@@ -493,6 +493,10 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
     # `test_model_choices.py` and fail on its own or in a parallel worker: 15 of 15 parallel runs,
     # 2026-09-14.
     monkeypatch.setattr(model_choices, "_LAST_ASKED", {}, raising=False)
+    # ...and which models were read from a cached catalogue and not confirmed since: the carrier
+    # of the #140 flake (final review M3). One test's reading left its names there, and the next
+    # test's agy picks read «not checked».
+    monkeypatch.setattr(model_choices, "_UNCONFIRMED", set(), raising=False)
     monkeypatch.setattr(model_choices, "cli_available", lambda harness: False, raising=False)
     # ...and the same probe wearing another name. `critic_reaches` does NOT go through
     # `cli_available`: it asks `os.environ` and `shutil.which` itself, so the patch above never

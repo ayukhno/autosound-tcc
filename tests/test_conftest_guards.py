@@ -13,6 +13,19 @@ import pytest
 from autosound_tcc.core import model_choices
 
 
+#: Taken at import, before any test's `monkeypatch` could stand a fresh one in its place.
+_UNCONFIRMED_AT_IMPORT = model_choices._UNCONFIRMED
+
+
+def test_no_test_inherits_which_models_are_unconfirmed():
+    """Final review M3: `_UNCONFIRMED` — models read from a cached catalogue and not confirmed since
+    — was the carrier of the #140 flake, and the one piece of the catalogue's state every test in a
+    worker still shared: what one test's reading left there read «not checked» in the next test's
+    pickers. Each test gets its own, empty, as with `_CLI_CACHE`."""
+    assert model_choices._UNCONFIRMED is not _UNCONFIRMED_AT_IMPORT
+    assert model_choices._UNCONFIRMED == set()
+
+
 def test_the_suite_cannot_see_which_clis_this_machine_has():
     assert model_choices.cli_available("agy") is False
 
