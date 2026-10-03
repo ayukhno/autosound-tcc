@@ -3600,3 +3600,14 @@ but nothing on screen says so before Apply.
 **Weight.** Low: the tuner did tick it; the choice is just not said.
 
 **Task.** Noted — the Arbiter: «занотуй, правити вже не будемо якщо чогось нового не вилізе більш серьозного». W-7's pool.
+
+### 150. A TCC candidate's row reads «0.1.46 (beta-v1.1.0-rc1) — newer than the latest release 0.1.46»
+
+**What.** The Arbiter on the Windows VM, 2026-10-03, TCC's candidate beta-v1.1.0-rc1 installed: the Updates tab's TCC
+row reads «TCC 0.1.46 (beta-v1.1.0-rc1) — newer than the latest release 0.1.46 (a candidate)». Right in substance (no
+update offered, finding 144 holds), but it names the package metadata's 0.1.46 — a candidate is not bumped — so it reads
+«0.1.46 newer than 0.1.46». The tag's version (1.1.0) would read true.
+
+**Weight.** Low: wording only.
+
+**Task.** Noted for W-7's pool (no fixes unless something serious, the Arbiter).
