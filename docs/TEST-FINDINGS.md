@@ -3565,6 +3565,6 @@ His rule: «перше брати не можна, а друге можна» �
 
 **Weight.** High for #21: a false red on every band-limited sweep.
 
-**Task.** W-6: the verdict is asked over the band the sweep itself was set to (its Start–End in REW), so «truncated»
-means a sweep that stopped short of its own range; a title whose kind (`sw` / `rta`) disagrees with the data reads red with
-that reason.
+**Task.** Not fixed — the Arbiter, 2026-10-03: «не треба це правити - ми не керуємо діапазоном явно, нехай буде. можеш
+занотувати». A known limit of v1.1.0: a band-limited sweep reads «truncated», and «Take it as it is» takes it. For W-7's pool
+if it comes back.

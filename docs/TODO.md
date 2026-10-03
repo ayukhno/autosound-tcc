@@ -2057,7 +2057,10 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 **Статус**: open · recorded 2026-10-03 during W-6's VM look; left as known bugs of v1.1.0 by the Arbiter
 
-- finding 143 — the reviewer-key window's provider box: light grey field, white words in the dark theme.
+- finding 143 — every drop-down box in the dark theme (the key window's provider box, the import window's NEW NAME
+  boxes): a light grey field with white or pale words.
+- finding 146 — #21's check reads a band-limited sweep (a sub at 20–1001 Hz) as «truncated»: noted, not fixed (the
+  Arbiter: «ми не керуємо діапазоном явно, нехай буде»).
 
 ### F-092 — W-6: the pool, now on the milestone `W-6 · v1.1.0`
 
