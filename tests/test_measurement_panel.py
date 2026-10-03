@@ -1752,17 +1752,43 @@ def test_a_row_taken_as_it_is_says_so_on_the_card():
     assert row._name_label.full_text() == f"sw_7 (sw) {i18n.t('capCheckAsIsDone')}"
 
 
-def test_a_row_held_by_the_window_says_its_verdict_and_that_it_is_a_patch():
-    """tcc#149: green for a sweep the import window found usable over its own range, the window's
-    verdict beside it, and the one line that says the method's own check still counts it until the
-    skill reads the sweep's range (hub #247)."""
+@pytest.mark.parametrize("lang", ["en", "uk"])
+def test_a_row_held_by_the_window_says_its_verdict_and_keeps_its_width(lang):
+    """tcc#149, the review's I3: green for a sweep the import window found usable over its own
+    range, with the window's verdict beside it — and only that. The row asks for its whole text
+    (the columns scroll sideways since 2026-09-23), and with the line about the method's own check
+    on it the row asked for ~930 px and a 380-px card scrolled ~870 px sideways. That line is the
+    row's hover. The width is held to the short text's ink (`theme.drawn_width`), so it cannot
+    grow back."""
+    import math
+
+    from PySide6.QtGui import QFontMetricsF
+
     from autosound_tcc.state.models import MeasItem
-    from autosound_tcc.ui.tcc.measurement_panel import _MeasRow
+    from autosound_tcc.ui.tcc import theme
+    from autosound_tcc.ui.tcc.measurement_panel import _MeasName, _MeasRow
 
     _app()
-    row = _MeasRow(MeasItem(name="sw_7", status="done", own_range=True), "sw")
+    before = i18n.current_language()
+    try:
+        i18n.set_language(lang)
+        row = _MeasRow(MeasItem(name="sw_7", status="done", own_range=True), "sw")
 
-    assert row.status == "done"
-    assert row._name_label.full_text() == (
-        f"sw_7 (sw) {i18n.t('measOwnRange')} · {i18n.t('measOwnRangeUntil')}")
-    assert "#247" in i18n.t("measOwnRangeUntil")
+        short = f"sw_7 (sw) {i18n.t('measOwnRange')}"
+        assert row.status == "done"
+        assert row._name_label.full_text() == short
+        assert row.hover_tip.text() == i18n.t("measOwnRangeUntil")
+        ink = theme.drawn_width(QFontMetricsF(row._name_label.font()), short)
+        assert row._name_label.minimumWidth() <= max(_MeasName._MIN_WIDTH, math.ceil(ink) + 12)
+    finally:
+        i18n.set_language(before)
+
+
+def test_the_held_row_s_words_name_no_ticket_and_no_skill():
+    """The review's m5: «(hub #247)» and «the skill» are the bus's names, not the tuner's. The
+    hover says it in plain words: the method's own step check, the sweep's range."""
+    for lang in ("en", "uk"):
+        for key in ("measOwnRange", "measOwnRangeUntil"):
+            text = i18n.T[lang][key]
+            assert "#" not in text and "hub" not in text.lower(), (lang, key, text)
+            assert "skill" not in text.lower() and "скіл" not in text.lower(), (lang, key, text)

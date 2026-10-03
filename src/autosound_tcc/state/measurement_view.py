@@ -254,7 +254,8 @@ def taken_as_is(project_dir: Optional[Path] = None) -> dict[str, str]:
 # ---- tcc#149: the card agrees with the import window on a sweep's own range ------------------
 # A patch until the method's own check reads a sweep's range (hub #247, TCC-049). At the re-pin
 # that carries it, drop this block and its uses (`window_checked`, `held_by_the_window`,
-# `flagged_for_kind` below and in `main_window._on_capture_check_done`), `MeasItem.own_range`,
+# `flagged_by_the_window` below, and in `main_window`'s `settled` and `_on_capture_check_done`),
+# `MeasItem.own_range`,
 # `measOwnRange*`, and `Candidate.checked` with what writes it.
 
 
@@ -280,15 +281,16 @@ def held_by_the_window(verdict: dict, checked: dict) -> bool:
             and capture_import.only_truncated(verdict.get("issues")))
 
 
-def flagged_for_kind(verdict: dict, checked: dict, marked: dict) -> bool:
-    """Whether the import window called this capture's title the wrong kind — a sweep titled
-    `(rta)`, an RTA titled `(sw)` — and the tuner took it as it is there. The method reads no
-    titles, so its verdict is a plain pass or no judgement at all; the card says what the window
-    said. By the uuid the verdict pins."""
+def flagged_by_the_window(verdict: dict, checked: dict, marked: dict) -> bool:
+    """Whether the import window said this capture's title contradicts its data — the wrong kind (a
+    sweep titled `(rta)`, an RTA titled `(sw)`) or another driver (a tweeter peaking in a sub's
+    range, the review's m4) — and the tuner took it as it is there. The method reads no titles, so
+    its verdict is a plain pass or no judgement at all; the card says what the window said. By the
+    uuid the verdict pins."""
     from autosound_tcc.core import capture_import
 
     uuid = str((verdict or {}).get("uuid") or "")
-    return bool(uuid) and uuid in marked and checked.get(uuid) in capture_import.KIND_CLASHES
+    return bool(uuid) and uuid in marked and checked.get(uuid) in capture_import.CLASHES
 
 
 def _answered_as_is(verdict: dict, title: str, marked: dict, keys: set, key) -> bool:
@@ -494,7 +496,7 @@ def build_session(
         key = naming.name_key(entry) if entry else None
         verdict = verdicts.get(name) or verdicts_by_key.get(key) or {}
         return (_answered_as_is(verdict, name, as_is_marked, as_is_keys, key)
-                or flagged_for_kind(verdict, window, as_is_marked))
+                or flagged_by_the_window(verdict, window, as_is_marked))
 
     def own_range_for(name: str) -> bool:
         entry = naming.parse_name(name, glossary)
@@ -659,7 +661,7 @@ def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict
         """Taken as it is, as on the live card (finding 147): history does not turn it red."""
         verdict = (taken.get(name) or {}).get("verified") or {}
         return (_answered_as_is(verdict, name, marked, set(), None)
-                or flagged_for_kind(verdict, window, marked))
+                or flagged_by_the_window(verdict, window, marked))
 
     def own_range_for(name: str) -> bool:
         return held_by_the_window((taken.get(name) or {}).get("verified") or {}, window)

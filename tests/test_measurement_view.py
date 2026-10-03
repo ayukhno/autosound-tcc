@@ -1107,3 +1107,24 @@ def test_a_capture_the_window_flagged_for_its_kind_reads_as_in_the_window(projec
     for name in ("sw_7 (rta)", "w-L_7 (sw)"):
         item = _item(session, name)
         assert (item.status, item.as_is) == (mv.STATUS_DONE, True), name
+
+
+def test_a_capture_the_window_flagged_for_its_driver_reads_as_in_the_window(project):
+    """The review's m4: a tweeter title whose sweep peaks in a sub's range was red in the window
+    and taken there «as it is»; the method, which reads no titles, passes it. The card says what
+    the window said, as for a title of the wrong kind."""
+    from autosound_tcc.core import capture_import
+
+    process = _round(project, version=7, expected=["tw-L_7 (sw)"], taken=["tw-L_7 (sw)"])
+    tw = _as_typed("tw-L_7 (sw)")
+    state = process.load()
+    state["capture"]["taken"][tw]["verified"] = {
+        "ok": True, "exists": True, "applicable": True, "uuid": "u-tw", "issues": []}
+    process._write(state)
+    capture_import.record_imported([capture_import.Candidate(
+        ordinal="1", title=tw, uuid="u-tw", date="", when=None, imported=False, as_is=True,
+        checked="tweeter_plays_low")], project_dir=project)
+
+    item = _item(mv.build_session("0", 7, [tw], project, taken=[tw]), "tw-L_7 (sw)")
+
+    assert (item.status, item.as_is) == (mv.STATUS_DONE, True)

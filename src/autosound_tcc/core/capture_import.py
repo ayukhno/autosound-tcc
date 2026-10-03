@@ -97,7 +97,7 @@ class Candidate:
     as_is: bool = False
     #: What the import window's check said about this capture, kept for the card until the method
     #: reads a sweep's own range (tcc#149, hub #247 — drop with the patch): `usable` (over its own
-    #: range, `check_sweeps`), or the kind clash's own name (`verdict_reader`). "" said nothing.
+    #: range, `check_sweeps`), or a clash's own name (`verdict_reader`). "" said nothing.
     checked: str = ""
 
     @property
@@ -198,7 +198,7 @@ def retake_titles(measurements: dict, project_dir: Optional[Path] = None) -> lis
 
 def window_verdicts(project_dir: Optional[Path] = None) -> dict[str, str]:
     """`uuid -> what the import window's check said` for the captures taken through it (tcc#149):
-    `usable`, or a kind clash's name. Keyed by REW's uuid as the method keys its own verdict, so a
+    `usable`, or a clash's name. Keyed by REW's uuid as the method keys its own verdict, so a
     re-take — a new uuid — never inherits it. Read by the card until hub #247 (drop with it)."""
     return {uuid: str(entry["checked"]) for uuid, entry in load_imported(project_dir).items()
             if entry.get("checked")}
@@ -371,8 +371,10 @@ def _verdict_by_the_method() -> Optional[Callable[..., dict]]:
     also the function the method's own `capture-check` runs after the import, which the card reads
     — but not asked the same question since tcc#148: the window asks it over each sweep's own range
     (`check_sweeps`) and adds what a title contradicts (`verdict_reader`), while the method's check
-    still asks over 20-20000 Hz and reads no titles. A band-limited sweep can pass here and read
-    «truncated» on the card until the method asks over the same range (the review of tcc#148, I2).
+    still asks over 20-20000 Hz and reads no titles. The card agrees with the window through TCC's
+    own patch (tcc#149: `window_verdicts`, `measurement_view.held_by_the_window`); what still
+    disagrees is the method's step gate, which counts such a sweep unusable until the method asks
+    over the same range (hub #247).
     """
     try:
         answer = getattr(vendor_loader.load_verify(), "verdict", None)
@@ -447,20 +449,23 @@ def only_truncated(issues: Any) -> bool:
     return bool(issues) and all(_truncated(issue) for issue in issues)
 
 
-#: The kind clashes `verdict_reader` names — what the card reads as the window did (tcc#149).
-KIND_CLASHES = ("sweep_named_rta", "rta_named_sweep")
-#: The window's verdict on a capture it found usable over its own range (tcc#149).
+#: Every clash `verdict_reader` names — the kind's and the driver's — which the card reads as the
+#: window did (tcc#149, the review's m4). Until hub #247; drop with the patch.
+CLASHES = ("sweep_named_rta", "rta_named_sweep", "tweeter_plays_low", "sub_plays_high")
+#: The window's verdict on a capture it found usable over its own range (tcc#149). Until hub
+#: #247; drop with the patch.
 CHECKED_USABLE = "usable"
 
 
 def window_said(verdict: Optional[dict]) -> str:
     """What the window's check said about one capture, as `Candidate.checked` keeps it: `usable`
-    for a usable verdict, a kind clash's name for a title of the wrong kind, else ""."""
+    for a usable verdict, a clash's own name for a title its data contradicts, else "" (tcc#149).
+    Until hub #247; drop with the patch."""
     verdict = verdict or {}
-    kinds = [clash.get("why") for clash in verdict.get("clashes") or []
-             if clash.get("why") in KIND_CLASHES]
-    if kinds:
-        return str(kinds[0])
+    found = [clash.get("why") for clash in verdict.get("clashes") or []
+             if clash.get("why") in CLASHES]
+    if found:
+        return str(found[0])
     if verdict.get("exists") and verdict.get("applicable", True) is not False \
             and verdict.get("valid"):
         return CHECKED_USABLE

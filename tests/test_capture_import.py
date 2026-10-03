@@ -1024,3 +1024,15 @@ def test_only_truncated_reads_the_method_s_own_line(monkeypatch):
     assert not ci.only_truncated(line + ["in-band mean -96.1 dB — silence, not a sweep"])
     assert not ci.only_truncated(["in-band mean -96.1 dB — silence, not a sweep"])
     assert not ci.only_truncated([])
+
+
+def test_the_window_s_verdict_names_any_clash_it_found():
+    """The review's m4: every clash the window found goes to the card under its own name — the
+    driver's as well as the kind's — and a usable verdict as `usable`."""
+    usable = dict(_verdict(), kind="sweep")
+
+    assert ci.window_said(usable) == "usable"
+    for why in ("sweep_named_rta", "rta_named_sweep", "tweeter_plays_low", "sub_plays_high"):
+        assert ci.window_said(dict(usable, valid=False, clashes=[{"why": why}])) == why
+    assert ci.window_said(_verdict(valid=False, issues=["in-band mean -96.1 dB — silence"])) == ""
+    assert ci.window_said(None) == ""

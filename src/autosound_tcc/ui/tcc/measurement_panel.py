@@ -457,6 +457,11 @@ class _MeasRow(QWidget):
         #: Usable over its own range by the import window's check, «truncated» by the method's
         #: (tcc#149): green, and the row says both. Until hub #247; drop with that patch.
         self._own_range = bool(getattr(item, "own_range", False))
+        if self._own_range:
+            # The line that the method's own step check still counts it is the ROW's hover, not
+            # its text: a row asks for its whole text, and with that line on it a held row asked
+            # for ~930 px (the review's I3).
+            attach_tip(self, i18n.t("measOwnRangeUntil"))
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 1, 0, 1)
         layout.setSpacing(6)
@@ -484,9 +489,8 @@ class _MeasRow(QWidget):
             extra = " · ".join(part for part in (i18n.t("measUnread"), self._extra) if part)
         if self._as_is:  # the import window's own words for the answer
             extra = " · ".join(part for part in (extra, i18n.t("capCheckAsIsDone")) if part)
-        if self._own_range:  # the window's verdict, and the line that it is a patch (tcc#149)
-            extra = " · ".join(part for part in (extra, i18n.t("measOwnRange"),
-                                                 i18n.t("measOwnRangeUntil")) if part)
+        if self._own_range:  # the window's verdict on the row (tcc#149, until hub #247)
+            extra = " · ".join(part for part in (extra, i18n.t("measOwnRange")) if part)
         # Class first, text second: the class carries the font (`.mn` is the monospace face), and
         # eliding against the font the label had a moment ago cuts at the wrong character.
         self._name_label.setProperty("class", f"mn mn-{self._status}")

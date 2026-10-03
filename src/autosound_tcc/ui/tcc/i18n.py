@@ -761,7 +761,7 @@ answers the first five questions anybody would ask.",
         # Beside a take whose title the naming grammar cannot read (tcc#122).
         "measUnread": "not parsed",
         "measOwnRange": "usable over its own range",
-        "measOwnRangeUntil": "the method's own check still counts it unusable until the skill reads the sweep's range (hub #247)",
+        "measOwnRangeUntil": "The method's own step check still counts this capture unusable until the method reads the sweep's own range.",
         "stepTagOkTip": "Closed, and its evidence is really on disk — the file or capture it names "
                         "was found.",
         "stepTagUnprovenTip": "Closed by the skill, but the evidence it named resolves to nothing "
@@ -2064,7 +2064,7 @@ Choose sweeps (sw) above to read this.",
         "measProtTip": "Знято за захисним фільтром: {legs}. Він У КРИВІЙ — математика знімає його перед читанням.",
         "measUnread": "не розібрано",
         "measOwnRange": "придатний у своєму діапазоні",
-        "measOwnRangeUntil": "власна перевірка методу ще вважає його непридатним, доки скіл не читатиме діапазон свіпу (hub #247)",
+        "measOwnRangeUntil": "Власна перевірка кроку в методі ще вважає цей замір непридатним, доки метод не читатиме власний діапазон свіпу.",
         "stepTagOkTip": "Закрито, і доказ справді є на диску — названий файл або захват знайдено.",
         "stepTagUnprovenTip": "Скіл закрив крок, але доказ, який він назвав, ні на що на диску не "
                               "вказує: такого файлу немає, і захвату з такою назвою теж.\n\nЦе не "

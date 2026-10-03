@@ -4239,13 +4239,17 @@ class MainWindow(QMainWindow):
         self._offer_title_fixes(round_)
         titles = set(self._meas_panel.known_titles())
         as_is = measurement_view.taken_as_is()
+        window = measurement_view.window_checked()  # tcc#149, until hub #247
 
         def settled(title: str) -> bool:
-            """Checked and fine, a capture the check does not apply to (hub #154 §1), or one the
-            tuner took as it is after this very verdict (review of finding 147, I1)."""
+            """Checked and fine, a capture the check does not apply to (hub #154 §1), one the
+            tuner took as it is after this very verdict (review of finding 147, I1), or one the
+            import window passed over its own range that the method calls «truncated» alone —
+            its verdict will not change until hub #247 (tcc#149, the review's m1; drop with it)."""
             verdict = ((round_.get("taken") or {}).get(title) or {}).get("verified") or {}
             return (bool(verdict.get("ok")) or not measurement_view.applicable(verdict)
-                    or measurement_view.answered_as_is(verdict, title, as_is))
+                    or measurement_view.answered_as_is(verdict, title, as_is)
+                    or measurement_view.held_by_the_window(verdict, window))
 
         # Only what the round TOOK (tcc#21): the method records a `taken` entry for every title it
         # checks, so checking whatever REW shows made a dud left for a re-take «брак — знятий» and

@@ -7412,6 +7412,25 @@ def test_a_capture_taken_as_it_is_is_not_checked_again(monkeypatch):
     assert _round_check_started(monkeypatch, round_, ["sw_7 (sw)"]) == [["sw_7 (sw)"]]
 
 
+def test_a_sweep_the_import_window_passed_is_not_checked_again(monkeypatch):
+    """tcc#149, the review's m1: a capture the window passed over its own range, which the method's
+    check calls «truncated» alone, was checked again on every change to REW's list — a pull from
+    REW and a journal event each time, for a verdict that will not change until hub #247. Settled,
+    as one taken as it is is; a re-take under the same title is another uuid and is checked."""
+    from autosound_tcc.core import capture_import, config
+
+    capture_import.record_imported([capture_import.Candidate(
+        ordinal="1", title="sw_7 (sw)", uuid="u-sw", date="", when=None, imported=False,
+        checked="usable")], project_dir=config.project_dir())
+    round_ = {"id": "cap_002", "expected": ["sw_7 (sw)"],
+              "taken": {"sw_7 (sw)": {"at": "x", "verified": dict(_AS_IS_VERDICT)}}}
+
+    assert _round_check_started(monkeypatch, round_, ["sw_7 (sw)"]) == []
+
+    round_["taken"]["sw_7 (sw)"]["verified"]["uuid"] = "u-retaken"
+    assert _round_check_started(monkeypatch, round_, ["sw_7 (sw)"]) == [["sw_7 (sw)"]]
+
+
 def test_the_strip_leaves_out_a_sweep_the_import_window_passed_over_its_own_range(monkeypatch):
     """tcc#149: after Apply the strip said «1 unusable: sw_7 (sw) — covers 20-1001 Hz, asked for
     20-20000 — truncated» for a sub the import window had just passed over its own range. Until
