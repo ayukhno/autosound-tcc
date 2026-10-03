@@ -5,6 +5,12 @@ M3): the order Qt sends activate and deactivate in is half of what decides the h
 that picks the order itself cannot see it. Another app is a bare QWindow taking the focus: Qt then
 has no active widget window, as when the focus goes to another process, and coming back is
 `activateWindow()` -- as is a switch between two of TCC's own windows.
+
+The mouse is the test's own: the platform's enter is sent to the window it comes into, and the
+filter is handed where that left the cursor. Not the offscreen cursor, and not `QTest.mouseMove`,
+which moves it: offscreen, a cursor move goes to the OLDEST window under the point, and in a worker
+that ran `test_main_window.py` first that is a window an earlier test left alive (F-053) -- the
+hover went there, and these tests failed after it, serially, and passed alone.
 """
 
 from __future__ import annotations
@@ -17,7 +23,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest  # noqa: E402
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402
 from PySide6.QtGui import QCursor, QEnterEvent, QWindow  # noqa: E402
-from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QCheckBox,
@@ -51,9 +56,19 @@ def _no_hover_filter_left_on_the_app():
 @pytest.fixture(autouse=True)
 def _cursor_parked():
     """The offscreen cursor stays where the last test left it, and Qt gives a widget shown under it
-    the hover by itself. Parked in a corner no window here reaches, so only the test moves it."""
-    QCursor.setPos(QPoint(5, 790))
+    the hover by itself. Parked off every screen, so no window of this file is ever under it."""
+    QCursor.setPos(QPoint(-500, -500))
     QApplication.processEvents()
+
+
+@pytest.fixture
+def pointer():
+    """Where the mouse is: set by `_hover`, read by the filter (`install(..., cursor_pos=)`)."""
+    return {"at": QPoint(-500, -500)}
+
+
+def _install(pointer) -> None:
+    hover_reset.install(QApplication.instance(), cursor_pos=lambda: pointer["at"])
 
 
 def _page(x: int, y: int, name: str):
@@ -113,17 +128,22 @@ def _to_another_app(elsewhere) -> None:
     assert QApplication.activeWindow() is None
 
 
-def _hover(window, widget) -> None:
-    """The mouse moved onto `widget`."""
-    QTest.mouseMove(window, _centre(window, widget))
+def _hover(window, widget, pointer=None) -> None:
+    """The mouse came into `window` over `widget`: the enter the platform sends, to the window's own
+    QWindow, which hands the hover to the widget under it."""
+    point = QPointF(_centre(window, widget))
+    where = QPointF(window.mapToGlobal(point.toPoint()))
+    QApplication.sendEvent(window.windowHandle(), QEnterEvent(point, point, where))
     QApplication.processEvents()
+    if pointer is not None:
+        pointer["at"] = where.toPoint()
 
 
-def test_leaving_the_window_for_another_app_drops_the_hover_it_held(window, elsewhere):
+def test_leaving_the_window_for_another_app_drops_the_hover_it_held(window, elsewhere, pointer):
     w, box, _button = window
-    hover_reset.install(QApplication.instance())
+    _install(pointer)
     _activate(w)
-    _hover(w, box)
+    _hover(w, box, pointer)
     assert box.underMouse()
 
     _to_another_app(elsewhere)
@@ -132,15 +152,14 @@ def test_leaving_the_window_for_another_app_drops_the_hover_it_held(window, else
     assert not box.underMouse() and not w.underMouse()
 
 
-def test_coming_back_gives_the_hover_to_what_is_under_the_cursor_now(window, elsewhere):
+def test_coming_back_gives_the_hover_to_what_is_under_the_cursor_now(window, elsewhere, pointer):
     w, box, button = window
-    cursor = {"at": w.mapToGlobal(QPoint(-50, -50))}
-    hover_reset.install(QApplication.instance(), cursor_pos=lambda: cursor["at"])
+    _install(pointer)
     _activate(w)
-    _hover(w, box)
+    _hover(w, box, pointer)
     _to_another_app(elsewhere)
     # Away, the mouse went over the button: the platform tells an inactive window nothing.
-    cursor["at"] = w.mapToGlobal(_centre(w, button))
+    pointer["at"] = w.mapToGlobal(_centre(w, button))
 
     _activate(w)
 
@@ -148,9 +167,10 @@ def test_coming_back_gives_the_hover_to_what_is_under_the_cursor_now(window, els
     assert button.underMouse() and not box.underMouse()
 
 
-def test_coming_back_with_the_cursor_outside_enters_nothing(window, elsewhere):
+def test_coming_back_with_the_cursor_outside_enters_nothing(window, elsewhere, pointer):
     w, box, button = window
-    hover_reset.install(QApplication.instance(), cursor_pos=lambda: w.mapToGlobal(QPoint(-50, -50)))
+    pointer["at"] = w.mapToGlobal(QPoint(-50, -50))
+    _install(pointer)
     _to_another_app(elsewhere)
 
     _activate(w)
@@ -158,32 +178,30 @@ def test_coming_back_with_the_cursor_outside_enters_nothing(window, elsewhere):
     assert not box.underMouse() and not button.underMouse()
 
 
-def test_a_switch_between_two_of_our_windows_keeps_the_hover(window, other):
+def test_a_switch_between_two_of_our_windows_keeps_the_hover(window, other, pointer):
     """Night review, I1: Qt activates the new window BEFORE it deactivates the old one, and a leave
     sent to the old window clears Qt's one app-wide record of where the mouse is -- the hover the
     new window had just been given. The platform sends no new enter, because the mouse never left.
     Closing the diagnostics, a modal, a keyboard switch: every switch between TCC's own windows."""
     w, _box, button = window
-    hover_reset.install(QApplication.instance())
+    _install(pointer)
     _activate(other)
-    _hover(w, button)
+    _hover(w, button, pointer)
 
     _activate(w)
-    QTest.mouseMove(w, _centre(w, button) + QPoint(1, 1))  # one more move on the button
-    QApplication.processEvents()
 
     assert button.underMouse()
 
 
-def test_coming_back_under_another_window_enters_nothing_beneath_it(window):
+def test_coming_back_under_another_window_enters_nothing_beneath_it(window, pointer):
     """Night review, M1: the cursor inside this window's rectangle is not the cursor over it when
     another window covers that point -- the diagnostics over the main window. The widget under it
     would keep a stale hover until the mouse crossed it again."""
     w, _box, button = window
     cover, _cbox, _cbutton = _page(20, 40, "cover")  # made later, so it is the one on top
     try:
-        where = w.mapToGlobal(_centre(w, button))
-        hover_reset.install(QApplication.instance(), cursor_pos=lambda: where)
+        where = pointer["at"] = w.mapToGlobal(_centre(w, button))
+        _install(pointer)
         assert QApplication.topLevelAt(where) is cover
         _activate(cover)
         assert not button.underMouse()
@@ -200,9 +218,7 @@ def test_a_child_is_left_alone(window):
     """A child sees its window's activate and deactivate too; only the window itself answers."""
     w, box, _button = window
     reset = hover_reset.HoverReset(cursor_pos=lambda: w.mapToGlobal(QPoint(-50, -50)))
-    point = QPointF(_centre(w, box))
-    QApplication.sendEvent(w.windowHandle(),
-                           QEnterEvent(point, point, QPointF(w.mapToGlobal(point.toPoint()))))
+    _hover(w, box)
     assert box.underMouse()
 
     reset.eventFilter(box, QEvent(QEvent.Type.WindowDeactivate))
@@ -221,8 +237,7 @@ def test_a_popup_keeps_its_own_hover():
     QApplication.processEvents()
     try:
         reset = hover_reset.HoverReset(cursor_pos=lambda: popup.mapToGlobal(QPoint(-50, -50)))
-        QTest.mouseMove(popup, _centre(popup, item))
-        QApplication.processEvents()
+        _hover(popup, item)
         assert item.underMouse()
 
         reset.eventFilter(popup, QEvent(QEvent.Type.WindowDeactivate))
