@@ -4209,10 +4209,23 @@ class MainWindow(QMainWindow):
         if not outstanding:
             return
         if self._capture_check is not None and self._capture_check.isRunning():
-            return  # one check at a time; the next title change re-triggers it
+            # One check at a time, and the one asked for now is run when that one ends (review
+            # M10): a check covers only what the round had taken when it started, so the captures
+            # the ledger has just recorded would otherwise wait for some later title change.
+            self._capture_check_again = True
+            return
+        self._capture_check_again = False
         self._capture_check = _CaptureCheckWorker(config.project_dir(), titles=outstanding)
         self._capture_check.result.connect(self._on_capture_check_done)
+        self._capture_check.finished.connect(self._on_capture_check_finished)
         self._capture_check.start()
+
+    def _on_capture_check_finished(self) -> None:
+        """The check's thread has ended: one asked for while it ran goes now. `finished` arrives
+        with `isRunning()` already false, as for the reviewer probe."""
+        if getattr(self, "_capture_check_again", False) and not getattr(self, "_closing", False):
+            self._capture_check_again = False
+            self._on_rew_titles_changed()
 
     def _offer_title_fixes(self, round_: dict) -> None:
         """A title REW holds that the round asked for under another spelling, or with a typo:
@@ -4236,17 +4249,23 @@ class MainWindow(QMainWindow):
             i18n.t("tfOffer").format(first=title_fixes.summary(fixes), n=len(fixes)), level="warn",
             action=(i18n.t("tfAction"), self._meas_panel.open_import))
 
-    def _on_capture_check_done(self, output: str) -> None:
+    def _on_capture_check_done(self, output: str, titles: Optional[list] = None) -> None:
         """Put the verdict on screen. The checker's own words, not a paraphrase.
 
         An unusable capture is a retake the Arbiter has to decide on, and deciding it needs the
         reason -- "silence in band" and "covers 200-2000 Hz, asked for 20-20000" lead to different
         actions at the car.
+
+        `titles` is what the check was handed. The method prints a line for every expected title,
+        and one it was not handed — not taken, so not checked — reads `UNUSABLE … не перевірено`
+        (tcc#21, review I5). Only the lines about those titles are answers.
         """
         # A curve that is not there is waiting, not unusable (the Arbiter, 2026-09-23): only a curve
-        # REW holds and the check failed is a retake to decide on.
+        # REW holds and the check failed is a retake to decide on. Nor is a curve nobody took.
+        asked = [str(title) for title in titles or []]
         bad = [line for line in (output or "").splitlines() if line.startswith("UNUSABLE")
-               and "no measurement titled" not in line.lower()]
+               and "no measurement titled" not in line.lower()
+               and (not asked or any(line.startswith(f"UNUSABLE {title} — ") for title in asked))]
         # One line and the rest behind a link, with a ✕ (finding 29): sixteen of them joined into
         # the strip took half the window and nothing could close it. A list closed by hand stays
         # closed until it CHANGES -- the same sixteen again are not news.

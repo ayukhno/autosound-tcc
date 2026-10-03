@@ -239,7 +239,10 @@ class _CaptureCheckWorker(QThread):
     freeze for seconds while somebody is sitting in a car waiting to move the mic.
     """
 
-    result = Signal(str)  # the checker's own output, or the refusal verbatim
+    #: The checker's own output, or the refusal verbatim — and the titles it was handed. The
+    #: method prints a line for every expected title, those it was not handed as `UNUSABLE …
+    #: не перевірено`, so a reader needs to know which lines are answers (tcc#21, review I5).
+    result = Signal(str, list)
 
     def __init__(self, project_dir, titles=None) -> None:
         super().__init__()
@@ -254,6 +257,7 @@ class _CaptureCheckWorker(QThread):
 
     def run(self) -> None:
         try:
-            self.result.emit(process_writer.check_captures(self._project_dir, self._titles))
+            self.result.emit(process_writer.check_captures(self._project_dir, self._titles),
+                             list(self._titles or []))
         except process_writer.ProcessWriterError as exc:
-            self.result.emit(str(exc))
+            self.result.emit(str(exc), list(self._titles or []))

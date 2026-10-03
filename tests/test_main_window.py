@@ -5555,6 +5555,7 @@ def _round_check_started(monkeypatch, round_: dict, known: list) -> list:
         def __init__(self, project_dir, titles=None):
             started.append(titles)
             self.result = SimpleNamespace(connect=lambda *_a: None)
+            self.finished = SimpleNamespace(connect=lambda *_a: None)
 
         def start(self) -> None:
             pass
@@ -5591,6 +5592,93 @@ def test_an_expected_title_in_rew_that_nobody_took_is_not_checked(monkeypatch):
     }, ["m-L_1 (sw)"])
 
     assert started == []
+
+
+def test_the_strip_counts_only_the_titles_the_check_was_handed(monkeypatch):
+    """Review I5 (tcc#21): the method's `capture-check` prints a line for EVERY expected title, and
+    one it was not handed — not taken, so not checked — prints `UNUSABLE <title> — не перевірено`.
+    After an import in a round still waiting for two, the strip said «Непридатних замірів: 2 —
+    w-R_1 (sw) — не перевірено» about two captures nobody had taken. A curve not taken is waiting,
+    not unusable (the Arbiter, 2026-09-23). Through the real worker, so the titles travel with the
+    answer the way they do in the app."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.state import process_view
+
+    _app()
+    window = MainWindow()
+    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
+        "id": "cap_001", "expected": ["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"],
+        "taken": {"w-L_1 (sw)": {"at": "2026-10-03T20:01:00", "planned": True}}})
+    monkeypatch.setattr(window._meas_panel, "known_titles",
+                        lambda: ["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"])
+    # What the method prints for `capture-check w-L_1 (sw)` in that round (process.py's CLI loop).
+    monkeypatch.setattr(process_writer, "check_captures", lambda project, titles=None, session=False: (
+        "UNUSABLE w-L_1 (sw) — in-band mean -96.1 dB — silence, not a sweep\n"
+        "UNUSABLE w-R_1 (sw) — не перевірено\n"
+        "UNUSABLE sw_1 (sw) — не перевірено\n"
+        "0/3 придатні"))
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **k: said.append(text))
+
+    window._on_rew_titles_changed()
+    window._capture_check.wait(5000)
+    _app().processEvents()
+
+    assert said == [i18n.t("unusableSummary").format(
+        n=1, first="w-L_1 (sw) — in-band mean -96.1 dB — silence, not a sweep")], said
+
+
+def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch):
+    """Review M10 (tcc#21): the ledger write asks for a check of what it just recorded while the
+    check the import itself set off is still running. "The next title change re-triggers it" held
+    while every check covered every expected title; one covering only what was taken loses the
+    rest, which then reads unchecked until something else changes."""
+    from types import SimpleNamespace
+
+    from autosound_tcc.state import process_view
+    from autosound_tcc.ui.tcc import main_window as mw
+
+    _app()
+    window = MainWindow()
+    round_ = {"id": "cap_001", "expected": ["w-L_1 (sw)", "w-R_1 (sw)"],
+              "taken": {"w-L_1 (sw)": {"at": "x"}}}
+    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: round_)
+    monkeypatch.setattr(window._meas_panel, "known_titles", lambda: ["w-L_1 (sw)", "w-R_1 (sw)"])
+    started: list = []
+    ended: list = []
+
+    class _Worker:
+        def __init__(self, project_dir, titles=None):
+            started.append(titles)
+            self.running = True
+            self.result = SimpleNamespace(connect=lambda *_a: None)
+            self.finished = SimpleNamespace(connect=ended.append)
+
+        def start(self) -> None:
+            pass
+
+        def isRunning(self) -> bool:  # noqa: N802 — Qt's name
+            return self.running
+
+        def isFinished(self) -> bool:  # noqa: N802 — Qt's name
+            return not self.running
+
+    monkeypatch.setattr(mw, "_CaptureCheckWorker", _Worker)
+    try:
+        window._on_rew_titles_changed()            # the import's own check: w-L_1
+        round_["taken"]["w-R_1 (sw)"] = {"at": "y"}
+        window._on_rew_titles_changed()            # the ledger wrote w-R_1: asked while it runs
+        assert started == [["w-L_1 (sw)"]]
+
+        window._capture_check.running = False
+        for callback in list(ended):
+            callback()
+
+        assert started == [["w-L_1 (sw)"], ["w-L_1 (sw)", "w-R_1 (sw)"]]
+    finally:
+        window._capture_check = None
 
 
 def test_the_capture_check_worker_hands_the_method_its_titles(monkeypatch, tmp_path):
