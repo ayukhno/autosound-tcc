@@ -257,6 +257,8 @@ def taken_as_is(project_dir: Optional[Path] = None) -> dict[str, str]:
 # `flagged_by_the_window` below, and in `main_window`'s `settled` and `_on_capture_check_done`),
 # `MeasItem.own_range`,
 # `measOwnRange*`, and `Candidate.checked` with what writes it.
+# The clash half (`flagged_by_the_window`, `CLASHES`, the clash names in `checked`) is not about the
+# band: keep it at that re-pin unless the method's check also reads titles by then.
 
 
 def window_checked(project_dir: Optional[Path] = None) -> dict[str, str]:

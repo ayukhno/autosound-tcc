@@ -64,7 +64,7 @@ evidence it names cannot be found on disk.
 ![The In focus now card: a capture round with sweeps waiting and MMM captures done](img/capture-round.webp)
 
 When a step needs measurements, *In focus now* lists them by name and method (sweep, MMM RTA). The
-colours: yellow **waiting**, blue **in REW**, green **done**, red **unusable** (a retake), grey
+colours: yellow **waiting**, blue **in REW**, green **done** (or «taken as it is», «usable over its own range»), red **unusable** (a retake), grey
 **skipped**. Take the measurements in REW under these names, then press **⬇** to read them from
 REW, matched against what the round expects. When they are all in, **Done** tells the AI to start on
 them. The picker at the top opens earlier rounds. **Protection** records the protective filters a

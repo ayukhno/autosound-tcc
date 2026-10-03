@@ -1027,7 +1027,7 @@ def test_only_truncated_reads_the_method_s_own_line(monkeypatch):
 
 
 def test_the_window_s_verdict_names_any_clash_it_found():
-    """The review's m4: every clash the window found goes to the card under its own name — the
+    """tcc#149, the review's m4: every clash the window found goes to the card under its own name — the
     driver's as well as the kind's — and a usable verdict as `usable`."""
     usable = dict(_verdict(), kind="sweep")
 

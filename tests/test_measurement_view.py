@@ -1110,7 +1110,7 @@ def test_a_capture_the_window_flagged_for_its_kind_reads_as_in_the_window(projec
 
 
 def test_a_capture_the_window_flagged_for_its_driver_reads_as_in_the_window(project):
-    """The review's m4: a tweeter title whose sweep peaks in a sub's range was red in the window
+    """tcc#149, the review's m4: a tweeter title whose sweep peaks in a sub's range was red in the window
     and taken there «as it is»; the method, which reads no titles, passes it. The card says what
     the window said, as for a title of the wrong kind."""
     from autosound_tcc.core import capture_import

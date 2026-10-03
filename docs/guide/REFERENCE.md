@@ -219,7 +219,7 @@ The card lists the measurements that the current step expects, by name, in one c
 |---|---|
 | yellow | **waiting**: not taken yet |
 | blue | **in REW**: REW has it, not read yet |
-| green | **done**: read and accepted |
+| green | **done**: read and accepted — or **taken as it is** (the check failed it and you took it anyway), or **usable over its own range** (a sub's or a tweeter's sweep, judged over the range it was taken with) |
 | red | **unusable**: taken, failed the check, needs a retake |
 | grey | **skipped** |
 
