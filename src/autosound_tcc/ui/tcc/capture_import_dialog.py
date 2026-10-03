@@ -56,7 +56,7 @@ from autosound_tcc.ui.tcc import i18n, qt_shutdown, sizing
 from autosound_tcc.ui.tcc.channel_order_dialog import ChannelOrderDialog
 from autosound_tcc.ui.tcc.protective_dialog import ProtectiveLegsDialog
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
-from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
+from autosound_tcc.ui.tcc.theme import MiniCombo, apply_caps, current_theme
 
 #: Where a row's uuid rides on its checkbox item, so a tick survives a re-render.
 _UUID = Qt.ItemDataRole.UserRole
@@ -133,7 +133,7 @@ class _NameDelegate(QStyledItemDelegate):
         self._dialog = dialog
 
     def createEditor(self, parent, option, index):  # noqa: N802 — Qt's name
-        combo = QComboBox(parent)
+        combo = MiniCombo(parent)  # its list as wide as its rows (tcc#145's review, I1)
         combo.setEditable(True)
         combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         combo.lineEdit().setPlaceholderText(i18n.t("capImportNamePick"))

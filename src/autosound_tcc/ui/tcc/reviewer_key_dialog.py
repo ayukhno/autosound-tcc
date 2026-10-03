@@ -37,7 +37,6 @@ from PySide6.QtCore import QEvent, QEventLoop, Qt
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QGridLayout,
@@ -51,6 +50,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import critic_env, reviewer_key, terminal_launcher
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.theme import MiniCombo
 
 _NAMES = {"google": "Google (Gemini)", "anthropic": "Anthropic (Claude)", "openai": "OpenAI"}
 
@@ -159,7 +159,7 @@ class ReviewerKeyDialog(QDialog):
         self._drops: dict[str, QPushButton] = {}
 
         entry = QHBoxLayout()
-        self._provider = QComboBox()
+        self._provider = MiniCombo()  # its list as wide as its rows (tcc#145's review, I1)
         for provider in reviewer_key.PROVIDERS:
             self._provider.addItem(_NAMES[provider], provider)
         entry.addWidget(self._provider)

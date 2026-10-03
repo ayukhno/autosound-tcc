@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import config_writer
 from autosound_tcc.state import ledger_line
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.theme import MiniCombo
 
 
 class SaveConfigDialog(QDialog):
@@ -53,7 +53,7 @@ class SaveConfigDialog(QDialog):
         if standing is not None:
             self._name.setText(standing[0])
         form.addRow(i18n.t("cfgName"), self._name)
-        self._slot = QComboBox()
+        self._slot = MiniCombo()  # its list as wide as its rows (tcc#145's review, I1)
         for name in slots or [slot]:
             self._slot.addItem(name, name)
         index = self._slot.findData(slot)

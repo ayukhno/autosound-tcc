@@ -1203,3 +1203,23 @@ def test_an_rta_given_a_sweep_s_name_here_reads_red_too(tmp_path):
 
     assert asked == ["m_2 (rta)"], "asked about by REW's own title"
     assert dialog._table.cellWidget(_row_of(dialog, "u2"), _COL_CHECK) is not None, "red"
+
+
+def test_a_new_name_list_holds_its_names_whole_in_a_narrow_column(tmp_path, monkeypatch):
+    """tcc#145's review, I1: every combo's list has `.mini-select`'s room for the check mark, and
+    a plain box's list is only as wide as the box — here the New name column, which the tuner
+    drags as narrow as he likes. The names the round waits for are read whole whatever its width."""
+    from tests import _windows
+
+    names = ["L w+m+tw_3 (rta) noXO", "m-L p1_3 (sw)"]
+    dialog = _dialog(_rew(3), tmp_path, expected=names)
+    _windows.theme_on(monkeypatch, dialog, "dark")
+    dialog._table.horizontalHeader().resizeSection(4, 110)
+    dialog.show()
+    try:
+        _app().processEvents()
+        editor = dialog._table.indexWidget(dialog._table.model().index(0, 4))
+        assert editor is not None and editor.count() == len(names)
+        assert _windows.cut_rows(editor) == []
+    finally:
+        dialog.close()

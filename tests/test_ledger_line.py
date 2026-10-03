@@ -151,6 +151,25 @@ def test_the_form_offers_the_device_preset_it_was_last_saved_to(tmp_path, monkey
     assert dialog.said == "SQ-2 = v_006 in slot SQ"
 
 
+def test_the_slot_list_holds_a_long_slot_name_whole(tmp_path, monkeypatch):
+    """tcc#145's review, I1: every combo's list has `.mini-select`'s room for the check mark, and
+    a plain box's list is only as wide as the box. A slot name longer than anything else in the
+    form sizes the box to itself, and its row came back cut."""
+    from autosound_tcc.ui.tcc.save_config_dialog import SaveConfigDialog
+    from tests import _windows
+
+    QApplication.instance() or QApplication([])
+    _arbiter_example(tmp_path)
+    dialog = SaveConfigDialog(tmp_path, "v_006", "SQ",
+                              ["FULL", "SQ", "Daily drive with the rear fill switched off"])
+    _windows.theme_on(monkeypatch, dialog, "dark")
+    dialog.show()
+    try:
+        assert _windows.cut_rows(dialog._slot) == []
+    finally:
+        dialog.close()
+
+
 def test_the_dsp_header_names_the_configuration_in_the_processor(tmp_path, monkeypatch):
     from types import SimpleNamespace
 

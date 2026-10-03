@@ -214,6 +214,27 @@ def test_the_screen_shows_where_never_what(monkeypatch):
     dialog.close()
 
 
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_the_provider_list_holds_every_provider_whole(monkeypatch, mode):
+    """tcc#145's review, I1: the sheet gives every combo's list `.mini-select`'s room for the check
+    mark, and the provider box — finding 143's own — opened a list as narrow as itself: «Googl…
+    mini)», «Anthro…laude)» under the Windows style. Its list is as wide as its widest row needs,
+    with the real rows, in either theme."""
+    from autosound_tcc.ui.tcc.reviewer_key_dialog import ReviewerKeyDialog
+    from tests import _windows
+
+    QApplication.instance() or QApplication([])
+    _use(monkeypatch, _Method())
+    dialog = ReviewerKeyDialog()
+    _windows.theme_on(monkeypatch, dialog, mode)
+    dialog.show()
+    try:
+        assert dialog._provider.count() >= 3
+        assert _windows.cut_rows(dialog._provider) == []
+    finally:
+        dialog.close()
+
+
 def test_the_move_runs_only_in_a_terminal_the_arbiter_answers(monkeypatch):
     """`key move-shell` asks before it moves — so TCC opens it where the Arbiter can answer, and
     never runs it quietly."""

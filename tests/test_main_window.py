@@ -2748,6 +2748,41 @@ def test_a_project_whose_model_retired_is_offered_a_replacement(tmp_path, monkey
     assert mc.resolve(window._model_choices, "sdk:claude-opus-4-1").ok
 
 
+def test_the_replacement_list_holds_its_models_whole(tmp_path, monkeypatch):
+    """tcc#145's review, I1: every combo's list has `.mini-select`'s room for the check mark, and a
+    plain box's list is only as wide as the box. The retired model's replacement list is read
+    whole, row by row, as the window builds it."""
+    from PySide6.QtWidgets import QComboBox, QMessageBox
+
+    from autosound_tcc.core import config, model_choices as mc, project_settings
+    from tests import _windows
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "cli_available", lambda harness: False)
+    project_settings.set_value(config.tcc_dir(tmp_path), "generator", "sdk:claude-opus-4-1")
+    seen = []
+
+    def look(box):
+        _windows.theme_on(monkeypatch, box, "dark")
+        box.show()
+        _app().processEvents()
+        for combo in box.findChildren(QComboBox):
+            seen.append((combo.count(), _windows.cut_rows(combo)))
+        box.hide()
+        return QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(QMessageBox, "exec", look)
+
+    _app()
+    MainWindow()
+
+    assert seen and seen[0][0] >= 1, "the replacement box was asked"
+    assert seen[0][1] == [], seen
+
+
 def test_declining_the_replacement_writes_nothing(tmp_path, monkeypatch):
     """The model may come back, or the Arbiter may want to choose deliberately later."""
     from PySide6.QtWidgets import QMessageBox

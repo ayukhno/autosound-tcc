@@ -44,6 +44,11 @@ def drawn_width(metrics: QFontMetricsF, text: str) -> float:
 class MiniCombo(QComboBox):
     """A `.mini-select` whose DROP-DOWN is as wide as its widest row, whatever the box's width.
 
+    And every other box of the app's: the sheet gives every combo's list `.mini-select`'s room for
+    the check mark (tcc#145), so a plain `QComboBox` opened a list as wide as itself and the
+    reviewer-key window's provider list read «Googl…mini)» (the review of tcc#145, I1). The class
+    is not given with it: the widening is all a plain box takes from here.
+
     Qt sizes a popup to the closed box unless told otherwise. These combos are narrow on purpose —
     they sit in tight rows — and `AdjustToContents` only grows the box when the layout lets it, so
     on a platform where the UI font is wider the rows came back elided: `AGY · Gem...sh (High)`,
@@ -55,8 +60,8 @@ class MiniCombo(QComboBox):
     noticing. Here it is right every time it is opened, and costs one pass over the rows.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
         #: What a row lends this box past its own ask, and its maximum before any was lent (VM-9).
         self._lent = 0
         self._cap: int | None = None

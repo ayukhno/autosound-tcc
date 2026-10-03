@@ -128,3 +128,31 @@ def drop_language_listeners_since(before: list) -> None:
         return
     kept = {id(entry) for entry in before}
     i18n._listeners[:] = [entry for entry in i18n._listeners if id(entry) in kept]
+
+
+def cut_rows(combo) -> list:
+    """The rows `combo`'s open list draws cut (tcc#145's review, I1): each row's ink in its own
+    font, plus the item padding the sheet gives every combo's list (`theme.py`, 28 + 14 px), wider
+    than the list's viewport. Opened and closed here, under whatever sheet the box is under.
+
+    Measured through `theme.drawn_width`, an inequality on the ink: a font-less runner measures
+    every row as nothing and finds nothing cut, never the other way round."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFont, QFontMetricsF
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import theme
+
+    app = QApplication.instance()
+    combo.showPopup()
+    app.processEvents()
+    room = combo.view().viewport().width()
+    cut = []
+    for i in range(combo.count()):
+        font = combo.itemData(i, Qt.ItemDataRole.FontRole)
+        metrics = QFontMetricsF(font if isinstance(font, QFont) else combo.view().font())
+        if theme.drawn_width(metrics, combo.itemText(i)) + 28 + 14 > room:
+            cut.append(combo.itemText(i))
+    combo.hidePopup()
+    app.processEvents()
+    return cut

@@ -139,7 +139,7 @@ from autosound_tcc.ui.tcc.reviewer_key_dialog import ReviewerKeyDialog
 from autosound_tcc.ui.tcc.save_config_dialog import SaveConfigDialog
 from autosound_tcc.ui.tcc.spinner import Spinner
 from autosound_tcc.ui.tcc.status_strip import StatusStrip
-from autosound_tcc.ui.tcc.theme import apply_caps, apply_theme, current_theme
+from autosound_tcc.ui.tcc.theme import MiniCombo, apply_caps, apply_theme, current_theme
 from autosound_tcc.ui.tcc.theme import mini_combo as theme_mini_combo
 from autosound_tcc.ui.tcc.workers import (
     _CaptureCheckWorker,
@@ -5556,7 +5556,7 @@ class MainWindow(QMainWindow):
         box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle(i18n.t("modelGoneTitle"))
         box.setText(i18n.t("modelGone").format(model=key))
-        combo = QComboBox(box)
+        combo = MiniCombo(box)  # its list as wide as its rows (tcc#145's review, I1)
         for choice in _replacements_for(key, entries):
             combo.addItem(f"{choice.route} · {choice.label}", choice.key)
         box.layout().addWidget(combo, 1, 1)
