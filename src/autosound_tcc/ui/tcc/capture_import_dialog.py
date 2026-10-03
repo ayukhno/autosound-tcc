@@ -222,6 +222,11 @@ class CaptureImportDialog(QDialog):
         #: How many times the check could not run; an Apply that waited through a new one stays.
         self._check_failures = 0
         self._failures_at_apply = 0
+        #: The check could not run (REW down, say), so ticks after it are not checked: each one
+        #: started a worker that failed again, one more refused connection and the same line
+        #: under the table (final review M6). Apply asks once more, over everything ticked since;
+        #: a re-open is a new window and starts afresh.
+        self._check_held = False
         self._closed = False
 
         self._all = capture_import.candidates(self._measurements, project_dir)
@@ -594,8 +599,9 @@ class CaptureImportDialog(QDialog):
 
     def _unchecked(self) -> list[capture_import.Candidate]:
         """Ticked sweeps the check has not answered for yet — the SELECTED ones only (the Arbiter,
-        2026-10-02): a verdict per listed row is an FR and an impulse for rows nobody chose."""
-        if self._check is None:
+        2026-10-02): a verdict per listed row is an FR and an impulse for rows nobody chose. None
+        while the check is held after a failure: nothing is waited for that nothing will ask."""
+        if self._check is None or self._check_held:
             return []
         return [row for row in capture_import.to_check(self.ticked_rows())
                 if row.uuid not in self._verdicts]
@@ -654,8 +660,10 @@ class CaptureImportDialog(QDialog):
             self._verdicts[uuid] = {}  # not checked: no mark, and not asked again in this window
         self._check_error = error
         self._check_failures += 1
+        # Held, not restarted: what was ticked meanwhile, and what is ticked from now on, waits
+        # for the next Apply (M6).
+        self._check_held = True
         self._refresh_checks()
-        self._check_selected()
         self._resolve_wait()
 
     def _resolve_wait(self) -> None:
@@ -858,6 +866,9 @@ class CaptureImportDialog(QDialog):
                 channels=", ".join(sorted(set(conflicts))))
             self._render()
             return
+        # A check that could not run is asked once more here, over what was ticked since — the
+        # one moment worth another try at REW, rather than every tick (final review M6).
+        self._check_held = False
         if self.checking() and not self._apply_waiting:
             # Opened and applied at once is the common way through, and it must not walk past
             # the check that is the point of #21. So the first Apply waits for the verdicts and

@@ -775,6 +775,37 @@ def test_a_check_that_cannot_run_is_said_and_holds_nothing(tmp_path):
     assert [row.uuid for row in dialog.taken()] == ["u3"]
 
 
+def test_a_check_that_could_not_run_is_asked_again_at_apply_not_at_every_tick(tmp_path):
+    """Final review M6: after a check failed (REW down), every new tick started another worker
+    that failed again — one more refused connection, the same line under the table, and one more
+    failure counted, per tick. The window holds the check after a failure; Apply asks once more,
+    over everything ticked since, and a re-open starts afresh."""
+    check, asked = _checker({}, fail="URLError: <urlopen error [Errno 61] Connection refused>")
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _settle(dialog)
+    assert asked == ["u3"] and dialog._check_failures == 1
+
+    for uuid in ("u1", "u2"):
+        dialog._table.item(_row_of(dialog, uuid), 0).setCheckState(Qt.CheckState.Checked)
+        _settle(dialog)
+
+    assert asked == ["u3"], "a tick after the failure started the check again"
+    assert dialog._check_failures == 1
+    assert not dialog.checking()
+
+    dialog._on_apply()
+    _settle(dialog)
+
+    assert sorted(asked[1:]) == ["u1", "u2"], "Apply asks once more, over what was ticked since"
+    assert dialog._check_failures == 2
+    assert dialog.result() != int(QDialog.DialogCode.Accepted), "failed during the wait: said once"
+
+    dialog._on_apply()
+
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+    assert len(asked) == 3
+
+
 def test_a_sweep_left_for_a_retake_stays_on_screen(tmp_path):
     """Ticked by name far up the list, it was on screen only because it was ticked; the check
     unticks it, and the next redraw must not take it — and its «Take it as it is» — out of view."""
