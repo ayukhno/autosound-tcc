@@ -506,6 +506,59 @@ def test_linux_terminal_session_gets_them_too(recorded, monkeypatch, tmp_path):
         in " ".join(recorded[0])
 
 
+#: A CLI path a person really has: a space, an `&` and an apostrophe (night review of #134, M10).
+_AWKWARD_BIN = {"posix": "/Users/O'Neil/R&D tools/agy",
+                "win32": "C:\\Users\\O'Neil\\R&D tools\\agy.exe"}
+
+
+def _posix_line(recorded, monkeypatch, platform, tmp_path, env) -> str:
+    """The shell line the terminal runs: Linux hands it over as the last argument, macOS inside
+    an AppleScript literal (whose escaping has tests of its own above)."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", platform)
+    lines: list = []
+    real = terminal_launcher._mac_script
+    monkeypatch.setattr(terminal_launcher, "_mac_script",
+                        lambda app, line: lines.append(line) or real(app, line))
+    launch(tmp_path, "claude", env=env)
+    return lines[0] if platform == "darwin" else recorded[0][-1]
+
+
+@pytest.mark.parametrize("platform", [
+    "linux",
+    pytest.param("darwin", marks=pytest.mark.skipif(os.name == "nt", reason="AppleScript")),
+])
+def test_a_value_that_needs_quoting_reaches_the_cli_whole(recorded, monkeypatch, tmp_path,
+                                                          platform):
+    """`shlex.quote` per value: the line splits back into exactly the value it was given."""
+    import shlex
+
+    monkeypatch.setenv("GEMINI_API_KEY", "AQ.not-a-real-key")
+    env = {**_PICK_ENV, "AUTOSOUND_CRITIC_BIN": _AWKWARD_BIN["posix"]}
+
+    line = _posix_line(recorded, monkeypatch, platform, tmp_path, env)
+
+    words = shlex.split(line)
+    assert f"AUTOSOUND_CRITIC_BIN={_AWKWARD_BIN['posix']}" in words
+    assert words[words.index("env") + 1:][:3] == [f"{k}={v}" for k, v in env.items()]
+    assert "_API_KEY" not in line, "the line carries the pick, never a key from TCC's environment"
+
+
+@pytest.mark.parametrize("wt", [True, False])
+def test_a_value_that_needs_quoting_is_set_whole_on_windows(recorded, monkeypatch, tmp_path, wt):
+    """`set "K=V"`: the quotes keep the space and the `&` in the value. Whether cmd reads the
+    line as Python hands it over is the Arbiter's VM check (night review of #134, M9)."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(terminal_launcher.shutil, "which",
+                        lambda name: f"C:/{name}" if (wt or name != "wt") else None)
+    monkeypatch.setenv("GEMINI_API_KEY", "AQ.not-a-real-key")
+
+    launch(tmp_path, "claude", env={**_PICK_ENV, "AUTOSOUND_CRITIC_BIN": _AWKWARD_BIN["win32"]})
+
+    line = recorded[0][-1]
+    assert f'set "AUTOSOUND_CRITIC_BIN={_AWKWARD_BIN["win32"]}" && ' in line
+    assert "_API_KEY" not in " ".join(recorded[0])
+
+
 def test_no_env_keeps_every_line_as_it_was(recorded, monkeypatch, tmp_path):
     monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
 
