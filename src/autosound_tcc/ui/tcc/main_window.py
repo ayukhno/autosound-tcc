@@ -463,6 +463,13 @@ def _breakable(text: str) -> str:
     return text.replace("\\", "\\\u200b").replace("/", "/\u200b")
 
 
+def _backup_label(step: int) -> str:
+    """«Back up to GitHub (1/2)»: the backup is two presses — the repository, then the private copy
+    on GitHub — and the first one looked like all of it (finding 145). The step comes from the
+    folder (`_show_git_state`), never from a count of presses."""
+    return f"{i18n.t('gitBackupBtn')} ({step}/2)"
+
+
 def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel, QLabel | None]:
     """A small-caps section header row (mirrors the prototype's `.phead`).
 
@@ -766,6 +773,8 @@ class MainWindow(QMainWindow):
         # twice on 2026-09-09 — and what would collapse every panel into a narrow strip.
         self._zoom = _sane_zoom(self._settings.value(_ZOOM_KEY, 1.0))
         self._view: ProjectView | None = None
+        # The step «Back up to GitHub» shows, as the folder last read: 0, 1, or None for no button.
+        self._backup_step: Optional[int] = None
         self._has_project = False  # set for real by _load_project(); read by _refresh_process()
         # Here, and not where a session starts it: filling the model combos below fires
         # `currentIndexChanged`, so `_on_effort_changed` runs while the window is still being
@@ -3091,6 +3100,7 @@ class MainWindow(QMainWindow):
 
     def _show_git_state(self) -> None:
         section = self._project_section
+        self._backup_step = None
         if config.chosen_project_dir() is None:
             section.set_sub("")
             section.set_dot(None)
@@ -3113,10 +3123,13 @@ class MainWindow(QMainWindow):
         section.set_dot(git.level)
         section.set_sub_tip(tip)
         body = section.body_layout()
+        # One button, two steps, read from the folder (finding 145): no repository is 0/2 and makes
+        # one; a repository with no remote is 1/2 and offers the GitHub copy; a backup, no button.
         if not git.works or not git.repo:
             body.addWidget(_kv_row(i18n.t("gitRow"), sub))
             if git.works:
-                body.addWidget(self._git_button("gitInitBtn", "gitInitTip", self._on_git_init))
+                self._backup_step = 0
+                body.addWidget(self._git_button(_backup_label(0), "gitInitTip", self._on_git_init))
             return
         body.addWidget(_kv_row(i18n.t("gitRow"), git.branch or "—"))
         if git.changed is not None:
@@ -3126,14 +3139,15 @@ class MainWindow(QMainWindow):
         if git.unpushed:
             body.addWidget(_kv_row(i18n.t("gitUnpushed"), str(git.unpushed)))
         if not git.remote:
-            body.addWidget(self._git_button("gitBackupBtn", "gitBackupTip", self._on_git_backup))
+            self._backup_step = 1
+            body.addWidget(self._git_button(_backup_label(1), "gitBackupTip", self._on_git_backup))
 
-    def _git_button(self, text_key: str, tip_key: str, slot) -> QWidget:
+    def _git_button(self, text: str, tip_key: str, slot) -> QWidget:
         """A one-click fix under the git rows: the method's own command, run on the click."""
         row = QWidget()
         layout = QHBoxLayout(row)
         layout.setContentsMargins(12, 2, 12, 6)
-        button = QPushButton(i18n.t(text_key))
+        button = QPushButton(text)
         button.setProperty("class", "link-btn")
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         attach_tip(button, i18n.t(tip_key))
@@ -3142,18 +3156,25 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
         return row
 
-    def _after_git(self, ok: bool, said: str, too_old: bool = False) -> None:
+    def _after_git(self, ok: bool, said: str, too_old: bool = False,
+                   first_step: bool = False) -> None:
+        # The panel first: the line below names the step the folder is at now.
+        self._set_project_params(self._view)
+        last = said.splitlines()[-1] if said else ""
         if too_old:
             self._status_strip.notify(i18n.t("gitTooOld"), level="warn")
+        elif ok and first_step and self._backup_step == 1:
+            # The first press looked like the whole backup (finding 145): it says the second.
+            self._status_strip.notify(i18n.t("gitStep1Done").format(
+                said=last, button=_backup_label(1)))
         elif ok:
-            self._status_strip.notify(i18n.t("gitDone").format(said=said.splitlines()[-1]
-                                                              if said else ""))
+            self._status_strip.notify(i18n.t("gitDone").format(said=last))
         else:
             self._status_strip.notify(i18n.t("gitFailed").format(said=said or "—"), level="warn")
-        self._set_project_params(self._view)
 
     def _on_git_init(self) -> None:
-        """«Зробити репозиторій»: the method's `project_repo.py init` on this project (hub #199)."""
+        """«Копія на GitHub (0/2)»: the method's `project_repo.py init` on this project (hub #199),
+        the first of the backup's two steps."""
         project = config.chosen_project_dir()
         if project is None:
             return
@@ -3162,10 +3183,11 @@ class MainWindow(QMainWindow):
             result = project_repo.init(project)
         finally:
             QApplication.restoreOverrideCursor()
-        self._after_git(result.ok, result.said, result.too_old)
+        self._after_git(result.ok, result.said, result.too_old, first_step=True)
 
     def _on_git_backup(self) -> None:
-        """«Копія на GitHub»: the method's offer, shown whole, and run only on the Arbiter's yes."""
+        """«Копія на GitHub (1/2)»: the method's offer, shown whole, and run only on the Arbiter's
+        yes."""
         project = config.chosen_project_dir()
         if project is None:
             return
