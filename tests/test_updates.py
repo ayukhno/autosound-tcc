@@ -1237,8 +1237,13 @@ def _tcc_origin(monkeypatch, tmp_path):
     return temp
 
 
-def _offering(monkeypatch, tag):
+def _offering(monkeypatch, tag, installed: str = "0.1.40"):
+    """`tag` is the newest on the channel, offered to a TCC at `installed` — pinned, because the
+    press refuses a tag older than what is installed (review of finding 144, I1), and this tree's
+    own version moves with every release."""
     monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": tag)
+    monkeypatch.setattr(install_report, "app_version", lambda: installed)
+    monkeypatch.setattr(install_report, "requested_revision", lambda: "")
 
 
 def _left_in(temp):
@@ -1408,6 +1413,29 @@ def test_the_update_log_gets_the_check_s_result(monkeypatch, tmp_path):
 
     assert said == ["tcc tag v0.1.44: v0.1.44 predates signed tags (they start at v0.1.45): "
                     "installed without a signature check"]
+
+
+def test_a_stale_update_tcc_press_does_not_install_an_older_release(monkeypatch, tmp_path):
+    """Review of finding 144, I1: the press resolves the newest tag again when it runs, so a row
+    gone stale — a second project window after the beta box was unticked in another, a candidate
+    installed from a terminal while TCC ran — kept «Update TCC» live, and the press wrote the
+    install of an OLDER release over the candidate. Refused as `ahead`, the row's own rule, before
+    anything is fetched or written."""
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
+    _tcc_installed(monkeypatch, "0.1.38", _RC1, "beta-v0.2.0-rc1")
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.1.45")
+    ran = []
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
+        ran.append(args) or (True, "")))
+
+    ready = updates.prepare_tcc_update(updates.STABLE, pid=4242, platform="darwin")
+
+    assert (ready.script, ready.reason, ready.tag) == (None, "ahead", "v0.1.45"), ready
+    assert ready.detail == "0.1.38 (beta-v0.2.0-rc1) → v0.1.45"
+    assert ran == [], "nothing fetched"
+    assert list(temp.iterdir()) == [], "no script written"
 
 
 def test_a_beta_candidate_of_tcc_is_ordered_on_its_channel_not_refused_as_no_release(monkeypatch):

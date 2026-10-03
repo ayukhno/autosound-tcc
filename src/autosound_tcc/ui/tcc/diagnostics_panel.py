@@ -941,7 +941,9 @@ class DiagnosticsDialog(QDialog):
             version = done.version.lstrip("v")
             self.updateLearned.emit(updates.Status("skill", version, version, False))
         else:
-            button.setEnabled(True)
+            # Pressed again, «ahead» would only fetch and say the same: off until a Re-check
+            # (review of finding 144, M2). Any other refusal can change on its own.
+            button.setEnabled(done.reason != "ahead")
 
     def _update_tcc(self) -> None:
         """Handed to a terminal, with the reason said out loud — once TCC's own tag checks out.
@@ -983,8 +985,9 @@ class DiagnosticsDialog(QDialog):
             return
         if ready.script is None:
             # Nothing was written, so nothing runs: the reason where the window would have been.
+            # And «ahead» keeps the button off, as on the method's row (review of finding 144).
             label.setText(i18n.t("updFailed").format(why=_reason(ready.reason, ready.detail)))
-            button.setEnabled(True)
+            button.setEnabled(ready.reason != "ahead")
             return
         try:
             terminal_launcher.run_script(ready.script)

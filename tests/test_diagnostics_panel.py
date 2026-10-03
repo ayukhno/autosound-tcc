@@ -849,6 +849,15 @@ def _finish_tcc_update(dialog) -> None:
     assert dialog._tcc_job is None, "the TCC update never settled"
 
 
+def _tcc_at(monkeypatch, version: str, revision: str = "") -> None:
+    """The TCC the press runs from — pinned, since the press refuses a tag older than it (review
+    of finding 144, I1) and this tree's own version moves with every release."""
+    from autosound_tcc.core import install_report
+
+    monkeypatch.setattr(install_report, "app_version", lambda: version)
+    monkeypatch.setattr(install_report, "requested_revision", lambda: revision)
+
+
 def _tag_checked(monkeypatch, answer=(True, "v0.9.9: signature good (ayukhno)", "", "c" * 40)):
     """TCC's own tag check (tcc#102) answered without the network; the tags it was asked about."""
     from autosound_tcc.core import updates
@@ -912,6 +921,7 @@ def test_a_tcc_tag_that_does_not_verify_opens_no_terminal_and_says_why(monkeypat
     dialog._show_update(updates.Status("tcc", "0.1.44", "0.1.46", True))
     monkeypatch.setattr(terminal_launcher, "run_script",
                         lambda path: pytest.fail("no terminal for a tag that does not verify"))
+    _tcc_at(monkeypatch, "0.1.44")  # not this tree's own number: the press refuses a move back
     monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.1.46")
     _tag_checked(monkeypatch, (False, "v0.1.46: No principal matched.", "bad_signature", ""))
 
@@ -1421,6 +1431,55 @@ def test_a_press_refused_as_a_move_back_says_why_in_words():
     assert i18n.t("updWhy_ahead") != "updWhy_ahead", "a sentence of its own"
     assert label.text() == i18n.t("updFailed").format(
         why=f"{i18n.t('updWhy_ahead')}: 3.1.0 → v3.0.66")
+
+
+def test_a_press_refused_as_a_move_back_leaves_the_button_off():
+    """Review of finding 144, M2: after «ahead» the button came back on, and pressing it again
+    fetched, ran the old tag's status and was refused again. Another refusal leaves it on — the
+    person can try again; this one would only say the same."""
+    from autosound_tcc.core import updates
+
+    _app()
+    dialog = DiagnosticsDialog()
+    label, button = dialog._update_rows["skill"]
+
+    button.setEnabled(True)
+    dialog._after_skill_update(updates.SkillUpdate(False, "ahead", "3.1.0 → v3.0.66"))
+    assert not button.isEnabled()
+
+    dialog._after_skill_update(updates.SkillUpdate(False, "fetch_failed", "no network"))
+    assert button.isEnabled(), "a refusal that can change on its own is pressed again"
+
+
+def test_a_stale_update_tcc_press_says_ahead_and_installs_nothing(monkeypatch, tmp_path):
+    """Review of finding 144, I1, at the row: a row gone stale was pressed — a candidate,
+    `beta-v0.2.0-rc1` with 0.1.38 in its metadata, and the newest stable `v0.1.45`. No tag is
+    checked, no terminal opens, the row says why, and the button stays off."""
+    import tempfile
+
+    from autosound_tcc.core import terminal_launcher, updates
+
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._show_update(updates.Status("tcc", "0.1.38", "0.1.45", True))
+    monkeypatch.setattr(terminal_launcher, "run_script",
+                        lambda path: pytest.fail("no terminal for an older release"))
+    monkeypatch.setattr(updates, "check_tcc_tag",
+                        lambda tag: pytest.fail("nothing fetched for an older release"))
+    _tcc_at(monkeypatch, "0.1.38", "beta-v0.2.0-rc1")
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.1.45")
+
+    dialog._update_tcc()
+    _finish_tcc_update(dialog)
+
+    label, button = dialog._update_rows["tcc"]
+    assert label.text() == i18n.t("updFailed").format(
+        why=f"{i18n.t('updWhy_ahead')}: 0.1.38 (beta-v0.2.0-rc1) → v0.1.45")
+    assert not button.isEnabled()
+    assert list(temp.iterdir()) == []
 
 
 def test_the_rew_line_reads_the_v3017_shape(monkeypatch):

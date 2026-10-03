@@ -211,7 +211,9 @@ def skill_version() -> str:
     A SIGNATURE FOR A PERSON, and not an identifier — `skill_sha()` is that. This number is kept
     by hand and in the method's own repository the two already disagree: `main` carries 3.0.36
     while `marketplace.json` still says 2.8.3 (measured 2026-08-27). It goes on screen because it
-    is what a person quotes; nothing is ever DECIDED by comparing it.
+    is what a person quotes. It decides one thing, compared as a number: whether the method is
+    past the newest release, a candidate (finding 144, `updates._ahead`) — never whether a checkout
+    is the one a tag names, which is `skill_sha()`'s.
 
     One file read. Public because the window puts both versions in its title bar — the first thing
     on screen in any screenshot, which is where a version is worth most (user, 2026-08-19).
@@ -228,8 +230,10 @@ def skill_version() -> str:
 def skill_sha() -> str:
     """The commit the method's checkout is at, or "" when it cannot be told.
 
-    **THE identifier of the method.** `skill_version()` is the signature beside it. Where anything
-    is compared this decides; where anything is shown, the version stands next to it. Two
+    **THE identifier of the method.** `skill_version()` is the signature beside it. Whether this
+    checkout is the one a tag names, this decides; where anything is shown, the version stands next
+    to it. The version decides one thing of its own, as a number: whether the method is past the
+    newest release, so that an older one is not offered (finding 144). Two
     identifiers would be one key kept in two places, and this pair has already been seen to drift
     (see `skill_version`) — a version string is maintained by hand and a sha is not.
 

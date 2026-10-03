@@ -337,7 +337,8 @@ class Status:
     #: False when this installation is not ours to touch (a checkout, a hand-made symlink).
     updatable: bool = True
     #: The commit that is here, and the commit the newest tag names — "" when either cannot be
-    #: read. For the method these are what `newer` is DECIDED by, and since F-036 they are not
+    #: read. For the method these decide `newer` once the release numbers have said the newest
+    #: tag is not behind what is installed («ahead», finding 144). Since F-036 they are not
     #: printed on the row at all: `installed` and `latest` above are what a person reads and
     #: quotes, and the whole commit is in the installation report (HUB-001, narrowed).
     installed_sha: str = ""
@@ -582,8 +583,9 @@ def check_skill() -> Status:
 
     Another commit is newer only when its release is not BEHIND this one (finding 144): the
     installer's clone can sit on a candidate tag, `beta-v3.1.0-rc3`, whose manifest says 3.1.0
-    while the newest release is 3.0.66. That reads as ahead (`reason` "ahead") and offers nothing —
-    the one place the version, compared as a number, decides; the sha still decides between equals.
+    while the newest release is 3.0.66. That reads as ahead (`reason` "ahead") and offers nothing.
+    The version, compared as a number, decides here and at the press (`apply_skill`, which refuses
+    a tag a stale row still offers); the sha still decides between equals.
     Whether that clone carries local changes is asked only when the button is pressed
     (`local_changes()`): the skill's `status` takes up to a minute, and every check would pay it.
     """
@@ -1316,10 +1318,20 @@ def prepare_tcc_update(channel: str = STABLE, *, pid: Optional[int] = None,
     A tag that does not verify gets NO script, so no terminal opens and `uv` never runs: nothing
     is installed, and the reason is the row's to say. No tag at all is refused too — the ref-less
     command would install `main` as it stands, which no signature covers.
+
+    **Never back to an older release** (review of finding 144, I1): the tag is resolved again here,
+    at the press, so a row gone stale — a second project window, a candidate installed from a
+    terminal while TCC ran — could still be pressed. A tag behind the release this TCC is
+    (`_tcc_release`, the row's own rule) is refused as `ahead` before anything is fetched.
     """
     tag = newest_tcc_tag(channel)
     if not tag:
         return TccUpdate(None, "probe_failed", last_probe_error() or "no tag matched")
+    version, revision = install_report.app_version(), install_report.requested_revision()
+    if _ahead(_tcc_release(version, revision), tag):
+        shown = install_report.shown_version(version, revision)
+        _log.warning("tcc: %s is ahead of %s — not moved back", shown, tag)
+        return TccUpdate(None, "ahead", f"{shown} → {tag}", tag=tag)
     ok, line, why, sha = check_tcc_tag(tag)
     # The update log's line with the check's result — the evidence HUB-032 closes on.
     (_log.info if ok else _log.warning)("tcc tag %s: %s", tag, line)
