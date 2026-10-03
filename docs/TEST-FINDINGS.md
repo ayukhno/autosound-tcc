@@ -3541,3 +3541,16 @@ but there for the whole joint candidate run.
 
 **Task.** W-6, on the Arbiter's word «так, виправляй»: an installed version newer than the newest release reads as such
 (a candidate), with no update offered.
+
+### 145. «Back up to GitHub» is two steps and says neither
+
+**What.** The Arbiter on the Windows VM, 2026-10-03, W-6's branch: the first press made the project folder a git
+repository with a first commit («Done: ✓ … is a git repository now, first commit made; git identity …») and left
+«Backup: none» with no word that a second press creates the GitHub copy; the second press asked «Create a private
+repository on GitHub…?» and, after it, the button went away. His words: «більш того на кнопці я б написав 0/2 1/2 2/2 і
+потім вже сховав» — the button counts its steps (0/2, 1/2) and hides after the last, and the first step's line says what
+comes next.
+
+**Weight.** Low–medium: the backup looks done after the first step.
+
+**Task.** On the Arbiter's word.
