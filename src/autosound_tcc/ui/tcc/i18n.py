@@ -3341,7 +3341,7 @@ Choose sweeps (sw) above to read this.",
         "measProtTip": 'Nagrane za filtrem ochronnym: {legs}. Jest W krzywej — matematyka zdejmuje go przed odczytem.',
         "measUnread": "nieprzetworzone",
         "measOwnRange": "przydatny w swoim zakresie",
-        "measOwnRangeUntil": "własna kontrola metody nadal uznaje go za nieprzydatny, dopóki skill nie zacznie odczytywać zakresu sweepu (hub #247)",
+        "measOwnRangeUntil": "Własna kontrola kroku metody nadal uznaje ten pomiar za nieprzydatny, dopóki metoda nie zacznie odczytywać własnego zakresu sweepu.",
         "stepTagOkTip": 'Zamknięty, a jego dowód naprawdę jest na dysku — nazwany plik lub pomiar znaleziono.',
         "stepTagUnprovenTip": 'Skill zamknął krok, ale dowód, który nazwał, nie wskazuje na nic na dysku: nie ma takiego '
                               'pliku ani pomiaru o tej nazwie.\n\nTo nie to samo, co krok bez ptaszka. Tamten po prostu nie '
@@ -4650,7 +4650,7 @@ Choose sweeps (sw) above to read this.",
         "measProtTip": 'Hinter einem Schutzfilter gemessen: {legs}. Er steckt IN der Kurve — die Rechnung nimmt ihn vor dem Lesen heraus.',
         "measUnread": "nicht eingelesen",
         "measOwnRange": "brauchbar im eigenen Bereich",
-        "measOwnRangeUntil": "die eigene Prüfung der Methode hält ihn noch für unbrauchbar, bis der Skill den Bereich des Sweeps lesen kann (hub #247)",
+        "measOwnRangeUntil": "Die eigene Schrittprüfung der Methode hält diese Messung noch für unbrauchbar, bis die Methode den eigenen Bereich des Sweeps liest.",
         "stepTagOkTip": 'Geschlossen, und der Beleg liegt wirklich auf der Platte — die genannte Datei oder Messung '
                         'wurde gefunden.',
         "stepTagUnprovenTip": 'Vom Skill geschlossen, aber der genannte Beleg löst sich auf der Platte zu nichts auf: keine '
