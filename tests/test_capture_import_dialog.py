@@ -654,8 +654,10 @@ def test_an_rta_row_is_not_put_to_the_check(tmp_path):
         pytest.skip("rew_tool submodule not checked out")
     answer = _rew(3)
     answer["2"]["notes"] = "65536-point 1/48 octave RTA using Hann window"
+    # Named as one: an RTA under a sweep's title IS checked, for that clash (tcc#148).
+    answer["2"]["title"] = "m_2 (rta)"
     check, asked = _checker({})
-    dialog = _dialog(answer, tmp_path, expected=["m_2 (sw)", "m_3 (sw)"], check=check)
+    dialog = _dialog(answer, tmp_path, expected=["m_2 (rta)", "m_3 (sw)"], check=check)
 
     _settle(dialog)
 
@@ -1093,3 +1095,111 @@ def test_the_tick_box_shows_what_the_verdict_and_the_answer_decided(tmp_path):
     _answer_buttons(dialog, "u3")[i18n.t("capCheckRetake")].click()
     _app().processEvents()
     assert not _tick_state(dialog, _row_of(dialog, "u3"))
+
+
+# ---- a sweep read over its own range, and a title that says the wrong thing (tcc#148) ---------
+
+
+def _needs_the_method():
+    from autosound_tcc.core import vendor_loader
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+
+
+def test_a_sweep_named_as_an_rta_reads_red_and_a_name_given_here_takes_the_red_off(tmp_path):
+    """Finding 146 (tcc#148): `sw_7 (rta)` is a sweep named as an RTA, right to stop (the Arbiter:
+    «перше брати не можна, а друге можна»). Red, left for a re-take, and the hover says what is
+    wrong and what to do — rename or re-take. The rename can be given right here: the New name
+    `sw_7 (sw)` puts the title right, the red goes, and the row is taken like any usable sweep."""
+    _needs_the_method()
+    check, _asked = _checker({"u3": dict(_USABLE, kind="sweep")})
+    answer = _rew(3)
+    answer["3"]["title"] = "sw_7 (rta)"
+    dialog = _dialog(answer, tmp_path, expected=["sw_7 (rta)"], check=check)
+    _settle(dialog)
+
+    box = dialog._table.cellWidget(_row_of(dialog, "u3"), _COL_CHECK)
+    assert box is not None, "red"
+    assert i18n.t("capCheckClash_sweep_named_rta") in box.hover_tip.text()
+    assert _answer_buttons(dialog, "u3")[i18n.t("capCheckRetake")].isChecked()
+    assert "u3" not in {row.uuid for row in dialog.taken()}
+
+    dialog._table.item(_row_of(dialog, "u3"), 4).setText("sw_7 (sw)")
+    _settle(dialog)
+    _app().processEvents()
+
+    assert dialog._table.cellWidget(_row_of(dialog, "u3"), _COL_CHECK) is None
+    assert dialog._table.item(_row_of(dialog, "u3"), _COL_CHECK).text() == "✓"
+    assert ("u3", False) in [(row.uuid, row.as_is) for row in dialog.taken()]
+
+
+def test_an_rta_named_as_a_sweep_is_put_to_the_check_and_reads_red(tmp_path):
+    """The other way round: an RTA under a sweep's title is checked after all — the clash is the
+    check's to say — and reads red with its reason in the reader's language."""
+    _needs_the_method()
+    rta = {"exists": True, "applicable": False, "valid": False, "kind": "rta", "stats": {},
+           "issues": ["this check is for swept captures; REW says this one is rta"]}
+    check, asked = _checker({"u2": rta})
+    answer = _rew(3)
+    answer["2"]["notes"] = "65536-point 1/48 octave RTA using Hann window"
+    dialog = _dialog(answer, tmp_path, expected=["m_2 (sw)"], check=check)
+    _settle(dialog)
+
+    assert asked == ["u2"]
+    box = dialog._table.cellWidget(_row_of(dialog, "u2"), _COL_CHECK)
+    assert box is not None
+    said = box.hover_tip.text()
+    assert i18n.t("capCheckClash_rta_named_sweep").format(kind="rta") in said
+    assert "nothing here was checked" not in said, "the method judged nothing; the clash is why"
+
+
+@pytest.mark.parametrize("lang", ["en", "uk"])
+def test_every_clash_the_check_can_find_is_said_in_words(lang):
+    """Each `why` `capture_import.verdict_reader` can give has its sentence, with its numbers in
+    it — never the bare key, in the reader's language."""
+    from autosound_tcc.ui.tcc import capture_import_dialog as cid
+
+    before = i18n.current_language()
+    try:
+        i18n.set_language(lang)
+        for clash in ({"why": "sweep_named_rta"}, {"why": "rta_named_sweep", "kind": "rta"},
+                      {"why": "tweeter_plays_low", "peak": 80.4},
+                      {"why": "sub_plays_high", "peak": 4000.0}):
+            said = cid._clash_text(clash)
+            assert said and not said.startswith("capCheckClash_"), (lang, clash)
+            if "peak" in clash:
+                assert f"{clash['peak']:.0f}" in said, (lang, said)
+            if "kind" in clash:
+                assert "rta" in said, (lang, said)
+    finally:
+        i18n.set_language(before)
+
+
+def test_an_rta_given_a_sweep_s_name_here_reads_red_too(tmp_path):
+    """The clash is read off the title a capture will go by: a sweep's New name typed on an RTA
+    asks the check about it — through the panel's own `check_sweeps`, which reads the rows it is
+    handed — and the row reads red for it."""
+    _needs_the_method()
+    from autosound_tcc.core import capture_import as ci
+
+    answer = _rew(3)
+    answer["2"]["title"] = "m_2 (rta)"
+    answer["2"]["notes"] = "65536-point 1/48 octave RTA using Hann window"
+    asked = []
+
+    def verdict(name, measurements=None, **_band):
+        asked.append(name)
+        return {"name": name, "exists": True, "applicable": False, "valid": False, "kind": "rta",
+                "issues": [], "stats": {}}
+
+    dialog = _dialog(answer, tmp_path, check=lambda rows, stop=None: ci.check_sweeps(
+        rows, listing=lambda: answer, verdict=verdict, stop=stop))
+    _app().processEvents()
+
+    dialog._table.item(_row_of(dialog, "u2"), 4).setText("m-L_2 (sw)")
+    _settle(dialog)
+    _app().processEvents()
+
+    assert asked == ["m_2 (rta)"], "asked about by REW's own title"
+    assert dialog._table.cellWidget(_row_of(dialog, "u2"), _COL_CHECK) is not None, "red"

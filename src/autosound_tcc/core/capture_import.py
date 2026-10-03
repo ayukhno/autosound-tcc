@@ -362,14 +362,74 @@ def _verdict_by_the_method() -> Optional[Callable[..., dict]]:
     return answer if callable(answer) else None
 
 
-def to_check(rows: Iterable[Candidate]) -> list[Candidate]:
+def to_check(rows: Iterable[Candidate], names: Optional[dict] = None) -> list[Candidate]:
     """Which of `rows` the check has something to say about.
 
-    Swept, because an RTA answers none of a sweep's questions (TCC-008); identified, because the
-    verdict is pinned to a uuid; and not already taken as it is — the tuner answered for that one,
-    and asking again is what «Take it as it is» is remembered to prevent.
+    Swept, because an RTA answers none of a sweep's questions (TCC-008) — unless its title names a
+    sweep, which is a clash the check says (tcc#148) and costs no pull: the method answers an RTA
+    from the listing alone. `names` are the titles being given in the window, `{uuid: name}`, read
+    in place of REW's. Identified, because the verdict is pinned to a uuid; and not already taken as
+    it is — the tuner answered for that one, and asking again is what «Take it as it is» is
+    remembered to prevent.
     """
-    return [row for row in rows if row.swept and row.identified and not row.as_is]
+    names = names or {}
+    return [row for row in rows if row.identified and not row.as_is
+            and (row.swept or _method_tag(names.get(row.uuid) or row.title) == _TAG_SWEEP)]
+
+
+# The method's tags (`naming.METHOD_SWEEP`, `naming.METHOD_RTA`) and its kinds
+# (`rew_api.SWEEP`, `RTA`, `IMPEDANCE`), by value: read off a verdict a test or an older method made.
+_TAG_SWEEP, _TAG_RTA = "sw", "rta"
+_KIND_SWEEP, _NOT_SWEPT = "sweep", ("rta", "impedance")
+
+#: Where a sweep plainly is not the driver its title names (tcc#148, the Arbiter 2026-10-03: «якщо
+#: треба твітер, а там саб — добре б знаходити»). Only the clear extremes, by where the sweep PEAKS
+#: (the verdict's `max_freq`, read at the method's 1/6): a tweeter peaking below 200 Hz plays a
+#: sub's or a woofer's range, a sub peaking above 2 kHz a tweeter's. A woofer is not judged — a
+#: door woofer can peak at 2-4 kHz on its break-up — and a midrange or a mid-bass never is.
+TWEETER_PEAK_FLOOR_HZ = 200.0
+SUB_PEAK_CEILING_HZ = 2000.0
+#: The method's reference codes where a project names no role (`path_check.ROLES`): its driver part.
+_ROLE_OF_CODE = {"tw": "tweeter", "sw": "sub"}
+_ROLES = {"tweeter": "tweeter", "sub": "sub", "subwoofer": "sub"}
+
+
+def _method_tag(title: str) -> str:
+    """`sw`, `rta`, `imp` — the method tag a title carries by the method's grammar, or ""."""
+    try:
+        parsed = vendor_loader.load_naming().parse_name(str(title or "").strip())
+    except Exception:  # noqa: BLE001 — no method, or a title it cannot read: no tag
+        return ""
+    return str((parsed or {}).get("method") or "")
+
+
+def sweep_band(record: Optional[dict]) -> Optional[tuple[float, float]]:
+    """The range the sweep itself was set to, as REW holds it for that measurement — the listing's
+    `startFreq` / `endFreq` (among its fields in `rew_api.py`, measured on a live REW V5.40) — or
+    None where REW gives no range a sweep can have (tcc#148)."""
+    try:
+        low, high = float((record or {})["startFreq"]), float((record or {})["endFreq"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return (low, high) if 0 < low < high < float("inf") else None
+
+
+def _truncated(issue: Any) -> bool:
+    """The method's own «covers A-B Hz, asked for C-D — truncated» (`verify.verdict`)."""
+    text = str(issue)
+    return text.startswith("covers ") and text.rstrip().endswith("truncated")
+
+
+def _without_truncation(verdict: dict) -> dict:
+    """The verdict with its «truncated» left out: asked over no range of the sweep's own, the
+    method's default band is not one it stopped short of (the Arbiter, 2026-10-03: «Якщо немає
+    діапазону, то і не перевіряємо»). The rest stands — flat, silent, unreadable — and `valid` is
+    the method's own rule over what is left."""
+    issues = list(verdict.get("issues") or [])
+    kept = [issue for issue in issues if not _truncated(issue)]
+    if len(kept) == len(issues):
+        return verdict
+    return dict(verdict, issues=kept, valid=not kept)
 
 
 def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]] = None,
@@ -388,6 +448,10 @@ def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]
 
     `stop` is asked between two sweeps: a window that closed wants no more of them, and each is up
     to five seconds against a REW that hangs (review M4).
+
+    Each is asked over the range REW holds for it (`sweep_band`, tcc#148): over 20-20000 Hz every
+    sub, mid-bass and woofer sweep read «truncated» (finding 146). Where REW gives no range the
+    method reads its own default band, and its «truncated» is left out (`_without_truncation`).
     """
     wanted = to_check(rows)
     if not wanted:
@@ -405,12 +469,96 @@ def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]
         if row.uuid not in by_uuid:
             continue
         ordinal, raw = by_uuid[row.uuid]
+        band = sweep_band(raw)
+        asked = {"f_low": band[0], "f_high": band[1]} if band else {}
         try:
-            found[row.uuid] = dict(judge(str(raw.get("title") or ""),
-                                         measurements={ordinal: raw}) or {})
+            answer = dict(judge(str(raw.get("title") or ""), measurements={ordinal: raw},
+                                **asked) or {})
         except Exception:  # noqa: BLE001 — the verdict "never raises"; one that does says nothing
             continue
+        found[row.uuid] = answer if band else _without_truncation(answer)
     return found
+
+
+def verdict_reader(
+        project_dir: Optional[Path] = None) -> Callable[[Optional[dict], str], Optional[dict]]:
+    """`(the method's verdict, the title the capture goes by) -> the verdict the window shows`,
+    with this project's roles read once (tcc#148).
+
+    What the title says and REW's data plainly contradicts is added as `clashes` — `{"why": …}`
+    keys and their numbers, for the window to say in words — and makes the verdict red (`valid`
+    false). Asked of the title the capture GOES BY, so a name given in the window that puts the
+    title right takes the red off. Two clashes:
+
+    * **The kind**: a title tagged `(rta)` on what REW holds as a sweep, or `(sw)` on an RTA or an
+      impedance capture — read off the verdict's `kind` (`rew_api.measurement_kind`), REW's
+      definite answer. A capture whose notes say nothing (`unknown`, which `is_swept` checks as a
+      sweep on purpose) is not called the wrong kind.
+    * **The driver**: a tweeter or a sub whose sweep peaks where the other plays
+      (`TWEETER_PEAK_FLOOR_HZ`, `SUB_PEAK_CEILING_HZ`).
+
+    The method's verdict is not changed for anything else; an RTA it did not judge (`applicable`
+    false) is red for its clash alone, with none of the method's «nothing here was checked».
+    """
+    naming, glossary = _grammar(project_dir)
+    roles = _channel_roles(project_dir)
+
+    def read(title: str) -> tuple[str, str]:
+        try:
+            parsed = naming.parse_name(str(title or "").strip(), glossary) if naming else None
+        except Exception:  # noqa: BLE001 — one unreadable title is not a broken list
+            parsed = None
+        if not parsed:
+            return "", ""
+        code = str(parsed.get("code_current") or parsed.get("code") or "")
+        role = roles.get(code) or roles.get(str(parsed.get("code") or ""))
+        if role is None:
+            role = _ROLE_OF_CODE.get(code.split("-", 1)[0].split(" ", 1)[0], "")
+        return str(parsed.get("method") or ""), _ROLES.get(str(role).lower(), "")
+
+    def judged(verdict: Optional[dict], title: str) -> Optional[dict]:
+        if not verdict or not verdict.get("exists"):
+            return verdict
+        tag, role = read(title)
+        kind = str(verdict.get("kind") or "")
+        found: list[dict] = []
+        if tag == _TAG_RTA and kind == _KIND_SWEEP:
+            found.append({"why": "sweep_named_rta"})
+        elif tag == _TAG_SWEEP and kind in _NOT_SWEPT:
+            found.append({"why": "rta_named_sweep", "kind": kind})
+        peak = (verdict.get("stats") or {}).get("max_freq")
+        if (verdict.get("applicable", True) is not False and isinstance(peak, (int, float))
+                and not isinstance(peak, bool)):
+            if role == "tweeter" and peak < TWEETER_PEAK_FLOOR_HZ:
+                found.append({"why": "tweeter_plays_low", "peak": peak})
+            elif role == "sub" and peak > SUB_PEAK_CEILING_HZ:
+                found.append({"why": "sub_plays_high", "peak": peak})
+        if not found:
+            return verdict
+        out = dict(verdict, clashes=found, valid=False)
+        if out.get("applicable") is False:
+            out.update(applicable=True, issues=[])
+        return out
+
+    return judged
+
+
+def _channel_roles(project_dir: Optional[Path] = None) -> dict[str, str]:
+    """`{channel code: role}` from `project.json`'s channel rows (SCR-001), `{}` without them."""
+    try:
+        path = Path(project_dir or config.project_dir()) / "project.json"
+        rows = json.loads(path.read_text(encoding="utf-8")).get("channels") or []
+    except (OSError, ValueError, AttributeError, TypeError):
+        return {}
+    out = {}
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not row.get("code"):
+            continue
+        role = row.get("role")
+        role = role.get("value") if isinstance(role, dict) else role  # a `fact()`, unwrapped
+        if isinstance(role, str) and role:
+            out[str(row["code"])] = role
+    return out
 
 
 def unusable(verdict: Optional[dict]) -> bool:
@@ -418,7 +566,8 @@ def unusable(verdict: Optional[dict]) -> bool:
 
     Not a curve REW does not hold (`exists: false` is "nobody measured it", a different
     conversation in the method's own words), and not a capture the check does not apply to
-    (`applicable: false`, an RTA: grey, never red — TCC-008).
+    (`applicable: false`, an RTA: grey, never red — TCC-008) — unless its title names a sweep,
+    which `verdict_reader` makes red (tcc#148).
     """
     verdict = verdict or {}
     return (bool(verdict.get("exists")) and verdict.get("applicable", True) is not False

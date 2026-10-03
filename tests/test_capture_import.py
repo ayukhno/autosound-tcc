@@ -784,3 +784,204 @@ def test_a_title_waits_for_its_retake_until_rew_holds_another_curve_under_it(tmp
     assert ci.retake_titles({}, tmp_path) == ["sw_7 (rta)"], "REW not read: still waiting"
     assert ci.retake_titles(_rew(("sw_7 (rta)", "u-rta", ""), ("sw_7 (rta)", "u-new", "")),
                             tmp_path) == []
+
+
+# ---- a sweep read over its own range, and a title that says the wrong thing (tcc#148) ---------
+
+
+_SWEEP_NOTES = "DELAY 6.1250 ms (2.101 m)"
+
+
+def _listed(title, uuid, notes=_SWEEP_NOTES, **range_) -> dict:
+    """One record of REW's `/measurements` listing: `startFreq` / `endFreq` are among its fields
+    (`rew_api.py`'s field list, measured on a live REW V5.40)."""
+    return {"title": title, "uuid": uuid, "date": "2026-Oct-03 12:00:00", "notes": notes, **range_}
+
+
+def test_a_sweep_is_asked_about_over_the_range_rew_holds_for_it():
+    """Finding 146 (tcc#148): the verdict was asked over 20-20000 Hz, so a sub swept over 20-1001
+    read «covers 20-1001 Hz, asked for 20-20000 — truncated». It is asked over the range REW holds
+    for that measurement — its own `startFreq`-`endFreq`."""
+    listing = {"1": _listed("sw_7 (sw)", "u1", startFreq=20.0, endFreq=1001.0)}
+    asked = []
+
+    def verdict(name, measurements=None, **band):
+        asked.append((name, band))
+        return _verdict()
+
+    ci.check_sweeps(ci.candidates(listing, imported={}), listing=lambda: listing, verdict=verdict)
+
+    assert asked == [("sw_7 (sw)", {"f_low": 20.0, "f_high": 1001.0})]
+
+
+@pytest.mark.parametrize("range_", [{}, {"startFreq": 0, "endFreq": 1001.0},
+                                    {"startFreq": 900.0, "endFreq": 100.0},
+                                    {"startFreq": "?", "endFreq": None}])
+def test_where_rew_holds_no_range_none_is_made_up(range_):
+    """No range, no truncation check (the Arbiter, 2026-10-03: «Якщо немає діапазону, то і не
+    перевіряємо»): nothing is passed for a band REW did not give — or gave as nothing a sweep can
+    be set to — so the method's own defaults read the rest."""
+    listing = {"1": _listed("sw_7 (sw)", "u1", **range_)}
+    asked = []
+
+    def verdict(name, measurements=None, **band):
+        asked.append(band)
+        return _verdict()
+
+    ci.check_sweeps(ci.candidates(listing, imported={}), listing=lambda: listing, verdict=verdict)
+
+    assert asked == [{}]
+
+
+def _rew_fr(monkeypatch, low, high, level=85.0, slope=True):
+    """REW faked at the method's own boundary (`verify._api`), no HTTP: an FR from `low` to `high`
+    Hz at 1/12 octave, falling 12 dB an octave above a third of the way if `slope`, and no
+    impulse."""
+    import math
+
+    verify = vendor_loader.load_verify()
+    n = int(math.log2(high / low) * 12) + 1
+    freqs = [low * 2 ** (i / 12) for i in range(n)]
+    knee = low * (high / low) ** (1 / 3)
+    mag = [level - (12 * math.log2(f / knee) if slope and f > knee else 0) for f in freqs]
+
+    def no_impulse(*_args, **_kwargs):
+        raise RuntimeError("no impulse in this fake")
+
+    monkeypatch.setattr(verify._api, "get_fr", lambda mid, smoothing=None: (freqs, mag, None))
+    monkeypatch.setattr(verify._api, "get_impulse_response", no_impulse)
+
+
+@needs_the_method
+def test_a_band_limited_sweep_is_usable_by_the_method_s_own_verdict(monkeypatch):
+    """The real verdict, REW faked at its edge: the sub sweep of finding 146 (20-1001 Hz) is usable
+    over its own range, and over none when REW gives none — the method's other verdicts still
+    stand there (a silent capture is still red). A sweep that stops short of the range REW holds
+    for it is still «truncated»: that is what the word means now."""
+    rows = lambda listing: ci.candidates(listing, imported={})  # noqa: E731
+    _rew_fr(monkeypatch, 20.0, 1001.0)
+
+    held = {"1": _listed("sw_7 (sw)", "u1", startFreq=20.0, endFreq=1001.0)}
+    found = ci.check_sweeps(rows(held), listing=lambda: held)
+    assert not ci.unusable(found["u1"]), found["u1"]["issues"]
+
+    bare = {"1": _listed("sw_7 (sw)", "u1")}
+    found = ci.check_sweeps(rows(bare), listing=lambda: bare)
+    assert not ci.unusable(found["u1"]), found["u1"]["issues"]
+
+    _rew_fr(monkeypatch, 20.0, 1001.0, level=-95.0)
+    found = ci.check_sweeps(rows(bare), listing=lambda: bare)
+    assert ci.unusable(found["u1"]) and "silence" in " ".join(found["u1"]["issues"])
+    assert not any("truncated" in issue for issue in found["u1"]["issues"])
+
+    _rew_fr(monkeypatch, 20.0, 300.0)
+    full = {"1": _listed("w-L_7 (sw)", "u1", startFreq=20.0, endFreq=20000.0)}
+    found = ci.check_sweeps(rows(full), listing=lambda: full)
+    assert ci.unusable(found["u1"]) and "truncated" in " ".join(found["u1"]["issues"])
+
+
+def _judged(verdict, title, project_dir=None):
+    return ci.verdict_reader(project_dir)(verdict, title)
+
+
+@needs_the_method
+def test_a_title_of_the_other_kind_reads_red_with_what_to_do(tmp_path):
+    """Finding 146's second half: the same sub sweep named `sw_7 (rta)` is right to stop — the
+    title names an RTA and REW holds a sweep (the Arbiter: «перше брати не можна, а друге можна»).
+    Red, with that reason; and an RTA under a sweep's title the same, the other way round. Read off
+    REW's definite kind (the verdict's `kind`, `rew_api.measurement_kind`): a capture whose notes
+    say nothing either way is not called the wrong kind."""
+    sweep = dict(_verdict(), kind="sweep")
+    rta = dict(_verdict(valid=False, applicable=False,
+                        issues=["this check is for swept captures; REW says this one is rta"]),
+               kind="rta")
+    unknown = dict(_verdict(), kind="unknown")
+
+    named_rta = _judged(sweep, "sw_7 (rta)", tmp_path)
+    assert ci.unusable(named_rta)
+    assert named_rta["clashes"] == [{"why": "sweep_named_rta"}]
+    assert not ci.unusable(_judged(sweep, "sw_7 (sw)", tmp_path))
+
+    named_sweep = _judged(rta, "w-L_3 (sw)", tmp_path)
+    assert ci.unusable(named_sweep)
+    assert named_sweep["clashes"] == [{"why": "rta_named_sweep", "kind": "rta"}]
+    assert named_sweep["issues"] == [], "the method judged nothing here; the clash is the reason"
+    assert not ci.unusable(_judged(rta, "w-L_3 (rta)", tmp_path))
+
+    assert not ci.unusable(_judged(unknown, "w-L_3 (rta)", tmp_path))
+    assert not ci.unusable(_judged(sweep, "not in the grammar", tmp_path))
+
+
+@needs_the_method
+def test_a_sweep_s_title_on_an_rta_is_put_to_the_check(tmp_path):
+    """An RTA is not put to the check (TCC-008) — unless its title names a sweep: that clash is the
+    check's to say, and the method answers an RTA with no HTTP at all. A name being given in the
+    window counts as the title it will carry."""
+    rows = ci.candidates({
+        "1": _listed("w-L_3 (sw)", "a", notes=_RTA_NOTES),
+        "2": _listed("w-L_3 (rta)", "b", notes=_RTA_NOTES),
+        "3": _listed("tw-L_3 (rta)", "c", notes=_RTA_NOTES),
+    }, imported={})
+
+    assert [row.uuid for row in ci.to_check(rows)] == ["a"]
+    assert [row.uuid for row in ci.to_check(rows, names={"a": "w-L_3 (rta)",
+                                                         "c": "tw-L_3 (sw)"})] == ["c"]
+
+
+@needs_the_method
+@pytest.mark.parametrize(("title", "peak", "why"), [
+    ("tw-L_7 (sw)", 80.0, "tweeter_plays_low"),
+    ("tw-R_7 (sw)", 3150.0, None),
+    ("sw_7 (sw)", 4000.0, "sub_plays_high"),
+    ("sw_7 (sw)", 45.0, None),
+    ("m-L_7 (sw)", 80.0, None),
+    ("w-L_7 (sw)", 8000.0, None),
+    ("w-L_7 (sw)", 60.0, None),
+])
+def test_a_driver_whose_data_is_plainly_another_s_reads_red(tmp_path, title, peak, why):
+    """The Arbiter, 2026-10-03: «якщо треба твітер, а там саб — добре б знаходити». Only the clear
+    extremes, by where the sweep peaks (the verdict's `max_freq`, read at the method's 1/6): a
+    tweeter whose peak is in a sub's or a woofer's range, a sub whose peak is in a tweeter's. A
+    midrange, a woofer or a mid-bass is never judged by it."""
+    verdict = dict(_verdict(), kind="sweep", stats={"max_freq": peak})
+
+    judged = _judged(verdict, title, tmp_path)
+
+    if why is None:
+        assert not ci.unusable(judged), judged
+    else:
+        assert ci.unusable(judged)
+        assert judged["clashes"] == [{"why": why, "peak": peak}]
+
+
+@needs_the_method
+def test_a_driver_s_role_is_the_project_s_where_it_names_one(tmp_path):
+    """The channel's role in `project.json` first (the method's own vocabulary — `tweeter`,
+    `sub`, …), the code's convention (`tw`, `sw`) only where the project names none."""
+    (tmp_path / "project.json").write_text(json.dumps({"channels": [
+        {"code": "hi-L", "role": "tweeter"}, {"code": "tw-L", "role": "midrange"}]}),
+        encoding="utf-8")
+    verdict = dict(_verdict(), kind="sweep", stats={"max_freq": 80.0})
+
+    assert ci.unusable(_judged(verdict, "hi-L_7 (sw)", tmp_path))
+    assert not ci.unusable(_judged(verdict, "tw-L_7 (sw)", tmp_path))
+
+
+@needs_the_method
+def test_finding_146_as_the_arbiter_met_it(monkeypatch, tmp_path):
+    """One sub sweep at 20-1001 Hz, taken twice: `sw_7 (sw)` and `sw_7 (rta)`. Before, both read
+    red, «truncated». His rule: «перше брати не можна, а друге можна» — the first is usable, the
+    second is not, for its title alone. The method's real verdict, REW faked at its edge."""
+    _rew_fr(monkeypatch, 20.0, 1001.0)
+    listing = {"1": _listed("sw_7 (sw)", "u-sw", startFreq=20.0, endFreq=1001.0),
+               "2": _listed("sw_7 (rta)", "u-rta", startFreq=20.0, endFreq=1001.0)}
+    judge = ci.verdict_reader(tmp_path)
+
+    titles = {raw["uuid"]: raw["title"] for raw in listing.values()}
+    found = ci.check_sweeps(ci.candidates(listing, imported={}), listing=lambda: listing)
+    shown = {uuid: judge(verdict, titles[uuid]) for uuid, verdict in found.items()}
+
+    assert not ci.unusable(shown["u-sw"]), shown["u-sw"]
+    assert ci.unusable(shown["u-rta"])
+    assert shown["u-rta"]["clashes"] == [{"why": "sweep_named_rta"}]
+    assert not any("truncated" in issue for issue in shown["u-rta"]["issues"])

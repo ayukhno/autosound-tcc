@@ -22,7 +22,9 @@ wanted were not the newest ones. A name two rows answer to ticks neither of them
 method's own capture verdict (SCR-013), only for what is ticked, on a worker — and the check is
 the panel's, handed in, so this file still makes no HTTP call. An unusable sweep gets a red mark
 and two answers: «Re-take» (not taken, the recommendation) or «Take it as it is». Apply is never
-refused for it (the Arbiter, 2026-10-02).
+refused for it (the Arbiter, 2026-10-02). A title that says what REW's data plainly contradicts —
+the other kind, or another driver — reads red the same way (`capture_import.verdict_reader`,
+tcc#148), and a New name given here that puts it right takes the red off.
 """
 
 from __future__ import annotations
@@ -108,6 +110,15 @@ def legs_summary(legs) -> str:
         freq = f"{value:g}" if isinstance(value, (int, float)) else str(value or "?")
         parts.append(f"{i18n.t(key)} {leg.get('type') or ''}{leg.get('slope') or ''} {freq}")
     return " · ".join(parts)
+
+
+def _clash_text(clash: dict) -> str:
+    """One of `capture_import.verdict_reader`'s clashes in the reader's language (tcc#148)."""
+    text = i18n.t(f"capCheckClash_{clash.get('why')}")
+    try:
+        return text.format(kind=clash.get("kind", ""), peak=float(clash.get("peak") or 0))
+    except (KeyError, ValueError, IndexError):
+        return text
 
 
 class _NameDelegate(QStyledItemDelegate):
@@ -231,6 +242,11 @@ class CaptureImportDialog(QDialog):
         self._closed = False
 
         self._all = capture_import.candidates(self._measurements, project_dir)
+        #: REW's title by uuid, and what the title a capture goes by says against its data
+        #: (`capture_import.verdict_reader`, tcc#148): read through `_verdict`, never off
+        #: `_verdicts` directly, so a name given here that puts a title right takes the red off.
+        self._titles = {row.uuid: row.title for row in self._all}
+        self._judge = capture_import.verdict_reader(project_dir)
         #: Why a typed name is not in the naming grammar, in the method's words (hub #153 E).
         self._explain_name = capture_import.name_explainer(project_dir)
         #: Ticked by uuid rather than by row, because +10 and the filter both re-render the table
@@ -535,7 +551,7 @@ class CaptureImportDialog(QDialog):
         self._table.removeCellWidget(index, _COL_CHECK)
         cell = QTableWidgetItem("")
         cell.setFlags(Qt.ItemFlag.ItemIsEnabled)
-        verdict = self._verdicts.get(row.uuid)
+        verdict = self._verdict(row.uuid)
         if row.as_is:
             # Answered on an earlier import and remembered by its uuid: not asked again.
             cell.setText(i18n.t("capCheckAsIsDone"))
@@ -580,7 +596,9 @@ class CaptureImportDialog(QDialog):
             line.addWidget(button)
         # The method's own words, not a paraphrase: "no clear arrival" and "covers 200-2000 Hz"
         # lead to different things done at the car (`main_window._on_capture_check_done`).
-        reasons = "<br>".join(escape(str(issue)) for issue in verdict.get("issues") or [])
+        reasons = "<br>".join(
+            [escape(_clash_text(clash)) for clash in verdict.get("clashes") or []]
+            + [escape(str(issue)) for issue in verdict.get("issues") or []])
         said = f"{escape(i18n.t('capCheckBadTip'))}<br>{reasons}"
         attach_tip(box, said)
         attach_tip(mark, said)
@@ -625,17 +643,24 @@ class CaptureImportDialog(QDialog):
         while the check is held after a failure: nothing is waited for that nothing will ask."""
         if self._check is None or self._check_held:
             return []
-        return [row for row in capture_import.to_check(self.ticked_rows())
+        return [row for row in capture_import.to_check(self.ticked_rows(), self._names)
                 if row.uuid not in self._verdicts]
 
     def checking(self) -> bool:
         """Whether a ticked sweep is still waiting for its verdict."""
         return bool(self._checking) or bool(self._unchecked())
 
+    def _verdict(self, uuid: str) -> Optional[dict]:
+        """The check's answer for one capture, as the window shows it: the method's verdict, red
+        too where the title it goes by — the New name given here, or REW's — says what its data
+        plainly contradicts (tcc#148)."""
+        title = self._names.get(uuid) or self._titles.get(uuid, "")
+        return self._judge(self._verdicts.get(uuid), title)
+
     def _to_retake(self) -> set[str]:
         """Unusable sweeps left out — the ones to re-take."""
         return {row.uuid for row in self._all if row.uuid not in self._ticked
-                and capture_import.unusable(self._verdicts.get(row.uuid))}
+                and capture_import.unusable(self._verdict(row.uuid))}
 
     def _schedule_check(self) -> None:
         if self._check is not None:
@@ -652,6 +677,10 @@ class CaptureImportDialog(QDialog):
         if not rows:
             return
         self._checking = {row.uuid for row in rows}
+        # Handed over under the title each will go by, the New name given here first: what the
+        # check's own `to_check` reads to ask about an RTA under a sweep's title (tcc#148). The
+        # method is still asked by REW's title, off the listing it fetches.
+        rows = [replace(row, title=self._names.get(row.uuid) or row.title) for row in rows]
         worker = _SweepCheckWorker(self._check, rows)
         worker.done.connect(self._on_checked)
         worker.failed.connect(self._on_check_failed)
@@ -664,9 +693,8 @@ class CaptureImportDialog(QDialog):
             return  # queued before `done()` cut the line: the window's answer is already given
         asked, self._checking = self._checking, set()
         for uuid in asked:
-            verdict = dict(verdicts.get(uuid) or {})
-            self._verdicts[uuid] = verdict
-            if capture_import.unusable(verdict):
+            self._verdicts[uuid] = dict(verdicts.get(uuid) or {})
+            if capture_import.unusable(self._verdict(uuid)):
                 # The recommendation, applied where it can be seen: a re-take, so not taken —
                 # one click on «Take it as it is» takes it (the Arbiter, 2026-10-02).
                 self._ticked.discard(uuid)
@@ -753,7 +781,7 @@ class CaptureImportDialog(QDialog):
         self._dup_note.setHidden(not self._dup_titles)
         # What `taken()` will hand over as `as_is`: ticked, and called unusable in this window.
         as_is = [row.title for row in self.ticked_rows()
-                 if capture_import.unusable(self._verdicts.get(row.uuid))]
+                 if capture_import.unusable(self._verdict(row.uuid))]
         self._as_is_note.setText(i18n.t("capCheckAsIsWarn").format(names=", ".join(as_is))
                                  if as_is else "")
         self._as_is_note.setHidden(not as_is)
@@ -918,7 +946,7 @@ class CaptureImportDialog(QDialog):
 
         A sweep the check called unusable and the tuner took anyway goes as `as_is`, so the store
         remembers that answer for that capture (tcc#21, `record_imported`)."""
-        return [replace(row, as_is=True) if capture_import.unusable(self._verdicts.get(row.uuid))
+        return [replace(row, as_is=True) if capture_import.unusable(self._verdict(row.uuid))
                 else row for row in self.ticked_rows()]
 
     def left_for_retake(self) -> list[capture_import.Candidate]:
