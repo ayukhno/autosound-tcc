@@ -15,6 +15,12 @@ pl/de through the Advisor, English commits naming the issue; no key on argv or i
 2. **#146** a TCC candidate's row names the candidate's version (finding 150). *~30 min*
 3. **#147** a hand tick on a red row warns and moves the row to «Take it as it is» (finding 149). *~30 min*
 4. **#148** the capture check reads a sweep over its own range, and a title of the wrong kind is said (finding 146). *~1 h*
+5. **#149** the capture card agrees with the import window on a sweep's own range: a method verdict whose only issue is
+   «truncated», on a capture the window judged usable over its own range, is not red and not in UNUSABLE; a kind clash
+   reads as in the window. Until the re-pin that carries hub #247 (TCC-049, to:skill). Added after the review of #148
+   (I2), the Arbiter's word 2026-10-03 «Тікет + латка в TCC». *~1 h*
+6. **The method re-pinned at v3.1.1** (e8dabf7, signed), with the guide's links; v3.1.1 touches no method code. The
+   Arbiter 2026-10-03: «якщо це не забере додатковий цикл тестування, то онови посилання». *~15 min*
 
 ## Order and cost
 
