@@ -937,6 +937,9 @@ def test_a_sweep_s_title_on_an_rta_is_put_to_the_check(tmp_path):
     ("m-L_7 (sw)", 80.0, None),
     ("w-L_7 (sw)", 8000.0, None),
     ("w-L_7 (sw)", 60.0, None),
+    # A junction typed channel-first is two drivers, not a tweeter (the review of tcc#148, M3).
+    ("tw-L+w-L_7 (sw)", 80.0, None),
+    ("sw+w-L_7 (sw)", 4000.0, None),
 ])
 def test_a_driver_whose_data_is_plainly_another_s_reads_red(tmp_path, title, peak, why):
     """The Arbiter, 2026-10-03: «якщо треба твітер, а там саб — добре б знаходити». Only the clear

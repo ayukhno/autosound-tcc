@@ -352,8 +352,11 @@ def _verdict_by_the_method() -> Optional[Callable[..., dict]]:
 
     Only the method's verdict, nothing of ours (the Arbiter, 2026-10-02): a sweep that never
     completed, a flat loopback, a silent capture. Noise and distortion are REW's to report. It is
-    also the function the method's own `capture-check` runs after the import, so the mark in the
-    import window and the colour on the card come from one rule.
+    also the function the method's own `capture-check` runs after the import, which the card reads
+    — but not asked the same question since tcc#148: the window asks it over each sweep's own range
+    (`check_sweeps`) and adds what a title contradicts (`verdict_reader`), while the method's check
+    still asks over 20-20000 Hz and reads no titles. A band-limited sweep can pass here and read
+    «truncated» on the card until the method asks over the same range (the review of tcc#148, I2).
     """
     try:
         answer = getattr(vendor_loader.load_verify(), "verdict", None)
@@ -512,9 +515,11 @@ def verdict_reader(
             return "", ""
         code = str(parsed.get("code_current") or parsed.get("code") or "")
         role = roles.get(code) or roles.get(str(parsed.get("code") or ""))
-        if role is None:
+        if role is None and "+" not in code:
+            # One driver's code only: a junction typed channel-first, `tw-L+w-L`, is two drivers,
+            # and its first segment is not its role (the review of tcc#148, M3).
             role = _ROLE_OF_CODE.get(code.split("-", 1)[0].split(" ", 1)[0], "")
-        return str(parsed.get("method") or ""), _ROLES.get(str(role).lower(), "")
+        return str(parsed.get("method") or ""), _ROLES.get(str(role or "").lower(), "")
 
     def judged(verdict: Optional[dict], title: str) -> Optional[dict]:
         if not verdict or not verdict.get("exists"):

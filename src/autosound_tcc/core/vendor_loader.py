@@ -188,8 +188,9 @@ _VENDORED = {
     "car_profile.py": "autosound_tcc._vendor.car_profile",
     # The capture verdict (SCR-013): is a sweep there, and does it look like a real capture. The
     # import window asks it of the sweeps the tuner ticked, while the microphone is still in place
-    # (tcc#21) -- the same function the method's own `capture-check` runs after the import, so the
-    # two cannot disagree. Like `resonalyze_vc` it puts `rew_tool/` on `sys.path` at import, and
+    # (tcc#21) -- the same function the method's own `capture-check` runs after the import, though
+    # since tcc#148 not over the same band (`capture_import._verdict_by_the_method` says where the
+    # two can disagree). Like `resonalyze_vc` it puts `rew_tool/` on `sys.path` at import, and
     # it talks to REW through its own bare `rew_api` (`tests/conftest.py` points both at nothing).
     "verify.py": "autosound_tcc._vendor.verify",
 }

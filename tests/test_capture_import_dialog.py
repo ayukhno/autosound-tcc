@@ -1223,3 +1223,30 @@ def test_a_new_name_list_holds_its_names_whole_in_a_narrow_column(tmp_path, monk
         assert _windows.cut_rows(editor) == []
     finally:
         dialog.close()
+
+
+@pytest.mark.parametrize("lang", ["en", "uk"])
+def test_a_row_red_only_for_its_title_does_not_lay_it_on_the_method(tmp_path, lang):
+    """The review of tcc#148, M4: a row red only for the title check — which is TCC's, the method
+    found the sweep fine — read «The method says:» on its hover and, taken anyway, «although the
+    method calls it unusable» under the table. Both say «the check» now, true of either kind of red."""
+    _needs_the_method()
+    before = i18n.current_language()
+    try:
+        i18n.set_language(lang)
+        check, _asked = _checker({"u3": dict(_USABLE, kind="sweep")})
+        answer = _rew(3)
+        answer["3"]["title"] = "sw_7 (rta)"
+        dialog = _dialog(answer, tmp_path, expected=["sw_7 (rta)"], check=check)
+        _settle(dialog)
+        method = {"en": "method", "uk": "метод"}[lang]
+
+        hover = dialog._table.cellWidget(_row_of(dialog, "u3"), _COL_CHECK).hover_tip.text()
+        assert method not in hover.lower(), hover
+
+        dialog._table.item(_row_of(dialog, "u3"), 0).setCheckState(Qt.CheckState.Checked)
+        _app().processEvents()
+        said = dialog._as_is_note.text()
+        assert "sw_7 (rta)" in said and method not in said.lower(), said
+    finally:
+        i18n.set_language(before)
