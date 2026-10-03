@@ -41,9 +41,10 @@ does.
   so a re-take under it opens ticked once the unusable one is deleted in REW) or «Take it as it is» (taken, and not asked about again for that
   capture). Import is never blocked. Noise and distortion stay REW's to report. After an import, the
   round's check now looks only at what was taken: a sweep left for a re-take no longer reads «taken,
-  unusable», and a good one nobody ticked no longer turns green. **Limit:** «Take it as it is» reaches TCC
-  only — the card still reads «unusable» and the method's step still counts the capture as such until the
-  method can record that answer.
+  unusable», and a good one nobody ticked no longer turns green. «Take it as it is» is TCC's answer only:
+  the method keeps its own verdict — the card reads «unusable» and the method's step counts the capture as
+  such. Tell the session if you want it to count; if the method still refuses, that is its call (the
+  Arbiter, 2026-10-03).
 - **A turning wheel while a new reviewer pick is checked** (tcc#140, finding 142). For the minute
   the check takes, the footer says «… · checking…» beside the «!» instead of the previous
   reviewer's red line, and the «!» claims a fallback only when the reviewer asked for this pick
