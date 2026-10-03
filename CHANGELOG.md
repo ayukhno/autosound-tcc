@@ -12,6 +12,37 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [Unreleased]
+
+Paired with method `e8dabf7145dea459a9f3c591c0828c9dbeb51669` — the tag on that commit is **`v3.1.1`**.
+
+The wave W-7 · v1.1.1, the patch after v1.1.0. The method moves to its v3.1.1, which changes no method
+code (the TCC pin in `install-tcc`, the session note in a submodule); the guide's method links follow it.
+
+### Fixed
+
+- **Every drop-down box reads in the dark theme** (tcc#145, finding 143): the closed field, the editable
+  field, the placeholder and the open list take the theme's own colours, and the open list is as wide as
+  its rows — the reviewer key's provider list reads whole.
+- **A TCC candidate's row names the candidate's version** (tcc#146, finding 150): «TCC 1.1.1
+  (beta-v1.1.1-rc1) — newer than the latest release …», not the package's unbumped number.
+- **A hand tick on a red row says it takes the capture as it is** (tcc#147, finding 149): the row's
+  choice moves to «Take it as it is» and an orange line says the check calls it unusable; unticking
+  moves it back to «Re-take».
+- **The capture check reads a sweep over its own range** (tcc#148, finding 146). A sub's or a tweeter's
+  sweep is judged over the range REW says it was taken with, so a band-limited sweep is no longer
+  «truncated»; where REW holds no range, truncation is not judged. A title of the wrong kind is said —
+  `(sw)` on an RTA, `(rta)` on a sweep, a tweeter's title on a sweep that peaks below 200 Hz, a sub's on
+  one that peaks above 2 kHz — with what to rename or re-take.
+- **The capture card agrees with the import window** (tcc#149). A capture the window judged usable over
+  its own range reads green on the card («usable over its own range») and stays out of the UNUSABLE
+  strip, and a title clash taken as it is reads «taken as it is» — until the method's own check reads a
+  sweep's range (hub #247), when this goes.
+
+Known in v1.1.1: the method's own step check still counts such a capture unusable until it reads the
+sweep's range; captures imported before v1.1.1 have no window verdict and stay red on the card; an Apply
+pressed twice before the check finishes records no window verdict.
+
 ## [v1.1.0] — 2026-10-03 · capture quality at import, agy through Google Cloud's ADC, the reviewer's route for every session, the method at v3.1.0
 
 Paired with method `705ab3e63c08912f8942c8369b439cda4259bdf3` — the tag on that commit is **`v3.1.0`**.
