@@ -288,3 +288,39 @@ def test_the_suite_cannot_reach_this_machines_rew_through_the_capture_check():
         pytest.skip("the vendored skill is not checked out")
 
     assert vendor_loader.load_verify()._api.BASE_URL == "http://127.0.0.1:1"
+
+
+def test_a_finished_test_s_window_leaves_no_worker_running():
+    """tcc#140's flaky reviewer tests, traced (fix round 2 of tcc#21): a window's catalogue read was
+    still running when its test's patches came off, and in the NEXT test's setup it read the
+    developer's own `~/.config/autosound-tcc/cli-catalogue.json` — every agy model in it then read
+    "not checked" for the rest of that xdist worker. A window a test leaves behind stops its
+    threads as a closing window does (`stop_workers`), while the test's patches are still on: a
+    running read is asked to stop and its answer cut, so nothing of it reaches a later test."""
+    from PySide6.QtCore import QThread, Signal
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc import qt_shutdown
+    from autosound_tcc.ui.tcc.main_window import MainWindow
+    from tests import _windows
+
+    class _Read(QThread):
+        done = Signal()
+
+        def run(self) -> None:
+            while not self.isInterruptionRequested():
+                self.msleep(5)
+
+    QApplication.instance() or QApplication([])
+    window = MainWindow()
+    read = qt_shutdown.watch(_Read())
+    previous, window._cli_catalogue = window._cli_catalogue, read
+    qt_shutdown.stop_or_detach(previous, 5000, mute=(previous.done,) if previous else ())
+    read.start()
+    try:
+        _windows.quiet(window)
+
+        assert read.wait(0) and not read.isRunning(), "the read did not outlive its test"
+    finally:
+        read.requestInterruption()
+        read.wait(5000)

@@ -7,8 +7,9 @@ running its deferred work: timers, file watchers, model pickers. Tests point `co
 folder, so a window left behind resolved the NEXT test's folder and wrote into it: `.tcc/` created
 by another window's model picker, a capture card emptied by another window's project watcher.
 
-So nothing is deleted: the window is told it is closing, its timers stop and its watchers let go of
-their paths. What a closing window does not do, it does not do here either.
+So nothing is deleted: the window is told it is closing, its timers stop, its watchers let go of
+their paths, and the threads that write process-wide state are stopped as a closing window stops
+them. What a closing window does not do, it does not do here either.
 """
 
 from __future__ import annotations
@@ -33,7 +34,9 @@ def main_windows() -> list:
 def quiet(window) -> None:
     """Stop a test's window from acting on anything after its test."""
     import shiboken6
-    from PySide6.QtCore import QFileSystemWatcher, QTimer
+    from PySide6.QtCore import QFileSystemWatcher, QThread, QTimer
+
+    from autosound_tcc.ui.tcc import qt_shutdown
 
     if not shiboken6.isValid(window):
         return
@@ -44,6 +47,19 @@ def quiet(window) -> None:
         paths = list(watcher.files()) + list(watcher.directories())
         if paths:
             watcher.removePaths(paths)
+    # And the two threads that write process-wide state — the CLI catalogue read and the reviewer
+    # probe — stopped as `stop_workers` stops them at a real close (fix round 2 of tcc#21, the
+    # tcc#140 flake). A catalogue read still running when its test's patches came off read the
+    # developer's own `~/.config/autosound-tcc/cli-catalogue.json` in the next test's setup, and
+    # every agy model in it read "not checked" for the rest of that xdist worker: the launch-failure
+    # test and the reviewer-pick tests, about one `-n 4` run in twelve. This runs before
+    # `monkeypatch` undoes anything (it is set up earlier, so it is torn down later), so what a
+    # worker still does here, it does under the test's own patches; and its answer is cut. Only
+    # real threads: a test may leave a stand-in in the attribute, and that is no thread to stop.
+    for name in ("_cli_catalogue", "_reviewer_probe"):
+        worker = getattr(window, name, None)
+        if isinstance(worker, QThread):
+            qt_shutdown.stop_or_detach(worker, 5000, mute=(worker.done,))
 
 
 class _StandIn:
