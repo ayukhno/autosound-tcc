@@ -3623,3 +3623,16 @@ The same at 5218910 (v1.1.0): not W-7's regression. `_` begins the series in a n
 
 **Task.** W-7, under #145 (every drop-down box reads), with the Arbiter's OK before the candidate (2026-10-03: «В W-7,
 до кандидата»).
+Fixed in 96805e5 (the editable box's line edit gets its whole height: 19 px for a 16-px line). It holds up to the
+app's zoom 1.2; at 1.3–1.5 the table row itself (30 px) is at its limit for the field and the plain cells — the next
+wave's pool, with 152.
+
+### 152. The import table's current-cell frame stands beside the TAKE tick, like a second box
+
+**What.** The Arbiter on the Windows VM, 2026-10-03, W-7's look: in the import window a rounded white frame stands to
+the right of the TAKE tick, like an empty second checkbox. It is the table's current-cell frame: it follows the click
+(on NO. it rings the number), and in TAKE the cell is wider than its tick, so it draws beside it. Not new.
+
+**Weight.** Low: looks like a control that is not there.
+
+**Task.** The next wave's pool.
