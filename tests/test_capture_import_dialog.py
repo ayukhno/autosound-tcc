@@ -737,6 +737,51 @@ def test_a_tick_on_a_red_row_is_taking_it_as_it_is(tmp_path):
     assert _answer_buttons(dialog, "u3")[i18n.t("capCheckAsIs")].isChecked()
 
 
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_a_hand_tick_on_a_red_row_says_it_takes_the_capture_as_it_is(tmp_path, monkeypatch, mode):
+    """tcc#147 (finding 149, the Arbiter on the Windows VM): he ticked a red row by hand, did not
+    press «Take it as it is», and Applied — the capture was taken as it is, and nothing on screen
+    had said so. «Дай попередження»: the tick moves the row's choice to «Take it as it is», and an
+    orange line of its own (the stopper's `caution-line`, tcc#94) names the capture that will be
+    taken although the method calls it unusable. Unticking returns the row to «Re-take» and the
+    line goes. Whichever door took it — the tick or the button — the line says the same."""
+    from PySide6.QtGui import QPalette
+
+    from autosound_tcc.ui.tcc.theme import PALETTE_DARK, PALETTE_LIGHT
+    from tests import _windows
+
+    check, _asked = _checker({"u2": _USABLE, "u3": _unusable("no clear arrival")})
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_2 (sw)", "m_3 (sw)"], check=check)
+    _windows.theme_on(monkeypatch, dialog, mode)
+    _settle(dialog)
+    retake, as_is = i18n.t("capCheckRetake"), i18n.t("capCheckAsIs")
+    warn = i18n.t("capCheckAsIsWarn").format(names="m_3 (sw)")
+    assert dialog._as_is_note.isHidden() and not dialog._as_is_note.text(), "nothing taken yet"
+
+    dialog._table.item(_row_of(dialog, "u3"), 0).setCheckState(Qt.CheckState.Checked)
+    _app().processEvents()
+
+    buttons = _answer_buttons(dialog, "u3")
+    assert buttons[as_is].isChecked() and not buttons[retake].isChecked()
+    assert dialog._as_is_note.text() == warn and not dialog._as_is_note.isHidden()
+    assert "caution-line" in str(dialog._as_is_note.property("class"))
+    dialog._as_is_note.ensurePolished()
+    caution = (PALETTE_DARK if mode == "dark" else PALETTE_LIGHT)["caution"]
+    assert dialog._as_is_note.palette().color(QPalette.ColorRole.WindowText).name() == caution
+    assert "m_2 (sw)" not in dialog._as_is_note.text(), "a usable sweep is not warned about"
+
+    dialog._table.item(_row_of(dialog, "u3"), 0).setCheckState(Qt.CheckState.Unchecked)
+    _app().processEvents()
+
+    buttons = _answer_buttons(dialog, "u3")
+    assert buttons[retake].isChecked() and not buttons[as_is].isChecked()
+    assert dialog._as_is_note.isHidden() and not dialog._as_is_note.text()
+
+    buttons[as_is].click()
+    _app().processEvents()
+    assert dialog._as_is_note.text() == warn, "the button's answer is said the same way"
+
+
 def test_a_capture_taken_as_it_is_is_not_asked_about_again_and_its_retake_is(tmp_path):
     """Remembered by the capture's uuid (SCR-040): not asked again — and a re-take under the same
     title is another capture, checked afresh."""

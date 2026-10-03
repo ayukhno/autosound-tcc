@@ -333,6 +333,14 @@ class CaptureImportDialog(QDialog):
         self._dup_note.setWordWrap(True)
         self._dup_note.setHidden(True)
         layout.addWidget(self._dup_note)
+        # A red row taken anyway, by its tick or by «Take it as it is», said before Apply in the
+        # same orange (tcc#147, finding 149): a hand tick took the capture as it is and nothing on
+        # screen had said so. «Дай попередження» — the Arbiter.
+        self._as_is_note = QLabel("")
+        self._as_is_note.setProperty("class", "caution-line")
+        self._as_is_note.setWordWrap(True)
+        self._as_is_note.setHidden(True)
+        layout.addWidget(self._as_is_note)
         self._note = QLabel("")
         self._note.setProperty("class", "phead-sub")
         self._note.setWordWrap(True)
@@ -743,6 +751,12 @@ class CaptureImportDialog(QDialog):
         self._dup_note.setText(i18n.t("capImportDupWarn").format(names=", ".join(self._dup_titles))
                                if self._dup_titles else "")
         self._dup_note.setHidden(not self._dup_titles)
+        # What `taken()` will hand over as `as_is`: ticked, and called unusable in this window.
+        as_is = [row.title for row in self.ticked_rows()
+                 if capture_import.unusable(self._verdicts.get(row.uuid))]
+        self._as_is_note.setText(i18n.t("capCheckAsIsWarn").format(names=", ".join(as_is))
+                                 if as_is else "")
+        self._as_is_note.setHidden(not as_is)
         lines.append(i18n.t("capImportShowing"))
         if self._picked:
             lines.append(i18n.t("capImportPicked").format(n=self._picked))
