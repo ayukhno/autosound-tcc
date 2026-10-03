@@ -1269,3 +1269,31 @@ def test_what_the_window_judged_goes_with_what_it_takes(tmp_path):
 
     assert [(row.uuid, row.as_is, row.checked) for row in dialog.taken()] == [
         ("u1", False, ""), ("u2", False, "usable"), ("u3", True, "sweep_named_rta")]
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_a_new_name_field_is_at_least_a_line_of_text_tall(tmp_path, monkeypatch, mode):
+    """Finding 151 (under tcc#145, the Arbiter on the Windows VM): the closed NEW NAME field read
+    «r-L 7 (rta)» for «r-L_7 (rta)». The editor sits in the cell's padded rect, 21 px, and the
+    sheet's 3 + 3 px of combo padding left its line edit 13 px for a 16-px line: the underscore and
+    the descenders were cut. The field's line edit is at least the height of a line of its own
+    font. Held against the widget's own font, so a runner whose fallback font is shorter or taller
+    measures against that one."""
+    from PySide6.QtWidgets import QComboBox
+
+    from tests import _windows
+
+    dialog = _dialog(_rew(3), tmp_path, expected=["r-L_1 (rta)", "tw-R_2 (sw)", "m_3 (sw)"])
+    _windows.theme_on(monkeypatch, dialog, mode)
+    dialog.show()
+    try:
+        _app().processEvents()
+        fields = [box.lineEdit() for box in dialog._table.findChildren(QComboBox)
+                  if box.isEditable() and box.isVisible()]
+        assert len(fields) == 3
+        for field in fields:
+            assert field.height() >= field.fontMetrics().height(), (
+                f"{mode}: the line edit is {field.height()} px for a "
+                f"{field.fontMetrics().height()}-px line")
+    finally:
+        dialog.close()

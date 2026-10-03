@@ -624,6 +624,15 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         padding: 3px 4px 3px 7px;
         placeholder-text-color: {t.faint};
     }}
+    /* An editable box gives its line edit the whole height inside the border (finding 151, under
+    tcc#145). The import window's NEW NAME editor sits in the table cell's padded rect, 21 px,
+    and 3 + 3 px of padding left its line edit 13 px for a 16-px line: «r-L_7 (rta)» read
+    «r-L 7 (rta)», the underscore and the descenders cut. The line edit centres its own text, so
+    the padding only took room. `.mini-select`'s padding comes later and keeps its own. */
+    QComboBox:editable {{
+        padding-top: 0;
+        padding-bottom: 0;
+    }}
     QComboBox:hover {{
         border-color: {t.accent_dim};
     }}
