@@ -20,6 +20,7 @@ from autosound_tcc.core import (
     critic,
     model_choices,
     process_writer,
+    self_check,
 )
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.ui.tcc import qt_shutdown
@@ -53,22 +54,33 @@ class _ContractWorker(QThread):
 
     It spawns a Python subprocess and (unless REW is skipped) probes REW over HTTP, so the GUI
     thread is exactly where it must not run -- same reason `_RewPingWorker` exists just above.
+
+    And, for the diagnostics, the method's reading of agy's sign-in (tcc#135): another Python
+    child, which the panel's own render used to start on the GUI thread (night review, I2). The
+    intake gate's check feeds no panel, so it does not ask.
     """
 
     result = Signal(object)  # ContractReport
 
-    def __init__(self, project_dir, skip_rew: bool = False) -> None:
+    def __init__(self, project_dir, skip_rew: bool = False, agy_sign_in: bool = True) -> None:
         super().__init__()
         self._project_dir = project_dir
         self._skip_rew = skip_rew
+        self._agy_sign_in = agy_sign_in
         self._child = None
         # Say who you were if you are destroyed before you finished (finding 35): Qt's own
         # fatal line names no class, and this app has eight kinds of worker.
         qt_shutdown.watch(self)
 
     def run(self) -> None:
-        self.result.emit(contract_check.run(self._project_dir, skip_rew=self._skip_rew,
-                                            register=self._took_child))
+        report = contract_check.run(self._project_dir, skip_rew=self._skip_rew,
+                                    register=self._took_child)
+        if self._agy_sign_in and not self.isInterruptionRequested():
+            try:
+                self_check.read_agy_sign_in(self._project_dir)
+            except Exception:  # noqa: BLE001 — a reading that failed is no row, not a lost report
+                app_log.logger().warning("agy sign-in: not read", exc_info=True)
+        self.result.emit(report)
 
     def _took_child(self, child) -> None:
         self._child = child
@@ -81,7 +93,10 @@ class _ContractWorker(QThread):
         window on its way out for half a minute, and NOT waiting means Qt destroys a running
         QThread -- which is not a warning but a `qFatal`, i.e. the whole process aborts. Seen
         exactly that way, as a macOS crash report with `_ContractWorker` still in `poll`.
+
+        Interruption first, so a check cut short does not go on to start the agy reading.
         """
+        self.requestInterruption()
         child = self._child
         if child is not None and child.poll() is None:
             child.kill()

@@ -313,19 +313,35 @@ def _recommendation_check() -> Check:
 _AGY_SIGN_IN_TITLE = {"adc": "selfAgyAdcTitle", "account": "selfAgyAccountTitle",
                       "none": "selfAgyNoneTitle"}
 
+#: The method's last reading of agy's sign-in, kept for the panel (night review of tcc#135, I2).
+#: Asking takes a Python child of up to 15 s, and the panel renders on the GUI thread -- on each
+#: open, Re-check, «ask», fix and language switch -- so the diagnostics' worker asks, once per
+#: check, and the row reads only what it brought back. Empty until the first check.
+_AGY_SIGN_IN: dict = {}
+
+
+def read_agy_sign_in(project_dir=None) -> None:
+    """Ask the method how agy signs in, and keep the answer for the agy row. Starts a Python child
+    when agy is installed: never on the GUI thread (`workers._ContractWorker` calls it)."""
+    _AGY_SIGN_IN["found"] = (critic.agy_sign_in(project_dir)
+                             if model_choices.cli_available("agy") else None)
+
 
 def _agy_sign_in_check() -> Optional[Check]:
     """Which sign-in agy will use for a review — Google Cloud's ADC, its account, or none — as the
-    method reads it (tcc#135). No row when agy is not installed, or when the method cannot say."""
+    method reads it (tcc#135). No row when agy is not installed, when the method cannot say, or
+    before the first check has asked (`read_agy_sign_in`): this never starts a child itself.
+
+    No sign-in is a warning only for a project that reviews through agy (M6): for one that reviews
+    through the API or codex it is a fact about agy, not a review that will fail."""
     if not model_choices.cli_available("agy"):
         return None
-    from autosound_tcc.core import critic
-
-    found = critic.agy_sign_in()
+    found = _AGY_SIGN_IN.get("found")
     if found is None:
         return None
     route, line = found
-    return Check("agy_sign_in", WARN if route == "none" else OK,
+    through_agy = critic.configured(config.project_dir())[1] == "agy"
+    return Check("agy_sign_in", WARN if route == "none" and through_agy else OK,
                  _t(_AGY_SIGN_IN_TITLE[route]), line)
 
 

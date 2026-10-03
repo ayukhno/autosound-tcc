@@ -15,7 +15,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from autosound_tcc.core import critic as _critic_at_import  # noqa: E402
 from autosound_tcc.core import model_choices, model_overrides, self_check  # noqa: E402
+
+#: Taken at import, before `conftest` makes it answer nothing: the test that the panel starts no
+#: child needs the real one to be able to see a child start.
+_REAL_AGY_SIGN_IN = _critic_at_import.agy_sign_in
 
 
 @pytest.fixture(autouse=True)
@@ -330,15 +335,29 @@ def test_no_tags_to_compare_against_is_silence_not_an_alarm(monkeypatch, tmp_pat
     assert self_check._pin_check().status == self_check.OK
 
 
+def _agy_reads(monkeypatch, found):
+    """agy installed, and the method's reading of its sign-in taken as the diagnostics' worker
+    takes it: off the GUI thread, before the report reaches the panel (night review of tcc#135,
+    I2). `run()` then reads only what that brought back."""
+    from autosound_tcc.core import critic
+
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None: found)
+    self_check.read_agy_sign_in()
+
+
+def _reviews_with(tmp_path, monkeypatch, key):
+    from autosound_tcc.core import config, project_settings
+
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    project_settings.set_value(config.tcc_dir(tmp_path), "critic", key)
+
+
 def test_an_installed_agy_says_how_it_signs_in_from_the_methods_own_reading(monkeypatch):
     """hub #235, tcc#135: which sign-in agy will use — Google Cloud's ADC, its account, or none —
     shown where TCC shows its setup. The method reads it (`agy_sign_in`, from disk and the
     environment its runs start with, critic-env included); TCC shows its words, not a copy."""
-    from autosound_tcc.core import critic
-
-    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
-    monkeypatch.setattr(critic, "agy_sign_in",
-                        lambda project_dir=None: ("adc", "ADC (Google Cloud), /home/x/adc.json"))
+    _agy_reads(monkeypatch, ("adc", "ADC (Google Cloud), /home/x/adc.json"))
 
     row = _find(self_check.run(), "agy_sign_in")
 
@@ -347,12 +366,9 @@ def test_an_installed_agy_says_how_it_signs_in_from_the_methods_own_reading(monk
     assert row.detail == "ADC (Google Cloud), /home/x/adc.json"
 
 
-def test_an_agy_with_no_sign_in_is_a_warning_with_the_methods_way_out(monkeypatch):
-    from autosound_tcc.core import critic
-
-    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
-    monkeypatch.setattr(critic, "agy_sign_in",
-                        lambda project_dir=None: ("none", "agy без входу: запусти `agy` раз і увійди"))
+def test_an_agy_with_no_sign_in_is_a_warning_with_the_methods_way_out(tmp_path, monkeypatch):
+    _reviews_with(tmp_path, monkeypatch, "agy:gemini-3.1-pro-high")
+    _agy_reads(monkeypatch, ("none", "agy без входу: запусти `agy` раз і увійди"))
 
     row = _find(self_check.run(), "agy_sign_in")
 
@@ -360,18 +376,58 @@ def test_an_agy_with_no_sign_in_is_a_warning_with_the_methods_way_out(monkeypatc
     assert row.detail.startswith("agy без входу")
 
 
+@pytest.mark.parametrize("key", ["", "api:gemini-3.1-pro-high", "codex:gpt-5.6"])
+def test_no_sign_in_warns_only_a_project_that_reviews_through_agy(tmp_path, monkeypatch, key):
+    """Night review of tcc#135, M6: a project that reviews through the API or codex carried a
+    permanent «a review through it will fail» in the headline count. The row stays, as a fact;
+    the warning is for the project whose review would go through agy."""
+    _reviews_with(tmp_path, monkeypatch, key)
+    _agy_reads(monkeypatch, ("none", "agy без входу: запусти `agy` раз і увійди"))
+
+    row = _find(self_check.run(), "agy_sign_in")
+
+    assert row.status == self_check.OK
+    assert row.detail.startswith("agy без входу")
+
+
 def test_no_agy_no_row(monkeypatch):
     from autosound_tcc.core import critic
 
-    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None: ("adc", "x"))
+    asked: list = []
+    monkeypatch.setattr(critic, "agy_sign_in",
+                        lambda project_dir=None: asked.append(project_dir) or ("adc", "x"))
+    self_check.read_agy_sign_in()
 
     assert "agy_sign_in" not in {c.id for c in self_check.run()}
+    assert asked == [], "no agy, nothing to ask the method"
 
 
 def test_a_method_that_cannot_say_leaves_no_row(monkeypatch):
-    from autosound_tcc.core import critic
-
-    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
-    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None: None)
+    _agy_reads(monkeypatch, None)
 
     assert "agy_sign_in" not in {c.id for c in self_check.run()}
+
+
+def test_the_self_check_starts_no_python_child(monkeypatch):
+    """Night review of tcc#135, I2: the panel calls `run()` on the GUI thread on every render —
+    each open, each Re-check result, each «ask» and fix, each language switch — and the agy row
+    started the method in a Python child there, capped at 15 s. On Windows a GUI thread blocked
+    past ~5 s is the «Not Responding» ghost. The row reads what the worker brought back; before
+    the first check there is none, and so no row."""
+    from autosound_tcc.core import child, critic
+
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(critic, "agy_sign_in", _REAL_AGY_SIGN_IN)  # as the app has it
+    spawned: list = []
+
+    def record(args, **_kwargs):
+        spawned.append(list(args))
+        raise OSError("no child in this test")
+
+    monkeypatch.setattr(child, "run_bounded", record)
+
+    checks = self_check.run()
+
+    # The pin row's own `git` is not this finding's, and it is not Python.
+    assert [argv for argv in spawned if argv[0] != "git"] == []
+    assert "agy_sign_in" not in {c.id for c in checks}

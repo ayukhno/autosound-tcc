@@ -10,6 +10,7 @@ error, because the whole point of the reviewer channel is that somebody actually
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -1567,3 +1568,76 @@ def test_a_session_is_handed_the_footers_route_in_the_methods_own_words(tmp_path
     assert all(f'"{via}"' in known for via in set(said.values())), known
     monkeypatch.setattr(critic, "configured", lambda _p: ("", ""))
     assert critic.session_env(tmp_path) == {}
+
+
+# ---- agy's sign-in, as the method reads it (tcc#135; night review, M7) -------------------------
+
+#: Taken at import, before `conftest` makes it answer nothing for every test.
+_REAL_AGY_SIGN_IN = critic.agy_sign_in
+
+
+def _fake_method(tmp_path: Path, name: str, body: str) -> Path:
+    """A method folder of one file, `scripts/autosound_ai.py`, that loads a key into `os.environ`
+    when it is imported -- as the real one loads its critic-env -- and then runs `body`."""
+    scripts = tmp_path / name / "scripts"
+    scripts.mkdir(parents=True)
+    script = scripts / "autosound_ai.py"
+    script.write_text("import os\nos.environ['GEMINI_API_KEY'] = 'AQ.fake-imported'\n" + body,
+                      encoding="utf-8")
+    return script
+
+
+@pytest.fixture
+def methods(monkeypatch, tmp_path):
+    """Point `critic` at one of two fake methods: one that answers, one older without the reader."""
+    made = {
+        "answers": _fake_method(tmp_path, "answers",
+                                "def agy_sign_in():\n    return ('adc', 'ADC (Google Cloud), x')\n"),
+        "older": _fake_method(tmp_path, "older", "def run():\n    pass\n"),
+    }
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    def use(name: str) -> None:
+        monkeypatch.setattr(critic, "script_path", lambda: made[name])
+
+    return use
+
+
+def test_agys_sign_in_is_the_methods_own_reading(methods, tmp_path):
+    methods("answers")
+
+    assert _REAL_AGY_SIGN_IN(tmp_path) == ("adc", "ADC (Google Cloud), x")
+
+
+def test_an_older_method_without_the_reader_says_nothing(methods, tmp_path):
+    methods("older")
+
+    assert _REAL_AGY_SIGN_IN(tmp_path) is None
+
+
+def test_asking_imports_nothing_into_tcc(methods, tmp_path):
+    """The method loads its machine critic-env into `os.environ` when it is imported, keys
+    included, and every child TCC starts inherits TCC's environment. So it is asked in a child."""
+    methods("answers")
+    before = dict(os.environ)
+
+    _REAL_AGY_SIGN_IN(tmp_path)
+
+    assert "GEMINI_API_KEY" not in os.environ
+    assert dict(os.environ) == before
+    assert "autosound_ai" not in sys.modules
+
+
+def test_the_suite_never_runs_the_method_for_agys_sign_in(monkeypatch):
+    """`conftest` answers for it, as for the reviewer key's `_ask`: the real reading runs this
+    machine's method against its critic-env."""
+    import subprocess
+
+    from autosound_tcc.core import child
+
+    spawned: list = []
+    monkeypatch.setattr(child, "run_bounded",
+                        lambda *a, **k: spawned.append(a) or subprocess.CompletedProcess(a, 0, "", ""))
+
+    assert critic.agy_sign_in() is None
+    assert spawned == [], "the method was run — the stub in conftest is gone"

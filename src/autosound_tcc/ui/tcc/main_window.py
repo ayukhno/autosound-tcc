@@ -2771,7 +2771,9 @@ class MainWindow(QMainWindow):
         worker = getattr(self, "_gate_worker", None)
         if worker is not None and worker.isRunning():
             return
-        self._gate_worker = _ContractWorker(config.project_dir(), skip_rew=True)
+        # No agy reading: that is the diagnostics panel's, and this result feeds no panel.
+        self._gate_worker = _ContractWorker(config.project_dir(), skip_rew=True,
+                                            agy_sign_in=False)
         self._gate_worker.result.connect(self._on_gate_result)
         self._gate_worker.start()
 

@@ -497,6 +497,14 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
 
     monkeypatch.setattr(reviewer_key, "_ask", lambda: None, raising=False)
     monkeypatch.setattr(reviewer_key, "_STATUS", False, raising=False)
+    # ...and how agy signs in, which the method also answers by running its own script against
+    # this machine's critic-env (tcc#135). "The method cannot say" is the neutral reply; tests of
+    # the reader take the real one at import. What a reading left for the panel goes with it, so
+    # one test's agy row never shows in the next (night review of tcc#135, M7).
+    from autosound_tcc.core import critic, self_check
+
+    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None: None, raising=False)
+    monkeypatch.setattr(self_check, "_AGY_SIGN_IN", {}, raising=False)
     # ...and the same probe for Claude. A window's catalogue worker asks `claude auth status`, and
     # on a machine with Claude Code that ran the real CLI: with HOME in `tmp_path` it wrote
     # `.claude.json` there, and the window's project watcher reloaded over the test (2026-09-14).

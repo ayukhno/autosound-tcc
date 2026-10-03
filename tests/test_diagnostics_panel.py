@@ -2333,3 +2333,76 @@ def test_the_updated_method_s_row_says_its_signature_in_ukrainian(monkeypatch):
         assert "signature good" not in text
     finally:
         i18n.set_language("en")
+
+
+def _agy_reading(monkeypatch, asked: list) -> None:
+    """agy installed; the method's reading recorded with the thread it was asked on."""
+    from autosound_tcc.core import contract_check, critic, model_choices
+
+    monkeypatch.setattr(contract_check, "run", lambda *a, **k: _report())
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(
+        critic, "agy_sign_in",
+        lambda project_dir=None: asked.append(
+            (project_dir, threading.current_thread() is threading.main_thread()))
+        or ("adc", "ADC (Google Cloud), /x/adc.json"))
+
+
+def test_the_check_brings_agys_sign_in_with_the_report_from_off_the_gui_thread(
+        monkeypatch, tmp_path):
+    """Night review of tcc#135, I2: the agy row started the method in a Python child from the
+    panel's render, on the GUI thread, on every open, Re-check, «ask», fix and language switch.
+    The worker that already runs for every check asks now, and the row reads what it brought."""
+    from autosound_tcc.ui.tcc import workers
+
+    _app()
+    asked: list = []
+    _agy_reading(monkeypatch, asked)
+    worker = workers._ContractWorker(tmp_path)
+
+    worker.start()
+    assert worker.wait(10_000)
+
+    assert asked == [(tmp_path, False)], "asked once, for this project, off the GUI thread"
+    dialog = DiagnosticsDialog()
+    dialog.set_report(_report())
+    assert i18n.t("selfAgyAdcTitle") in _texts(dialog)
+    assert asked == [(tmp_path, False)], "the render asked nothing"
+
+
+def test_the_intake_gates_check_does_not_ask_agys_sign_in(monkeypatch, tmp_path):
+    """The gate's check after an intake save feeds no panel: a child there is a child for nobody."""
+    from autosound_tcc.ui.tcc import workers
+
+    _app()
+    asked: list = []
+    _agy_reading(monkeypatch, asked)
+    worker = workers._ContractWorker(tmp_path, skip_rew=True, agy_sign_in=False)
+
+    worker.start()
+    assert worker.wait(10_000)
+
+    assert asked == []
+
+
+def test_a_check_cancelled_at_close_does_not_go_on_to_ask_agy(monkeypatch, tmp_path):
+    """`stop_workers` cancels the check and waits three seconds: the agy reading after a cancel
+    would be a child of up to 15 s that the window then has to let go of running."""
+    from autosound_tcc.core import contract_check
+    from autosound_tcc.ui.tcc import workers
+
+    _app()
+    asked: list = []
+    _agy_reading(monkeypatch, asked)
+    entered, release = threading.Event(), threading.Event()
+    monkeypatch.setattr(contract_check, "run",
+                        lambda *a, **k: (entered.set(), release.wait(10), _report())[-1])
+    worker = workers._ContractWorker(tmp_path)
+    worker.start()
+    assert entered.wait(10)
+
+    worker.cancel()
+    release.set()
+    assert worker.wait(10_000)
+
+    assert asked == []

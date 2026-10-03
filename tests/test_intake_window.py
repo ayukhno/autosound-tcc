@@ -131,6 +131,32 @@ def test_no_gate_check_for_a_form_never_opened(tmp_path, monkeypatch):
     assert built == []
 
 
+def test_the_gate_check_does_not_ask_agys_sign_in(tmp_path, monkeypatch):
+    """The gate's result feeds no diagnostics panel, so its check starts no agy reading (night
+    review of tcc#135, I2: that reading is the panel's, and a Python child)."""
+    window, _ = _window(tmp_path, monkeypatch)
+    built = []
+
+    class _Worker:
+        def __init__(self, *args, **kwargs):
+            built.append(kwargs)
+            self.result = type("S", (), {"connect": lambda self, slot: None})()
+
+        def start(self):
+            pass
+
+        def isRunning(self):  # noqa: N802 (Qt's name)
+            return False
+
+    monkeypatch.setattr(main_window, "_ContractWorker", _Worker)
+    window._intake_form = type("F", (), {"was_opened": True})()
+    window._agent_worker = None
+
+    window._check_intake_gate()
+
+    assert built == [{"skip_rew": True, "agy_sign_in": False}]
+
+
 def test_the_offer_starts_the_in_app_session(tmp_path, monkeypatch):
     window, _ = _window(tmp_path, monkeypatch)
     started = []
