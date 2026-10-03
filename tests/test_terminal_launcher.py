@@ -680,3 +680,18 @@ def test_the_plain_terminal_hands_cmd_the_line_verbatim_too(recorded, monkeypatc
 
     tab = _as_wt_starts_it(recorded[0])[1] if wt else recorded[0]
     assert _as_cmd_runs_it(tab) == line
+
+
+def test_a_semicolon_in_the_project_folder_does_not_split_the_bare_wt_line(recorded, monkeypatch,
+                                                                         tmp_path):
+    """Review of finding 148, M10: the bare `wt -d <folder> <cli>` never went through
+    `_wt_command`, so a folder named with a `;` still started a second wt command."""
+    import subprocess
+
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    folder = tmp_path / "Golf; Passat"
+    folder.mkdir()
+
+    launch(folder, "claude")
+
+    assert _as_wt_starts_it(subprocess.list2cmdline(recorded[0])) == (str(folder), "claude")

@@ -122,6 +122,11 @@ def _cmd_command(line: str) -> str:
     «Environment variable AUTOSOUND not defined», the hint and the model broken the same way
     (finding 148). With `/s`, cmd takes the first and the last quote off what follows `/k` and runs
     the rest exactly as written.
+
+    One thing it still does to the line: `%NAME%` is replaced when NAME is a defined variable,
+    inside quotes too — and wt does the same first on its branch. A cmd command line has no
+    reliable escape for it, so it is accepted: no value TCC writes here (a model id, the critic's
+    path, a hint) is expected to hold one (review of finding 148, M8).
     """
     return f'cmd /s /k "{line}"'
 
@@ -344,7 +349,9 @@ def _launch_windows(
         if hint or model or extra or env:
             subprocess.Popen(_wt_command(inner, str(project_dir)), close_fds=True)
         else:
-            subprocess.Popen(["wt", "-d", str(project_dir), cli], close_fds=True)
+            # The folder's `;` escaped here too: wt would start a second command at it (M10).
+            subprocess.Popen(["wt", "-d", str(project_dir).replace(";", "\\;"), cli],
+                             close_fds=True)
         return
     # ONE console, no shell, no `start`. The old line ran `start "" … cmd /k …` through
     # `shell=True`, which opens two consoles by construction (TCC-006); `start` was only ever

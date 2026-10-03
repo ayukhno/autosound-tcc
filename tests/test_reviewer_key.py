@@ -1551,3 +1551,23 @@ def test_the_copies_after_a_save_are_named_with_and(monkeypatch, lang):
     assert asked == [i18n.t("rkRemoveAsk").format(var="GEMINI_API_KEY", place=place)]
     assert i18n.t("rkRemoved").format(place=place) in dialog._result.text()
     dialog.close()
+
+
+def test_the_move_line_quotes_every_argument_for_cmd(monkeypatch):
+    """Review of finding 148, M7: the line went over in the C runtime's quoting, which leaves a
+    path with no space bare — and for a Windows user named `R&D` cmd split the interpreter's path
+    at the `&`. Every argument is in `"…"` now: cmd keeps `&` inside quotes, and a Windows path
+    cannot hold a `"`."""
+    from pathlib import PureWindowsPath
+
+    from autosound_tcc.core import child, reviewer_key
+
+    monkeypatch.setattr(reviewer_key.sys, "platform", "win32")
+    monkeypatch.setattr(child, "script_interpreter",
+                        lambda **_k: r"C:\Users\R&D\AppData\Local\uv\python.exe")
+    monkeypatch.setattr(reviewer_key, "script_path",
+                        lambda: PureWindowsPath(r"C:\Users\R&D\.claude\skills\autosound\key.py"))
+
+    assert reviewer_key.move_shell_line() == (
+        r'"C:\Users\R&D\AppData\Local\uv\python.exe" '
+        r'"C:\Users\R&D\.claude\skills\autosound\key.py" "key" "move-shell"')

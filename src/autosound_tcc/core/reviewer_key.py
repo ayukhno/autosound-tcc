@@ -306,5 +306,8 @@ def move_shell_line() -> str:
     """
     argv = [child.script_interpreter(), str(script_path()), "key", "move-shell"]
     if sys.platform.startswith("win"):
-        return subprocess.list2cmdline(argv)
+        # For cmd, which runs it (`terminal_launcher.run_line`): every argument in `"…"`. The C
+        # runtime's quoting left a path with no space bare, and cmd split a user named `R&D` at
+        # the `&` (review of finding 148, M7). A Windows path cannot hold a `"`.
+        return " ".join(f'"{arg}"' for arg in argv)
     return " ".join(shlex.quote(a) for a in argv)
