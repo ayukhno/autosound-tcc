@@ -3519,3 +3519,13 @@ wording odd; what he expected is to be asked (recorded as said).
 
 **Task.** For W-6's collection (record only): while the new pick's check runs, a spinner in place of (or beside) the
 «!» and no stale red line from the old pick.
+
+### 143. The reviewer-key window's provider box is light grey with white words in the dark theme
+
+**What.** The Arbiter on the Windows VM, 2026-10-03, W-6's branch (afc0494): in the dark theme the provider picker
+under the rows («Anthropic (Claude)») is drawn on a light grey field with white text — barely readable. It is not a
+disabled look; the box is live. «то не сіре, то білий шрифт — запиши на майбутнє, поки залишаємо як відому багу».
+
+**Weight.** Low: a look.
+
+**Task.** For the next wave's collection (a known bug in v1.1.0).
