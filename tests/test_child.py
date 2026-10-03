@@ -835,6 +835,24 @@ def test_a_bounded_run_feeds_the_child_its_input():
     assert done.stdout.strip() == "THE KEY"
 
 
+def test_a_bounded_run_hands_its_child_to_whoever_may_end_it():
+    """Final review M2: the agy reading ran through here with no handle out, so a window closing
+    during it could not end it. `register` gets the child the moment it exists, as
+    `contract_check.run` hands its own, and a kill from there comes back at once — not at the
+    timeout. A real child, killed before it can do anything."""
+    import time
+
+    taken: list = []
+    started = time.monotonic()
+    done = child.run_bounded([sys.executable, "-c", "import time; time.sleep(60)"], timeout=60,
+                             register=lambda proc: (taken.append(proc), proc.kill()),
+                             text=True, **child.quiet())
+
+    assert [type(proc) for proc in taken] == [subprocess.Popen]
+    assert done.returncode != 0
+    assert time.monotonic() - started < 30
+
+
 def test_off_windows_a_child_given_up_on_is_killed_and_no_taskkill_runs(monkeypatch):
     """`taskkill` is Windows'. Elsewhere the child is killed, the wait after the kill is bounded
     all the same, and the caller hears `TimeoutExpired` with the bound it set."""

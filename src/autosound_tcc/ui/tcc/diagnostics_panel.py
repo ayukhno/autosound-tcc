@@ -1574,6 +1574,13 @@ class DiagnosticsDialog(QDialog):
         self._refresh_btn.setEnabled(report is not None)
         self._render()
 
+    def own_checks_changed(self) -> None:
+        """A reading the self-check rows show came in after the report — agy's sign-in, which
+        follows it (final review of W-6, M2). Drawn again with it; a check still running keeps its
+        «Checking…» until its own report."""
+        if self._report is not None:
+            self._render()
+
     def _ask_row(self, subject: str, issue: str, shown: Optional[str] = None) -> QWidget:
         row = _AskRow(subject, issue, self._asked.get(f"{subject}::{issue}"), shown)
         row.ask.connect(lambda text, key=f"{subject}::{issue}": self._on_ask(key, text))

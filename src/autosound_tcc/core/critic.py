@@ -929,13 +929,18 @@ _AGY_SIGN_IN_ASK = (
 )
 
 
-def agy_sign_in(project_dir: Optional[Path] = None) -> Optional[tuple[str, str]]:
+def agy_sign_in(project_dir: Optional[Path] = None,
+                register=None) -> Optional[tuple[str, str]]:
     """`(route, line)` — how agy will sign in for a review: `adc`, `account` or `none`, in the
     method's own words (hub #235; `autosound_ai.agy_sign_in`, v3.1.0). None when the method cannot
     say: an older one without the function, no script, or a child that did not answer.
 
     The method reads it off disk and off the environment its runs start with, critic-env included
-    — never by running agy, and no credential file is opened."""
+    — never by running agy, and no credential file is opened.
+
+    `register` is handed the child as soon as it exists (`child.run_bounded`): the diagnostics'
+    worker ends it when the window closes, rather than waiting up to 15 s for it (final review of
+    W-6, M2). A child killed that way is no answer, so None."""
     if not is_available():
         return None
     project_dir = Path(project_dir or config.project_dir())
@@ -943,7 +948,7 @@ def agy_sign_in(project_dir: Optional[Path] = None) -> Optional[tuple[str, str]]
         proc = child.run_bounded(
             [child.script_interpreter(), "-c", _AGY_SIGN_IN_ASK, str(script_path().parent)],
             timeout=15, cwd=str(project_dir), text=True, encoding="utf-8",
-            errors="replace", env=vendor_loader.child_env(), **child.quiet(),
+            errors="replace", env=vendor_loader.child_env(), register=register, **child.quiet(),
         )
     except (subprocess.TimeoutExpired, OSError):
         return None

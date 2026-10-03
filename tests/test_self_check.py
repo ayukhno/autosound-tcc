@@ -342,7 +342,7 @@ def _agy_reads(monkeypatch, found):
     from autosound_tcc.core import critic
 
     monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
-    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None: found)
+    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None, register=None: found)
     self_check.read_agy_sign_in()
 
 
@@ -395,7 +395,8 @@ def test_no_agy_no_row(monkeypatch):
 
     asked: list = []
     monkeypatch.setattr(critic, "agy_sign_in",
-                        lambda project_dir=None: asked.append(project_dir) or ("adc", "x"))
+                        lambda project_dir=None, register=None: asked.append(project_dir)
+                        or ("adc", "x"))
     self_check.read_agy_sign_in()
 
     assert "agy_sign_in" not in {c.id for c in self_check.run()}

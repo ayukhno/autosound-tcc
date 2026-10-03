@@ -801,6 +801,8 @@ class MainWindow(QMainWindow):
         # opens the dialog, and before _load_project(), which re-runs the check.
         self._contract_report: ContractReport | None = None
         self._contract_worker: _ContractWorker | None = None
+        #: A check asked for while one ran; started when that one's thread ends.
+        self._contract_again = False
         self._diag_dialog: DiagnosticsDialog | None = None
         #: The reviewer probe's own QThread, and what was on the clipboard just before it started
         #: (so a clipboard-mode probe's copy can be given back -- see `_on_reviewer_probed`).
@@ -2013,7 +2015,12 @@ class MainWindow(QMainWindow):
         if os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0":
             return
         if self._contract_worker is not None and self._contract_worker.isRunning():
+            # Asked again while one runs: it goes when that one ends. Its report may be out
+            # already — the agy reading follows the report (final review of W-6, M2) — and a
+            # Re-check dropped here left the panel on «Checking…» with its button off.
+            self._contract_again = True
             return
+        self._contract_again = False
         if not contract_check.is_available():
             self._on_contract_result(
                 ContractReport(
@@ -2027,7 +2034,20 @@ class MainWindow(QMainWindow):
             self._diag_dialog.set_report(None)  # "Checking…", not stale data
         self._contract_worker = _ContractWorker(config.project_dir())
         self._contract_worker.result.connect(self._on_contract_result)
+        self._contract_worker.signInRead.connect(self._on_agy_sign_in_read)
+        self._contract_worker.finished.connect(self._on_contract_finished)
         self._contract_worker.start()
+
+    def _on_agy_sign_in_read(self) -> None:
+        """agy's sign-in, read after the check's report (M2): an open panel shows its row now."""
+        if self._diag_dialog is not None:
+            self._diag_dialog.own_checks_changed()
+
+    def _on_contract_finished(self) -> None:
+        """The check's thread has ended: one asked for while it ran goes now. `finished` arrives
+        with `isRunning()` already false, as for the reviewer probe."""
+        if getattr(self, "_contract_again", False) and not getattr(self, "_closing", False):
+            self._start_contract_check()
 
     def _on_contract_result(self, report: ContractReport) -> None:
         self._contract_report = report
@@ -6077,6 +6097,7 @@ class MainWindow(QMainWindow):
         # is the only lever that reaches a thread blocked reading it, and waiting out its own 30 s
         # timeout would freeze a window on its way out. The hand-over covers the rest.
         contract = getattr(self, "_contract_worker", None)
+        self._contract_again = False  # a Re-check queued behind it is not started on the way out
         if contract is not None and contract.isRunning():
             contract.cancel()
         qt_shutdown.stop_or_detach(contract, 3000)

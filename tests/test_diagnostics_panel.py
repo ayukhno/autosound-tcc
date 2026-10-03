@@ -2343,7 +2343,7 @@ def _agy_reading(monkeypatch, asked: list) -> None:
     monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
     monkeypatch.setattr(
         critic, "agy_sign_in",
-        lambda project_dir=None: asked.append(
+        lambda project_dir=None, register=None: asked.append(
             (project_dir, threading.current_thread() is threading.main_thread()))
         or ("adc", "ADC (Google Cloud), /x/adc.json"))
 
@@ -2406,3 +2406,119 @@ def test_a_check_cancelled_at_close_does_not_go_on_to_ask_agy(monkeypatch, tmp_p
     assert worker.wait(10_000)
 
     assert asked == []
+
+
+class _AgyChild:
+    """The agy reading's child as the worker sees it: alive until killed."""
+
+    def __init__(self) -> None:
+        self.killed = threading.Event()
+
+    def poll(self):
+        return -9 if self.killed.is_set() else None
+
+    def kill(self) -> None:
+        self.killed.set()
+
+
+def test_the_report_goes_out_before_agys_reading_and_the_reading_on_its_own_signal(
+        monkeypatch, tmp_path):
+    """Final review M2: the REW dot, the strip and the panel of the launch check and of every
+    Re-check waited for the agy reading — a Python child, under a second usually, up to 15 s. The
+    report goes first; the reading follows, and says so on a signal of its own."""
+    from PySide6.QtCore import Qt
+
+    from autosound_tcc.core import contract_check, critic, model_choices
+    from autosound_tcc.ui.tcc import workers
+
+    _app()
+    reading, release = threading.Event(), threading.Event()
+    monkeypatch.setattr(contract_check, "run", lambda *a, **k: _report())
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None, register=None: (
+        reading.set(), release.wait(10), ("adc", "ADC (Google Cloud), /x/adc.json"))[-1])
+    reported, read = threading.Event(), threading.Event()
+    worker = workers._ContractWorker(tmp_path)
+    worker.result.connect(lambda _report: reported.set(), Qt.ConnectionType.DirectConnection)
+    worker.start()
+    try:
+        assert reading.wait(10)
+        assert reported.wait(5), "the report waited for agy's reading"
+        worker.signInRead.connect(read.set, Qt.ConnectionType.DirectConnection)
+        assert not read.is_set()
+    finally:
+        release.set()
+        assert worker.wait(10_000)
+
+    assert read.is_set(), "the reading came back and nothing said so"
+    from autosound_tcc.core import self_check
+
+    assert self_check._AGY_SIGN_IN["found"] == ("adc", "ADC (Google Cloud), /x/adc.json")
+
+
+def test_a_close_during_agys_reading_ends_its_child(monkeypatch, tmp_path):
+    """Final review M2 (a): the reading's child was not the worker's to end, so `cancel()` killed
+    only the contract child. A close during the reading waited out `stop_or_detach`'s 3 s, let the
+    thread go, and the exit waited for it again."""
+    from autosound_tcc.core import contract_check, critic, model_choices
+    from autosound_tcc.ui.tcc import workers
+
+    _app()
+    child, reading = _AgyChild(), threading.Event()
+
+    def agy_sign_in(project_dir=None, register=None):
+        if register is not None:
+            register(child)
+        reading.set()
+        child.killed.wait(10)
+        return None
+
+    monkeypatch.setattr(contract_check, "run", lambda *a, **k: _report())
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(critic, "agy_sign_in", agy_sign_in)
+    worker = workers._ContractWorker(tmp_path)
+    worker.start()
+    try:
+        assert reading.wait(10)
+        worker.cancel()
+
+        assert child.killed.is_set(), "the close left agy's reading running"
+        assert worker.wait(5000)
+    finally:
+        child.kill()
+        worker.wait(10_000)
+
+
+def test_a_close_just_before_agys_child_exists_still_ends_it(monkeypatch, tmp_path):
+    """The other order: the close lands after the worker decided to read and before the child is
+    handed over, when `cancel()` finds no child to kill. Handed over late, it is ended at once."""
+    from autosound_tcc.core import contract_check, critic, model_choices
+    from autosound_tcc.ui.tcc import workers
+
+    _app()
+    child, entered, go = _AgyChild(), threading.Event(), threading.Event()
+
+    def agy_sign_in(project_dir=None, register=None):
+        entered.set()
+        go.wait(10)
+        if register is not None:
+            register(child)
+        child.killed.wait(10)
+        return None
+
+    monkeypatch.setattr(contract_check, "run", lambda *a, **k: _report())
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    monkeypatch.setattr(critic, "agy_sign_in", agy_sign_in)
+    worker = workers._ContractWorker(tmp_path)
+    worker.start()
+    try:
+        assert entered.wait(10)
+        worker.cancel()
+        go.set()
+
+        assert worker.wait(5000), "the child handed over after the close was left to run"
+        assert child.killed.is_set()
+    finally:
+        go.set()
+        child.kill()
+        worker.wait(10_000)

@@ -58,9 +58,15 @@ class _ContractWorker(QThread):
     And, for the diagnostics, the method's reading of agy's sign-in (tcc#135): another Python
     child, which the panel's own render used to start on the GUI thread (night review, I2). The
     intake gate's check feeds no panel, so it does not ask.
+
+    The report goes first and the reading after it (final review of W-6, M2): the REW dot, the
+    strip and the panel of the launch check and of every Re-check waited for that child, under a
+    second usually and up to 15 s. The reading lands in `self_check`'s own keeping, as before, and
+    `signInRead` says it is there, so an open panel can show its row.
     """
 
     result = Signal(object)  # ContractReport
+    signInRead = Signal()  # the reading is in `self_check._AGY_SIGN_IN`
 
     def __init__(self, project_dir, skip_rew: bool = False, agy_sign_in: bool = True) -> None:
         super().__init__()
@@ -75,15 +81,26 @@ class _ContractWorker(QThread):
     def run(self) -> None:
         report = contract_check.run(self._project_dir, skip_rew=self._skip_rew,
                                     register=self._took_child)
-        if self._agy_sign_in and not self.isInterruptionRequested():
-            try:
-                self_check.read_agy_sign_in(self._project_dir)
-            except Exception:  # noqa: BLE001 — a reading that failed is no row, not a lost report
-                app_log.logger().warning("agy sign-in: not read", exc_info=True)
         self.result.emit(report)
+        if not self._agy_sign_in or self.isInterruptionRequested():
+            return
+        try:
+            self_check.read_agy_sign_in(self._project_dir, register=self._took_child)
+        except Exception:  # noqa: BLE001 — a reading that failed is no row, not a lost report
+            app_log.logger().warning("agy sign-in: not read", exc_info=True)
+            return
+        if not self.isInterruptionRequested():
+            self.signInRead.emit()
 
     def _took_child(self, child) -> None:
+        """Keep the running child — the check's, then the agy reading's — for `cancel()` to kill.
+
+        A close can land between the decision to read agy and its child existing, when `cancel()`
+        finds no child to kill. The interruption it asked for first is read here, so a child
+        handed over after it is ended at once rather than left to its 15 s."""
         self._child = child
+        if self.isInterruptionRequested() and child.poll() is None:
+            child.kill()
 
     def cancel(self) -> None:
         """End the check now rather than at its 30 s timeout.
@@ -94,7 +111,8 @@ class _ContractWorker(QThread):
         QThread -- which is not a warning but a `qFatal`, i.e. the whole process aborts. Seen
         exactly that way, as a macOS crash report with `_ContractWorker` still in `poll`.
 
-        Interruption first, so a check cut short does not go on to start the agy reading.
+        Interruption first, so a check cut short does not go on to start the agy reading; and a
+        reading already running is the child killed here, as the check's is.
         """
         self.requestInterruption()
         child = self._child

@@ -320,10 +320,11 @@ _AGY_SIGN_IN_TITLE = {"adc": "selfAgyAdcTitle", "account": "selfAgyAccountTitle"
 _AGY_SIGN_IN: dict = {}
 
 
-def read_agy_sign_in(project_dir=None) -> None:
+def read_agy_sign_in(project_dir=None, register=None) -> None:
     """Ask the method how agy signs in, and keep the answer for the agy row. Starts a Python child
-    when agy is installed: never on the GUI thread (`workers._ContractWorker` calls it)."""
-    _AGY_SIGN_IN["found"] = (critic.agy_sign_in(project_dir)
+    when agy is installed: never on the GUI thread (`workers._ContractWorker` calls it, after its
+    report, and ends the child through `register` when the window closes)."""
+    _AGY_SIGN_IN["found"] = (critic.agy_sign_in(project_dir, register=register)
                              if model_choices.cli_available("agy") else None)
 
 

@@ -514,7 +514,8 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
     # one test's agy row never shows in the next (night review of tcc#135, M7).
     from autosound_tcc.core import critic, self_check
 
-    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None: None, raising=False)
+    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None, register=None: None,
+                        raising=False)
     monkeypatch.setattr(self_check, "_AGY_SIGN_IN", {}, raising=False)
     # ...and the same probe for Claude. A window's catalogue worker asks `claude auth status`, and
     # on a machine with Claude Code that ran the real CLI: with HOME in `tmp_path` it wrote

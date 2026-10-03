@@ -1960,6 +1960,82 @@ def test_closing_the_window_stops_the_contract_worker(tmp_path, monkeypatch):
         assert mcp._thread is None, "a daemon asyncio thread outliving the window is the crash"
 
 
+def _agy_reading_held(monkeypatch):
+    """A window whose contract check answers at once and whose agy reading waits for the test.
+    The window is built under the suite's switch, which is then lifted for its own check."""
+    import threading
+
+    from autosound_tcc.core import contract_check, critic, model_choices
+    from autosound_tcc.core.contract_check import ContractReport
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")
+    monkeypatch.setattr(contract_check, "is_available", lambda: True)
+    runs: list = []
+    monkeypatch.setattr(contract_check, "run", lambda *a, **k: runs.append(1) or ContractReport(
+        ok=True, project_dir="/tmp/proj", checked_at="2026-10-03T12:00:00+00:00"))
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "agy")
+    reading, release = threading.Event(), threading.Event()
+    monkeypatch.setattr(critic, "agy_sign_in", lambda project_dir=None, register=None: (
+        reading.set(), release.wait(10), ("adc", "ADC (Google Cloud), /x/adc.json"))[-1])
+    return window, runs, reading, release
+
+
+def _pump_until(done, seconds: float = 10.0) -> bool:
+    import time
+
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        if done():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_the_report_reaches_the_window_before_agys_reading_and_its_row_follows(monkeypatch):
+    """Final review M2: the panel, the strip and the REW dot of every check waited for agy's
+    sign-in reading. The report shows at once; the agy row joins the open panel when its reading
+    comes back."""
+    window, _runs, reading, release = _agy_reading_held(monkeypatch)
+    try:
+        window._diag_btn.click()  # no report yet: opening the panel starts the check
+        dialog = window._diag_dialog
+        assert reading.wait(10)
+
+        assert _pump_until(lambda: dialog._report is not None), "the report waited for agy"
+        assert "agy_sign_in" not in {check.id for check in dialog._checks}
+    finally:
+        release.set()
+    worker = window._contract_worker
+    assert worker.wait(10_000)
+
+    assert _pump_until(lambda: "agy_sign_in" in {check.id for check in dialog._checks}), \
+        "the reading came back and the open panel did not show it"
+
+
+def test_a_recheck_asked_during_agys_reading_runs_when_it_ends(monkeypatch):
+    """With the report out first, the worker still runs while it reads agy's sign-in. A Re-check
+    pressed then was dropped as «a check is already running», and the panel stayed on «Checking…»
+    with its button off. It runs when the reading ends."""
+    window, runs, reading, release = _agy_reading_held(monkeypatch)
+    try:
+        window._start_contract_check()
+        assert reading.wait(10)
+        assert _pump_until(lambda: window._contract_report is not None), "the report waited"
+        window._diag_btn.click()
+        window._diag_dialog._on_refresh()  # Re-check: the panel says «Checking…»
+        assert window._diag_dialog._report is None
+    finally:
+        release.set()
+
+    assert _pump_until(lambda: len(runs) == 2 and window._diag_dialog._report is not None), \
+        f"the Re-check never ran ({len(runs)} check(s)); the panel waits for nothing"
+    assert window._contract_worker.wait(10_000)
+
+
 def test_a_new_ledger_snapshot_does_not_need_the_reload_button(tmp_path, monkeypatch):
     """A snapshot committed from a terminal is the most visible thing a session does — a channel
     gains a crossover, the header's version moves — and the only way to see it was ↻."""

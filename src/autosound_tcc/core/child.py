@@ -314,10 +314,15 @@ def kill_tree(proc: subprocess.Popen) -> None:
         pass
 
 
-def run_bounded(args, *, timeout: float, input=None, **popen_kwargs) -> subprocess.CompletedProcess:
+def run_bounded(args, *, timeout: float, input=None, register=None,
+                **popen_kwargs) -> subprocess.CompletedProcess:
     """`subprocess.run(args, input=input, capture_output=True, timeout=timeout)` that comes back.
     The rest are `Popen` keywords: `check=` and `capture_output=` are not taken (output is always
     captured, and the return code is the caller's to read).
+
+    `register`, when given, is handed the child as soon as it exists, as `contract_check.run`
+    hands its own: a caller on a worker thread can then end it at close instead of waiting it out
+    (the agy reading, final review of W-6, M2). A killed child comes back as a non-zero return.
 
     `subprocess.run` on Windows, at the timeout, kills the one process and then waits in
     `communicate()` with no bound for its pipes -- which a grandchild that outlived the kill holds
@@ -336,6 +341,8 @@ def run_bounded(args, *, timeout: float, input=None, **popen_kwargs) -> subproce
             raise ValueError("stdin and input arguments may not both be used.")
         popen_kwargs["stdin"] = subprocess.PIPE
     proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **popen_kwargs)
+    if register is not None:
+        register(proc)
     try:
         out, err = proc.communicate(input, timeout=timeout)
     except subprocess.TimeoutExpired:

@@ -1609,6 +1609,17 @@ def test_agys_sign_in_is_the_methods_own_reading(methods, tmp_path):
     assert _REAL_AGY_SIGN_IN(tmp_path) == ("adc", "ADC (Google Cloud), x")
 
 
+def test_agys_reading_hands_its_child_out_and_a_killed_one_says_nothing(methods, tmp_path):
+    """Final review M2: the diagnostics' worker ends this child when the window closes; until then
+    it was not the worker's to end. Killed, it is no reading rather than a wrong one."""
+    methods("answers")
+    taken: list = []
+
+    assert _REAL_AGY_SIGN_IN(tmp_path, register=lambda proc: (taken.append(proc), proc.kill())) \
+        is None
+    assert len(taken) == 1
+
+
 def test_an_older_method_without_the_reader_says_nothing(methods, tmp_path):
     methods("older")
 
