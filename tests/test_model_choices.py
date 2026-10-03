@@ -1061,7 +1061,10 @@ def test_tccs_own_agy_models_carries_the_adc_line_from_critic_env(monkeypatch):
 
     monkeypatch.delenv("AGY_ADC_AUTH", raising=False)
     monkeypatch.delenv("GOOGLE_CLOUD_QUOTA_PROJECT", raising=False)
-    _write_critic_env("AUTOSOUND_CRITIC_MODEL=x\nAGY_ADC_AUTH=true\nGOOGLE_CLOUD_QUOTA_PROJECT=q-1\n")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    # A reviewer key beside the ADC line, as a person's critic-env has one (night review, M8).
+    _write_critic_env("GEMINI_API_KEY=AQ.not-a-real-key\nAUTOSOUND_CRITIC_MODEL=x\n"
+                      "AGY_ADC_AUTH=true\nGOOGLE_CLOUD_QUOTA_PROJECT=q-1\n")
     envs: list = []
 
     class _Proc:
@@ -1079,7 +1082,9 @@ def test_tccs_own_agy_models_carries_the_adc_line_from_critic_env(monkeypatch):
     env = envs[0]
     assert env is not None and env.get("AGY_ADC_AUTH") == "true"
     assert env.get("GOOGLE_CLOUD_QUOTA_PROJECT") == "q-1"
-    assert "AUTOSOUND_CRITIC_MODEL" not in env, "only agy's own sign-in lines travel"
+    assert "GEMINI_API_KEY" not in env, "only agy's own sign-in lines travel: no reviewer key"
+    # The rest of the file stays the method's; whether this machine exports it is not the test's.
+    assert env.get("AUTOSOUND_CRITIC_MODEL") == os.environ.get("AUTOSOUND_CRITIC_MODEL")
     assert env.get("PATH") == os.environ.get("PATH"), "the rest of the environment is TCC's own"
 
 
@@ -1141,3 +1146,37 @@ def test_adc_from_the_environment_counts_as_well(monkeypatch):
     monkeypatch.setenv("AGY_ADC_AUTH", "true")
 
     assert mc.recommended(_adc_flash_high(), critic=True)
+
+
+def test_an_adc_line_added_while_tcc_runs_is_read_without_a_restart(monkeypatch):
+    """Night review of tcc#135, M5: ADVANCED.md walks a person through adding `AGY_ADC_AUTH=true`
+    to critic-env, and TCC is likely running. The agy row asks a fresh child and said ADC, while
+    the picker kept the Flash caution and TCC's own `agy models` ran without ADC -- until a
+    restart, because the file was parsed once per process."""
+    from autosound_tcc.core import critic_env
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.delenv("AGY_ADC_AUTH", raising=False)
+    _write_critic_env("AUTOSOUND_CRITIC_MODEL=x\n")
+    assert mc.reviewer_caution(_adc_flash_high()) == mc.REVIEWER_CAUTION_FLASH
+
+    path = critic_env.machine_config_path()
+    path.write_text("AUTOSOUND_CRITIC_MODEL=x\nAGY_ADC_AUTH=true\n", encoding="utf-8")  # an editor
+    stat = path.stat()  # a later stamp, as an edit a moment later gets on any file system
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
+
+    assert mc.reviewer_caution(_adc_flash_high()) == ""
+
+
+def test_critic_env_read_in_one_place_is_not_the_answer_for_another(monkeypatch, tmp_path):
+    """The parse was kept whatever the path, and the path changes with every test: an ADC line
+    one test wrote was the next test's critic-env (M5)."""
+    from autosound_tcc.core import critic_env
+
+    _write_critic_env("AGY_ADC_AUTH=true\n")
+    assert critic_env.values().get("AGY_ADC_AUTH") == "true"
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "another" / "Roaming"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "another" / ".config"))
+
+    assert critic_env.values() == {}

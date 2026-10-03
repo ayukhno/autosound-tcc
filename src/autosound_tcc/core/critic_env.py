@@ -28,9 +28,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-#: Parsed once. A picker asks this per model on every repaint, and the file changes when a person
-#: edits it — which is not something that happens between two paints. `forget()` drops it.
-_CACHE: dict[str, str] | None = None
+#: Parsed once per version of the file: `(path, mtime, size)` and what it said. A picker asks this
+#: per model on every repaint, so a stat stands in for a read; an edit made while TCC runs -- the
+#: ADC line ADVANCED.md walks a person through -- is read at the next ask, and a different path
+#: is a different file (night review of tcc#135, M5). `forget()` drops it.
+_CACHE: tuple[tuple, dict[str, str]] | None = None
 
 
 def machine_config_path() -> Path:
@@ -74,12 +76,23 @@ def _parse(path: Path) -> dict[str, str]:
     return found
 
 
+def _version(path: Path) -> tuple:
+    """Which file, as it stands now. No file is a version of its own."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), None, None)
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
 def values() -> dict[str, str]:
     """Everything the machine config defines. Empty when there is no file — never an error."""
     global _CACHE
-    if _CACHE is None:
-        _CACHE = _parse(machine_config_path())
-    return dict(_CACHE)
+    path = machine_config_path()
+    version = _version(path)
+    if _CACHE is None or _CACHE[0] != version:
+        _CACHE = (version, _parse(path))
+    return dict(_CACHE[1])
 
 
 def forget() -> None:
