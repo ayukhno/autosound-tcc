@@ -2895,7 +2895,10 @@ class MainWindow(QMainWindow):
         # usually one a pass closed sessions ago wrote, and `set_protective` cannot touch it
         # (skill `#48`). The open round keeps the ordinary path, written into directly.
         viewing = str(self._meas_panel.viewing_session_id() or "")
-        open_round = str((process_view.capture_round(config.project_dir()) or {}).get("id") or "")
+        # A closed round is none (finding 147's fault, review M5): the method keeps the last one
+        # in its state with `closed` set, and its id is not a round anything can be written into.
+        round_ = process_view.capture_round(config.project_dir()) or {}
+        open_round = "" if round_.get("closed") else str(round_.get("id") or "")
         amending = viewing if viewing and viewing != open_round else ""
         dialog = protective_dialog.open_for(
             config.project_dir(), getattr(self, "_view", None), self, capture_id=amending)
@@ -4233,10 +4236,14 @@ class MainWindow(QMainWindow):
             return
         self._offer_title_fixes(round_)
         titles = set(self._meas_panel.known_titles())
+        as_is = measurement_view.taken_as_is()
+
         def settled(title: str) -> bool:
-            """Checked and fine, or a capture the check does not apply to (hub #154 §1)."""
+            """Checked and fine, a capture the check does not apply to (hub #154 §1), or one the
+            tuner took as it is after this very verdict (review of finding 147, I1)."""
             verdict = ((round_.get("taken") or {}).get(title) or {}).get("verified") or {}
-            return bool(verdict.get("ok")) or not measurement_view.applicable(verdict)
+            return (bool(verdict.get("ok")) or not measurement_view.applicable(verdict)
+                    or measurement_view.answered_as_is(verdict, title, as_is))
 
         # Only what the round TOOK (tcc#21): the method records a `taken` entry for every title it
         # checks, so checking whatever REW shows made a dud left for a re-take «брак — знятий» and
@@ -4305,9 +4312,22 @@ class MainWindow(QMainWindow):
         # A curve that is not there is waiting, not unusable (the Arbiter, 2026-09-23): only a curve
         # REW holds and the check failed is a retake to decide on. Nor is a curve nobody took.
         asked = [str(title) for title in titles or []]
+        # Nor is a capture the tuner took as it is (review of finding 147, I1): its row on the
+        # card is green «taken as it is», and a warning beside it contradicted the choice just
+        # made. The verdict the method recorded is read back, so the match is by its uuid.
+        recorded = (process_view.capture_round() or {}).get("taken") or {}
+        as_is = measurement_view.taken_as_is()
+
+        def answered(line: str) -> bool:
+            title = next((t for t in asked if line.startswith(f"UNUSABLE {t} — ")),
+                         line[len("UNUSABLE"):].strip().split(" — ", 1)[0])
+            verdict = (recorded.get(title) or {}).get("verified") or {}
+            return measurement_view.answered_as_is(verdict, title, as_is)
+
         bad = [line for line in (output or "").splitlines() if line.startswith("UNUSABLE")
                and "no measurement titled" not in line.lower()
-               and (not asked or any(line.startswith(f"UNUSABLE {title} — ") for title in asked))]
+               and (not asked or any(line.startswith(f"UNUSABLE {title} — ") for title in asked))
+               and not answered(line)]
         # One line and the rest behind a link, with a ✕ (finding 29): sixteen of them joined into
         # the strip took half the window and nothing could close it. A list closed by hand stays
         # closed until it CHANGES -- the same sixteen again are not news.

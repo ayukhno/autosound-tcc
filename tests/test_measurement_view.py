@@ -971,3 +971,25 @@ def test_a_past_round_reads_a_capture_taken_as_it_is_as_done(project):
 
     assert item.status == mv.STATUS_DONE
     assert item.as_is
+
+
+def test_taken_as_it_is_is_said_only_on_a_row_that_reads_done(project):
+    """Review of finding 147, M3: a capture taken as it is and then decided against — or made
+    stale by a change — showed «взято як є» beside a grey or red dot. The words explain a green
+    row; on any other row the row's own reason stands."""
+    process, sw = _as_is_round(project)
+    state = process.load()
+    state["capture"]["skipped"][sw] = {"reason": "sub disconnected"}
+    process._write(state)
+
+    live = mv.build_session("0", 7, [sw], project, taken=[sw])
+    item = {i.name: i for g in live.groups for i in g.items}["sw_7 (sw)"]
+    assert (item.status, item.as_is) == (mv.STATUS_SKIPPED, False)
+
+    past = mv._session_for_round({
+        "id": "cap_001", "version": "7", "phase": "0", "expected": [sw],
+        "taken": {sw: {"verified": process.load()["capture"]["taken"][sw]["verified"]}},
+        "skipped": {sw: {"reason": "sub disconnected"}}, "protective": {}},
+        None, mv.taken_as_is(project))
+    item = past.groups[0].items[0]
+    assert (item.status, item.as_is, item.extra) == (mv.STATUS_SKIPPED, False, "sub disconnected")

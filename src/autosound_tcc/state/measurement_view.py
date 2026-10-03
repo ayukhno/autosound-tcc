@@ -263,6 +263,21 @@ def _answered_as_is(verdict: dict, title: str, marked: dict, keys: set, key) -> 
     return title in marked.values() or (key is not None and key in keys)
 
 
+def _row(name: str, status: str, issues: Optional[str], as_is: bool, **fields) -> MeasItem:
+    """One checklist row. «Taken as it is» explains a GREEN row — the tuner's answer, in place of
+    the method's reasons; on a row a skip or a change turned another colour, that row's own
+    reason stands (review of finding 147, M3)."""
+    said = as_is and status == STATUS_DONE
+    return MeasItem(name=name, status=status, extra=None if said else issues, as_is=said, **fields)
+
+
+def answered_as_is(verdict: dict, title: str, marked: dict) -> bool:
+    """Whether the tuner already answered for this failing verdict with «Take it as it is» —
+    `marked` is `taken_as_is()`. The window's after-import check reads it as settled and does not
+    warn about it again (review of finding 147, I1); the verdict itself stays the method's."""
+    return _answered_as_is(verdict, title, marked, set(), None)
+
+
 def _round_is_at(round_: dict, version, naming, glossary) -> bool:
     """Whether a round was captured at series `version`: by its own `version`, or by the `_N` its
     titles carry (hub #153 C).
@@ -468,10 +483,10 @@ def build_session(
         """Why a capture is unusable, in the checker's own words — the panel shows it on hover.
 
         Nothing for a capture the check does not apply to (an RTA): "this check does not apply"
-        trailed every RTA row, cut off, and said nothing anyone needed (finding 30). Nothing for
-        a capture taken as it is either: the row says that instead (finding 147)."""
+        trailed every RTA row, cut off, and said nothing anyone needed (finding 30). A green row
+        taken as it is says that instead (`_row`, finding 147)."""
         verdict = verdicts.get(name) or {}
-        if not applicable(verdict) or as_is_for(name):
+        if not applicable(verdict):
             return None
         issues = verdict.get("issues") or []
         return "; ".join(str(i) for i in issues) or None
@@ -494,8 +509,8 @@ def build_session(
     groups = []
     for spec in groups_spec:
         items = tuple(
-            MeasItem(name=name, status=status_for(name), extra=issues_for(name),
-                     protective=protective_for(name), as_is=as_is_for(name))
+            _row(name, status_for(name), issues_for(name), as_is_for(name),
+                 protective=protective_for(name))
             for name in spec["names"]
         )
         groups.append(MeasGroup(type=spec["label"], items=items, method=spec.get("method")))
@@ -509,8 +524,8 @@ def build_session(
         listed = {n for spec in groups_spec for n in spec["names"]}
         listed |= {str(t) for t in round_.get("expected") or []}
         extras += tuple(
-            MeasItem(name=title, status=status_for(title), extra=issues_for(title),
-                     additional=True, unread=True, as_is=as_is_for(title))
+            _row(title, status_for(title), issues_for(title), as_is_for(title),
+                 additional=True, unread=True)
             for title in sorted(recorded_taken - listed) if _key(title) is None
         )
     if extras:
@@ -612,7 +627,7 @@ def _session_for_round(round_: dict, state: Optional[dict],
         if name in skipped:
             return (round_.get("skipped") or {}).get(name, {}).get("reason")
         verdict = (taken.get(name) or {}).get("verified") or {}
-        if not applicable(verdict) or as_is_for(name):
+        if not applicable(verdict):
             return None  # an RTA: the check has nothing to say about it (finding 30)
         issues = verdict.get("issues") or []
         return "; ".join(str(i) for i in issues) or None
@@ -632,8 +647,8 @@ def _session_for_round(round_: dict, state: Optional[dict],
             type=spec["label"],
             method=spec.get("method"),
             items=tuple(
-                MeasItem(name=name, status=status_for(name), extra=issues_for(name),
-                         protective=protective_for(name), as_is=as_is_for(name))
+                _row(name, status_for(name), issues_for(name), as_is_for(name),
+                     protective=protective_for(name))
                 for name in spec["names"]
             ),
         )

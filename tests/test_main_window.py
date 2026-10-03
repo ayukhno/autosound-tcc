@@ -4758,6 +4758,34 @@ def test_the_protection_button_answers_where_it_was_pressed(tmp_path, monkeypatc
     assert i18n.t("protNoChannels") in said[0]
 
 
+def test_protection_on_a_closed_round_on_screen_opens_as_a_correction(tmp_path, monkeypatch):
+    """Review of finding 147, M5 — 147's own fault in another reader: the method keeps the last
+    round in its state with `closed` set, and Protection took that id for the OPEN round. Viewing
+    the closed round, the press opened the ordinary path, whose write the method refuses («no
+    capture round is open»). A closed round is none: the press corrects the round on screen."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from autosound_tcc.state import process_view
+    from autosound_tcc.ui.tcc import protective_dialog
+
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(process_view, "capture_round", lambda *_a, **_k: {
+        "id": "cap_001", "closed": "2026-10-03T12:00:00+00:00"})
+    asked = []
+    monkeypatch.setattr(protective_dialog, "open_for",
+                        lambda *a, capture_id="", **k: asked.append(capture_id) or None)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Ok)
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    monkeypatch.setattr(window._meas_panel, "viewing_session_id", lambda: "cap_001")
+    window._open_protective()
+
+    assert asked == ["cap_001"]
+
+
 def test_the_capture_list_scrolls_and_the_picker_above_it_stays(tmp_path, monkeypatch):
     """The Arbiter, 2026-09-23: with many columns the WHOLE right column scrolled, taking the
     picker, the buttons and the legend with the list. Now the list scrolls on its own, both ways,
@@ -7325,3 +7353,55 @@ def test_closing_the_window_during_a_check_stops_the_wheel(monkeypatch):
     window.closeEvent(QCloseEvent())
 
     assert not window._critic_spinner.is_spinning()
+
+
+# ---- a capture taken as it is: the strip agrees with the card (review of finding 147, I1) -------
+
+_AS_IS_VERDICT = {"ok": False, "exists": True, "applicable": True, "uuid": "u-sw",
+                  "issues": ["covers 20-1001 Hz, asked for 20-20000 — truncated"]}
+
+
+def test_a_capture_taken_as_it_is_is_not_checked_again(monkeypatch):
+    """The tuner answered for that verdict in the import window: checking it again on every title
+    change pulled the curve from REW and repeated «unusable» beside a green row. A re-take under
+    the same title is another capture (another uuid) and is checked."""
+    from autosound_tcc.state import measurement_view
+
+    monkeypatch.setattr(measurement_view, "taken_as_is", lambda *a, **k: {"u-sw": "sw_7 (sw)"})
+    round_ = {"id": "cap_002", "expected": ["sw_7 (sw)"],
+              "taken": {"sw_7 (sw)": {"at": "x", "verified": dict(_AS_IS_VERDICT)}}}
+
+    assert _round_check_started(monkeypatch, round_, ["sw_7 (sw)"]) == []
+
+    round_["taken"]["sw_7 (sw)"]["verified"]["uuid"] = "u-retaken"
+    assert _round_check_started(monkeypatch, round_, ["sw_7 (sw)"]) == [["sw_7 (sw)"]]
+
+
+def test_the_strip_does_not_call_a_capture_taken_as_it_is_unusable(monkeypatch):
+    """Review I1: right after Apply the strip said «1 unusable: sw_7 (sw) — … truncated» while the
+    card's row read green «взято як є». The method's verdict stays recorded as it is; the strip
+    does not warn about a capture the tuner already answered for — and still warns about another."""
+    from autosound_tcc.state import measurement_view, process_view
+
+    _app()
+    window = MainWindow()
+    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
+    monkeypatch.setattr(measurement_view, "taken_as_is", lambda *a, **k: {"u-sw": "sw_7 (sw)"})
+    silence = {"ok": False, "exists": True, "applicable": True, "uuid": "u-wl",
+               "issues": ["in-band mean -96.1 dB — silence, not a sweep"]}
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
+        "id": "cap_002", "expected": ["sw_7 (sw)", "w-L_7 (sw)"],
+        "taken": {"sw_7 (sw)": {"verified": dict(_AS_IS_VERDICT)},
+                  "w-L_7 (sw)": {"verified": silence}}})
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **k: said.append(text))
+    as_is_line = "UNUSABLE sw_7 (sw) — covers 20-1001 Hz, asked for 20-20000 — truncated"
+
+    window._on_capture_check_done(as_is_line + "\n0/1 придатні", ["sw_7 (sw)"])
+    assert said == []
+
+    window._on_capture_check_done(
+        as_is_line + "\nUNUSABLE w-L_7 (sw) — in-band mean -96.1 dB — silence, not a sweep\n"
+        "0/2 придатні", ["sw_7 (sw)", "w-L_7 (sw)"])
+    assert said == [i18n.t("unusableSummary").format(
+        n=1, first="w-L_7 (sw) — in-band mean -96.1 dB — silence, not a sweep")], said
