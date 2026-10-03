@@ -34,6 +34,16 @@ does.
   window says the same instead of «REW is not holding this measurement». Nothing is renamed or
   blocked: the curves and the method cannot tell which one to take, so the name has to be made
   one again in REW.
+- **Capture quality at import, while the microphone is in hand** (tcc#21). The import window checks the
+  sweeps you tick with the method's own capture verdict — a sweep that never completed: silent, flat,
+  truncated or unreadable — on its own thread, and marks an unusable one red with the method's reason on
+  hover. You choose: «Re-take» (the default: it is not taken, and the round keeps waiting for that name,
+  so a re-take under it opens ticked) or «Take it as it is» (taken, and not asked about again for that
+  capture). Import is never blocked. Noise and distortion stay REW's to report. After an import, the
+  round's check now looks only at what was taken: a sweep left for a re-take no longer reads «taken,
+  unusable», and a good one nobody ticked no longer turns green. **Limit:** «Take it as it is» reaches TCC
+  only — the card still reads «unusable» and the method's step still counts the capture as such until the
+  method can record that answer.
 - **A turning wheel while a new reviewer pick is checked** (tcc#140, finding 142). For the minute
   the check takes, the footer says «… · checking…» beside the «!» instead of the previous
   reviewer's red line, and the «!» claims a fallback only when the reviewer asked for this pick
@@ -59,8 +69,9 @@ does.
 
 - **Hover after a switch to another app and back** (tcc#137, finding 139). The widget that was under
   the mouse no longer keeps its hover look, and hover works at once on return, in every window.
-- **A test suite that cannot carry state across tests** (tcc#141): the reviewer calls a test leaves
-  running are drained before the next one.
+- **A test suite that cannot carry state across tests** (tcc#141): the MCP tool calls a test leaves
+  running are drained before the next one, and a finished test's window stops its own catalogue read
+  and reviewer probe.
 
 ## [v0.1.46] — 2026-10-02 · omp, agy, gh and Claude Code updated from TCC, the footer's reviewer is the one that runs, a «don't ask» that stops asking, the guides one click away, the reviewer key deleted in one place, the method at v3.0.66
 
