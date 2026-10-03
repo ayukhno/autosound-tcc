@@ -38,7 +38,7 @@ does.
   sweeps you tick with the method's own capture verdict — a sweep that never completed: silent, flat,
   truncated or unreadable — on its own thread, and marks an unusable one red with the method's reason on
   hover. You choose: «Re-take» (the default: it is not taken, and the round keeps waiting for that name,
-  so a re-take under it opens ticked) or «Take it as it is» (taken, and not asked about again for that
+  so a re-take under it opens ticked once the unusable one is deleted in REW) or «Take it as it is» (taken, and not asked about again for that
   capture). Import is never blocked. Noise and distortion stay REW's to report. After an import, the
   round's check now looks only at what was taken: a sweep left for a re-take no longer reads «taken,
   unusable», and a good one nobody ticked no longer turns green. **Limit:** «Take it as it is» reaches TCC
