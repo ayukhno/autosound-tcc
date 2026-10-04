@@ -2053,6 +2053,15 @@ every screen in about two minutes.
 
 Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
+### F-095 — N2: run TCC's suite against each skill candidate before its tag (hub #255)
+
+**Статус**: open · committed in `docs/PLAN-AUDIT-2026-10.md` §10 M3 (4892e15), 2026-10-04
+
+- When the skill names a candidate tag on the bus (first J1a and J4a, its W-8): scratch clone of tcc, submodule at the
+  candidate; the boundary set with `-n 4`, then the whole suite once, serially, the VM suspended; answer on the skill's
+  ticket. A test run, not a build — it fits W-8's collection.
+- Known in advance: J4a needs `tests/test_rew_api_shapes.py:54-67` to answer GET /filters (TCC's re-pin, W-9).
+
 ### F-093 — W-7's pool: found after W-6's milestone
 
 **Статус**: done v1.1.1 · tag `v1.1.1` on 6f66285 (signed, by the tcc role — a patch, no candidate — 2026-10-03), milestone #7 closed (5), its GitHub Release Latest (by the tcc role, hub c83de2f) · W-7 released, paired with the method's v3.1.1 (e8dabf7): #145 (143, and 151 from the VM look), #146 (150), #147 (149), #148 (146), #149 (the card with the window, until hub #247) · was: open · on the milestone `W-7 · v1.1.1` (#7), all ok by the Arbiter 2026-10-03: #145 (143), #146 (150), #147 (149), #148 (146); plan `docs/PLAN-W-7.md` · was: recorded 2026-10-03 during W-6's VM look; left as known bugs of v1.1.0 by the Arbiter
