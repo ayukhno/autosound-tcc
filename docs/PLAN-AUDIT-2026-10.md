@@ -53,8 +53,10 @@ Everything else is TCC's own.
 **Proposed order** (§3):
 1. **W-8:** two small TCC-only groups — the agent↔window crossing (G2) and loud boundaries (G1). Both are user-visible, and neither touches a module a joint group will redesign.
 2. **W-9:** the TCC-only parts that prepare the joint work.
-3. **W-10:** the contract, the refusals and the REW states, built together with the skill.
-4. **W-11:** one lock for every writer, built together with the skill.
+3. **W-10:** the contract, the refusals and the REW states, on top of the skill's W-8 tags.
+4. **W-11:** one lock for every writer, on top of the skill's W-9 lock.
+
+The mismatches with the skill's plan were settled in one round (hub #255), §10.
 5. **Later:** the deeper GUI-thread work, curve view, end-to-end tests and structure, one slice per wave.
 
 ## 1. Verification — what changed against the reports
@@ -148,7 +150,9 @@ TCC's own: G1, G2, G10, G12, G13, G14, and the TCC halves G3 (J3) and G4 (J6), w
 
 ### G4 · Install and update say the truth (J6, TCC half)
 - **Part 1, TCC-only:** F10a (rank stable with release-shaped names only), F10b + N6 (all four code hints built from `updates.tcc_install_command`, and the README line at `:186` given its tag), F13 (pairing check needs a ≥7-character prefix; `uv run --locked` in CI), the CHANGELOG preamble (F10c's TCC line).
-- **Part 2, joint:** F1 (a constraints file exported from `uv.lock`, passed with `-c` by the updater **and** the skill's installers) plus a scheduled fresh-resolve job (with G12). Whether uv 0.12.10 takes `-c` with a URL is checked first, as TB says.
+- **Part 1 also takes the T-35 twin**, which the skill's plan found in TCC. `updates.py:830` runs `git verify-tag` without pinning `gpg.ssh.program`, so a signing helper in the user's git config (1Password's, say) refuses a good release. Its classifier also matches a bare `"-Y"` (`:767-773`). Fix: pin `-c gpg.ssh.program=ssh-keygen` and classify on git's own sentences. First red test: the `_git` spy's argv carries the pin.
+- **Part 2a, TCC first (W-10):** F1 — `constraints.txt` exported from `uv.lock` (`uv export --extra gui --extra claude --no-hashes`) ships in every tag from W-10. A test holds it equal to the lock, and `ship.py` refuses a tag where it differs. TCC's updater passes `-c` with the file read from the signed tag's tree to disk, so whether uv takes a URL does not matter. The skill's installers take the same file in its J6c (W-11), its N7.
+- **Part 2b (W-12, with G12):** the scheduled fresh-resolve job.
 - **Four lines:** Class defect/infra · Model opus · Risk L (part 1), M (part 2) · Complexity S×4 (~5 h) + M.
 - **First tests:**
   - `newest_tcc_tag()` over `v1.1.1, v1.2.0-wip, v1.1.1.1` (the `_git_answers` helper) → `v1.1.1`.
@@ -173,7 +177,7 @@ TCC's own: G1, G2, G10, G12, G13, G14, and the TCC halves G3 (J3) and G4 (J6), w
 - **Four lines:** Class defect · Model opus · Risk M · Complexity M (~16 h + ~5 h + ~9 h in three slices).
 - **Design:** §5.3.
 
-### G7 · Refusals and REW states reach the screen (J3 + J4, TCC half; ships with the skill's half)
+### G7 · Refusals and REW states reach the screen (J3 + J4, TCC half; follows the skill's half)
 - **Findings:**
   - F5 for `process-state.json`: today an empty plan is shown, and the next write makes it permanent.
   - F4 `write_rew_filters`.
@@ -205,7 +209,7 @@ TCC's own: G1, G2, G10, G12, G13, G14, and the TCC halves G3 (J3) and G4 (J6), w
   - `test_main_window.py:2920-2922` pins `_set_rew_online(bool)`.
   - Only one behaviour test covers `write_rew_filters` (`test_mcp_server.py:458-479`).
 
-### G8 · One lock for every writer (J2, joint; ships in one wave on both sides)
+### G8 · One lock for every writer (J2, joint; TCC's half follows the skill's lock)
 - **Findings:** F9, N1 (lock part), N8, N9, TA-1d/e, and the skill's K-3, T-8, T-9, T-12, T-18.
 - **Four lines:** Class defect · Model opus + **Fable's final review** · Risk H · Complexity M.
 - **Design:** §5.4.
@@ -308,15 +312,15 @@ TCC's own: G1, G2, G10, G12, G13, G14, and the TCC halves G3 (J3) and G4 (J6), w
 
 ## 3. Order across waves
 
-Joint groups follow the hub's rule: the skill tags first, and TCC re-pins in the same wave. J2 and J3 each ship whole on both sides in one wave.
+Joint groups follow the hub's rule: the skill tags first, and TCC re-pins in its next wave. **J2 and J3 no longer need one wave on both sides** (§10, M2): the skill's half is safe for today's TCC, provided «busy» is not exit 1. TCC's half then improves the display a wave later. Every skill candidate tag that TCC users would receive is run through TCC's suite first (§10, M3).
 
 | wave | TCC builds | the skill builds (its own plan decides) | why this order |
 |---|---|---|---|
 | **W-8** (open; milestone at «збір закінчено») | G2 (3 S), G1 (6 S), G13 step 0 (ratchet) | — | TCC-only and user-visible (a wrong preset told to the model; a hung turn). Touches no module that a joint group redesigns. Small, because W-8 also carries the collection's findings and is the trial of the agents. |
-| **W-9** | G5 S1+S2 (one copy per project, N1, `set-car`, the flag check, stop swallowing, newest-tag workflow; the handshake ships, its constant per §4.2); G9 S1 (bound and cache, no threads; its lock deadline **is** G8 phase 0, built once); G8 phase 0 race tests (xfail); G6 slice 1 (D-1, superseded, "settled", parity); G3; G4 part 1; G7's "now" part; G10 S part (~4 h) | the contract (K-6, the 15-module list, T-19, T-27, T-21, T-23 incl. N19), strict reads (T-10, K-2, T-11, T-13, T-14), REW states (T-1, T-2, T-3, K-1), S-R1/S-R2 readers, N17, T-8 unique temp names | It prepares both sides. Nothing in TCC's part waits for the skill, and nothing in it is replaced when the contract lands. ~70 h of TCC work, so the milestone may split it in two. |
-| **W-10** — joint 1 | re-pin; G5 S3 (contract 1); G7 with the skill's refusals and REW states; G6 slice 2 (the skill's readers); G11 | the skill tags first | J3 and J4 ship whole on both sides. |
-| **W-11** — joint 2 | G8 phase 1 (adopt the skill's lock) + G9 S2 (one helper; **one FIFO lane for all of TCC's writes**); G6 slice 3 (one reader per skill file) | T-18 lock + `PROTOCOL`, `Project.update`, T-9, T-12, with T-8's Windows retry in the same tag | J2 ships whole on both sides. The lane and the lock are built together, so the lane does not bake in today's lock. Fable reviews both. |
-| **W-12 →** | G9 slice 3 (two-phase constructor, lazy `mcp`), G10 M part, G12, G4 part 2 (constraints, with the skill's installers) | K-4 seed preview (any time before), K-5 `gh` timeout, installers take `-c` | The riskiest window changes come last, on top of the helper. |
+| **W-9** | G5 S1+S2 (one copy per project, N1, `set-car`, the flag check, stop swallowing, newest-tag workflow; the handshake ships, its constant per §4.2); G9 S1 (bound and cache, no threads; its lock deadline **is** G8 phase 0, built once); G8 phase 0 race tests (xfail); G6 slice 1 (D-1, superseded, "settled", parity); G3; G4 part 1 (+ the T-35 twin); G7's "now" part; G10 S part (~4 h); **re-pin to the skill's W-8 tag**, with `test_rew_api_shapes.py:54-67` answering GET /filters with what was written (the skill's R3) | the contract (K-6, the 15-module list, T-19, T-27, T-21, T-23 incl. N19), strict reads (T-10, K-2, T-11, T-13, T-14), REW states (T-1, T-2, T-3, K-1), S-R1/S-R2 readers, N17, T-8 unique temp names | It prepares both sides. Nothing in TCC's part waits for the skill, and nothing in it is replaced when the contract lands. ~70 h of TCC work, so the milestone may split it in two. |
+| **W-10** — joint 1 | G5 S3 (contract 1); G7 (the skill's refusals and REW states shown); G6 slice 2 (only if the skill takes §4.1 #6); G11; **G4 part 2a** (`constraints.txt` with every tag, the updater's `-c`); **conftest patches the shared `rew_api`** (the skill's J1c prerequisite, §10 M4) | the skill's W-8 tags (J1a, J2a + J3a, J4a), already out | TCC's half follows the skill's in the next wave; until then the refusals reach the strip verbatim and `_write`'s guard keeps the file (§10, M2). |
+| **W-11** — joint 2 | G8 phase 1 (adopt the skill's lock) + G9 S2 (one helper; **one FIFO lane for all of TCC's writes**); G6 slice 3 (one reader per skill file) | the skill's J2b lock (its W-9), already out; its J1c (`sys.path` edits out) and J6c (installers take `constraints.txt`) | TCC drops its own lock around children that lock themselves, in the re-pin commit. The lane and the lock are built together, so the lane does not bake in today's lock. Fable reviews both. |
+| **W-12 →** | G9 slice 3 (two-phase constructor, lazy `mcp`), G10 M part, G12 (+ G4 part 2b, the fresh-resolve job) | K-4 seed preview (its J5, W-10), K-5 `gh` timeout | The riskiest window changes come last, on top of the helper. |
 | every wave | G13: one or two extractions; G14 when nearby | — | |
 | after a car walk | J7 screens | J7 text | S3's own advice. |
 
@@ -330,16 +334,16 @@ TCC's W-10 and tags first.
 | # | what | S2/S1 ids | for | wave |
 |---|---|---|---|---|
 | 1 | `CONTRACT_VERSION = 1`, a top-level integer literal in `rew_tool/contract.py`. TCC reads it with `ast` from disk and from tag blobs, and never imports it. **Contract 1 = the v3.1.x surface TCC uses (§9).** A bump comes only on a breaking change to a listed item, never in a patch, and only after a TCC release that accepts it is out, with a beta candidate first. | §7.1, §7.12, K-6 | G5 | joint 1 |
-| 2 | The importable list = **TCC's 15 modules, including `verify`** (S2 lists 14). None of them edits `sys.path` at import — there are six today, `verify.py:33` included — or at call time (`project.py:1568`, `naming.py:1081`, `project_seed.py:340`, `eq_export.py:585`). A by-path load probe in the skill's suite. A public `PresetHistory` path accessor to replace `_path`. | §7.9, T-19, T-27 | G5 | joint 1 |
-| 3 | An exit-code table: 0 yes/done · 1 no/refused · 2 usage · **an unknown flag is a usage error, never absorbed (N19)** · 75 busy · one code for "unexpected error" · one for "REW unavailable". | §7.2, T-23 | G5, G7, G8 | joint 1 |
+| 2 | The importable list = **TCC's 15 modules, including `verify`** (S2 lists 14). No `sys.path` edits at import — there are six today, `verify.py:33` included — or at call time (`project.py:1568`, `naming.py:1081`, `project_seed.py:340`, `eq_export.py:585`) **by the skill's J1c (W-11), not earlier** (§10, M4). Before that, `siblings.py` registers its modules **in `sys.modules`**, so TCC's `reload_loaded` drops them after an in-app update (`vendor_loader.py:356-401`). A by-path load probe in the skill's suite. A public `PresetHistory` path accessor to replace `_path`. | §7.9, T-19, T-27 | G5 | J1a (W-8); J1c (W-11) |
+| 3 | An exit-code table: 0 yes/done · 1 no/refused · 2 usage · **an unknown flag is a usage error, never absorbed (N19)** · busy **≠ 1** (75 asked; §10, M2) · one code for "unexpected error" · one for "REW unavailable". | §7.2, T-23 | G5, G7, G8 | joint 1 |
 | 4 | Strict reads. `Process.load` refuses an unreadable file with a named error. Newer schemas are refused in `Process.load`, `PresetHistory` and `load_profile`. The gates refuse a damaged project, and the contract check says `valid: false`. | K-2, T-10, T-11, T-13, T-14, T-21 | G7 | joint 1 |
 | 5 | REW. `set_filters` refuses unknown keys and reads back, raising a named error. `capture-check` never creates `taken`. Named errors for unavailable, protocol error and not found (a `KeyError` subclass), with a third verdict state. | K-1, T-1, T-2, T-3 | G7 | joint 1 |
-| 6 | Readers. `Process.capture_history()` returns every round in the state-slice shape, open and closed alike. `is_taken`/`outstanding` become public. The fix for N17. `capture_superseded` and the closed event's `outstanding` are documented. | new (S-R1, S-R2), T-22 | G6 | joint 1 |
+| 6 | Readers. `Process.capture_history()` returns every round in the state-slice shape, open and closed alike. `is_taken`/`outstanding` become public. The fix for N17. `capture_superseded` and the closed event's `outstanding` are documented. **Not in the skill's plan, and the hub's match has no row for it** (§10). If the skill does not take it, G6 slice 2 is dropped, and TCC's fold stays its own with parity tests (the slice-3 rule). | new (S-R1, S-R2), T-22 | G6 | its W-9 → TCC W-10 |
 | 7 | The prose answers that TCC follows: the reviewer's truth model, the contract copy, one folder per prose file. | I-2, I-5, I-21 | G11 | joint 1 |
 | 8 | The lock (§5.4): `rew_tool/write_lock.py` with `PROTOCOL = 1`; `<project>/.autosound/write.lock` plus a self-ignoring `.autosound/.gitignore`, and never `process/.process-write.lock`; re-entrancy owned by a thread, with one registry per process; `hold`, `held_here`, `Busy` and `Project.update`; never held across REW, git or a subprocess; `AUTOSOUND_LOCK_TIMEOUT_S`, then exit 75 with a `busy:` line. **T-8 in the same tag** (unique temp name, fsync, Windows retry). | T-18, K-3, T-8, T-9, T-12, T-17 | G8 | joint 2 (W-11) |
-| 9 | A seed dry run with no git, no `gh` and no `Project.save`, whose record carries the Fs count; lazy imports moved to the top. | K-4 | G9 S3 | any time before W-12 |
+| 9 | A seed dry run with no git, no `gh`, no `Project.save` and no `.gitignore`, whose record carries the Fs count; lazy imports moved to the top. `describe()` does **not** cover the dialog (§10, N4). | K-4 | G9 S3 | its J5 (W-10) |
 | 10 | A `gh` timeout. | K-5, T-49 | G9 | any time |
-| 11 | Installers accept a constraints file (`-c`); a decision on the unsigned-`main` fallback. | F1, T-37 | G4 part 2 | W-12 → |
+| 11 | Installers take TCC's `constraints.txt` (`-c`) from the paired TCC tag; the unsigned-`main` fallback stops (T-37, its J6a). | F1, T-37 | G4 part 2a | its J6c (W-11), after TCC's W-10 |
 
 **TCC does not need** these, so the skill should not build them for us:
 - `"contract": N` in every JSON output (one handshake per copy is enough);
@@ -361,7 +365,8 @@ TCC's W-10 and tags first.
   - If the skill confirms before TCC's W-9 release that contract 1 = the v3.1.x surface (§9), TCC ships `KNOWN_CONTRACT = 1` in W-9.
   - Otherwise W-9 ships it inert (`0`), and the skill's contract-1 tag waits for TCC's W-10 release through the release train (hub #246).
   - After contract 1, every bump waits for a TCC release that accepts it, with a beta candidate first.
-- **Same-wave commitments:** TCC shows the refusals (J3) and the REW states (J4) in the wave the skill ships them (W-10). It takes the lock and drops its own lock around self-locking children in the wave the skill ships it (W-11).
+- **Next-wave commitments** (§10, M2): TCC shows the refusals (J3) and the REW states (J4) in its wave after the skill ships them (skill W-8 → TCC W-10). It drops its own lock around self-locking children in the commit that re-pins to the skill's lock (skill W-9 → TCC W-11).
+- **A candidate run before each skill tag TCC users would receive** (§10, M3).
 - **The contract list itself** (§9 + §4.1) is settled between the two sessions, and the user confirms it then (`AUDIT-INDEX` §4.2). It is not a question now.
 - **Every route sets `AUTOSOUND_SKILL_ROOT`** to the copy the project runs (G5), so the skill's own deployment check agrees with TCC.
 - **Facts for the skill's own audit:**
@@ -510,6 +515,8 @@ This passes the no-rework rule.
 
 **Legacy path:** for old or pinned methods, today's `_THREAD_LOCK` + flock stays, under one deadline. No `msvcrt` half: it would only guard TCC against a second TCC, and it would be thrown away later.
 
+This is a clarification of the hub's agreed line («TCC deletes its own lock in the re-pin commit»), not a counter. The deletion holds for every child that locks itself. A project approved to run an older copy (G5, U10) has no skill lock, so only that path keeps the bounded legacy lock.
+
 | phase | TCC tasks | when | effort |
 |---|---|---|---|
 | **0 — TCC-only, nothing thrown away** | One deadline over `_THREAD_LOCK` + flock, with a `Busy` answer; this is the same task as G9 S1 #1, built once. N1, the supersede going through `_spawn`; this is G5's task, built once. Race tests marked `xfail(not locks_itself, strict=True)`. | W-9 | ~1 day |
@@ -657,3 +664,87 @@ From a read of every call site at `f58d208`. Full detail with file:line: `docs/a
   - `project.json`, `dsp_profile.json`, `journal.jsonl`, `slots.json`, `v_NNN.json`;
   - `references/patterns/target-curves/*`;
   - `.claude-plugin/plugin.json` `version`.
+
+## 10. Settled with the skill — hub #255 (one round)
+
+The hub matched the two plans (`hub/docs/AUDIT-PLANS-MATCH-2026-10.md`; skill `472318c`, tcc `c8e9e3d`). These are
+TCC's answers to its rows, with evidence at `f58d208`. §1 of the match is agreed and not reopened.
+
+### M2 · J2/J3 staging — **agree with the skill, on one condition**
+
+Neither J2 nor J3 needs to ship in one wave on both sides. TCC withdraws «one wave», and its half follows a wave later (§3).
+
+**J3 — what today's TCC does when the skill starts refusing:**
+- Every write goes through `_run`. A non-zero exit raises `ProcessWriterError` carrying the child's own stderr (`core/process_writer.py:186-193`). So a refusal from `_write`'s guard reaches the strip and the model verbatim.
+- `contract_check.py:78` renders `valid: False` entries.
+- What stays wrong until G7 is only the display. The plan panel shows an empty plan, because TCC's reads use the non-strict default (`state/process_view.py:79`). `report_phase` tells the agent to `enter_phase` (`core/mcp_server.py:1483-1497`). That write is then refused by the guard, so nothing is lost.
+- A strict `show` does not touch TCC: nothing in `src/` calls `process_writer.state()`.
+- A strict `session-close` that refuses with exit 1 reads in TCC as "not recorded", with the skill's own text (`close_session`, `:467-471`). That is honest.
+
+**J2 — the skill's lock inside its children is safe for today's TCC:**
+- TCC's flock sits on another file (`process/.process-write.lock`, `:106-147`), so a child that locks itself never waits on its parent.
+- The child's wait (10 s) is under TCC's child timeouts: 20 s, or 120 s for capture-check (`:45`, `:574`).
+
+**The condition — evidence for M1 (the skill's row): busy must not be exit 1.** TCC reads exit 1 as an *answer* in two verbs:
+- `capture-supersede`: `title_fixes.py:74` returns `returncode in (0, 1)` as "done". A busy supersede that wrote nothing would read as done, silently.
+- `session-close`: exit 1 means "open work, here it is". A busy stop would show the busy line as the list of what is open.
+
+Any code other than 0 and 1 reaches TCC as an error carrying the skill's sentence, which is right. TCC asked for 75; any free code will do.
+
+### M3 · What makes «skill first» safe — **TCC commits to N2**
+
+- **The risk is real.** Until G5 S2 (W-9), an installed TCC takes the newest `v3.*` method tag on install and update (TB-F2; `core/updates.py:62,532,606`). So a skill tag reaches TCC users the day it is out, and TCC's CI never saw it.
+- **N2, as TCC will run it.** For every candidate tag the skill names on the bus before a tag — J1a and J4a in its W-8, and every later one users would receive:
+  - The tcc session runs, in a scratch clone of tcc with the submodule at the candidate (never the main tree's pin):
+    - the boundary set with `-n 4`: `test_vendor_loader`, `test_process_writer`, `test_skill_selftests`, `test_rew_api_shapes`, `test_contract_check`, `test_capture_import`, `test_dsp_state`, `test_mcp_server`, `test_process_view`, `test_measurement_view`, `test_title_fixes`, `test_handoff`, `test_rew_bridge`;
+    - then the whole suite once, serially, with the VM suspended.
+  - It answers on the skill's ticket: pass, or the failing tests with the reason.
+  - This is a test run, not a build, so it fits W-8's collection.
+- **Known in advance:**
+  - for J4a, `tests/test_rew_api_shapes.py:54-67` must answer GET /filters with what was written (the skill's R3). That is a TCC test change, done in the re-pin (W-9);
+  - for J1a, a shared module object changes what tests that patch module globals see (M4).
+- **Residual risk:** N2 covers what TCC's tests cover. The seams G12 names (no wheel install, no MCP over HTTP, doubles never compared) stay blind until W-12.
+
+### M4 · `sys.path` edits — **TCC moves to the skill's timing: J1c (W-11)**
+
+**Nothing in TCC breaks between W-10 and W-11 if the edits stay.**
+- G5's recommended binding keeps in-process reads on TCC's **own** copy (§5.2, decision 1). It never activates another copy in-process. Every `sys.path` edit therefore adds the same `rew_tool` that TCC already loads.
+- No `rew_tool` module name matches a top-level module TCC imports, or a package in TCC's installed tool environment (checked by name, 2026-10-04). TCC catches no `NamingError` across copies (`grep NamingError src/`: none).
+- TCC's earlier «by W-10» came from the clean design, which switched copies in-process. That design is not the recommended one.
+
+**What TCC does need, and when:**
+1. **In J1a (skill W-8):** `siblings.py` keeps its registry **in `sys.modules`**, under names whose `__file__` lies inside the skill folder. Otherwise TCC's `reload_loaded` (`core/vendor_loader.py:356-401`), which drops by file prefix after an in-app method update, leaves adopted copies behind, and the window would mix the old and the new method. If the registry is a private dict, it needs a `reset()` that TCC calls in `reload_loaded`.
+2. **J1c's prerequisite (TCC, W-10):** `tests/conftest.py`'s `_no_live_rew` (`:183-220`) re-points `REW_API_URL`, a bare `rew_api` in `sys.modules`, and TCC's own copy. It moves to «the one shared `rew_api`»: ask `siblings` for it by real path, or patch every module whose `__file__` is the skill's `rew_api.py`. That covers the copy J1c leaves. This is a test-only change, and it is in §3's W-10 row.
+
+### M9 · The skill's questions
+
+- **N3 — TCC does not quote or inject any SKILL.md section.**
+  - TCC loads the skill whole: as a plugin with `skills=["autosound-tuning:autosound-tuning"]` (`core/tuning_session.py:357-359`), or as the project's `.claude/skills` link for omp.
+  - Its own prompt (`tuning_session.py:91-141`, `core/openers.py:35-57`) names no section. "SKILL.md" appears in `src/` only in comments.
+  - S2's cut is free, with one condition: TCC depends on **paths**, so moving any of these four needs a bus ticket first:
+    - `references/patterns/target-curves/target_curves_visualizer.html` (`ui/tcc/main_window.py:280-283`);
+    - `references/patterns/target-curves/target_curves_guide.md` (`core/guide.py:29`);
+    - `references/patterns/target-curves/*.txt|.html` (`core/target_curve.py:90,133-167`);
+    - `assets/data-contract-template.md` (`core/critic.py:240`).
+  - One more dependency: the read-root grant lets the agent read anything under the skill folder without a click (`tuning_session.py:143-156`). It relies on reference files staying inside that folder.
+- **N4 — `describe()` does not cover the New-project dialog.**
+  - The dialog moved off `describe()` on purpose. `describe()` counts what the **source** holds. The note must say what **lands**:
+    - channels, which depend on the same-processor rule;
+    - findings and questions when ticked;
+    - the profile copy;
+    - the drivers' Fs.
+  - See `ui/tcc/new_project_dialog.py:418-433` (the docstring says why) and `:484-506` (`report.channels`, `amps`, `flaws`, `questions`). Fs is read off the preview's `project.json` because the report has no count (tcc#93, `:105-124`).
+  - `describe()` is used only to tell a project folder from a non-project folder.
+  - So the skill's J5 is needed as K-4 says: `seed(..., dry_run=True)` returning the `Seeded` record, **plus the Fs count**, writing nothing.
+- **N8 — agree, nothing on TCC's side.** TCC never reads or shows `goal.design_path` (`grep design_path src/ tests/`: none). The question text lives in the skill's intake form, which TCC only serves (`core/intake_form.py`). The rewording is the skill's alone. TCC does not read the field as data either, so «TCC reads it» in the skill's S3 can go.
+
+### M10 · Constraints order — **agree: TCC first, in W-10**
+
+- G4 part 2 is split. **2a** (`constraints.txt` with every tag from W-10, held equal to `uv.lock`; the updater's `-c`) moves from W-12 to W-10, a wave before the skill's J6c (W-11). **2b** (the scheduled fresh-resolve job) stays in W-12 with G12.
+- The installers and TCC's updater read the file from the **signed tag's tree** to disk and pass a local path. uv 0.12.3 here documents `-c` as «requirements files», so a URL is not relied on.
+
+### Named once — not in the match's rows
+
+- **§4.1 #6, the round reader** (`Process.capture_history()`, public `is_taken`/`outstanding`) has no group in the skill's plan and no row in the match. G6 slice 2 waits on it. If the skill does not take it, the fold stays TCC's own with parity tests, so nothing breaks.
+- **The T-35 twin** the skill found in TCC (`updates.py:830`, `:767-773`) is taken into G4 part 1.
+- **The legacy lock** for a project approved to run an older copy: §5.4, a clarification of §1, not a counter.
