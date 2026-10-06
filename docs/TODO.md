@@ -2053,6 +2053,17 @@ every screen in about two minutes.
 
 Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
+### F-096 — the car package: bring it into the product, reviewed first (W-8)
+
+**Статус**: open · recorded 2026-10-06 in W-8's collection · the Arbiter tested the package of 2026-09-18 (`passat-b8-2026-car-2026-09-18.zip`) and says it belongs in the product; this replaces F-064's "closed on his command", which lives only on the local branch `car-package`
+
+- The ask: "Save the car to a file…" in the ☰ menu, **before «Intake…»**; the «Copy the car…» picker takes that file as it takes a folder (F-062, `c15473b`).
+- **Not a plain merge** (the Arbiter): read the code and the logic first, and check
+  (a) what changed since 2026-09-18 — the branch is 3 commits on `374cb3c`, 656 behind `main`, never pushed; since then New project became the skill's intake form (hub #194), the method went from v3.0.58 to v3.1.x, and hub #185 (SKL-044, done 2026-09-23) changed what the method carries from a package;
+  (b) whether it was right then — the Arbiter's observation: the archive has a file at its first level that the import does not take (so it was on 2026-09-18). Fact only, not a diagnosis: in the 18.09 zip the one first-level entry is `package.json`, the manifest; the other three files sit under `passat-b8-2026/`.
+- Open on the method's side: SCR-058 (`seed()` writes the temporary unpack folder as `seeded_from.path`), not on the bus.
+- Collection rule: nothing is built now; the milestone review classifies and sizes it, and it is built only on the Arbiter's `ok`.
+
 ### F-095 — N2: run TCC's suite against each skill candidate before its tag (hub #255)
 
 **Статус**: open · committed in `docs/PLAN-AUDIT-2026-10.md` §10 M3 (4892e15), 2026-10-04
