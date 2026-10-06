@@ -2104,6 +2104,8 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 - W-7's final review m1 (`check_sweeps` reuses `answer`) and m2 (the as-is line names REW's title, not the New name);
   round-1 M1 (a test's colour assertion proves nothing) and M2 (`.mini-select` rules repeat the generic ones);
 - at the re-pin that carries hub #247 (TCC-049): drop the W-7 card patch's band half (marked «until hub #247»), keep its clash half unless the method reads titles.
+- finding 153 (W-8's collection, 2026-10-06) — a capture task whose series carries a letter (`sw_E3`, `ALL+C+FX_A3`) is all
+  «not in the grammar»; the skill's to settle, hub #259 (TCC-052); TCC's side is the re-pin to its tag.
 
 ### F-092 — W-6: the pool, now on the milestone `W-6 · v1.1.0`
 

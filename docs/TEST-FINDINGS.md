@@ -3636,3 +3636,17 @@ the right of the TAKE tick, like an empty second checkbox. It is the table's cur
 **Weight.** Low: looks like a control that is not there.
 
 **Task.** The next wave's pool.
+
+### 153. A capture task whose series carries a letter (`sw_E3`, `ALL+C+FX_A3`) is all «not in the grammar»
+
+**What.** The Arbiter, 2026-10-06, W-8's collection: the focus card «задача на замір» for `cap_001` puts every row
+of the task under NOT IN THE GRAMMAR — `L w+m_E3 (sw)`, `sw+w-L_E3 (sw)`, `sw_E3 86dB (sw)`, `ALL+C+FX_A3 (rta)` and
+the rest, thirteen titles. The agreed rule: an old prefix (`D_w-L_nnn (rta)`) moves into the number
+(`w-L_Dnnn (rta)`); the task follows it. The skill's `naming.parse_name` answers `None` for every such title (main
+e562d05 and the vendored v3.1.1); the same titles with a plain number parse. Its v3.0.66 CHANGELOG already says the
+grammar does not read the letter form. A level between the series and the method (`sw_3 86dB (sw)`) is refused too.
+
+**Weight.** High: a task in that form cannot be followed in the card.
+
+**Task.** The skill's: hub #259 (TCC-052). TCC reads titles with the skill's grammar, so TCC's side should be the
+re-pin to the tag that carries it. W-8's pool.
