@@ -2053,6 +2053,15 @@ every screen in about two minutes.
 
 Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
+### F-097 — the audit's tasks first: where the session stopped, 2026-10-06
+
+**Статус**: чекає · the Arbiter's «збір закінчено» opens the milestone with the audit's tasks (`docs/PLAN-AUDIT-2026-10.md` §3; its first wave is the row named W-8: G2, G1, G13 step 0, then G13's seams); the numbers of the audit's waves while W-8's collection waits are the hub's rule (`WAVES.md` §1), open · resume: `hub/bin/role tcc --resume b9d95adc-87eb-4837-9d43-5ef908317bd4`
+
+- Nothing is built. F-096 and the pool (F-094, F-095) wait behind the audit's tasks by the Arbiter's order.
+- On the milestone: every audit task becomes an issue with the four lines, built only on the Arbiter's `ok` (`WAVES.md` §1).
+- Queue: hub #242 (HUB-074) looks stale — `beta-v1.1.0-rc1`, rc2, `v1.1.0` and `v1.1.1` exist — verify and close with the tags as proof; #246 (HUB-076) is about the next minor's release train.
+- Sent: hub #256 (TCC-051) to the skill; its answer comes on the ticket.
+
 ### F-096 — the car package: bring it into the product, reviewed first (W-8)
 
 **Статус**: open · recorded 2026-10-06 in W-8's collection; **the Arbiter, 2026-10-06: W-8's findings collection waits until after the audit's changes**, so this is built last, on the structure those changes leave · the Arbiter tested the package of 2026-09-18 (`passat-b8-2026-car-2026-09-18.zip`) and says it belongs in the product; this replaces F-064's "closed on his command", which lives only on the local branch `car-package`
