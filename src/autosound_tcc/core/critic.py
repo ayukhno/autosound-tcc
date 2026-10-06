@@ -571,15 +571,11 @@ def run(
         "--model" if by_flag else "GEMINI_CRITIC_MODEL" if model else "none sent",
         harness, os.environ.get("GEMINI_BIN"))
     try:
-        proc = subprocess.run(
-            argv,
-            cwd=str(project_dir),
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_s, **child.quiet())
+        # Bounded on Windows too: `subprocess.run` there waits with no bound for pipes a
+        # grandchild holds after the kill (tcc#132, F16-1).
+        proc = child.run_bounded(
+            argv, timeout=timeout_s, cwd=str(project_dir), env=env,
+            text=True, encoding="utf-8", errors="replace", **child.quiet())
     except subprocess.TimeoutExpired:
         return CriticResult(
             MODE_ERROR, "", None, role, f"reviewer timed out after {timeout_s:.0f}s",
@@ -967,14 +963,9 @@ def doctor(project_dir: Optional[Path] = None, python_executable: Optional[str] 
     python_executable = python_executable or child.script_interpreter()
     project_dir = Path(project_dir or config.project_dir())
     try:
-        proc = subprocess.run(
-            [python_executable, str(script_path()), "doctor"],
-            cwd=str(project_dir),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=60,
+        proc = child.run_bounded(  # bounded on Windows too (F16-1)
+            [python_executable, str(script_path()), "doctor"], timeout=60,
+            cwd=str(project_dir), text=True, encoding="utf-8", errors="replace",
             env=vendor_loader.child_env(**critic_bin_override()),  # TCC-002, as above
             **child.quiet(),
         )

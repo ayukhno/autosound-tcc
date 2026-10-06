@@ -40,7 +40,6 @@ import os
 import re
 import shlex
 import shutil
-import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -928,10 +927,9 @@ def _run_upkeep(argv: list[str], timeout: float) -> tuple[int, str, str]:
     credential window over the app (TCC-006).
     """
     try:
-        done = subprocess.run(
-            argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=timeout, check=False, env=vendor_loader.child_env(**_NO_PROMPTING),
-            **child.quiet())
+        done = child.run_bounded(  # bounded on Windows too (tcc#132, F16-1)
+            argv, timeout=timeout, text=True, encoding="utf-8", errors="replace",
+            env=vendor_loader.child_env(**_NO_PROMPTING), **child.quiet())
     except Exception as exc:  # noqa: BLE001 — no interpreter, a timeout: an answer, not a crash
         return -1, "", f"{type(exc).__name__}: {exc}"
     return done.returncode, done.stdout or "", done.stderr or ""

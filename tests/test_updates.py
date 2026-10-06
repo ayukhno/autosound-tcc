@@ -1975,3 +1975,13 @@ def test_the_tcc_rows_check_ends_when_git_never_answers(monkeypatch):
     assert ready.script is None and ready.reason == "probe_failed"
     assert "TimeoutExpired" in ready.detail
     assert spawns.hung and all(git.killed for git in spawns.hung)
+
+
+def test_an_upkeep_run_that_never_answers_is_bounded_on_windows(monkeypatch):
+    """F16-1: `_run_upkeep` was one of three children left on `subprocess.run` (tcc#132)."""
+    spawns = _hung_child.install(monkeypatch)
+
+    code, out, err = updates._run_upkeep(["python", "upkeep.py", "--json", "libs"], timeout=1)
+
+    assert code == -1 and out == "" and err.startswith("TimeoutExpired")
+    assert spawns.hung and all(child.killed for child in spawns.hung)

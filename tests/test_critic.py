@@ -310,7 +310,7 @@ def _reviewer_exits(monkeypatch, code, stderr):
     monkeypatch.setattr(critic, "preflight", lambda project_dir=None: [])
     monkeypatch.setattr(critic, "is_available", lambda: True)
     monkeypatch.setattr(
-        subprocess, "run",
+        critic.child, "run_bounded",
         lambda *a, **kw: subprocess.CompletedProcess(a[0] if a else [], code, "", stderr),
     )
     return critic
@@ -426,7 +426,7 @@ def test_the_call_says_which_binary_it_went_out_with(tmp_path, monkeypatch, capl
     def explode(*_a, **_k):
         raise OSError("not actually running the reviewer in a test")
 
-    monkeypatch.setattr(critic.subprocess, "run", explode)
+    monkeypatch.setattr(critic.child, "run_bounded", explode)
 
     with caplog.at_level(logging.INFO):
         critic.run("a package", project_dir=tmp_path, harness="agy")
@@ -530,7 +530,7 @@ def test_the_reviewer_is_given_one_model_variable_for_both_tasks(tmp_path, monke
         seen.update(kwargs.get("env") or {})
         raise OSError("not actually running the reviewer in a test")
 
-    monkeypatch.setattr(critic.subprocess, "run", capture)
+    monkeypatch.setattr(critic.child, "run_bounded", capture)
 
     critic.run("a package", project_dir=tmp_path, role="advisor",
                model="gemini-3.1-pro-high", harness="agy")
@@ -555,7 +555,7 @@ def test_extra_env_reaches_the_subprocess(tmp_path, monkeypatch):
         seen.update(kwargs.get("env") or {})
         raise OSError("not actually running the reviewer in a test")
 
-    monkeypatch.setattr(critic.subprocess, "run", capture)
+    monkeypatch.setattr(critic.child, "run_bounded", capture)
 
     critic.run("a package", project_dir=tmp_path, role="ask", harness="agy",
                extra_env={"AUTOSOUND_PROJECT_DIR": "/scratch/probe"})
@@ -580,7 +580,7 @@ def test_extra_env_outranks_the_mirror_project_dir_implies(tmp_path, monkeypatch
         seen["cwd"] = kwargs.get("cwd")
         raise OSError("not actually running the reviewer in a test")
 
-    monkeypatch.setattr(critic.subprocess, "run", capture)
+    monkeypatch.setattr(critic.child, "run_bounded", capture)
 
     critic.run("a package", project_dir=tmp_path, role="ask", harness="agy",
                extra_env={"PROJECT_MIRROR": "/scratch/probe/rew_analitic"})
@@ -654,7 +654,7 @@ def _env_seen_by_reviewer(tmp_path, monkeypatch, harness):
         seen.update(kwargs.get("env") or {})
         raise OSError("not actually running the reviewer in a test")
 
-    monkeypatch.setattr(critic.subprocess, "run", capture)
+    monkeypatch.setattr(critic.child, "run_bounded", capture)
     critic.run("a package", project_dir=tmp_path, harness=harness, model="gemini-3.8-flash-high")
     return seen
 
@@ -740,7 +740,7 @@ def test_with_the_omp_route_an_omp_pick_runs_through_omp_only(tmp_path, monkeypa
         seen["argv"] = argv
         raise OSError("stop here")
 
-    monkeypatch.setattr(critic.subprocess, "run", _fake)
+    monkeypatch.setattr(critic.child, "run_bounded", _fake)
     critic.run("# hi", project_dir=tmp_path, model="google-antigravity/gemini-3.1-pro-high",
                harness="omp")
     assert seen["argv"][seen["argv"].index("--via") + 1] == "omp"
@@ -770,7 +770,7 @@ def test_one_call_can_ask_for_the_api_route_and_keeps_the_key_for_it(tmp_path, m
         seen["argv"], seen["env"] = list(argv), dict(kwargs.get("env") or {})
         raise OSError("not actually running the reviewer in a test")
 
-    monkeypatch.setattr(critic.subprocess, "run", capture)
+    monkeypatch.setattr(critic.child, "run_bounded", capture)
     critic.run("a package", project_dir=tmp_path, harness="agy", model="gemini-3.8-flash-high",
                via="api")
     assert seen["argv"][-2:] == ["--via", "api"]
@@ -797,7 +797,7 @@ def test_an_api_pick_runs_through_the_key_and_an_omp_pick_hands_a_session_nothin
         seen["argv"] = argv
         raise OSError("stop here")
 
-    monkeypatch.setattr(critic.subprocess, "run", _fake)
+    monkeypatch.setattr(critic.child, "run_bounded", _fake)
     critic.run("# hi", project_dir=tmp_path, model="gemini-pro-latest", harness="api")
     assert "--via" in seen["argv"] and seen["argv"][seen["argv"].index("--via") + 1] == "api"
 
@@ -926,7 +926,7 @@ def _capture_argv(tmp_path, monkeypatch) -> dict:
         seen["argv"], seen["env"] = list(argv), dict(kwargs.get("env") or {})
         raise OSError("not actually running the reviewer in a test")
 
-    monkeypatch.setattr(critic.subprocess, "run", capture)
+    monkeypatch.setattr(critic.child, "run_bounded", capture)
     return seen
 
 
@@ -1334,7 +1334,7 @@ def test_the_filed_text_is_named_by_a_path_every_os_reads(monkeypatch, tmp_path,
 
     monkeypatch.setattr(critic, "preflight", lambda project_dir=None: [])
     monkeypatch.setattr(critic, "is_available", lambda: True)
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
+    monkeypatch.setattr(critic.child, "run_bounded", lambda *a, **kw: subprocess.CompletedProcess(
         a[0] if a else [], 0, "pong", f">> REVIEW_FILE: {said}\n"))
 
     result = critic.run("## a question", project_dir=tmp_path, role=critic.ASK)
@@ -1409,7 +1409,6 @@ def _route_taken(tmp_path, monkeypatch, *, harness, model, provider, via="",
     `stored` in its OS key store, `exported` in TCC's environment and `clis` on PATH. `seen_keys`,
     a list, gets the names of the vendor keys the CLI would have been started with. `extra_env`
     is the call's own, as `critic.run` takes it."""
-    import subprocess
 
     if not critic.is_available():
         pytest.skip("the method's submodule is not checked out")
@@ -1430,7 +1429,7 @@ def _route_taken(tmp_path, monkeypatch, *, harness, model, provider, via="",
     monkeypatch.setenv("PROBE_STORED", ",".join(stored))
     monkeypatch.setattr(critic.shutil, "which",
                         lambda name, *a, **k: f"/probe/bin/{name}" if name in clis else None)
-    real_run, seen = subprocess.run, {}
+    real_run, seen = critic.child.run_bounded, {}
 
     def through_the_probe(argv, **kwargs):
         argv = [sys.executable, str(probe), *argv[1:]]
@@ -1439,7 +1438,7 @@ def _route_taken(tmp_path, monkeypatch, *, harness, model, provider, via="",
         seen["stderr"] = proc.stderr or ""
         return proc
 
-    monkeypatch.setattr(critic.subprocess, "run", through_the_probe)
+    monkeypatch.setattr(critic.child, "run_bounded", through_the_probe)
     result = critic.run("# a question", project_dir=project, role=critic.ASK, model=model,
                         harness=harness, provider=provider, via=via, extra_env=extra_env)
     said = seen.get("stderr", "")
@@ -1652,3 +1651,39 @@ def test_the_suite_never_runs_the_method_for_agys_sign_in(monkeypatch):
 
     assert critic.agy_sign_in() is None
     assert spawned == [], "the method was run — the stub in conftest is gone"
+
+
+def _reviewer_ready(monkeypatch, tmp_path):
+    from autosound_tcc.core import critic
+
+    monkeypatch.setattr(critic, "is_available", lambda: True)
+    monkeypatch.setattr(critic, "preflight", lambda _p=None: [])
+    monkeypatch.setattr(critic, "script_path", lambda: tmp_path / "autosound_ai.py")
+    monkeypatch.setattr(critic.shutil, "which", lambda name: f"/usr/bin/{name}")
+    return critic
+
+
+def test_a_reviewer_that_never_answers_is_killed_on_windows(tmp_path, monkeypatch):
+    """F16-1: the reviewer's call was one of three left on `subprocess.run`, which on Windows waits
+    with no bound for pipes a grandchild holds (tcc#132)."""
+    from tests import _hung_child
+
+    critic = _reviewer_ready(monkeypatch, tmp_path)
+    spawns = _hung_child.install(monkeypatch)
+
+    result = critic.run("a package", project_dir=tmp_path, role="ask", harness="agy", timeout_s=1)
+
+    assert result.mode == critic.MODE_ERROR and "timed out" in result.detail
+    assert spawns.hung and all(child.killed for child in spawns.hung)
+
+
+def test_the_reviewer_doctor_is_bounded_on_windows(tmp_path, monkeypatch):
+    from tests import _hung_child
+
+    critic = _reviewer_ready(monkeypatch, tmp_path)
+    spawns = _hung_child.install(monkeypatch)
+
+    said = critic.doctor(tmp_path, python_executable="python")
+
+    assert said.startswith("doctor failed")
+    assert spawns.hung and all(child.killed for child in spawns.hung)
