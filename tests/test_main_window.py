@@ -7525,3 +7525,73 @@ def test_the_strip_does_not_call_a_capture_taken_as_it_is_unusable(monkeypatch):
         "0/2 придатні", ["sw_7 (sw)", "w-L_7 (sw)"])
     assert said == [i18n.t("unusableSummary").format(
         n=1, first="w-L_7 (sw) — in-band mean -96.1 dB — silence, not a sweep")], said
+
+
+def _two_presets(tmp_path, monkeypatch):
+    """A seeded project with two presets and no AUTOSOUND_TCC_PRESET — the case every preset test
+    hid by setting it (TA-5)."""
+    from autosound_tcc.core import vendor_loader
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("AUTOSOUND_STATE_ROOT", raising=False)
+    monkeypatch.delenv("AUTOSOUND_TCC_PRESET", raising=False)
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    _intake.seed(tmp_path)
+    vendor_loader.load_dsp_state().PresetHistory(
+        str(tmp_path / "state"), "SECOND", project_dir=str(tmp_path)).snapshot({
+            "preset": "SECOND", "sample_rate": 96000,
+            "channels": {"w-L": {"hp": None, "lp": None, "gain_db": 0.0, "ta_ms": 0.0,
+                                 "polarity": "NORM"}},
+        }, note="fixture: a second preset")
+    assert config.available_presets() == ["FULL", "SECOND"], "the situation this is about"
+    assert config.resolve_preset() is None
+
+
+def test_the_agent_is_told_the_preset_on_screen_when_there_are_two(tmp_path, monkeypatch):
+    """TA-5: with two presets `resolve_preset` is None while the window shows the first, so the
+    model was told no preset at all about a screen that had one."""
+    _two_presets(tmp_path, monkeypatch)
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+
+    assert window._preset_combo.currentData() == "FULL"
+    assert window._bridge.snapshot()["preset"] == window._preset_combo.currentData()
+
+
+def test_a_preset_switch_reaches_the_agent(tmp_path, monkeypatch):
+    _two_presets(tmp_path, monkeypatch)
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+
+    window._preset_combo.setCurrentIndex(window._preset_combo.findData("SECOND"))
+
+    assert window._bridge.snapshot()["preset"] == "SECOND"
+
+
+def test_a_preset_left_by_another_project_is_not_reported(tmp_path, monkeypatch):
+    """`ui/preset` is global; the load ignores a name this project does not have, and the
+    snapshot reported it anyway."""
+    _two_presets(tmp_path, monkeypatch)
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+
+    window._preset_override = "GONE"
+    window._load_project()
+
+    assert window._bridge.snapshot()["preset"] == "FULL"
+
+
+def test_edit_mode_reaches_the_agent(tmp_path, monkeypatch):
+    _two_presets(tmp_path, monkeypatch)
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+
+    window._dialog._start_editing("manual")
+    assert window._bridge.snapshot()["param_edit_mode"] is True
+    window._dialog._finish_editing()
+    assert window._bridge.snapshot()["param_edit_mode"] is False

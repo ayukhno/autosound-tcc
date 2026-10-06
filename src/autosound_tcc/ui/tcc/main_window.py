@@ -830,6 +830,8 @@ class MainWindow(QMainWindow):
         #: remembered set restored a week later would reopen an argument that has been settled.
         self._curve_last: dict[str, list[str]] = {}
         self._preset_override: str | None = self._settings.value("ui/preset", None)
+        #: The preset the last `_load_project` chose — what the agent is told is on screen (TA-5).
+        self._loaded_preset: str | None = None
         i18n.set_language(self._settings.value(_LANG_KEY, "en"))
         # Which project folder is actually open matters the moment you run TCC against more than
         # one (user request 2026-07-29) -- there's no in-app project switcher yet, only
@@ -2404,6 +2406,14 @@ class MainWindow(QMainWindow):
     # ---- project loading ----------------------------------------------------
 
     def _load_project(self) -> None:
+        """Load the project, then tell the agent what is now on screen (TA-5)."""
+        self._loaded_preset = None
+        try:
+            self._load_project_inner()
+        finally:
+            self._publish_snapshot()
+
+    def _load_project_inner(self) -> None:
         """Load the DSP capability profile + the current preset's ledger, and hand the result to
         the tree. Degrades to a status message rather than crashing — no profile / no ledger /
         a broken file are all things a half-set-up project can legitimately be in."""
@@ -2444,6 +2454,7 @@ class MainWindow(QMainWindow):
         preset = self._preset_override if self._preset_override in available else None
         if preset is None:
             preset = config.resolve_preset(root) or (available[0] if available else None)
+        self._loaded_preset = preset
         self._preset_combo.blockSignals(True)
         self._preset_combo.clear()
         for p in available:
@@ -3559,6 +3570,7 @@ class MainWindow(QMainWindow):
         self._dialog_frame.setProperty("class", "panel dialog-editing" if editing else "panel")
         self._dialog_frame.style().unpolish(self._dialog_frame)
         self._dialog_frame.style().polish(self._dialog_frame)
+        self._publish_snapshot()
 
     def _build_right(self) -> QWidget:
         container = QWidget()
@@ -4712,8 +4724,13 @@ class MainWindow(QMainWindow):
 
     def _publish_snapshot(self) -> None:
         """Mirror what's on screen into the bridge, for `get_tcc_state` to read off-thread."""
-        self._bridge.set_snapshot(
-            preset=self._preset_override or config.resolve_preset(),
+        bridge = getattr(self, "_bridge", None)
+        if bridge is None:  # the first load runs before the MCP server's bridge exists
+            return
+        bridge.set_snapshot(
+            # The preset the load chose, not `resolve_preset`: that is None for two or more
+            # presets, and an override from another project is not what is on screen (TA-5).
+            preset=self._loaded_preset,
             project_dir=str(config.project_dir()),
             param_edit_mode=self._dialog.is_editing,
             theme=self._mode,
