@@ -2008,6 +2008,8 @@ class MainWindow(QMainWindow):
         self._agent_refresh_timer.start()
 
     def _reread_after_agent(self) -> None:
+        if getattr(self, "_closing", False):
+            return  # a window on its way out — or left behind by a test — reloads nothing (F-053)
         self._safe_load_project()
         self._start_contract_check()
 

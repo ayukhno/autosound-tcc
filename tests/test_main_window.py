@@ -3531,7 +3531,7 @@ def test_the_header_reload_asks_again_for_the_title(monkeypatch):
 
     monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")  # past the launch-time escape hatch (conftest)
     window._bridge.refresh_from_disk()  # what the session's report_phase sends
-    QTest.qWait(50)
+    QTest.qWait(main_window._AGENT_REFRESH_MS + 200)  # the agent's re-read has run
     assert asked == [], "a phase report asks GitHub nothing"
     window._header_refresh_btn.click()
     settle(True)
@@ -7620,3 +7620,23 @@ def test_an_agent_write_rereads_the_project_without_the_full_recheck(monkeypatch
     _pump_until(lambda: False, seconds=0.6)  # and no second one after it
     assert loads == [1] and checks == [1]
     assert pings == [] and catalogues == [] and forgets == []
+
+
+def test_a_window_closing_before_the_agents_reread_reloads_nothing(monkeypatch):
+    """TA-3 and F-053: the agent's re-read waits for the writes to settle, and a window that
+    starts closing in that wait reloads nothing, like the other delayed reloads."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    loads, checks = [], []
+    monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: loads.append(1))
+    monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: checks.append(1))
+
+    window._bridge.refresh_from_disk()  # a write lands...
+    window._closing = True  # ...and the window starts closing before the re-read
+    try:
+        _pump_until(lambda: False, seconds=(main_window._AGENT_REFRESH_MS + 300) / 1000)
+    finally:
+        window._closing = False  # the kept window is not left half-closed for later tests
+    assert loads == [] and checks == []
