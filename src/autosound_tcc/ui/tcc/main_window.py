@@ -5354,10 +5354,12 @@ class MainWindow(QMainWindow):
         )
 
     def _launch_session(self, opening: Optional[str] = None, fresh: bool = False) -> None:
-        if self._mcp_server is None:
+        # A server that started and then died is as down as one that never started (F3c).
+        reason = (getattr(self, "_mcp_error", "") if self._mcp_server is None
+                  else getattr(self._mcp_server, "stopped_reason", None))
+        if self._mcp_server is None or reason:
             # WITH the reason. "Start TCC again" is advice that does not survive a second failure,
             # and the cause was already known minutes ago — it just had nowhere to go.
-            reason = getattr(self, "_mcp_error", "")
             where = app_log.log_path()
             self._dialog._add_system_message(
                 "⚠️ " + i18n.t("mcpDown")

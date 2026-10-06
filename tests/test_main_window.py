@@ -7670,3 +7670,27 @@ def test_a_cancelled_close_still_rereads_after_an_agent_write(monkeypatch, tmp_p
         assert _pump_until(lambda: bool(loads), seconds=3), "an agent write after Cancel is re-read"
     finally:
         window._agent_worker = None
+
+
+def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):
+    """F3c: the window held a server whose thread had died and handed its URL to the next session;
+    it now says why the server is down, once, as it does for one that never started."""
+    from autosound_tcc.core.mcp_server import TccMcpServer
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    dead = TccMcpServer(project_dir=tmp_path)
+    dead._server = SimpleNamespace(started=True)
+    dead.failure = OSError("p")
+    said = []
+    monkeypatch.setattr(window._dialog, "_add_system_message",
+                        lambda text, *_a, **_k: said.append(text))
+    window._mcp_server = dead
+    try:
+        window._launch_session()
+    finally:
+        window._mcp_server = None
+
+    assert len(said) == 1
+    assert i18n.t("mcpDown") in said[0] and "OSError: p" in said[0]

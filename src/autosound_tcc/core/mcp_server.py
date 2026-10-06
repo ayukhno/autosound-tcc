@@ -1869,9 +1869,23 @@ class TccMcpServer:
             time.sleep(0.05)
 
     @property
+    def stopped_reason(self) -> Optional[str]:
+        """Why a server that was started is not up any more — None while it starts or serves.
+
+        `serving` could not say it alone (F3c): uvicorn sets `started` once and never clears it,
+        so a server whose thread had died still read as up, and the next session was handed a URL
+        nothing answered on."""
+        if self.failure is not None:
+            return f"{type(self.failure).__name__}: {self.failure}"
+        if self._thread is not None and not self._thread.is_alive():
+            return "the MCP server's thread ended"
+        return None
+
+    @property
     def serving(self) -> bool:
-        """Whether uvicorn is actually up — not merely whether a thread was created."""
-        return bool(getattr(self._server, "started", False))
+        """Whether uvicorn is actually up — not merely whether a thread was created, and not after
+        it died."""
+        return bool(getattr(self._server, "started", False)) and self.stopped_reason is None
 
     def stop(self, timeout: float = 5.0) -> None:
         if self._server is not None:

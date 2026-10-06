@@ -2569,3 +2569,25 @@ def test_a_call_still_out_is_named_by_the_tool_it_runs():
         release.set()
         caller.join(10)
         assert mcp_server.drain_calls(timeout=2.0) == 0
+
+
+def test_a_server_whose_thread_died_is_not_serving_and_says_why(tmp_path):
+    """F3c: uvicorn's `started` is set once and never cleared, so `serving` read True for a server
+    whose thread had died."""
+    import threading
+    from types import SimpleNamespace
+
+    from autosound_tcc.core.mcp_server import TccMcpServer
+
+    server = TccMcpServer(project_dir=tmp_path)
+    assert server.stopped_reason is None and not server.serving, "never started: nothing to say"
+
+    server._server = SimpleNamespace(started=True)  # uvicorn got up once
+    server._thread = threading.Thread(target=lambda: None)
+    server._thread.start()
+    server._thread.join()
+    assert not server.serving
+    assert server.stopped_reason == "the MCP server's thread ended"
+
+    server.failure = OSError("p")
+    assert server.stopped_reason == "OSError: p"
