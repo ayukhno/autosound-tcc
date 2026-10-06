@@ -33,7 +33,8 @@ from autosound_tcc.core.agent_events import (
     Unasked,
 )
 from autosound_tcc.core.agent_session import language_name
-from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
+from autosound_tcc.core.mcp_server import (ConfirmRequest, HeadlessBridge, UiBridge,
+                                           await_confirmation)
 from autosound_tcc.core.session_registry import SessionRegistry
 from autosound_tcc.core.shell_gate import (
     GATE_AUTO,
@@ -292,16 +293,9 @@ class TuningSession:
         return await self._ask(tool_name, str(tool_input)[:400], tool_input, deny_reason=f"{tool_name} is not pre-approved")
 
     async def _ask(self, tool: str, detail: str, payload: dict, deny_reason: str, reason: str = ""):
-        import asyncio
-
         request = ConfirmRequest(tool=tool, title=f"Дозволити {tool}?", detail=detail, payload=payload,
                                  reason=reason)
-        try:
-            allowed = await asyncio.wait_for(
-                asyncio.wrap_future(self.bridge.request_confirmation(request)), timeout=600.0
-            )
-        except Exception:
-            allowed = False
+        allowed = await await_confirmation(self.bridge, request, timeout_s=600.0)
         if allowed:
             return PermissionResultAllow()
         return PermissionResultDeny(message=f"Arbiter did not approve: {deny_reason}")

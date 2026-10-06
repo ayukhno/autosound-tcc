@@ -1121,3 +1121,22 @@ def test_a_failure_names_omps_reason_not_its_stack_frames(tmp_path):
     asyncio.run(feed())
 
     assert "SomeError: the reason" in session._why("omp exited before reporting ready")
+
+
+def test_a_failed_confirmation_in_the_omp_session_is_logged_and_denies(tmp_path, caplog):
+    """F3e: omp's gate read a failed confirmation as the Arbiter's «no», with nothing logged."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
+    session = _session(tmp_path, allow=True)
+
+    def broken(request):
+        raise RuntimeError("boom")
+
+    session.bridge.request_confirmation = broken
+    with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+        asyncio.run(session._gate(PERMISSION_FRAME))
+
+    assert session.sent == [{"type": "extension_ui_response", "id": "f1", "value": "Deny"}]
+    assert any("boom" in r.getMessage() for r in caplog.records)

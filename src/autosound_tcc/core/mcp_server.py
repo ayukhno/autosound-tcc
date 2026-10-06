@@ -511,6 +511,24 @@ class HeadlessBridge:
         pass
 
 
+
+async def await_confirmation(bridge: "UiBridge", request: ConfirmRequest, timeout_s: float) -> bool:
+    """The Arbiter's answer to `request`, False when there is none.
+
+    A timeout is a denial: nobody answered. A failure is a denial too — the gate stays shut — but it
+    is logged with what failed (F3e): three places asked this way and swallowed the failure as a plain
+    «no», so a broken confirmation bar read as the Arbiter refusing everything."""
+    try:
+        return bool(await asyncio.wait_for(
+            asyncio.wrap_future(bridge.request_confirmation(request)), timeout=timeout_s))
+    except asyncio.TimeoutError:
+        return False
+    except Exception as exc:  # noqa: BLE001 — any failure is a denial, said in the log
+        app_log.logger().warning("confirmation for %s failed, read as a denial: %s: %s",
+                                 request.tool, type(exc).__name__, exc)
+        return False
+
+
 def build_server(
     project_dir: Path,
     bridge: UiBridge,
@@ -559,13 +577,7 @@ def build_server(
         return process.Process(str(project_dir / "process")).load(), None
 
     async def _confirm(request: ConfirmRequest) -> bool:
-        try:
-            return await asyncio.wait_for(
-                asyncio.wrap_future(bridge.request_confirmation(request)),
-                timeout=CONFIRM_TIMEOUT_S,
-            )
-        except (asyncio.TimeoutError, Exception):
-            return False
+        return await await_confirmation(bridge, request, CONFIRM_TIMEOUT_S)
 
     # ---- reads -------------------------------------------------------------
 

@@ -1114,3 +1114,22 @@ def test_the_headless_runner_prints_a_command_let_through_unasked(capsys):
     tuning_session_cli._render(Unasked("rm -rf ~/old"))
 
     assert "rm -rf ~/old" in capsys.readouterr().out
+
+
+def test_a_failed_confirmation_in_the_sdk_session_is_logged(tmp_path, caplog):
+    """F3e: the SDK session read a failed confirmation as the Arbiter's «no», with nothing logged."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
+    session, arbiter = _session(tmp_path, allow=True)
+
+    def broken(request):
+        raise RuntimeError("boom")
+
+    arbiter.request_confirmation = broken
+    with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+        behavior = _decide(session, "Bash", {"command": "touch x"})
+
+    assert behavior == "deny"
+    assert any("boom" in r.getMessage() for r in caplog.records)

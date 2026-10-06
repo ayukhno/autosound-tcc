@@ -2591,3 +2591,49 @@ def test_a_server_whose_thread_died_is_not_serving_and_says_why(tmp_path):
 
     server.failure = OSError("p")
     assert server.stopped_reason == "OSError: p"
+
+
+class _BrokenBar:
+    """A confirmation bar that fails instead of answering."""
+
+    def request_confirmation(self, request):
+        raise RuntimeError("boom")
+
+
+class _SilentBar:
+    """A confirmation bar nobody answers."""
+
+    def request_confirmation(self, request):
+        from concurrent.futures import Future
+        return Future()
+
+
+def test_a_failed_confirmation_is_logged_and_denied(caplog):
+    """F3e: the failure read as the Arbiter's «no», with nothing in the log."""
+    import asyncio
+    import logging
+
+    from autosound_tcc.core import app_log
+    from autosound_tcc.core.mcp_server import ConfirmRequest, await_confirmation
+
+    request = ConfirmRequest(tool="bash", title="Allow bash?", detail="rm x")
+    with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+        allowed = asyncio.run(await_confirmation(_BrokenBar(), request, timeout_s=1.0))
+
+    assert allowed is False
+    assert any("boom" in r.getMessage() and "bash" in r.getMessage() for r in caplog.records)
+
+
+def test_an_unanswered_confirmation_is_a_quiet_denial(caplog):
+    import asyncio
+    import logging
+
+    from autosound_tcc.core import app_log
+    from autosound_tcc.core.mcp_server import ConfirmRequest, await_confirmation
+
+    request = ConfirmRequest(tool="bash", title="Allow bash?", detail="rm x")
+    with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+        allowed = asyncio.run(await_confirmation(_SilentBar(), request, timeout_s=0.05))
+
+    assert allowed is False
+    assert not caplog.records, "nobody answering is not a failure"

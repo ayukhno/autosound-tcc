@@ -63,7 +63,8 @@ from autosound_tcc.core.agent_events import (
     TurnEnd,
     Unasked,
 )
-from autosound_tcc.core.mcp_server import ConfirmRequest, HeadlessBridge, UiBridge
+from autosound_tcc.core.mcp_server import (ConfirmRequest, HeadlessBridge, UiBridge,
+                                           await_confirmation)
 # The gate's modes live with the gate since tcc#128; the window and the suite read them from here,
 # so they are named here too.
 from autosound_tcc.core.shell_gate import (
@@ -593,13 +594,7 @@ class OmpSession:
             payload=dict(frame),
             reason="gateIrreversible" if irreversible else "",
         )
-        try:
-            allowed = await asyncio.wait_for(
-                asyncio.wrap_future(self.bridge.request_confirmation(request)),
-                timeout=CONFIRM_TIMEOUT_S,
-            )
-        except Exception:
-            allowed = False
+        allowed = await await_confirmation(self.bridge, request, CONFIRM_TIMEOUT_S)
         self._answer_frame(frame, allowed)
 
     def _auto_allowed(self, tool: str, detail: str) -> bool:
