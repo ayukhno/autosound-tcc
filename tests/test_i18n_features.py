@@ -63,3 +63,41 @@ def test_the_lookup_imports_no_qt():
         print(sorted(m for m in sys.modules if m.split(".")[0] in ("PySide6", "shiboken6")))
     """)
     assert loaded == "[]"
+
+
+def test_the_copy_strings_live_with_their_feature():
+    """G13 B3: the new-project dialog's strings live beside it; the two buttons six dialogs share
+    stay in the core table."""
+    from autosound_tcc.ui.tcc.strings import new_project
+
+    assert "npSeedSummary" in new_project.STRINGS
+    assert "npSeedSummary" not in i18n._CORE["en"]
+    assert "npCancel" in i18n._CORE["en"] and "npBrowse" in i18n._CORE["en"]
+
+
+def _strings_modules():
+    from pathlib import Path
+
+    folder = Path(i18n.strings.__file__).parent
+    return sorted(path for path in folder.glob("*.py") if path.stem != "__init__")
+
+
+def test_every_strings_module_is_joined():
+    assert [path.stem for path in _strings_modules()] == sorted(i18n.strings.FEATURES)
+
+
+def _imports(source: str) -> list:
+    import ast
+
+    return [node for node in ast.walk(ast.parse(source))
+            if isinstance(node, (ast.Import, ast.ImportFrom))]
+
+
+def test_a_strings_module_imports_nothing():
+    for path in _strings_modules():
+        assert not _imports(path.read_text(encoding="utf-8")), path.name
+
+
+def test_the_imports_guard_goes_red_on_an_import():
+    assert _imports("import os\nSTRINGS = {}\n")
+    assert not _imports("STRINGS = {'a': {'en': 'b'}}\n")
