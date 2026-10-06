@@ -6284,6 +6284,9 @@ class MainWindow(QMainWindow):
                 and not self._closed_in_order()):
             answer = self._ask_save_before_quit()
             if answer == QMessageBox.StandardButton.Cancel:
+                # Cancel keeps the window, so it is not closing: every guard that reads the flag (the
+                # agent's re-read, the watcher, the settings writes) works again (review of #152).
+                self._closing = False
                 event.ignore()
                 return
             self._flush_own_state()  # instant and free either way

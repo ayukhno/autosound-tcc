@@ -7640,3 +7640,33 @@ def test_a_window_closing_before_the_agents_reread_reloads_nothing(monkeypatch):
     finally:
         window._closing = False  # the kept window is not left half-closed for later tests
     assert loads == [] and checks == []
+
+
+def test_a_cancelled_close_still_rereads_after_an_agent_write(monkeypatch, tmp_path):
+    """Review of #152: `closeEvent` sets `_closing` before it asks whether to save, and Cancel kept
+    it set — so after Close → Cancel the agent's writes no longer reached the screen, and nothing
+    said so. Cancel means the window stays: it is not closing."""
+    from PySide6.QtGui import QCloseEvent
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    window._agent_worker = SimpleNamespace(shutdown=lambda: None)
+    monkeypatch.setattr(window, "_ask_save_before_quit",
+                        lambda: QMessageBox.StandardButton.Cancel)
+    event = QCloseEvent()
+    try:
+        window.closeEvent(event)
+        assert not event.isAccepted(), "the situation this is about: the window stays"
+
+        loads = []
+        monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: loads.append(1))
+        monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: None)
+        window._bridge.refresh_from_disk()
+
+        assert _pump_until(lambda: bool(loads), seconds=3), "an agent write after Cancel is re-read"
+    finally:
+        window._agent_worker = None
