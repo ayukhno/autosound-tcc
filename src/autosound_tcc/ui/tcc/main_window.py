@@ -672,6 +672,9 @@ def _detect_system_mode() -> str:
 #: skill writes several files in a row and the watcher fires more than once per commit, so every
 #: watcher in this window coalesces on this number rather than on its own.
 _RELOAD_COALESCE_MS = 400
+#: An agent write is answered with ONE re-read once the writes settle (TA-3): `report_phase` fires
+#: per write, and each used to run the whole ↻.
+_AGENT_REFRESH_MS = 300
 
 
 # Every window ever built, weakly. The point is the `atexit` hook below: a process that ends
@@ -1992,11 +1995,21 @@ class MainWindow(QMainWindow):
         """The header's ↻ and Menu → Reload: everything `_reload_from_disk` re-reads, and the
         title's «update available» too — an update installed since launch is a change as well, and
         the word stayed until TCC restarted (VM-3). On a press only: the session's `report_phase`
-        lands on `_reload_from_disk` too, and a phase move is no reason to ask GitHub. Behind the
-        launch-time question's switch, so a test run reaches no network."""
+        re-reads the project too (`_on_agent_refresh`), and a phase move is no reason to ask
+        GitHub. Behind the launch-time question's switch, so a test run reaches no network."""
         self._reload_from_disk()
         if os.environ.get("AUTOSOUND_TCC_MCP", "1") != "0":
             self._check_for_updates()
+
+    def _on_agent_refresh(self) -> None:
+        """The session's `report_phase`: the skill wrote something. A burst of writes is one re-read
+        (the timer restarts), and it is not ↻: REW, the models and the refusals did not change
+        because a file did (TA-3)."""
+        self._agent_refresh_timer.start()
+
+    def _reread_after_agent(self) -> None:
+        self._safe_load_project()
+        self._start_contract_check()
 
     def _safe_load_project(self) -> None:
         """Re-read the project without letting a bad file take the window with it.
@@ -4563,7 +4576,11 @@ class MainWindow(QMainWindow):
         # and this is where that signal lands (D-6). Broader than the process-state watcher in
         # `_load_process`: a phase move usually comes with a new ledger snapshot and new project
         # facts, which nothing else is watching.
-        self._bridge.refreshRequested.connect(self._reload_from_disk)
+        self._agent_refresh_timer = QTimer(self)
+        self._agent_refresh_timer.setSingleShot(True)
+        self._agent_refresh_timer.setInterval(_AGENT_REFRESH_MS)
+        self._agent_refresh_timer.timeout.connect(self._reread_after_agent)
+        self._bridge.refreshRequested.connect(self._on_agent_refresh)
         self._bridge.sessionClosed.connect(lambda: setattr(self, "_session_saved", True))
         self._bridge.sessionChanged.connect(lambda: setattr(self, "_session_saved", False))
         self._bridge.externalSession.connect(self._on_external_session)

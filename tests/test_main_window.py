@@ -3530,7 +3530,7 @@ def test_the_header_reload_asks_again_for_the_title(monkeypatch):
     assert asked == [], "the switch is off in tests: nothing was asked"
 
     monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")  # past the launch-time escape hatch (conftest)
-    window._reload_from_disk()  # what the session's report_phase lands on
+    window._bridge.refresh_from_disk()  # what the session's report_phase sends
     QTest.qWait(50)
     assert asked == [], "a phase report asks GitHub nothing"
     window._header_refresh_btn.click()
@@ -7595,3 +7595,28 @@ def test_edit_mode_reaches_the_agent(tmp_path, monkeypatch):
     assert window._bridge.snapshot()["param_edit_mode"] is True
     window._dialog._finish_editing()
     assert window._bridge.snapshot()["param_edit_mode"] is False
+
+
+def test_an_agent_write_rereads_the_project_without_the_full_recheck(monkeypatch):
+    """TA-3: every `report_phase` ran the header's ↻ — REW, the models, the refusals — and a
+    session that wrote five files ran it five times. The agent's signal re-reads the project and
+    the contract once the writes settle; ↻ stays the explicit full re-check."""
+    _catalogue(monkeypatch, [])
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    loads, checks, pings, catalogues, forgets = [], [], [], [], []
+    monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: loads.append(1))
+    monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: checks.append(1))
+    monkeypatch.setattr(MainWindow, "_ping_rew", lambda self: pings.append(1))
+    monkeypatch.setattr(MainWindow, "_refresh_cli_catalogue",
+                        lambda self, force=False: catalogues.append(force))
+    monkeypatch.setattr(main_window.availability, "forget_refusals", lambda: forgets.append(1))
+
+    for _ in range(5):
+        window._bridge.refresh_from_disk()
+
+    assert _pump_until(lambda: bool(loads), seconds=5), "the re-read comes once the writes settle"
+    _pump_until(lambda: False, seconds=0.6)  # and no second one after it
+    assert loads == [1] and checks == [1]
+    assert pings == [] and catalogues == [] and forgets == []
