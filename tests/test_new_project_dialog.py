@@ -606,3 +606,65 @@ def test_a_check_box_shows_its_box_in_either_theme(monkeypatch, mode):
         assert ticked == palette.accent, f"{mode}: the ticked box is {ticked}"
     finally:
         dlg.close()
+
+
+class _FileSource:
+    """A second source for the copy (G13 C2): a `.car` file resolves to a folder with a note and a
+    warning; a `.bad` one is refused. What it let go of is counted on the class, because the
+    dialog's picker makes its own instance."""
+
+    chooser = None  # set by the test: car_source.Chooser("file", …)
+    folder = None
+    released: list = []
+
+    def accepts(self, path):
+        return path.suffix in (".car", ".bad")
+
+    def resolve(self, path):
+        from autosound_tcc.ui.tcc import car_source
+
+        if path.suffix == ".bad":
+            return car_source.Resolved(
+                None, problem=car_source.Line("npSeedFailed", {"problem": "not a car file"}))
+        return car_source.Resolved(type(self).folder,
+                                   about=(car_source.Line("npSeedNoSkill"),),
+                                   warnings=(car_source.Line("npSeedFindingsEvidence"),))
+
+    def release(self):
+        type(self).released.append(True)
+
+
+def test_a_second_source_needs_no_dialog_code(tmp_path, monkeypatch):
+    """G13 C2: a new source of a car is a module, not dialog code. Registered, it gets its own
+    browse button; what it resolves is copied from, with its note under the summary and its
+    warning last; a refused file says why and creates no project; closing lets go of it."""
+    from autosound_tcc.ui.tcc import car_source
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "project.json").write_text('{"schema_version": 3}', encoding="utf-8")
+    _FileSource.chooser = car_source.Chooser("file", "npBrowse", "npSeedFrom", "npSeedPlaceholder")
+    _FileSource.folder = source
+    _FileSource.released = []
+    monkeypatch.setattr(car_source, "SOURCES", (_FileSource, car_source.FolderSource))
+    seeder = _StubSeeder(_Described("VW Passat B8 2017", "Helix DSP Ultra S", 20), _Report(20))
+
+    dlg = _dialog_on(tmp_path / "the.car", seeder, monkeypatch)
+
+    assert len(dlg._seed_browse_buttons) == 2, "one browse button per source"
+    said = dlg._seed_summary.text().split("\n")
+    assert said[0].startswith(npd.i18n.t("npSeedSummary").split("{")[0])
+    assert said[1] == npd.i18n.t("npSeedNoSkill"), "the source's note sits under the summary"
+    assert said[-1] == npd.i18n.t("npSeedFindingsEvidence"), "its warning comes last"
+
+    dlg._seed_edit.setText(str(tmp_path / "x.bad"))
+    target = tmp_path / "new"
+    dlg._folder_edit.setText(str(target))
+    dlg._on_create()
+    assert npd.i18n.t("npSeedFailed").format(problem="not a car file") in dlg._seed_summary.text()
+    assert not target.exists(), "a refused file creates no project"
+    assert all(into != str(target) for _src, into, _kw in seeder.seeded_into), "nor copies into it"
+
+    released = len(_FileSource.released)
+    dlg.reject()
+    assert len(_FileSource.released) == released + 1, "closing lets go of what was held"

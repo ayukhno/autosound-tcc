@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from autosound_tcc.core import config, model_choices, terminal_launcher, vendor_loader
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import car_source, i18n
 from autosound_tcc.ui.tcc.mock_data import AI_MAIN_MODELS, AI_MODEL_IDS
 
 
@@ -44,6 +44,12 @@ def _field_label(text: str) -> QLabel:
     label = QLabel(text)
     label.setProperty("class", "kv-lbl")
     return label
+
+
+def _said(line: car_source.Line) -> str:
+    """A source's sentence in the reader's language."""
+    text = i18n.t(line.key)
+    return text.format(**line.args) if line.args else text
 
 
 def _seeder():
@@ -225,15 +231,25 @@ class NewProjectDialog(QDialog):
         layout.addWidget(self._seed_combo)
 
         seed_row = QHBoxLayout()
+        # The typed text goes through the source picker (G13 C2): a folder is itself, and a new
+        # source of a car is a module in `car_source.SOURCES`, not code here.
+        self._picker = car_source.Picker()
+        self._seed_resolved: Optional[car_source.Resolved] = None
         self._seed_edit = QLineEdit()
         self._seed_edit.setPlaceholderText(i18n.t("npSeedPlaceholder"))
         self._seed_edit.textChanged.connect(self._on_seed_source)
         seed_row.addWidget(self._seed_edit, stretch=1)
-        self._seed_browse = QPushButton(i18n.t("npBrowse"))
-        self._seed_browse.setProperty("class", "reason-btn")
-        self._seed_browse.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._seed_browse.clicked.connect(self._on_browse_seed)
-        seed_row.addWidget(self._seed_browse)
+        # One browse button per source; the first is `_seed_browse`, as before.
+        self._seed_browse_buttons: list[QPushButton] = []
+        for source in self._picker.sources:
+            button = QPushButton(i18n.t(source.chooser.label_key))
+            button.setProperty("class", "reason-btn")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(
+                lambda _checked=False, chooser=source.chooser: self._on_browse_source(chooser))
+            seed_row.addWidget(button)
+            self._seed_browse_buttons.append(button)
+        self._seed_browse = self._seed_browse_buttons[0]
         self._seed_row = seed_row
         layout.addLayout(seed_row)
 
@@ -375,7 +391,7 @@ class NewProjectDialog(QDialog):
         an unchecked box under a picker set to "no" are three ways of saying the same nothing."""
         copying = self._seed_combo.currentData() == "copy"
         self._sync_create_enabled()  # the button names the act this mode performs
-        for widget in (self._seed_edit, self._seed_browse, self._seed_summary,
+        for widget in (self._seed_edit, *self._seed_browse_buttons, self._seed_summary,
                        self._seed_findings, self._seed_fs, self._seat_label, self._seat_combo,
                        self._seat_source):
             widget.setVisible(copying)
@@ -383,11 +399,19 @@ class NewProjectDialog(QDialog):
             self._on_seed_source(self._seed_edit.text())
 
     def _seed_source(self) -> Optional[Path]:
-        """The folder to seed from, or None -- the single place that answers "are we copying"."""
+        """The folder to seed from, or None -- the single place that answers "are we copying".
+
+        Through the picker: another source's input resolves to the folder it holds, and one no
+        source takes leaves a problem (`_seed_problem`) instead of a folder."""
         if self._seed_combo.currentData() != "copy":
+            self._seed_resolved = None
             return None
-        text = self._seed_edit.text().strip()
-        return Path(text).expanduser() if text else None
+        self._seed_resolved = self._picker.resolve(self._seed_edit.text())
+        return self._seed_resolved.folder if self._seed_resolved is not None else None
+
+    def _seed_problem(self) -> Optional[car_source.Line]:
+        """Why the typed source cannot be copied from, as its source said it; None if it can."""
+        return self._seed_resolved.problem if self._seed_resolved is not None else None
 
     def _on_seed_source(self, _text: str) -> None:
         """Say what the picked folder is while it is still being picked.
@@ -403,7 +427,8 @@ class NewProjectDialog(QDialog):
         self._seat_source.setText(i18n.t("npSeatSource").format(
             seat=_seat_label(seat) if seat else i18n.t("npSeatUnset")) if summary else "")
         if source is None:
-            self._set_seed_note("", warn=False)
+            problem = self._seed_problem()
+            self._set_seed_note(_said(problem) if problem else "", warn=problem is not None)
             return
         if summary is None:
             self._set_seed_note(i18n.t("npSeedNotAProject"), warn=True)
@@ -482,8 +507,11 @@ class NewProjectDialog(QDialog):
         if source is None:
             return
         summary = self._seed_describes
+        resolved = self._seed_resolved
         lines = [i18n.t("npSeedSummary").format(
             car=summary.car, dsp=summary.dsp or "—", channels=summary.channels)]
+        # What the source says about itself sits under the summary; its warnings come last.
+        lines += [_said(line) for line in (resolved.about if resolved else ())]
         report, fs = self._would_travel(source)
         if report is not None and report.ok:
             key = "npSeedTravelsFindings" if self._seed_findings.isChecked() else "npSeedTravels"
@@ -508,6 +536,7 @@ class NewProjectDialog(QDialog):
                 # not the channels was impossible, so the working answer was to go around the
                 # seeder by hand — and the findings only travel with it.
                 lines.append(i18n.t("npSeedNoChannels"))
+        lines += [_said(line) for line in (resolved.warnings if resolved else ())]
         self._set_seed_note("\n".join(lines), warn=False)
 
     def _set_seed_note(self, text: str, *, warn: bool) -> None:
@@ -612,13 +641,29 @@ class NewProjectDialog(QDialog):
         if chosen:
             self._folder_edit.setText(chosen)
 
-    def _on_browse_seed(self) -> None:
+    def _on_browse_source(self, chooser: car_source.Chooser) -> None:
         start = self._seed_edit.text().strip() or str(config.project_dir())
-        chosen = QFileDialog.getExistingDirectory(self, i18n.t("npSeedFrom"), start)
+        title = i18n.t(chooser.title_key)
+        if chooser.kind == "file":
+            wanted = i18n.t(chooser.filter_key) if chooser.filter_key else ""
+            chosen, _filter = QFileDialog.getOpenFileName(self, title, start, wanted)
+        else:
+            chosen = QFileDialog.getExistingDirectory(self, title, start)
         if chosen:
             self._seed_edit.setText(chosen)
 
+    def done(self, result: int) -> None:  # Qt override: accept and reject both end here
+        """Closing lets go of whatever a source held (a package's temporary folder, later)."""
+        self._picker.release()
+        super().done(result)
+
     def _on_create(self) -> None:
+        self._seed_source()  # what the picker holds for the text as it is now
+        problem = self._seed_problem()
+        if problem is not None:
+            # A refused source creates nothing — not an empty project in the copy's place.
+            self._set_seed_note(_said(problem), warn=True)
+            return
         project_dir = Path(self._folder_edit.text().strip()).expanduser()
         vendor = self._vendor_edit.text().strip()
         model = self._model_edit.text().strip()
