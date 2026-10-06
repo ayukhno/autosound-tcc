@@ -3641,10 +3641,13 @@ the right of the TAKE tick, like an empty second checkbox. It is the table's cur
 
 **What.** The Arbiter, 2026-10-06, W-8's collection: the focus card «задача на замір» for `cap_001` puts every row
 of the task under NOT IN THE GRAMMAR — `L w+m_E3 (sw)`, `sw+w-L_E3 (sw)`, `sw_E3 86dB (sw)`, `ALL+C+FX_A3 (rta)` and
-the rest, thirteen titles. The agreed rule: an old prefix (`D_w-L_nnn (rta)`) moves into the number
+the rest: all 36 of the task's titles. The agreed rule: an old prefix (`D_w-L_nnn (rta)`) moves into the number
 (`w-L_Dnnn (rta)`); the task follows it. The skill's `naming.parse_name` answers `None` for every such title (main
 e562d05 and the vendored v3.1.1); the same titles with a plain number parse. Its v3.0.66 CHANGELOG already says the
 grammar does not read the letter form. A level between the series and the method (`sw_3 86dB (sw)`) is refused too.
+The Arbiter, 2026-10-06: the level is more convenient after the method; the grammar already reads `sw_3 (sw) 86dB`
+(as `params`), and no reference of the skill names that place. The before-form came from research's AYA plan, and
+the car session put it into the task.
 
 **Weight.** High: a task in that form cannot be followed in the card.
 
