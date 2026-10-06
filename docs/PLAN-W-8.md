@@ -17,9 +17,8 @@ pytest.
 `docs/audit/AUDIT-2026-10-VERIFIED.md` (file:line of each finding). Milestone `W-8 · v1.1.2` (#8), all issues `ok`
 by the Arbiter 2026-10-06. Pool `docs/TODO.md` F-097.
 
-**Not in this plan yet:** G13's three seams (#161 menu registry, #162 strings per feature, #163 car source). They go
-through the group's architects first (`hub:seam`); the Arbiter picks the approach, and then their tasks are added
-here as a section of their own. N2 (#164) is a standing test run the controller does when the skill names a
+**G13's three seams** (#161 menu registry, #162 strings per feature, #163 car source) went through three architects
+(`hub:seam`); the Arbiter chose «Balance» on 2026-10-06, and their Tasks 11–18 are the section below Task 10. N2 (#164) is a standing test run the controller does when the skill names a
 candidate (§ N2 below), not a build.
 
 ## Global Constraints
@@ -1240,6 +1239,405 @@ back — and say so in the report.
 
 ---
 
+## G13 · The three seams (#161–#163) — the Arbiter's choice «Balance»
+
+The Arbiter, 2026-10-06, chose the «Balance» design of three (`.superpowers/sdd/PLAN-W-8/arch-balance.md`, local; the
+other two beside it). Each seam gets its whole mechanism now; only what the car package will touch moves, or what
+proves the mechanism. The design's own check: after it, the car package (F-096) adds 0 lines to `main_window.py`,
+`new_project_dialog.py` and `i18n.py`. Built after Task 10, in this order: B1, B2, A1, A2, A3, C1, C2, B3. Re-read line
+numbers when you start — Tasks 1–10 move them.
+
+Shared rules for Tasks 11–18 (on top of the Global Constraints):
+- A module said to have "no Qt" is proven by a fresh-interpreter test, as `tests/test_setting_status.py:149-160` does
+  (`_fresh(...)` printing the loaded `PySide6`/`shiboken6` modules, expecting `[]`).
+- A guard that is green by design gets a test that shows it failing (the `test_packaging.py:106` pattern).
+- Old private names that tests use keep working until the task that rewrites those tests.
+- A string a user sees: uk and en by the builder; pl and de carry the English until the Advisor.
+
+### Task 11 · #162 B1 — `i18n.assemble`, the `strings/` package, the lookup without Qt
+
+**Files:** Modify `src/autosound_tcc/ui/tcc/i18n.py`. Create `src/autosound_tcc/ui/tcc/strings/__init__.py`. Test:
+`tests/test_i18n_features.py` (new).
+
+**Interfaces (produces):**
+```python
+# ui/tcc/strings/__init__.py — no module-level imports beyond the standard library
+FEATURES: tuple[str, ...] = ()            # module names under this package, in join order (B3 adds "new_project")
+def tables() -> list[tuple[str, dict[str, dict[str, str]]]]   # [(f"strings.{name}", module.STRINGS), …], imported at call time
+# ui/tcc/i18n.py
+_CORE: dict[Lang, dict[str, str]] = {…}   # the literal that is `T` today, renamed, unchanged
+def assemble(core, tables) -> dict[Lang, dict[str, str]]
+T = assemble(_CORE, strings.tables())     # core first, then FEATURES in order
+```
+`assemble` returns a new dict-of-dicts: every language of `core`, each with core's keys, then each table's rows. A
+table row is `{key: {lang: text}}`. It raises `ValueError` naming the key and both owners (`"core"` or the table's name)
+when a key is defined twice, and naming the key, the table and the language when a row lacks one of core's languages
+or has a language core does not. `import shiboken6` moves from the top of `i18n.py` into `set_language`, its only user.
+
+- [ ] **Step 1: failing tests** (`tests/test_i18n_features.py`)
+
+```python
+"""G13 B1: strings per feature, joined into one table; the lookup imports no Qt."""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+import textwrap
+
+import pytest
+
+from autosound_tcc.ui.tcc import i18n
+
+LANGS = ("en", "uk", "pl", "de")
+
+
+def _core(**keys):
+    return {lang: dict(keys) for lang in LANGS}
+
+
+def test_a_key_in_core_and_a_table_is_refused_naming_both():
+    with pytest.raises(ValueError) as caught:
+        i18n.assemble(_core(a="A"), [("strings.demo", {"a": {lang: "x" for lang in LANGS}})])
+    said = str(caught.value)
+    assert "'a'" in said and "core" in said and "strings.demo" in said
+
+
+def test_a_key_in_two_tables_is_refused_naming_both():
+    row = {lang: "x" for lang in LANGS}
+    with pytest.raises(ValueError) as caught:
+        i18n.assemble(_core(), [("strings.one", {"b": row}), ("strings.two", {"b": row})])
+    said = str(caught.value)
+    assert "'b'" in said and "strings.one" in said and "strings.two" in said
+
+
+def test_a_row_without_one_of_the_languages_is_refused():
+    with pytest.raises(ValueError) as caught:
+        i18n.assemble(_core(), [("strings.demo", {"c": {"en": "C", "uk": "C", "pl": "C"}})])
+    assert "'c'" in str(caught.value) and "de" in str(caught.value)
+
+
+def test_a_table_s_rows_reach_every_language():
+    out = i18n.assemble(_core(a="A"), [("strings.demo", {"d": {"en": "D", "uk": "Д", "pl": "D", "de": "D"}})])
+    assert out["uk"]["d"] == "Д" and out["en"]["a"] == "A" and set(out) == set(LANGS)
+
+
+def test_the_table_the_app_uses_is_the_join():
+    assert i18n.T == i18n.assemble(i18n._CORE, i18n.strings.tables())
+
+
+def _fresh(code: str) -> str:
+    done = subprocess.run([sys.executable, "-c", textwrap.dedent(code)], capture_output=True,
+                          text=True, timeout=120, check=False)
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+def test_the_lookup_imports_no_qt():
+    loaded = _fresh("""
+        import sys
+        from autosound_tcc.ui.tcc import i18n
+        i18n.t("npCancel")
+        print(sorted(m for m in sys.modules if m.split(".")[0] in ("PySide6", "shiboken6")))
+    """)
+    assert loaded == "[]"
+```
+
+- [ ] **Step 2:** run `.venv/bin/python -m pytest tests/test_i18n_features.py -q` — FAIL (`assemble` missing; shiboken6 loaded).
+- [ ] **Step 3:** implement as above (the `strings` import in `i18n.py` sits with the other imports at the top).
+- [ ] **Step 4:** `.venv/bin/python -m pytest tests/test_i18n_features.py tests/test_i18n_languages.py tests/test_labels.py tests/test_project_repo.py -q -n 4` — PASS.
+- [ ] **Step 5:** commit — `#162 G13 B1: strings per feature join one table, and the lookup imports no Qt`
+
+### Task 12 · #162 B2 — every literal key the UI names exists
+
+**Files:** Create `tests/test_i18n_keys.py`. Fix any missing keys it finds (in `i18n.py`, en + uk; pl/de English).
+
+**Interfaces (produces, in the test module):** `literal_keys(source: str) -> set[str]` — every string constant passed
+as the first argument to `i18n.t(...)`, including both branches of a conditional expression there
+(`i18n.t("a" if x else "b")`); a key built at run time (a variable, an f-string, `+`) is not a literal and is skipped.
+
+- [ ] **Step 1: failing test that shows the guard can fail**
+
+```python
+"""G13 B2: a key typed wrong shows on screen as the raw key, and nothing caught it."""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+from autosound_tcc.ui.tcc import i18n
+
+UI = Path(__file__).resolve().parents[1] / "src" / "autosound_tcc" / "ui"
+
+
+def literal_keys(source: str) -> set[str]:
+    keys: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not (isinstance(node, ast.Call) and node.args and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "t" and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "i18n"):
+            continue
+        arg = node.args[0]
+        branches = [arg.body, arg.orelse] if isinstance(arg, ast.IfExp) else [arg]
+        keys |= {b.value for b in branches if isinstance(b, ast.Constant) and isinstance(b.value, str)}
+    return keys
+
+
+def test_the_key_guard_goes_red_on_a_typo():
+    source = ('i18n.t("npCancel")\n'
+              'i18n.t("noSuchKeyAnywhere")\n'
+              'i18n.t("npCreate" if ok else "noSuchOtherKey")\n'
+              'i18n.t(name)\n')
+    assert literal_keys(source) - set(i18n.T["en"]) == {"noSuchKeyAnywhere", "noSuchOtherKey"}
+
+
+def test_every_literal_key_the_ui_names_exists():
+    missing = {}
+    for path in sorted(UI.rglob("*.py")):
+        lost = literal_keys(path.read_text(encoding="utf-8")) - set(i18n.T["en"])
+        if lost:
+            missing[path.relative_to(UI).as_posix()] = sorted(lost)
+    assert not missing, missing
+```
+
+- [ ] **Step 2:** run it. The first test passes (it proves the checker); the second either passes or names keys that
+  are raw on screen today. Each one found is a finding: fix it (a typo → the right key; a key never added → add it,
+  en + uk written, pl/de the English) and name every one in the report with its file:line.
+- [ ] **Step 3:** `.venv/bin/python -m pytest tests/test_i18n_keys.py tests/test_i18n_languages.py -q` — PASS.
+- [ ] **Step 4:** commit — `#162 G13 B2: every key the UI names exists` (+ the keys fixed, in the body).
+
+### Task 13 · #161 A1 — the menu as data: `menu_registry.py`
+
+**Files:** Create `src/autosound_tcc/ui/tcc/menu_registry.py` (no Qt). Test: `tests/test_menu_registry.py` (new); extend
+the existing menu test in `tests/test_main_window.py` (the one that checks headings and every key, ~:3583) first.
+
+**Interfaces (produces):**
+```python
+@dataclass(frozen=True)
+class MenuEntry:
+    id: str; place: str                  # a SECTIONS id, or the id of a submenu entry
+    label_key: str = ""; label: str = ""; tip_key: str = ""; prefix: str = ""   # prefix e.g. "⚙ ", "📖 "
+    on: Callable[[Any], None] | None = None        # receives the host (the window), never Qt's `checked`
+    url: Callable[[], str] | None = None           # opened in the browser instead of `on`
+    enabled: Callable[[Any], bool] | None = None
+    checked: Callable[[Any], bool] | None = None   # set → the line is checkable
+    submenu: bool = False; bold: bool = False
+    before: str = ""; after: str = ""              # an anchor: another entry's id in the same place
+    alias: str = ""; alias_key: str = ""           # the window attribute tests use; a dict entry when alias_key is set
+SECTIONS: tuple[tuple[str, str], ...] = (("project", "menuProject"), ("session", "menuSession"),
+                                         ("tools", "menuTools"), ("help", "menuHelp"))
+PROVIDERS: tuple[str, ...] = ()           # module names exposing menu_entries() -> list[MenuEntry]
+SPONSORS_URL: str; MONOBANK_URL: str     # moved from main_window.py with their comments
+def window_entries() -> list[MenuEntry]  # today's menu, in today's order, handlers as late-bound calls on the host
+def collect() -> list[MenuEntry]         # window_entries() + every provider's, PROVIDERS read at call time
+def ordered(entries, place: str) -> list[MenuEntry]   # registration order with anchors applied; an unknown anchor goes last
+def problems(entries, known_keys) -> list[str]        # duplicate ids, unknown places or anchors, keys not in known_keys,
+                                                      # an entry with neither on, url nor submenu
+```
+`window_entries()` is a transcription of `_build_main_menu`: every `addAction` / `addMenu` / heading becomes one entry in
+the same order, with the same keys, prefixes, tips, checkable state and `bold`; each `triggered.connect(...)` becomes
+`on=lambda w: w.<the same method>(<the same arguments>)` (late-bound, so a test that patches a window method still
+wins); the gate, EQ-order and language submenus become entries with `checked`; Settings stays a bold submenu placed last
+in TOOLS; the Guides submenu keeps its order and URLs. Nothing in `main_window.py` changes in this task.
+
+- [ ] **Step 1: pin today's menu.** Extend the existing headings-and-keys menu test in `tests/test_main_window.py` so it
+  walks the whole tree (sections, entries, submenus, separators) and compares it with a list of
+  `(depth, kind, key-or-text, checkable, bold)` rows written out in the test. It passes on today's code and adds no
+  window build. This pin is what Task 15 must keep green.
+- [ ] **Step 2: failing registry tests** (`tests/test_menu_registry.py`), among them:
+
+```python
+class _Recorder:
+    """A host that writes down which window method an entry calls, and with what."""
+    def __init__(self):
+        self.calls = []
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: self.calls.append((name, args, kwargs))
+
+
+def _entry(entry_id):
+    return next(e for e in menu_registry.window_entries() if e.id == entry_id)
+
+
+def test_copy_the_car_asks_for_a_seeded_dialog():
+    host = _Recorder()
+    _entry("copy_car").on(host)
+    _entry("new_project").on(host)
+    assert host.calls == [("_open_new_project_dialog", (), {"seed": True}),
+                          ("_open_new_project_dialog", (), {})]
+
+
+def test_the_window_s_menu_has_no_problems():
+    assert menu_registry.problems(menu_registry.collect(), set(i18n.T["en"])) == []
+
+
+def test_every_entry_calls_a_method_the_window_has():
+    from autosound_tcc.ui.tcc.main_window import MainWindow
+    for entry in menu_registry.window_entries():
+        if entry.on is not None:
+            host = _Recorder()
+            entry.on(host)
+            assert all(hasattr(MainWindow, name) for name, _a, _k in host.calls), entry.id
+
+
+def test_an_anchor_puts_an_entry_right_before_its_neighbour():
+    entries = [MenuEntry("a", "project", label="A", on=print), MenuEntry("b", "project", label="B", on=print),
+               MenuEntry("x", "project", label="X", on=print, before="b")]
+    assert [e.id for e in menu_registry.ordered(entries, "project")] == ["a", "x", "b"]
+
+
+def test_problems_name_a_duplicate_id_an_unknown_place_and_a_missing_key():
+    entries = [MenuEntry("a", "project", label_key="npCancel", on=print),
+               MenuEntry("a", "nowhere", label_key="noSuchKey", on=print)]
+    said = " ".join(menu_registry.problems(entries, set(i18n.T["en"])))
+    assert "'a'" in said and "nowhere" in said and "noSuchKey" in said
+```
+(Use the real entry ids your transcription gives the copy and new-project lines; `copy_car` / `new_project` if free.)
+Plus a fresh-interpreter test that `menu_registry` loads no Qt.
+
+- [ ] **Step 3:** implement; **Step 4:** run `tests/test_menu_registry.py` and the extended window menu test — PASS.
+- [ ] **Step 5:** commit — `#161 G13 A1: the menu as data, today's entries transcribed and pinned`
+
+### Task 14 · #161 A2 — one renderer: `main_menu.py`
+
+**Files:** Create `src/autosound_tcc/ui/tcc/main_menu.py`. Test: `tests/test_main_menu.py` (new).
+
+**Interfaces (produces):**
+```python
+def tip_menu(parent) -> QMenu            # today's `_tip_menu`: class "support-menu", hover tips, tip hidden on hide
+def show_action_tip(action) -> None      # today's `_show_action_tip`
+def add_heading(menu, text) -> None      # today's `_menu_section`: a disabled upper-case action
+class MainMenu:
+    def __init__(self, button: QToolButton, host, entries: Callable[[], list[MenuEntry]] | None = None)  # default collect
+    def render(self) -> QMenu   # builds the tree, button.setMenu(new), old.deleteLater(), sets the aliases, then sync()
+    def sync(self) -> None      # re-asks every `enabled` and `checked` predicate
+    def action(self, entry_id: str) -> QAction | None
+```
+Every line connects `triggered` (never `toggled`) as `lambda _checked=False, e=entry: self._fire(e)`; `_fire` calls
+`e.on(host)` or opens `e.url()`. Aliases: `render()` sets `host.<alias>` (or `host.<alias>[alias_key]`, the dict reset
+first so its order is the render order).
+
+- [ ] **Step 1: failing tests** on a bare `QToolButton` with a small host object (no `MainWindow`):
+  `test_a_handler_never_receives_qts_checked_flag` (a checkable entry and a plain one; trigger both; the host's
+  handler was called with the host only), `test_a_render_from_inside_an_entry_defers_the_old_menu` (an entry whose `on`
+  calls `render()` again; trigger it; process the deferred delete; no RuntimeError; `button.menu()` is the new menu),
+  `test_sync_re_asks_enabled_and_checked`, `test_headings_are_disabled_upper_case_lines`,
+  `test_render_sets_the_aliases_the_tests_use`.
+- [ ] **Steps 2–4:** RED, implement, GREEN (`tests/test_main_menu.py`).
+- [ ] **Step 5:** commit — `#161 G13 A2: one menu renderer, handlers never see Qt's checked flag`
+
+### Task 15 · #161 A3 — the window renders the registry
+
+**Files:** Modify `src/autosound_tcc/ui/tcc/main_window.py` (delete `_build_main_menu`'s body, `_tip_menu`,
+`_build_eq_order_menu`, `_menu_section`, `_show_action_tip`; `_sync_menu_state`'s body becomes
+`self._main_menu.sync()`, its four call sites unchanged; the loop in `_set_eq_order_pref` becomes
+`self._sync_menu_state()`; the footer's coffee popup uses `main_menu.tip_menu`). Modify `tests/test_main_window.py`,
+`tests/test_structure_ratchet.py`.
+
+- [ ] **Step 1: failing test** — the successor of the menu pin: a fake provider module put in `sys.modules` and named in
+  `menu_registry.PROVIDERS` (monkeypatched) whose entry has `before=` the intake entry's id; the window's menu shows it
+  right before Intake, and otherwise the tree equals the Task 13 pin.
+- [ ] **Step 2:** switch the window to `self._main_menu = MainMenu(self._menu_btn, self)` and `render()`; delete the
+  old code.
+- [ ] **Step 3:** rewrite as plain or renderer tests (no `MainWindow()`): the save/fresh-disabled test (~:1408), the
+  tooltip test (~:1454), the New-project label test (~:3544), the Guides test (~:3627), the menu half of the
+  Copy-the-car test (~:3717; its dialog half stays, without its window build); the pin becomes a plain list over
+  `window_entries()` plus the one window test from Step 1. The gate tests (~:1761, ~:1786), reload (~:3500), import
+  (~:3564), language (~:3695), feedback (~:3766), EQ-order (~:6452) and `tests/test_intake_window.py:52-65` stay
+  unchanged — the aliases carry them. After the rewrites the alias list is exactly `_intake_action`, `_reload_action`,
+  `_import_action`, `_gate_actions`, `_eq_order_actions`; a test pins that list.
+- [ ] **Step 4:** measure and lower both bounds in `tests/test_structure_ratchet.py` to the new numbers in this commit.
+- [ ] **Step 5:** `.venv/bin/python -m pytest tests/test_main_window.py -k "menu or gate or reload or import or guide or copy or feedback or eq_order or tip or language" tests/test_main_menu.py tests/test_menu_registry.py tests/test_intake_window.py tests/test_structure_ratchet.py tests/test_control_layout.py -q -n 4` — PASS.
+- [ ] **Step 6:** commit — `#161 G13 A3: the window renders the menu registry` (lines before → after in the body).
+
+### Task 16 · #163 C1 — the car source as an interface: `car_source.py`
+
+**Files:** Create `src/autosound_tcc/ui/tcc/car_source.py` (no Qt). Test: `tests/test_car_source.py` (new).
+
+**Interfaces (produces):**
+```python
+@dataclass(frozen=True)
+class Line:                      # an untranslated sentence: the dialog translates it
+    key: str
+    args: Mapping[str, object] = field(default_factory=dict)
+@dataclass(frozen=True)
+class Resolved:
+    folder: Path | None
+    problem: Line | None = None
+    about: tuple[Line, ...] = ()
+    warnings: tuple[Line, ...] = ()
+@dataclass(frozen=True)
+class Chooser:
+    kind: str                    # "folder" | "file"
+    label_key: str; title_key: str; filter_key: str = ""
+class CarSource(Protocol):
+    chooser: Chooser
+    def accepts(self, path: Path) -> bool: ...
+    def resolve(self, path: Path) -> Resolved: ...
+    def release(self) -> None: ...
+class FolderSource:              # Chooser("folder", "npBrowse", "npSeedFrom"); accepts: not path.is_file();
+                                 # resolve → Resolved(path); release: nothing
+SOURCES: tuple[type, ...] = (FolderSource,)   # sources take disjoint inputs; also the browse buttons' order
+class Picker:
+    def __init__(self, sources=None) -> None  # reads SOURCES at call time when None, so tests can monkeypatch it
+    def resolve(self, text: str) -> Resolved | None   # None for blank text; memo per expanded path; resolving a new
+                                                      # path releases the previous source
+    def release(self) -> None
+```
+No source accepts the input → `Resolved(None, problem=Line("npSeedNotAProject"))`, the sentence a file gets today.
+
+- [ ] **Step 1: failing tests:** `test_the_same_path_is_resolved_once_and_released_on_change` (a counting fake source;
+  resolve the same text twice → one resolve; a new text → the first released), `test_a_folder_and_a_path_not_made_yet_are_folders`,
+  `test_a_file_no_source_takes_is_refused_as_not_a_project`, `test_blank_text_resolves_to_nothing`, and a
+  fresh-interpreter test that `car_source` loads no Qt.
+- [ ] **Steps 2–4:** RED, implement, GREEN.
+- [ ] **Step 5:** commit — `#163 G13 C1: the car source as an interface, the folder its first`
+
+### Task 17 · #163 C2 — the new-project dialog goes through the picker
+
+**Files:** Modify `src/autosound_tcc/ui/tcc/new_project_dialog.py`. Test: `tests/test_new_project_dialog.py`.
+
+Changes: `self._picker = car_source.Picker()`; one Browse button per source in the seed row (`self._seed_browse` stays
+the first one); `_on_browse_seed` becomes `_on_browse_source(chooser)` (a folder or a file dialog by `chooser.kind`,
+titled `t(chooser.title_key)`, filtered by `t(chooser.filter_key)`); `_seed_source()` keeps returning
+`Optional[Path]` (the resolved folder); `_on_seed_source` shows `problem` as the warning it shows today;
+`_refresh_seed_note_now` adds `about` under the summary and `warnings` last; `_on_create` refuses while there is a
+`problem`; `done()` calls `self._picker.release()`. Untouched: `npd._seeder`, the `(parent, seed_first=)` constructor,
+the public attributes, every private widget the 27 tests use, `_would_travel`'s `(report, fs)`.
+
+- [ ] **Step 1: failing test** `test_a_second_source_needs_no_dialog_code`: a fake file source monkeypatched into
+  `car_source.SOURCES` (accepts files; resolves to a tmp folder with `about=(Line("npSeedTravels"),)` and
+  `warnings=(Line("npSeedNoChannels"),)`; counts releases; a second fake path it refuses with
+  `problem=Line("npSeedFailed")`). Assert: a second browse button exists; typing the accepted file shows the about line
+  under the summary and the warning last; the refused one shows the problem and Create does not create a project;
+  closing the dialog releases what was held.
+- [ ] **Steps 2–4:** RED, implement, GREEN: `.venv/bin/python -m pytest tests/test_new_project_dialog.py tests/test_intake_window.py tests/test_car_source.py -q -n 4`.
+- [ ] **Step 5:** commit — `#163 G13 C2: the new-project dialog copies a car through the source picker`
+
+### Task 18 · #162 B3 — the new-project strings live beside their dialog
+
+**Files:** Create `src/autosound_tcc/ui/tcc/strings/new_project.py`; modify `strings/__init__.py`
+(`FEATURES = ("new_project",)`), `i18n.py` (the keys leave `_CORE`). Test: `tests/test_i18n_features.py`.
+
+The 39 `np*` keys of today's table move, every language and every comment with them: all of `np*` except `npBrowse`
+and `npCancel`, which six dialogs share and which stay in `_CORE`. The module is plain data that imports nothing:
+`STRINGS = {"npTitle": {"en": …, "uk": …, "pl": …, "de": …}, …}`, one row per key.
+
+- [ ] **Step 1: failing tests:** `test_the_copy_strings_live_with_their_feature` (`"npSeedSummary"` in
+  `strings.new_project.STRINGS`, not in `i18n._CORE["en"]`; `"npCancel"` still in `_CORE["en"]`),
+  `test_every_strings_module_is_joined` (the `.py` files of the package minus `__init__` == `FEATURES`),
+  `test_a_strings_module_imports_nothing` (AST: no `Import`/`ImportFrom` in any feature module) with its go-red twin on
+  a tmp file.
+- [ ] **Step 2:** before moving, record `hashlib.sha256(json.dumps(i18n.T, sort_keys=True, ensure_ascii=False).encode()).hexdigest()`;
+  move the keys with a script (not by hand); record the hash after. They must be equal; both go in the report.
+- [ ] **Step 3:** `.venv/bin/python -m pytest tests/test_i18n_features.py tests/test_i18n_languages.py tests/test_i18n_keys.py tests/test_new_project_dialog.py tests/test_labels.py -q -n 4` — PASS.
+- [ ] **Step 4:** commit — `#162 G13 B3: the new-project strings live beside their dialog` (the two hashes in the body).
+
+**Group review after Task 18 (controller):** `pr-review-toolkit:silent-failure-hunter` and
+`pr-review-toolkit:pr-test-analyzer` on the diff of Tasks 11–18; findings in one round of fixes.
+
 ## N2 · #164 — the skill's candidates through TCC's suite (the controller)
 
 When the skill names a candidate tag on the bus (first its J1a and J4a): a scratch clone of tcc under
@@ -1249,7 +1647,7 @@ needs `tests/test_rew_api_shapes.py:54-67` to answer GET /filters (TCC's re-pin,
 
 ## Order and cost
 
-Tasks 1 → 10 by one builder at a time (Opus), each with its own task review; the two group reviews and the Fable
-review where marked; then G13's seams on the Arbiter's choice; `CHANGELOG.md` and the version (v1.1.2) by the
+Tasks 1 → 18 by one builder at a time (Opus), each with its own task review; the three group reviews and the Fable
+review where marked; `CHANGELOG.md` and the version (v1.1.2) by the
 controller; one PR from `wave-8` with the full CI; the full suite once before the PR. About 4 hours of build and
-review for Tasks 1–10.
+review for Tasks 1–10, and about 19 for Tasks 11–18.
