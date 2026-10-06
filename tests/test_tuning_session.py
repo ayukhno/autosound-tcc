@@ -1133,3 +1133,29 @@ def test_a_failed_confirmation_in_the_sdk_session_is_logged(tmp_path, caplog):
 
     assert behavior == "deny"
     assert any("boom" in r.getMessage() for r in caplog.records)
+
+
+def test_an_sdk_result_that_ended_in_error_is_said(tmp_path):
+    """F3b: a ResultMessage with is_error=True was read as a normal end, so a turn the SDK failed
+    looked finished and said nothing. A real SDK type, so the field names are the SDK's."""
+    from claude_agent_sdk import ResultMessage
+
+    from autosound_tcc.core import claude_sdk
+    from autosound_tcc.core import tuning_session as ts
+    from autosound_tcc.core.agent_events import Notice, TurnEnd
+
+    claude_sdk.bind(ts.SDK_NAMES, vars(ts))
+    failed = ResultMessage(subtype="error_during_execution", duration_ms=1, duration_api_ms=1,
+                           is_error=True, num_turns=1, session_id="s-1", errors=["x"])
+
+    class _Failing(_RecordingClient):
+        async def receive_response(self):
+            yield failed
+
+    session = _live_session(tmp_path)
+    session._client = _Failing()
+
+    events = _run_turn(session, "go")
+
+    assert isinstance(events[-2], Notice) and "x" in events[-2].text
+    assert isinstance(events[-1], TurnEnd) and events[-1].session_id == "s-1"

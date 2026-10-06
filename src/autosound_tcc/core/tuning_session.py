@@ -26,6 +26,7 @@ from autosound_tcc.core import openers
 from autosound_tcc.core import claude_sdk, config, critic, model_choices, signal_bus, vendor_loader
 from autosound_tcc.core.agent_events import (
     AgentEvent,
+    Notice,
     TextDelta,
     ToolCall,
     ToolEnd,
@@ -58,6 +59,16 @@ SDK_NAMES = (
 )
 
 DEFAULT_MODEL = model_choices.DEFAULT_SDK_MODEL
+
+
+def _result_error_text(result: Any) -> str:
+    """What an SDK result that ended in error says (F3b): it read as a normal end, so a turn the
+    SDK had failed looked finished and said nothing."""
+    said = [str(e) for e in (getattr(result, "errors", None) or []) if str(e).strip()]
+    if not said and getattr(result, "result", None):
+        said = [str(result.result)]
+    detail = "; ".join(said) or str(getattr(result, "subtype", "") or "no reason given")
+    return f"The session reported an error: {detail}"
 SKILL_NAME = "autosound-tuning"
 
 # Pre-approved, i.e. NOT gated. Keep this list tiny.
@@ -418,6 +429,8 @@ class TuningSession:
                     yield event
                 if isinstance(message, ResultMessage):
                     self._remember_session(message)
+                    if getattr(message, "is_error", False):
+                        yield Notice(_result_error_text(message))
                     yield TurnEnd(session_id=message.session_id)
                     return
                 for event in self._translate(message):
