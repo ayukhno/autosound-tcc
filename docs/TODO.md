@@ -2105,8 +2105,10 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
   round-1 M1 (a test's colour assertion proves nothing) and M2 (`.mini-select` rules repeat the generic ones);
 - at the re-pin that carries hub #247 (TCC-049): drop the W-7 card patch's band half (marked «until hub #247»), keep its clash half unless the method reads titles.
 - finding 153 (W-8's collection, 2026-10-06) — a capture task whose series carries a letter (`sw_E3`, `ALL+C+FX_A3`) is all
-  «not in the grammar», and a level goes after the method (`sw_E3 (sw) 86dB`, the Arbiter); the skill's to settle,
-  hub #259 (TCC-052); TCC's side is the re-pin to its tag.
+  «not in the grammar» — the skill's, hub #259 (TCC-052); a level read before or after the method, written after —
+  the skill's, hub #261 (TCC-053); TCC's side is the re-pin to their tag;
+- finding 154 (W-8) — the import window's «≈» proposal gets a red cross: turn it down, take the capture under REW's name;
+- finding 155 (W-8) — a «Refresh» button beside the focus card's curve-download button: the rows REW holds turn blue.
 
 ### F-092 — W-6: the pool, now on the milestone `W-6 · v1.1.0`
 

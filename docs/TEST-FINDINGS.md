@@ -3651,5 +3651,25 @@ the car session put it into the task.
 
 **Weight.** High: a task in that form cannot be followed in the card.
 
-**Task.** The skill's: hub #259 (TCC-052). TCC reads titles with the skill's grammar, so TCC's side should be the
-re-pin to the tag that carries it. W-8's pool.
+**Task.** The skill's: hub #259 (TCC-052) for the letter in the series, hub #261 (TCC-053) for the level — the
+Arbiter's later word: read it before or after the method, write it after. TCC reads titles with the skill's grammar,
+so TCC's side should be the re-pin to the tag that carries them. W-8's pool.
+
+### 154. The import window's «≈» (a proposed New name) has no way to say no
+
+**What.** The Arbiter, 2026-10-06, W-8's collection: in the curve import window, a row whose New name was matched
+automatically shows «≈» beside REW's title. He wants a red cross beside that mark: it turns the proposal down, and the
+capture is taken under the name it has in REW.
+
+**Weight.** Medium: a wrong proposal can only be retyped by hand.
+
+**Task.** W-8's pool.
+
+### 155. A «Refresh» button beside the focus card's curve-download button: what REW already holds, in blue
+
+**What.** The Arbiter, 2026-10-06, W-8's collection: beside the button that loads the curves («задача на замір»), a
+button with a «Refresh» icon; on it, the task's rows that REW already holds turn blue (the card's «в REW» colour).
+
+**Weight.** Low: a convenience — what is taken shows without opening the import window.
+
+**Task.** W-8's pool.
