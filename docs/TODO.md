@@ -2063,6 +2063,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
   (b) whether it was right then — the Arbiter's observation: the archive has a file at its first level that the import does not take (so it was on 2026-09-18). Fact only, not a diagnosis: in the 18.09 zip the one first-level entry is `package.json`, the manifest; the other three files sit under `passat-b8-2026/`.
 - Open on the method's side: SCR-058 (`seed()` writes the temporary unpack folder as `seeded_from.path`), not on the bus.
 - Collection rule: nothing is built now; the milestone review classifies and sizes it, and it is built only on the Arbiter's `ok`.
+- Order, 2026-10-06: the audit's changes build first, G13's seams (menu registry, per-feature strings, a source interface for the car copy) before this, which is then the timed pilot on them. Open: how the wave numbers map (TCC's proposal: W-8's milestone takes the audit's tasks, the findings move to the next collection) — the Arbiter has not decided. Told to the skill as hub #256 (TCC-051).
 
 ### F-095 — N2: run TCC's suite against each skill candidate before its tag (hub #255)
 
