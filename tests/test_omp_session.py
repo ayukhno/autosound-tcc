@@ -1140,3 +1140,46 @@ def test_a_failed_confirmation_in_the_omp_session_is_logged_and_denies(tmp_path,
 
     assert session.sent == [{"type": "extension_ui_response", "id": "f1", "value": "Deny"}]
     assert any("boom" in r.getMessage() for r in caplog.records)
+
+
+def test_the_turn_after_omp_died_says_so_instead_of_waiting(tmp_path):
+    """F3a: the reader saw EOF, and the next prompt went to the dead process and waited on a queue
+    nothing would fill, saying only «no output» every two minutes."""
+    from types import SimpleNamespace
+
+    from autosound_tcc.core.agent_events import Notice
+
+    session = _session(tmp_path)
+
+    async def run():
+        reader = asyncio.StreamReader()
+        reader.feed_eof()  # omp is gone
+        session._proc = SimpleNamespace(stdout=reader, stdin=None)
+        await session._read_frames()
+        while not session._events.empty():  # the turn that was running took its None
+            session._events.get_nowait()
+        turn = session._prompt("next?")
+        return await asyncio.wait_for(turn.__anext__(), timeout=2.0)
+
+    first = asyncio.run(run())
+    assert isinstance(first, Notice)
+    assert "no output" not in first.text, "the silence notice is not the answer"
+    assert "omp has stopped" in first.text
+    assert session.sent == [], "nothing is written to a process that is gone"
+
+
+def test_omp_ending_mid_turn_ends_the_turn_out_loud(tmp_path):
+    from autosound_tcc.core.agent_events import Notice
+
+    session = _session(tmp_path)
+
+    async def collect(turn):
+        return [event async for event in turn]
+
+    async def run():
+        turn = session._prompt("go")
+        session._events.put_nowait(None)  # the reader's EOF, mid-turn
+        return await asyncio.wait_for(collect(turn), timeout=2.0)
+
+    events = asyncio.run(run())
+    assert events and isinstance(events[-1], Notice) and "omp has stopped" in events[-1].text

@@ -1046,10 +1046,19 @@ class OmpSession:
             "anything it says."
         )
 
+    def _ended_notice(self) -> Notice:
+        """What a turn says when omp is gone (F3a): the next prompt went to the dead process and
+        waited on a queue nothing would fill, saying only «no output» every two minutes. A close
+        cancels the reader, so `_ended` and the `None` come only from omp ending on its own."""
+        return Notice(self._why("omp has stopped, so this session cannot go on. Start a new session."))
+
     async def _prompt(self, text: str) -> AsyncIterator[AgentEvent]:
         self._round_ended_at = 0.0  # a round that ended before this prompt did not end this one
         self._retrying = False  # a storm belongs to the turn it happened in
         self._retry_reason = ""
+        if self._ended.is_set():
+            yield self._ended_notice()
+            return
         # The F-009 injection point: every turn -- the opener included -- passes through here, so
         # un-acknowledged signals reach the model even in a turn where it calls no tcc tool at
         # all. Same mechanism as `TuningSession.send`; the two front-ends must not differ on it.
@@ -1089,6 +1098,7 @@ class OmpSession:
                     continue
                 warned = False
                 if event is None:  # process ended mid-turn
+                    yield self._ended_notice()
                     return
                 yield event
                 if isinstance(event, TurnEnd):
