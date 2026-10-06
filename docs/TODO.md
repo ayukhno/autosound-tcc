@@ -2055,13 +2055,14 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-097 — W-8's milestone: the audit's first wave, in review
 
-**Статус**: open · stage 2, the milestone's review — the Arbiter's «збір закінчили», 2026-10-06 · milestone `W-8 · v1.1.2` (#8, TCC-only: the vendored method does not move) with 14 issues, all assessed, none `ok` yet: G2 #151 (TA-5), #152 (TA-3), #153 (TA-2); G1 #154 (F3a), #155 (F3b), #156 (F3c), #157 (F3e), #158 (F16-1), #159 (F16-5); G13 #160 (step 0, the ratchet), #161 (menu registry), #162 (strings per feature), #163 (car source interface); N2 #164 (candidate runs, hub #255) · resume: `hub/bin/role tcc --resume 6727cc78-880d-4190-93a5-3e54eca2a0df`
+**Статус**: open · stage 2, the milestone's review — the Arbiter's «збір закінчили», 2026-10-06 · milestone `W-8 · v1.1.2` (#8, TCC-only: the vendored method does not move) with 14 issues, **all `ok` by the Arbiter 2026-10-06** (all four groups taken): G2 #151 (TA-5), #152 (TA-3), #153 (TA-2); G1 #154 (F3a), #155 (F3b), #156 (F3c), #157 (F3e), #158 (F16-1), #159 (F16-5); G13 #160 (step 0, the ratchet), #161 (menu registry), #162 (strings per feature), #163 (car source interface); N2 #164 (candidate runs, hub #255) · resume: `hub/bin/role tcc --resume 6727cc78-880d-4190-93a5-3e54eca2a0df`
 
 - Audit tasks only (the Arbiter, 2026-10-06, hub AUDIT-PLANS-MATCH §4 U1): W-8's collected findings — F-094, F-096,
   TEST-FINDINGS 153–155 — wait until the audit is done; they are not on the milestone.
 - Each issue carries `Group:` (the shared solution, `hub:seam`); the groups are a proposal until the Arbiter takes them.
 - R1 (`test_rew_api_shapes.py` onto `rew_api._fetch`, before the skill's J4b tag) is W-9's: J4b is the skill's W-10.
-- Next: the Arbiter's OK task by task (or by group) → the label `ok`; only then the plan and the work (`WAVES.md` §1).
+- Next: stage 3, the work — G2, G1 and G13 step 0 straight to a plan (all small, one way); G13's three seams first go through
+  the group's architects (`hub:seam`), with the approaches shown to the Arbiter before code; N2 runs when the skill names a candidate.
 
 ### F-096 — the car package: bring it into the product, reviewed first (W-8)
 
