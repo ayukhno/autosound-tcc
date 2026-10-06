@@ -312,6 +312,8 @@ TCC's own: G1, G2, G10, G12, G13, G14, and the TCC halves G3 (J3) and G4 (J6), w
 
 ## 3. Order across waves
 
+**Decision, the Arbiter, 2026-10-06:** the audit's changes build first; W-8's findings collection (the pool: F-094, F-095's wave part, F-096) waits until they are done. How the wave numbers map is open (the number is read from the open milestones of both repos, `WAVES.md` §1), so the table below is not renumbered yet.
+
 Joint groups follow the hub's rule: the skill tags first, and TCC re-pins in its next wave. **J2 and J3 no longer need one wave on both sides** (§10, M2): the skill's half is safe for today's TCC, provided «busy» is not exit 1. TCC's half then improves the display a wave later. Every skill candidate tag that TCC users would receive is run through TCC's suite first (§10, M3).
 
 | wave | TCC builds | the skill builds (its own plan decides) | why this order |

@@ -2055,7 +2055,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-096 — the car package: bring it into the product, reviewed first (W-8)
 
-**Статус**: open · recorded 2026-10-06 in W-8's collection · the Arbiter tested the package of 2026-09-18 (`passat-b8-2026-car-2026-09-18.zip`) and says it belongs in the product; this replaces F-064's "closed on his command", which lives only on the local branch `car-package`
+**Статус**: open · recorded 2026-10-06 in W-8's collection; **the Arbiter, 2026-10-06: W-8's findings collection waits until after the audit's changes**, so this is built last, on the structure those changes leave · the Arbiter tested the package of 2026-09-18 (`passat-b8-2026-car-2026-09-18.zip`) and says it belongs in the product; this replaces F-064's "closed on his command", which lives only on the local branch `car-package`
 
 - The ask: "Save the car to a file…" in the ☰ menu, **before «Intake…»**; the «Copy the car…» picker takes that file as it takes a folder (F-062, `c15473b`).
 - **Not a plain merge** (the Arbiter): read the code and the logic first, and check
