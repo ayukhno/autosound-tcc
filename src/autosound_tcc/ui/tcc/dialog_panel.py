@@ -66,6 +66,8 @@ _SYS_ROLE_TCC = "SYSTEM · TCC"
 SYS_ROLE_LEDGER = "SYSTEM · ledger"
 _MSG_BODY_BASE_PX = 13.0
 _DIALOG_FONT_KEY = "ui/dialog_font_scale"
+#: A streamed answer is redrawn at ~15 Hz, not per delta (TA-2).
+_LIVE_REDRAW_MS = 66
 _DIALOG_FONT_MIN, _DIALOG_FONT_MAX, _DIALOG_FONT_STEP = 0.8, 1.6, 0.1
 #: The gap between who spoke and when, on a bubble's role line (tcc#100). `natural_width` counts
 #: it, so it lives in one place.
@@ -281,6 +283,13 @@ class DialogPanel(QWidget):
         self._bus: Optional[signal_bus.SignalBus] = None
         self._live_bubble: Optional[MessageBubble] = None
         self._live_text = ""
+        # Every delta re-ran the markdown and the fit over the whole message (TA-2); the timer
+        # draws what has arrived at most once per tick, and the first delta is still immediate.
+        self._live_timer = QTimer(self)
+        self._live_timer.setSingleShot(True)
+        self._live_timer.setInterval(_LIVE_REDRAW_MS)
+        self._live_timer.timeout.connect(self._draw_live_text)
+        self._live_drawn = ""
         # The run of identical tool calls currently on the activity line -- see `_add_chip`.
         self._chip_tool = ""
         self._chip_count = 0
@@ -947,8 +956,10 @@ class DialogPanel(QWidget):
         """
         # Anything pointing into the bubbles goes with them -- a dangling reference to a deleted
         # widget is a crash in whichever slot touches it next, not a visual glitch.
+        self._live_timer.stop()
         self._live_bubble = None
         self._live_text = ""
+        self._live_drawn = ""
         self._clear_new_below()  # the anchor and the reading position point into the bubbles too
         # An empty transcript has nobody reading it, so the chase re-arms: this is a clear, not a
         # message arriving, and the first real bubble of the next session should be followed.
@@ -969,8 +980,10 @@ class DialogPanel(QWidget):
         for bubble in self._bubbles:
             discard.drop(bubble)
         self._bubbles.clear()
+        self._live_timer.stop()
         self._live_bubble = None
         self._live_text = ""
+        self._live_drawn = ""
 
     def _set_busy(self, busy: bool) -> None:
         # The field is never switched off. A turn is minutes long and the agent asks for things in
@@ -1120,16 +1133,14 @@ class DialogPanel(QWidget):
         elif isinstance(item, Notice):
             # The adapter talking about the harness. Under the model's byline it read as the model
             # saying "omp has said nothing", which is a sentence no model would write.
-            self._live_bubble = None
-            self._live_text = ""
+            self._end_live_bubble()
             self._add_system_message(f"⚠️ {item.text}", role=_SYS_ROLE_TCC)
         elif isinstance(item, Unasked):
             # The fourth gate choice asks about nothing (tcc#115), and what it let through that
             # would have asked under `auto` is said here, by TCC — never silently. Escaped: a shell
             # line is full of `<`, `>` and `&`. Cut, because a heredoc can be three screens long
             # and the line is there to be found, not to be the command.
-            self._live_bubble = None
-            self._live_text = ""
+            self._end_live_bubble()
             command = item.command if len(item.command) <= 400 else item.command[:400] + "…"
             self._add_system_message(
                 i18n.t("gateNeverPassed").format(command=html.escape(command)), role=_SYS_ROLE_TCC)
@@ -1142,10 +1153,28 @@ class DialogPanel(QWidget):
             self._add_bubble("gen", f"Generator · {self._model_label}",
                              _markdown(self._live_text), self._live_text)
             self._live_bubble = self._bubbles[-1]
-        else:
-            self._live_bubble.set_html(_markdown(self._live_text), self._live_text)
-            self._fit(self._live_bubble)
+            self._live_drawn = self._live_text
+            self._scroll_to_end()
+        elif not self._live_timer.isActive():
+            self._live_timer.start()
+
+    def _draw_live_text(self) -> None:
+        """Bring the live bubble up to the text received so far — at most once per tick."""
+        self._live_timer.stop()
+        if self._live_bubble is None or self._live_text == self._live_drawn:
+            return
+        self._live_bubble.set_html(_markdown(self._live_text), self._live_text)
+        self._fit(self._live_bubble)
+        self._live_drawn = self._live_text
         self._scroll_to_end()
+
+    def _end_live_bubble(self) -> None:
+        """The live answer is over — a tool call, a notice, a question, the turn's end: draw what is
+        still waiting, then let the next text start a new bubble."""
+        self._draw_live_text()
+        self._live_bubble = None
+        self._live_text = ""
+        self._live_drawn = ""
 
     def _add_question(self, question: Question) -> None:
         """A structured question from the agent. The turn is parked inside the harness until it is
@@ -1202,8 +1231,7 @@ class DialogPanel(QWidget):
         # "Working…" while the harness is blocked waiting for the human is the window blaming the
         # model for its own silence. Say who is being waited on.
         self._sub_label.setText(i18n.t("questionWaiting"))
-        self._live_bubble = None
-        self._live_text = ""
+        self._end_live_bubble()
         self._scroll_to_end()
 
     def _withdraw_question(self, question_id: str) -> None:
@@ -1284,8 +1312,7 @@ class DialogPanel(QWidget):
         self._tick_activity()
         if not self._activity_timer.isActive():
             self._activity_timer.start()
-        self._live_bubble = None  # text after a tool call starts a new bubble
-        self._live_text = ""
+        self._end_live_bubble()  # text after a tool call starts a new bubble
 
     def _on_turn_done(self) -> None:
         # Before the live text is cleared below: a turn that ended in a dropped connection leaves
@@ -1304,8 +1331,7 @@ class DialogPanel(QWidget):
         # The question the turn is currently parked on, and the option buttons offering it.
         self._pending_question: Optional[str] = None
         self._question_widgets: Optional[QWidget] = None
-        self._live_bubble = None
-        self._live_text = ""
+        self._end_live_bubble()
         self._set_busy(False)
         self._input.setFocus()
         self._flush_queued()

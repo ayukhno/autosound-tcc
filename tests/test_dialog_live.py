@@ -1387,3 +1387,54 @@ def test_the_running_call_and_the_turn_say_how_long_they_have_taken(_app, monkey
     assert panel._sub_label.text() == f"{i18n.t('agentThinking')} · 1:32"
     panel._end_chip()
     assert panel._activity.text() == "· Bash · 1:32"
+
+
+def test_a_long_stream_is_drawn_at_a_bounded_rate_and_whole_at_the_end(tmp_path, monkeypatch):
+    """TA-2: every delta re-rendered the whole message — markdown, setText and the fit — so a long
+    answer cost the GUI thread O(n²). The first delta is drawn at once, the rest at most ~15 times
+    a second, and the end of the turn draws whatever is still waiting."""
+    panel, worker, _ = _attached(tmp_path)
+    drawn = []
+    real = MessageBubble.set_html
+
+    def counting(self, html, source=""):
+        drawn.append(source)
+        return real(self, html, source)
+
+    monkeypatch.setattr(MessageBubble, "set_html", counting)
+
+    worker.chunk.emit(TextDelta("first "))
+    assert len(panel._bubbles) == 1
+    assert "first" in panel._bubbles[0]._plain, "the first delta is on screen at once"
+
+    words = [f"w{i} " for i in range(599)]
+    for word in words:
+        worker.chunk.emit(TextDelta(word))
+    worker.turn_done.emit()
+
+    assert len(drawn) <= 30, f"{len(drawn)} redraws for 600 deltas"
+    assert panel._bubbles[0]._source == "first " + "".join(words), "the end draws the rest"
+
+
+def test_a_stream_is_drawn_while_it_streams(tmp_path):
+    from PySide6.QtTest import QTest
+
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(TextDelta("one "))
+    worker.chunk.emit(TextDelta("two"))
+
+    for _ in range(40):
+        if panel._bubbles[0]._source == "one two":
+            break
+        QTest.qWait(25)
+    assert panel._bubbles[0]._source == "one two", "the timer draws without waiting for the end"
+
+
+def test_text_waiting_to_be_drawn_is_drawn_before_a_tool_call(tmp_path):
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(TextDelta("a"))
+    worker.chunk.emit(TextDelta("b"))
+
+    worker.chunk.emit(ToolCall(name="mcp__tcc__get_tcc_state"))
+
+    assert panel._bubbles[0]._source == "ab"
