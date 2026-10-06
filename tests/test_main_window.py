@@ -7694,3 +7694,29 @@ def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):
 
     assert len(said) == 1
     assert i18n.t("mcpDown") in said[0] and "OSError: p" in said[0]
+
+
+def test_the_signal_nudge_reads_every_open_signals_id_from_the_brief(tmp_path, monkeypatch):
+    """Characterisation before the parsing leaves the window (G13 step 0, TA-8): the ids are read
+    back out of `unacked_brief`'s text with `rsplit("id ")`. Pinned with a real bus and a payload
+    that has «id » in it, so the extraction keeps exactly this behaviour."""
+    from autosound_tcc.core.signal_bus import CHANNEL_TOGGLE, SignalBus
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    bus = SignalBus(tmp_path)
+    one = bus.push(CHANNEL_TOGGLE, group="rear", channel="r-L", on=False)
+    two = bus.push(CHANNEL_TOGGLE, group="rear", channel="r-R", on=False, note="said id x")
+    asked = []
+    monkeypatch.setattr(window._dialog, "nudge_for_signals",
+                        lambda count, prompt: asked.append(count) or True)
+    window._mcp_server = SimpleNamespace(bus=bus)
+    try:
+        window._nudge_for_open_signals()
+        assert asked == [2]
+        assert window._nudged_signal_ids == {one.id, two.id}
+        window._nudge_for_open_signals()
+        assert asked == [2], "a signal already handed a turn gets no second one"
+    finally:
+        window._mcp_server = None
