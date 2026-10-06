@@ -10,9 +10,9 @@ displays translated text registers a retranslate callback via `on_language_chang
 from __future__ import annotations
 
 import weakref
-
-import shiboken6
 from typing import Callable
+
+from autosound_tcc.ui.tcc import strings
 
 Lang = str  # "en" | "uk" | "pl" | "de"
 
@@ -35,7 +35,7 @@ LANGS: tuple[tuple[Lang, str, str], ...] = (
     ("de", "langNameDe", "DE"),
 )
 
-T: dict[Lang, dict[str, str]] = {
+_CORE: dict[Lang, dict[str, str]] = {
     "en": {
         "theme": "theme",
         "dspPanel": "DSP",
@@ -5214,6 +5214,35 @@ Choose sweeps (sw) above to read this.",
     },
 }
 
+
+
+def assemble(core: dict[Lang, dict[str, str]], tables) -> dict[Lang, dict[str, str]]:
+    """The one table `t()` reads: `core`'s languages and keys, then each feature table's rows.
+
+    A feature table is `{key: {lang: text}}` — the four languages of one key side by side, which is
+    how the Advisor fills pl and de row by row. Refused, by name: a key defined twice (in core and a
+    table, or in two tables), which a dict update would hide; and a row without one of core's
+    languages, or with one core does not have (G13 B1, #162)."""
+    langs = list(core)
+    out = {lang: dict(texts) for lang, texts in core.items()}
+    owner = {key: "core" for texts in core.values() for key in texts}
+    for name, table in tables:
+        for key, row in table.items():
+            if key in owner:
+                raise ValueError(f"{key!r} is defined twice: in {owner[key]} and in {name}")
+            wrong = ([f"no {lang}" for lang in langs if lang not in row]
+                     + [f"{lang} is not a language" for lang in row if lang not in core])
+            if wrong:
+                raise ValueError(f"{key!r} in {name}: " + ", ".join(wrong))
+            owner[key] = name
+            for lang in langs:
+                out[lang][key] = row[lang]
+    return out
+
+
+#: The table every lookup reads: the core above, then the feature tables in `strings.FEATURES`.
+T: dict[Lang, dict[str, str]] = assemble(_CORE, strings.tables())
+
 _lang: Lang = "en"
 _listeners: list[Callable[[], None]] = []
 
@@ -5271,6 +5300,8 @@ def on_language_changed(callback: Callable[[], None]) -> None:
 
 
 def set_language(lang: Lang) -> None:
+    import shiboken6  # here only: the lookup itself imports no Qt (G13 B1)
+
     global _lang
     if lang not in T:
         raise ValueError(f"unknown language {lang!r}, known: {sorted(T)}")
