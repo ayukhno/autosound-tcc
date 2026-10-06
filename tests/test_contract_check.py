@@ -192,3 +192,21 @@ def test_complete_is_the_gate_verdict_the_report_already_carries():
     assert done.complete is True
     assert open_.complete is False
     assert older.complete is False, "a method that does not say is not a green gate"
+
+
+@pytest.mark.parametrize("report", [[], None, "x", 3])
+def test_a_report_that_is_not_an_object_is_no_report(report):
+    """F16-5: `run` never raises, and this is the last thing it calls."""
+    out = contract_check.report_from_json(report, "/p", "now", 0.1)
+
+    assert not out.ok and out.error and out.files == ()
+
+
+def test_a_report_field_of_the_wrong_shape_is_read_as_empty():
+    out = contract_check.report_from_json(
+        {"ok": True, "files": 3, "inherited": 5, "cross_checks": [], "sources_gone": 7},
+        "/p", "now", 0.1)
+
+    assert out.ok and out.error == ""
+    assert out.files == () and out.inherited == () and out.cross_checks == {}
+    assert out.sources_gone == ()

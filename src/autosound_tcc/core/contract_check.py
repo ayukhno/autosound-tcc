@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from autosound_tcc.core import child as child_process
 from autosound_tcc.core import config, vendor_loader
@@ -242,17 +242,28 @@ def run(
     return report_from_json(report, project_dir, checked_at, time.monotonic() - started)
 
 
-def report_from_json(report: dict, project_dir, checked_at: str, duration_s: float) -> ContractReport:
-    """`contract.py check --json`'s answer as a `ContractReport`."""
-    files = report.get("files") or []
+def report_from_json(report: Any, project_dir, checked_at: str, duration_s: float) -> ContractReport:
+    """`contract.py check --json`'s answer as a `ContractReport`. Never raises (F16-5): an answer
+    that is not an object is a run that produced no report, and a field of the wrong shape reads as
+    empty — `run` promises never to raise, and this is the last thing it calls."""
+    if not isinstance(report, dict):
+        return ContractReport(
+            ok=False, project_dir=str(project_dir), checked_at=checked_at, duration_s=duration_s,
+            error=f"contract.py answered with a JSON {type(report).__name__}, not an object")
+
+    def rows(key: str) -> tuple:
+        value = report.get(key)
+        return tuple(row for row in value if isinstance(row, dict)) if isinstance(value, list) else ()
+
+    cross, gone = report.get("cross_checks"), report.get("sources_gone")
     return ContractReport(
         ok=bool(report.get("ok")),
         project_dir=str(report.get("project_dir") or project_dir),
-        files=tuple(f for f in files if isinstance(f, dict)),
-        cross_checks=report.get("cross_checks") or {},
+        files=rows("files"),
+        cross_checks=cross if isinstance(cross, dict) else {},
         checked_at=checked_at,
         duration_s=duration_s,
-        inherited=tuple(row for row in report.get("inherited") or [] if isinstance(row, dict)),
-        sources_gone=tuple(str(path) for path in report.get("sources_gone") or []),
+        inherited=rows("inherited"),
+        sources_gone=tuple(str(path) for path in gone) if isinstance(gone, list) else (),
         complete=bool(report.get("complete")),
     )

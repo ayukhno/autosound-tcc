@@ -1625,6 +1625,8 @@ def forget_mcp_config(project_dir: Path) -> None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return
+    if not isinstance(data, dict):
+        return  # not a config TCC could have written its entry into (F16-5)
     servers = data.get("mcpServers")
     if not isinstance(servers, dict) or SERVER_NAME not in servers:
         return
@@ -1653,7 +1655,16 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
-    servers = data.setdefault("mcpServers", {})
+    # A file of the wrong shape must not take the server down: only OSError is caught around this
+    # in `start()` (F16-5). It is rewritten with TCC's entry, as an unparseable one already is.
+    if not isinstance(data, dict):
+        app_log.logger().warning("%s is not a JSON object; written anew with TCC's entry", path)
+        data = {}
+    servers = data.get("mcpServers")
+    if not isinstance(servers, dict):
+        if servers is not None:
+            app_log.logger().warning("%s: mcpServers is not an object; replaced", path)
+        servers = data["mcpServers"] = {}
     servers[SERVER_NAME] = {
         "type": "http",
         "url": f"http://127.0.0.1:{port}/mcp",

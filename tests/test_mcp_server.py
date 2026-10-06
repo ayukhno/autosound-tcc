@@ -2637,3 +2637,19 @@ def test_an_unanswered_confirmation_is_a_quiet_denial(caplog):
 
     assert allowed is False
     assert not caplog.records, "nobody answering is not a failure"
+
+
+@pytest.mark.parametrize("text", ["[]", "null", "3", '{"mcpServers": []}'])
+def test_an_mcp_json_of_the_wrong_shape_neither_raises_nor_stops_the_server(tmp_path, text):
+    """F16-5: `forget_mcp_config` never raises; `write_mcp_config` raising anything but OSError
+    escaped `start()` and took the server down with it."""
+    from autosound_tcc.core import config
+
+    path = config.mcp_config_path(tmp_path)
+    path.write_text(text, encoding="utf-8")
+
+    mcp_server.forget_mcp_config(tmp_path)
+    write_mcp_config(tmp_path, 8765, "tok")
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["mcpServers"][mcp_server.SERVER_NAME]["url"] == "http://127.0.0.1:8765/mcp"
