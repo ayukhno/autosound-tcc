@@ -515,18 +515,29 @@ class HeadlessBridge:
 async def await_confirmation(bridge: "UiBridge", request: ConfirmRequest, timeout_s: float) -> bool:
     """The Arbiter's answer to `request`, False when there is none.
 
-    A timeout is a denial: nobody answered. A failure is a denial too — the gate stays shut — but it
-    is logged with what failed (F3e): three places asked this way and swallowed the failure as a plain
-    «no», so a broken confirmation bar read as the Arbiter refusing everything."""
+    A timeout is a denial: nobody answered -- one INFO line says what was denied and after how
+    long, because it once left nothing in tcc.log at all. A failure is a denial too — the gate
+    stays shut — but it is a WARNING with what failed and which command (F3e): three places asked
+    this way and swallowed the failure as a plain «no», so a broken confirmation bar read as the
+    Arbiter refusing everything. Only this clock running out is "nobody answered": since 3.11
+    every TimeoutError is asyncio's, and a bridge's own was read as silence (the G1 review). A
+    cancel is neither, and goes through."""
+    future = None
     try:
-        return bool(await asyncio.wait_for(
-            asyncio.wrap_future(bridge.request_confirmation(request)), timeout=timeout_s))
-    except asyncio.TimeoutError:
-        return False
+        future = bridge.request_confirmation(request)
+        return bool(await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout_s))
+    except asyncio.TimeoutError as exc:
+        if future is not None and future.cancelled():  # `wait_for` gave up on it: our clock
+            app_log.logger().info("confirmation for %s (%s): no answer in %.0f s, denied",
+                                  request.tool, request.title, timeout_s)
+            return False
+        failure: BaseException = exc
     except Exception as exc:  # noqa: BLE001 — any failure is a denial, said in the log
-        app_log.logger().warning("confirmation for %s failed, read as a denial: %s: %s",
-                                 request.tool, type(exc).__name__, exc)
-        return False
+        failure = exc
+    app_log.logger().warning("confirmation for %s failed, read as a denial: %s: %s (%s: %s)",
+                             request.tool, type(failure).__name__, failure, request.title,
+                             (request.detail or "")[:200])
+    return False
 
 
 def build_server(
@@ -1594,8 +1605,12 @@ def _teach_git_to_ignore(project_dir: Path) -> None:
     path = Path(project_dir) / ".gitignore"
     try:
         existing = path.read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
         existing = ""
+    except (OSError, ValueError) as exc:  # unreadable, or not UTF-8: a file never rewritten blind
+        app_log.logger().warning("could not read %s (%s: %s); TCC's lines are not added to it",
+                                 path, type(exc).__name__, exc)
+        return
     present = {line.strip() for line in existing.splitlines()}
     missing = [line for line in _IGNORE_LINES if line not in present]
     if not missing:
@@ -1671,6 +1686,10 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
         "headers": {"X-TCC-Token": token},
     }
     body = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    try:
+        body.encode("utf-8")
+    except UnicodeEncodeError:  # a lone surrogate the user's file carried: written escaped
+        body = json.dumps(data, indent=2) + "\n"
     for attempt in range(1, _CONFIG_WRITE_TRIES + 1):
         try:
             _write_atomically(path, body)
@@ -1832,18 +1851,25 @@ class TccMcpServer:
             # real and this never fired).
             #
             # Passing None tells uvicorn to configure no logging of its own, which is what we want
-            # anyway: `core/app_log` already owns this process's logging, and uvicorn's loggers
-            # propagate into it. One less thing writing to a stream that may not exist.
+            # anyway: `core/app_log` owns this process's logging. (uvicorn's own loggers do not
+            # reach tcc.log -- `autosound_tcc` does not propagate -- so the death below is logged
+            # here, by TCC.) One less thing writing to a stream that may not exist.
             log_config=None,
         )
         self._server = uvicorn.Server(uvicorn_config)
 
         def _serve() -> None:
+            server = self._server
             self._ready.set()
             try:
-                asyncio.run(self._server.serve())
+                asyncio.run(server.serve())
             except BaseException as exc:  # noqa: BLE001 — the thread's death has to be reportable
                 self.failure = exc
+                app_log.logger().error("the MCP server stopped serving: %s: %s",
+                                       type(exc).__name__, exc, exc_info=exc)
+                return
+            if not getattr(server, "should_exit", False):
+                app_log.logger().warning("the MCP server stopped serving on its own")
 
         self._thread = threading.Thread(target=_serve, name="tcc-mcp", daemon=True)
         self._thread.start()
@@ -1858,7 +1884,7 @@ class TccMcpServer:
             # session then ran with no tools at all, with one line in the log as the only sign.
             try:
                 write_mcp_config(self.project_dir, self.port, self.token)
-            except OSError as exc:
+            except Exception as exc:  # noqa: BLE001 — the server is up; only the advert failed
                 self.config_error = f"{type(exc).__name__}: {exc}"
                 app_log.logger().warning("mcp config not written (%s): %s — the server is up; a "
                                          "CLI started in the project folder will not find it",

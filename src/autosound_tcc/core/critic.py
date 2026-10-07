@@ -576,9 +576,12 @@ def run(
         proc = child.run_bounded(
             argv, timeout=timeout_s, cwd=str(project_dir), env=env,
             text=True, encoding="utf-8", errors="replace", **child.quiet())
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        # What it last printed is usually why: a sign-in or a trust prompt nobody saw.
+        tail = "\n".join(str(exc.stderr or "").strip().splitlines()[-3:])
+        said = f"reviewer timed out after {timeout_s:.0f}s"
         return CriticResult(
-            MODE_ERROR, "", None, role, f"reviewer timed out after {timeout_s:.0f}s",
+            MODE_ERROR, "", None, role, f"{said}: {tail}" if tail else said,
             time.monotonic() - started, called_at,
         )
     except OSError as exc:

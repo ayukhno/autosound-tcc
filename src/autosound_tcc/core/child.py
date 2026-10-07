@@ -332,9 +332,10 @@ def run_bounded(args, *, timeout: float, input=None, register=None,
     outlives even that keeps its pipes, read by `subprocess`'s own daemon threads, and nothing
     waits for it. Raises `TimeoutExpired` with `timeout`, as `run` does.
 
-    Off Windows it is `run` but for two things, both on the timeout path only: a grandchild that
-    holds the pipes costs up to `REAP_TIMEOUT_S` more (`run` waits on the child alone there), and
-    the `TimeoutExpired` carries no partial output.
+    Off Windows it is `run` but for one thing, on the timeout path only: a grandchild that holds
+    the pipes costs up to `REAP_TIMEOUT_S` more (`run` waits on the child alone there). The
+    `TimeoutExpired` carries what was reaped after the kill, as `run`'s does -- a reviewer waiting
+    on a sign-in prompt says so there (the G1 review).
     """
     if input is not None:
         if popen_kwargs.get("stdin") is not None:
@@ -347,11 +348,12 @@ def run_bounded(args, *, timeout: float, input=None, register=None,
         out, err = proc.communicate(input, timeout=timeout)
     except subprocess.TimeoutExpired:
         kill_tree(proc)
+        out = err = None
         try:
-            proc.communicate(timeout=REAP_TIMEOUT_S)
+            out, err = proc.communicate(timeout=REAP_TIMEOUT_S)
         except subprocess.TimeoutExpired:
             pass
-        raise subprocess.TimeoutExpired(args, timeout) from None
+        raise subprocess.TimeoutExpired(args, timeout, output=out, stderr=err) from None
     except BaseException:
         proc.kill()  # as `run` does: an interrupted wait leaves no child behind
         raise

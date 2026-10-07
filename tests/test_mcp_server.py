@@ -712,6 +712,52 @@ def test_an_advertisement_whose_mode_cannot_be_set_is_logged_not_raised(
     assert any(".mcp.json" in r.getMessage() for r in app_log_warnings)
 
 
+def test_a_gitignore_that_is_not_utf8_is_left_alone(tmp_path, monkeypatch, app_log_warnings):
+    """A UTF-16 `.gitignore` (what `"x" > .gitignore` writes in Windows PowerShell 5.1) raised
+    UnicodeDecodeError out of `start()` while uvicorn was already serving (the G1 review)."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    ignore = tmp_path / ".gitignore"
+    ignore.write_bytes("node_modules/\n".encode("utf-16"))
+    before = ignore.read_bytes()
+
+    path = write_mcp_config(tmp_path, 8765, "tok")
+
+    assert "tcc" in json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
+    assert ignore.read_bytes() == before, "a file that could not be read is not rewritten"
+    assert any(".gitignore" in r.getMessage() for r in app_log_warnings)
+
+
+def test_a_lone_surrogate_in_the_user_s_config_is_written_escaped(tmp_path, monkeypatch):
+    """`"\\ud83d"` -- a string cut mid-emoji -- parsed fine and failed the UTF-8 write."""
+    from autosound_tcc.core import config
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = config.mcp_config_path(tmp_path)
+    path.write_text('{"mcpServers": {"other": {"note": "cut \\ud83d"}}}', encoding="utf-8")
+
+    write_mcp_config(tmp_path, 8765, "tok")
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["mcpServers"]["other"]["note"] == "cut \ud83d" and "tcc" in data["mcpServers"]
+
+
+def test_start_keeps_any_failure_of_the_advertisement_as_config_error(tmp_path, monkeypatch):
+    """The server is up when `.mcp.json` is written; whatever that write raises is the
+    advertisement's failure, not the server's."""
+    def broken(project_dir, port, token):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(mcp_server, "write_mcp_config", broken)
+    server = TccMcpServer(project_dir=tmp_path, preferred_port=8910)
+    try:
+        server.start(write_config=True)
+        assert server.serving
+        assert server.config_error.startswith("UnicodeDecodeError")
+    finally:
+        server.stop()
+
+
 def test_free_port_skips_a_port_already_in_use(tmp_path):
     import socket
 
@@ -732,10 +778,13 @@ def test_server_starts_stops_and_advertises_itself(tmp_path, monkeypatch, write_
     try:
         assert server.url == f"http://127.0.0.1:{port}/mcp"
         assert (tmp_path / ".mcp.json").exists() is write_config
+        assert server.serving and server.stopped_reason is None, "a live server is not dead"
+        assert server.config_error == ""
     finally:
         server.stop()
 
     assert server._thread is None
+    assert server.stopped_reason is None, "a stop is not a death"
 
 
 # ---- onboarding tools (2026-07-29) -- an external CLI's path to driving onboarding,
@@ -2571,6 +2620,44 @@ def test_a_call_still_out_is_named_by_the_tool_it_runs():
         assert mcp_server.drain_calls(timeout=2.0) == 0
 
 
+def test_a_server_that_dies_after_a_good_start_reads_dead_and_is_logged(
+        monkeypatch, tmp_path, app_log_warnings):
+    """The healthy side and the death, through the real serving thread (the G1 review): a gate
+    that refused every live server passed every test before; and the death went to no log."""
+    import threading
+
+    import uvicorn
+
+    release = threading.Event()
+
+    class _ServerThatDiesLater:
+        started = False
+
+        def __init__(self, config):
+            self.config, self.should_exit = config, False
+
+        async def serve(self, sockets=None):
+            import asyncio
+
+            self.started = True
+            while not release.is_set():
+                await asyncio.sleep(0.01)
+            raise OSError("the socket went away")
+
+    monkeypatch.setattr(uvicorn, "Server", _ServerThatDiesLater)
+    server = mcp_server.TccMcpServer(project_dir=tmp_path)
+    server.start(write_config=False)
+    try:
+        assert server.serving and server.stopped_reason is None
+        release.set()
+        server._thread.join(5)
+        assert not server.serving
+        assert server.stopped_reason == "OSError: the socket went away"
+        assert any("stopped serving" in r.getMessage() for r in app_log_warnings)
+    finally:
+        server.stop()
+
+
 def test_a_server_whose_thread_died_is_not_serving_and_says_why(tmp_path):
     """F3c: uvicorn's `started` is set once and never cleared, so `serving` read True for a server
     whose thread had died."""
@@ -2621,10 +2708,47 @@ def test_a_failed_confirmation_is_logged_and_denied(caplog):
         allowed = asyncio.run(await_confirmation(_BrokenBar(), request, timeout_s=1.0))
 
     assert allowed is False
-    assert any("boom" in r.getMessage() and "bash" in r.getMessage() for r in caplog.records)
+    said = " ".join(r.getMessage() for r in caplog.records)
+    assert "boom" in said and "bash" in said and "rm x" in said, "which command, too"
 
 
-def test_an_unanswered_confirmation_is_a_quiet_denial(caplog):
+def test_an_unanswered_confirmation_is_a_denial_with_a_trace_not_a_warning(caplog):
+    """Nobody answering is not a failure -- but it left nothing in tcc.log at all, and the bar
+    stayed up (the G1 review): one INFO line now says what was denied and after how long."""
+    import asyncio
+    import logging
+
+    from autosound_tcc.core import app_log
+    from autosound_tcc.core.mcp_server import ConfirmRequest, await_confirmation
+
+    request = ConfirmRequest(tool="bash", title="Allow bash?", detail="rm x")
+    with caplog.at_level(logging.INFO, logger=app_log.LOGGER_NAME):
+        allowed = asyncio.run(await_confirmation(_SilentBar(), request, timeout_s=0.05))
+
+    assert allowed is False
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("bash" in r.getMessage() and "no answer" in r.getMessage() for r in caplog.records)
+
+
+class _TimingOutBar:
+    """A bar whose own call fails with TimeoutError -- a broken bridge, not a silent Arbiter."""
+
+    def __init__(self, on_the_future=False):
+        self.on_the_future = on_the_future
+
+    def request_confirmation(self, request):
+        from concurrent.futures import Future
+
+        if not self.on_the_future:
+            raise TimeoutError("the bridge timed out")
+        future = Future()
+        future.set_exception(TimeoutError("the bar timed out"))
+        return future
+
+
+@pytest.mark.parametrize("on_the_future", [False, True])
+def test_a_bridge_s_own_timeout_is_a_failure_not_silence(caplog, on_the_future):
+    """Since 3.11 every TimeoutError is asyncio's: the bridge's own was read as «nobody answered»."""
     import asyncio
     import logging
 
@@ -2633,16 +2757,60 @@ def test_an_unanswered_confirmation_is_a_quiet_denial(caplog):
 
     request = ConfirmRequest(tool="bash", title="Allow bash?", detail="rm x")
     with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
-        allowed = asyncio.run(await_confirmation(_SilentBar(), request, timeout_s=0.05))
+        allowed = asyncio.run(await_confirmation(_TimingOutBar(on_the_future), request, 5.0))
 
     assert allowed is False
-    assert not caplog.records, "nobody answering is not a failure"
+    assert any("timed out" in r.getMessage() and r.levelno == logging.WARNING
+               for r in caplog.records)
 
 
-@pytest.mark.parametrize("text", ["[]", "null", "3", '{"mcpServers": []}'])
-def test_an_mcp_json_of_the_wrong_shape_neither_raises_nor_stops_the_server(tmp_path, text):
+def test_a_cancelled_confirmation_is_a_cancel_not_a_denial(caplog):
+    """omp's close() cancels a pending gate: that is not a confirmation that failed."""
+    import asyncio
+    import logging
+
+    from autosound_tcc.core import app_log
+    from autosound_tcc.core.mcp_server import ConfirmRequest, await_confirmation
+
+    request = ConfirmRequest(tool="bash", title="Allow bash?", detail="rm x")
+
+    async def run():
+        task = asyncio.ensure_future(await_confirmation(_SilentBar(), request, timeout_s=10))
+        await asyncio.sleep(0)
+        task.cancel()
+        await task
+
+    with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(run())
+    assert not caplog.records
+
+
+def test_a_tool_s_confirmation_that_fails_is_logged_and_writes_nothing(tmp_path, caplog):
+    """The two tools that change the tune ask through `_confirm`; reverting it to the silent
+    swallow passed every test before (the G1 review)."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
+    bridge = RecordingBridge(allow=True)
+    bridge.request_confirmation = _BrokenBar().request_confirmation
+    mcp, _, _ = _server(tmp_path, bridge)
+    with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+        result = json.loads(_text(asyncio.run(
+            mcp.call_tool("copy_helix_eq", {"text": "PK 1000 -3 Q2"}))))
+
+    assert result["copied"] is False and bridge.clipboard == []
+    assert any("copy_helix_eq" in r.getMessage() and "boom" in r.getMessage()
+               for r in caplog.records)
+
+
+@pytest.mark.parametrize("text", ["[]", "null", "3", '{"mcpServers": [], "other": 1}'])
+def test_an_mcp_json_of_the_wrong_shape_neither_raises_nor_stops_the_server(
+        tmp_path, text, app_log_warnings):
     """F16-5: `forget_mcp_config` never raises; `write_mcp_config` raising anything but OSError
-    escaped `start()` and took the server down with it."""
+    escaped `start()` and took the server down with it. What it rewrote is said, and the user's
+    other keys stay."""
     from autosound_tcc.core import config
 
     path = config.mcp_config_path(tmp_path)
@@ -2653,3 +2821,6 @@ def test_an_mcp_json_of_the_wrong_shape_neither_raises_nor_stops_the_server(tmp_
 
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["mcpServers"][mcp_server.SERVER_NAME]["url"] == "http://127.0.0.1:8765/mcp"
+    assert any(str(path) in r.getMessage() for r in app_log_warnings)
+    if "other" in text:
+        assert data["other"] == 1

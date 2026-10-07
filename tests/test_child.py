@@ -865,3 +865,29 @@ def test_off_windows_a_child_given_up_on_is_killed_and_no_taskkill_runs(monkeypa
     assert probe.killed and spawns.taskkills == []
     assert probe.timeouts == [3.0, child.REAP_TIMEOUT_S]
     assert raised.value.timeout == 3.0
+
+
+def test_a_timed_out_child_s_last_words_come_back_with_the_timeout(monkeypatch):
+    """What the child printed before the kill is reaped; it now travels on the TimeoutExpired, as
+    `subprocess.run`'s does (the G1 review)."""
+    class _Stuck:
+        pid, returncode = 1, None
+
+        def __init__(self, *_args, **_kwargs):
+            self.calls = 0
+
+        def communicate(self, input=None, timeout=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired("agy", timeout)
+            return "partial", "open the browser to sign in"
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(child.subprocess, "Popen", _Stuck)
+    monkeypatch.setattr(child, "kill_tree", lambda _proc: None)
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        child.run_bounded(["agy"], timeout=1)
+    assert caught.value.timeout == 1
+    assert (caught.value.output, caught.value.stderr) == ("partial", "open the browser to sign in")

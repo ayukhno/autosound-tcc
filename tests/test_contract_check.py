@@ -202,11 +202,32 @@ def test_a_report_that_is_not_an_object_is_no_report(report):
     assert not out.ok and out.error and out.files == ()
 
 
-def test_a_report_field_of_the_wrong_shape_is_read_as_empty():
+def test_a_report_field_of_the_wrong_shape_is_said_not_read_as_green(caplog):
+    """F16-5 kept it from raising; read as empty it also kept `ok`, so a report TCC could not read
+    showed «OK — nothing to fix», and a `complete` one offered to start the session (the G1
+    review). A newer method that changes the schema is the likely way here."""
     out = contract_check.report_from_json(
-        {"ok": True, "files": 3, "inherited": 5, "cross_checks": [], "sources_gone": 7},
-        "/p", "now", 0.1)
+        {"ok": True, "complete": True, "files": 3, "inherited": 5, "cross_checks": [],
+         "sources_gone": 7}, "/p", "now", 0.1)
 
-    assert out.ok and out.error == ""
+    assert not out.ok and not out.complete
+    assert "files" in out.error and "int" in out.error
     assert out.files == () and out.inherited == () and out.cross_checks == {}
     assert out.sources_gone == ()
+    assert "files" in caplog.text
+
+
+@pytest.mark.parametrize("report", [{"ok": "false", "complete": "yes"}, {"ok": 1, "complete": {}}])
+def test_ok_and_complete_are_true_only_when_they_say_true(report):
+    """`bool("false")` is True: a wrong-shaped verdict was a green gate."""
+    out = contract_check.report_from_json(report, "/p", "now", 0.1)
+
+    assert out.ok is False and out.complete is False and "ok" in out.error
+
+
+def test_a_well_formed_report_reads_as_it_says():
+    out = contract_check.report_from_json(
+        {"ok": True, "complete": False, "files": [{"file": "project.json"}], "project_dir": None},
+        "/p", "now", 0.1)
+
+    assert out.ok and not out.complete and out.error == "" and len(out.files) == 1

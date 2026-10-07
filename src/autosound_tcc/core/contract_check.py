@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from autosound_tcc.core import child as child_process
-from autosound_tcc.core import config, vendor_loader
+from autosound_tcc.core import app_log, config, vendor_loader
 
 # Generous next to critic.py's model calls: this is local file I/O plus at most one REW probe
 # (`rew_api` has its own 5s per-call timeout), so anything approaching this is a hang, not slowness.
@@ -244,8 +244,10 @@ def run(
 
 def report_from_json(report: Any, project_dir, checked_at: str, duration_s: float) -> ContractReport:
     """`contract.py check --json`'s answer as a `ContractReport`. Never raises (F16-5): an answer
-    that is not an object is a run that produced no report, and a field of the wrong shape reads as
-    empty — `run` promises never to raise, and this is the last thing it calls."""
+    that is not an object is a run that produced no report — `run` promises never to raise, and
+    this is the last thing it calls. A field of the wrong shape reads as empty AND is said: the
+    report is then an error, not a green verdict over nothing (the G1 review), and `ok` and
+    `complete` are true only when they say `true` — `bool("false")` is True."""
     if not isinstance(report, dict):
         return ContractReport(
             ok=False, project_dir=str(project_dir), checked_at=checked_at, duration_s=duration_s,
@@ -255,9 +257,18 @@ def report_from_json(report: Any, project_dir, checked_at: str, duration_s: floa
         value = report.get(key)
         return tuple(row for row in value if isinstance(row, dict)) if isinstance(value, list) else ()
 
+    shapes = {"ok": bool, "complete": bool, "files": list, "inherited": list,
+              "cross_checks": dict, "sources_gone": list, "project_dir": str}
+    wrong = [f"`{key}` as {type(report[key]).__name__}" for key, kind in shapes.items()
+             if report.get(key) is not None and not isinstance(report[key], kind)]
+    error = ("contract.py's report has " + ", ".join(wrong)) if wrong else ""
+    if error:
+        app_log.logger().warning("%s; TCC cannot read it as a verdict", error)
+
     cross, gone = report.get("cross_checks"), report.get("sources_gone")
     return ContractReport(
-        ok=bool(report.get("ok")),
+        ok=report.get("ok") is True and not wrong,
+        error=error,
         project_dir=str(report.get("project_dir") or project_dir),
         files=rows("files"),
         cross_checks=cross if isinstance(cross, dict) else {},
@@ -265,5 +276,5 @@ def report_from_json(report: Any, project_dir, checked_at: str, duration_s: floa
         duration_s=duration_s,
         inherited=rows("inherited"),
         sources_gone=tuple(str(path) for path in gone) if isinstance(gone, list) else (),
-        complete=bool(report.get("complete")),
+        complete=report.get("complete") is True and not wrong,
     )

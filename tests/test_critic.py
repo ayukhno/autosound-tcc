@@ -268,6 +268,22 @@ def test_a_hung_reviewer_is_killed_rather_than_waited_on(stubbed, tmp_path):
     assert "timed out" in result.detail
 
 
+def test_a_reviewer_that_timed_out_says_what_it_last_printed(stubbed, tmp_path):
+    """A reviewer waiting on a sign-in prompt said only «timed out»: what it had printed was
+    reaped after the kill and thrown away (the G1 review)."""
+    stubbed("import sys, time\n"
+            "print('open the browser to sign in', file=sys.stderr, flush=True)\n"
+            "time.sleep(30)\n")
+    project = _project(tmp_path)
+
+    result = critic.run(
+        "pkg", project_dir=project, timeout_s=1.0, python_executable=sys.executable
+    )
+
+    assert result.mode == critic.MODE_ERROR
+    assert "timed out" in result.detail and "open the browser to sign in" in result.detail
+
+
 def test_calls_are_logged_append_only_and_the_last_one_is_readable(stubbed, tmp_path):
     stubbed("print('x')\nprint('— [critic: Gemini 3.1 Pro]')\n")
     project = _project(tmp_path)
