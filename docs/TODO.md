@@ -2055,7 +2055,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-099 — W-9: the audit's second wave — at review
 
-**Статус**: open · stage 2 decided — **all 12 `ok`, one milestone** (the Arbiter, 2026-10-07: «ок. ок.»); next the groups' architects (`hub:seam`), then a plan and the build · milestone `W-9 · v1.1.3` (#9), 12
+**Статус**: open · stage 3 started 2026-10-07 — **all 12 `ok`, one milestone** (the Arbiter, 2026-10-07: «ок. ок.»); the architects' step is the audit's own design passes (`docs/PLAN-AUDIT-2026-10.md` §5: three approaches each, «Balance» named in every issue the Arbiter OK'd), so it is not run again; four code maps against today's main (W-8 moved the code, `.superpowers/sdd/PLAN-W-9/map-*.md`), then `docs/PLAN-W-9.md` and its cost before the build · milestone `W-9 · v1.1.3` (#9), 12
 issues: G5 S1 #169, G5 S2 #170, G8 phase 0 #171 · G9 S1 #172, G3 #173, G4 part 1 #174 · G6 slice 1
 #175, G7 now #176 · G10 S #177 · the re-pin to the skill's W-8 tag #178 · a G13 slice #179 · N2 #164 · from
 `docs/PLAN-AUDIT-2026-10.md` §3's W-9 row (~70 h of TCC work); the collected findings (F-094, F-096, F-098's
