@@ -2055,7 +2055,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-099 — W-9: the audit's second wave — at review
 
-**Статус**: open · stage 3 started 2026-10-07 — **all 12 `ok`, one milestone** (the Arbiter, 2026-10-07: «ок. ок.»); the architects' step is the audit's own design passes (§5, «Balance» named in every issue the Arbiter OK'd), not run again; four code maps against `80519f1` (`.superpowers/sdd/PLAN-W-9/map-*.md`); **the plan is written** — `docs/PLAN-W-9.md`, 32 tasks in five groups (G5+G8 1–14, G9+G3+G4 15–23, G6+G7 24–29, G10 30–31, G13 32), 11 rulings, about 30–35 h of session time; next the Arbiter's «го» on the plan, then the build on `wave-9` · milestone `W-9 · v1.1.3` (#9), 12
+**Статус**: open · stage 3 started 2026-10-07 — **all 12 `ok`, one milestone** (the Arbiter, 2026-10-07: «ок. ок.»); the architects' step is the audit's own design passes (§5, «Balance» named in every issue the Arbiter OK'd), not run again; four code maps against `80519f1` (`.superpowers/sdd/PLAN-W-9/map-*.md`); **the plan is written** — `docs/PLAN-W-9.md`, 32 tasks in five groups (G5+G8 1–14, G9+G3+G4 15–23, G6+G7 24–29, G10 30–31, G13 32), 11 rulings, about 30–35 h of session time; **the Arbiter's «го» on the plan** (2026-10-07, «Го, спершу /compact»); the build on `wave-9` from Task 1, the SDD ledger `.superpowers/sdd/PLAN-W-9/progress.md` · milestone `W-9 · v1.1.3` (#9), 12
 issues: G5 S1 #169, G5 S2 #170, G8 phase 0 #171 · G9 S1 #172, G3 #173, G4 part 1 #174 · G6 slice 1
 #175, G7 now #176 · G10 S #177 · the re-pin to the skill's W-8 tag #178 · a G13 slice #179 · N2 #164 · from
 `docs/PLAN-AUDIT-2026-10.md` §3's W-9 row (~70 h of TCC work); the collected findings (F-094, F-096, F-098's
