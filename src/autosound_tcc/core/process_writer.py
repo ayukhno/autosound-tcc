@@ -32,6 +32,7 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
+from autosound_tcc.core import app_log
 from autosound_tcc.core import child
 from autosound_tcc.core import project_lock
 from autosound_tcc.core import vendor_loader
@@ -141,10 +142,13 @@ def _spawn(
                 env=vendor_loader.child_env(),
                 **child.quiet(),
             )
-    except project_lock.LockTimeout:
+    except project_lock.LockTimeout as exc:
+        # Into the log too: the caller may have nobody left to tell — `close_session` at quit
+        # posts its refusal to a window that is closing, and the write would go without a trace.
+        app_log.logger().warning("busy: `%s` on %s was not run: %s", args[0], project_dir, exc)
         raise Busy(
             "busy: another write to this project is still running — nothing was written, try again"
-        ) from None
+        ) from exc
     except subprocess.TimeoutExpired:
         raise ProcessWriterError(f"process.py timed out after {timeout_s:.0f}s") from None
     except OSError as exc:

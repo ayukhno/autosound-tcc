@@ -83,7 +83,10 @@ def hold(project_dir: Path | str, timeout_s: float) -> Iterator[None]:
     deadline = time.monotonic() + timeout_s
     thread_lock = _thread_lock(project_dir)
     if not thread_lock.acquire(timeout=_left(deadline)):
-        raise LockTimeout(f"another write to {project_dir} held the lock past {timeout_s:g}s")
+        raise LockTimeout(
+            f"this process's thread lock for {project_dir} was still held after {timeout_s:g}s "
+            "(another write from this app)"
+        )
     try:
         with _flock(project_dir, deadline, timeout_s):
             yield
@@ -114,7 +117,8 @@ def _flock(project_dir: Path, deadline: float, timeout_s: float) -> Iterator[Non
                 # a sentence no retry could ever make true.
                 if time.monotonic() >= deadline:
                     raise LockTimeout(
-                        f"another writer held {folder / _LOCK_NAME} past {timeout_s:g}s"
+                        f"the flock on {folder / _LOCK_NAME} was still held after "
+                        f"{timeout_s:g}s (another process is writing)"
                     ) from None
                 time.sleep(min(_POLL_S, _left(deadline)))
         try:

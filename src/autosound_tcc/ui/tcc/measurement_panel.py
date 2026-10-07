@@ -315,6 +315,11 @@ class _LedgerWriteWorker(QThread):
                     process_writer.start_capture(
                         self._project_dir, str(self._version), [], origin=self._origin,
                         plan=True)
+                except process_writer.Busy:
+                    # Another write held the project (#171) — no answer about the plan. Retried
+                    # without `--plan`, the round would open WITHOUT the method's list, the busy
+                    # sentence standing as the gate's reason; refused whole, below, instead.
+                    raise
                 except process_writer.ProcessWriterError as exc:
                     result["unplanned"] = self._why(exc)
                     process_writer.start_capture(

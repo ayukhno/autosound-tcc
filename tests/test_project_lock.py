@@ -9,6 +9,7 @@ get the lock in time answering «busy» instead of waiting — with nothing writ
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import sys
 import threading
@@ -19,7 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from autosound_tcc.core import process_writer, project_lock, vendor_loader
+from autosound_tcc.core import app_log, process_writer, project_lock, vendor_loader
 
 from tests import _intake
 
@@ -90,6 +91,30 @@ def holder_process(tmp_path):
     finally:
         let_go()
         child.stdout.close()
+
+
+@pytest.fixture
+def app_log_warnings():
+    """What TCC's own logger was warned about, heard on that logger itself (the idiom of
+    `test_mcp_server.py`): after `app_log.setup()` it does not propagate, so caplog on the root
+    would hear nothing."""
+    records: list[logging.LogRecord] = []
+
+    class _Keep(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    log = app_log.logger()
+    handler = _Keep(level=logging.WARNING)
+    level = log.level
+    log.addHandler(handler)
+    if level == logging.NOTSET or level > logging.WARNING:
+        log.setLevel(logging.WARNING)
+    try:
+        yield records
+    finally:
+        log.removeHandler(handler)
+        log.setLevel(level)
 
 
 @contextmanager
@@ -193,6 +218,46 @@ def test_a_lock_another_process_holds_answers_busy_within_the_same_deadline(
 
     assert time.monotonic() - started < 2.0
     assert _bytes_of(project / "process") == before
+
+
+def test_a_busy_answer_leaves_one_warning_naming_the_command_and_the_thread_lock(
+    project, monkeypatch, app_log_warnings
+):
+    """A write refused as busy may have nobody left to tell: `close_session` at quit posts its
+    refusal to a status strip whose window is closing, and `session_closed` was gone without a
+    trace. So the log says it — once, with the command, the project and the lock that was held —
+    and `Busy` keeps the `LockTimeout` as its cause."""
+    monkeypatch.setattr(process_writer, "GUI_LOCK_WAIT_S", 0.2)
+
+    with _held_by_another_thread(project_lock.hold(project, timeout_s=5)):
+        app_log_warnings.clear()
+        with pytest.raises(process_writer.Busy) as busy:
+            process_writer.close_session(project)
+
+    said = [record.getMessage() for record in app_log_warnings]
+    assert len(said) == 1, said
+    assert app_log_warnings[0].levelno == logging.WARNING
+    assert "session-close" in said[0] and str(project) in said[0], said[0]
+    assert "thread lock" in said[0], f"which lock was held, this process's own: {said[0]}"
+    assert isinstance(busy.value.__cause__, project_lock.LockTimeout)
+
+
+@posix_only
+def test_a_busy_answer_behind_another_process_names_the_flock_file(
+    project, holder_process, monkeypatch, app_log_warnings
+):
+    """The same one warning when the holder is another PROCESS: the stage it names is the flock,
+    on the file that process holds."""
+    monkeypatch.setattr(process_writer, "GUI_LOCK_WAIT_S", 0.2)
+    app_log_warnings.clear()
+
+    with pytest.raises(process_writer.Busy):
+        process_writer.close_session(project)
+
+    said = [record.getMessage() for record in app_log_warnings]
+    assert len(said) == 1, said
+    assert "session-close" in said[0] and str(project) in said[0], said[0]
+    assert "flock" in said[0] and ".process-write.lock" in said[0], said[0]
 
 
 @posix_only
