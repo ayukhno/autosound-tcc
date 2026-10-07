@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from autosound_tcc.core import process_writer, project_lock, vendor_loader
+from autosound_tcc.core import method_cli, process_writer, project_lock, vendor_loader
 
 from tests import _intake
 
@@ -94,8 +94,8 @@ def test_a_write_off_the_gui_thread_waits_lock_wait_s_not_the_gui_s(project, mon
     `capture-check`; any other thread — an MCP call, a QThread worker — waits `LOCK_WAIT_S`. Both
     are read when the call runs, which is what lets this test move them: had the worker taken the
     GUI's 30 s, it would have outwaited the holder and written."""
-    monkeypatch.setattr(process_writer, "GUI_LOCK_WAIT_S", 30.0)
-    monkeypatch.setattr(process_writer, "LOCK_WAIT_S", 0.3)
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 30.0)
+    monkeypatch.setattr(method_cli, "LOCK_WAIT_S", 0.3)
     held, release = threading.Event(), threading.Event()
 
     def holder():
@@ -242,7 +242,10 @@ def test_every_command_on_a_method_too_old_for_it_says_so(project, monkeypatch, 
 def test_every_command_tcc_sends_has_the_method_version_that_has_it():
     """A command added to `process_writer` without its version would answer an old method with the
     usage dump again. The versions are the first method tags whose `process.py` carries the command,
-    read from the skill's history on 2026-09-14 — a guess here would be worse than no version."""
+    read from the skill's history on 2026-09-14 — a guess here would be worse than no version.
+
+    `capture-supersede` and `handoff` were started past this module by launchers of their own,
+    where this scan could not see them (#169, N1); they are sent from here now, so it does."""
     import inspect
     import re
 
@@ -251,6 +254,7 @@ def test_every_command_tcc_sends_has_the_method_version_that_has_it():
                           source, re.M))
 
     assert sent, "the pattern found no commands — it no longer matches how they are written"
+    assert {"capture-supersede", "handoff"} <= sent, f"sent from elsewhere: {sorted(sent)}"
     missing = sorted(sent - set(process_writer.LANDED_IN))
     assert not missing, f"commands with no method version: {missing}"
 

@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import subprocess
+import threading
+import time
 
-from autosound_tcc.core import process_writer, title_fixes
+import pytest
+
+from autosound_tcc.core import method_cli, project_lock, title_fixes, vendor_loader
 
 
 def test_a_grammar_difference_is_the_methods_rename_and_ticked():
@@ -37,13 +41,51 @@ def test_supersede_calls_the_method_and_a_round_without_the_title_is_fine(tmp_pa
         seen.append(argv)
         return subprocess.CompletedProcess(argv, 1, "", "the round never took 'sw_01 (sw)'")
 
-    monkeypatch.setattr(title_fixes.subprocess, "run", fake_run)
-    monkeypatch.setattr(process_writer, "script_path", lambda: tmp_path / "process.py")
+    monkeypatch.setattr(method_cli.child, "run_bounded", fake_run)
     done, said = title_fixes.supersede(tmp_path, "sw_01 (sw)", "sw_1 (sw)")
     assert done and "never took" in said
     argv = seen[0]
     assert argv[argv.index("capture-supersede"):] == [
         "capture-supersede", "sw_01 (sw)", "sw_1 (sw)", title_fixes.REASON]
+
+
+def _bytes_of(folder) -> dict[str, bytes]:
+    return {path.relative_to(folder).as_posix(): path.read_bytes()
+            for path in sorted(folder.rglob("*")) if path.is_file()}
+
+
+def test_a_supersede_behind_another_write_answers_busy_and_writes_nothing(tmp_path, monkeypatch):
+    """#169 N1: `capture-supersede` rewrites the open round, and it ran with no lock at all — so a
+    write already under way could have its round saved over. Now it waits as every write on the
+    GUI thread does (the import form calls it from the window), and past that wait it answers
+    busy, with the round exactly as it was."""
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.3)
+    (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                           encoding="utf-8")
+    process = vendor_loader.load_process().Process(str(tmp_path / "process"))
+    process.start_capture("1", ["sw_1 (sw)"])
+    process.record_capture("sw_01 (sw)")  # taken under the wrong title: there is a row to fix
+    held, release = threading.Event(), threading.Event()
+
+    def holder():
+        with project_lock.hold(tmp_path, timeout_s=5):
+            held.set()
+            release.wait(10)
+
+    threading.Thread(target=holder, daemon=True).start()
+    assert held.wait(5)
+    before = _bytes_of(tmp_path / "process")
+    started = time.monotonic()
+    try:
+        done, said = title_fixes.supersede(tmp_path, "sw_01 (sw)", "sw_1 (sw)")
+    finally:
+        release.set()
+
+    assert done is False and said.startswith("busy:") and "nothing was written" in said, said
+    assert time.monotonic() - started < 2.0, "it waited longer than the GUI's wait"
+    assert _bytes_of(tmp_path / "process") == before
 
 
 def test_the_import_form_fills_found_names_and_leaves_them_unticked(tmp_path):

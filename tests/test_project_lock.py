@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from autosound_tcc.core import app_log, process_writer, project_lock, vendor_loader
+from autosound_tcc.core import app_log, method_cli, process_writer, project_lock, vendor_loader
 
 from tests import _intake
 
@@ -151,7 +151,7 @@ def _bytes_of(folder: Path) -> dict[str, bytes]:
 
 
 def test_a_held_lock_answers_busy_within_the_deadline_and_writes_nothing(project, monkeypatch):
-    monkeypatch.setattr(process_writer, "GUI_LOCK_WAIT_S", 0.3)   # method_cli's from Task 2
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.3)
     before = _bytes_of(project / "process")          # {relative path: bytes}
     held, release = threading.Event(), threading.Event()
 
@@ -209,7 +209,7 @@ def test_a_lock_another_process_holds_answers_busy_within_the_same_deadline(
     """The twin with a holder PROCESS, which no thread lock here can see. The flock used to wait
     out the child's own `timeout_s` (20 s for `enter_phase`); now it spends the same deadline the
     thread lock does."""
-    monkeypatch.setattr(process_writer, "GUI_LOCK_WAIT_S", 0.3)
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.3)
     before = _bytes_of(project / "process")
 
     started = time.monotonic()
@@ -227,7 +227,7 @@ def test_a_busy_answer_leaves_one_warning_naming_the_command_and_the_thread_lock
     refusal to a status strip whose window is closing, and `session_closed` was gone without a
     trace. So the log says it — once, with the command, the project and the lock that was held —
     and `Busy` keeps the `LockTimeout` as its cause."""
-    monkeypatch.setattr(process_writer, "GUI_LOCK_WAIT_S", 0.2)
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.2)
 
     with _held_by_another_thread(project_lock.hold(project, timeout_s=5)):
         app_log_warnings.clear()
@@ -248,7 +248,7 @@ def test_a_busy_answer_behind_another_process_names_the_flock_file(
 ):
     """The same one warning when the holder is another PROCESS: the stage it names is the flock,
     on the file that process holds."""
-    monkeypatch.setattr(process_writer, "GUI_LOCK_WAIT_S", 0.2)
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.2)
     app_log_warnings.clear()
 
     with pytest.raises(process_writer.Busy):

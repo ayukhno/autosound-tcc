@@ -11,39 +11,33 @@ starts with («продовжуй»); `resume` says what must stay open (the REW
 captures). `warnings` (the method's v3.0.65, S-084, hub #227) never moves `ok`: a ▶️ CONTINUE
 block naming a HEAD the ledger is not at, prose to bring up to date. TCC shows the answer and
 starts nothing without the Arbiter's click.
+
+Asked through `process_writer.handoff_json`, as every call to the method goes: a read, so with no
+lock to wait for.
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import app_log, child, process_writer, vendor_loader
-
-_TIMEOUT_S = 30
+from autosound_tcc.core import app_log, process_writer
 
 
 def check(project_dir: Path) -> Optional[dict]:
-    """The method's answer, or None when the vendored method cannot give one (older than `--json`)."""
-    script = process_writer.script_path()
-    if not script.is_file():
+    """The method's answer, or None when it cannot give one: a method older than `--json` (or
+    than `handoff`), or a call that did not get an answer — no script, a timeout."""
+    try:
+        code, out, _err = process_writer.handoff_json(Path(project_dir))
+    except process_writer.ProcessWriterError as exc:
+        app_log.logger().info("handoff: no answer: %s", exc)
+        return None
+    app_log.logger().info("handoff --json -> exit %s", code)
+    if code not in (0, 1):
         return None
     try:
-        proc = subprocess.run(
-            [child.script_interpreter(), str(script), str(Path(project_dir) / "process"),
-             "handoff", "--json"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=_TIMEOUT_S, env=vendor_loader.child_env(), **child.quiet())
-    except (OSError, subprocess.SubprocessError) as exc:
-        app_log.logger().info("handoff: did not run: %s", type(exc).__name__)
-        return None
-    app_log.logger().info("handoff --json -> exit %s", proc.returncode)
-    if proc.returncode not in (0, 1):
-        return None
-    try:
-        answer = json.loads(proc.stdout)
+        answer = json.loads(out)
     except ValueError:
         return None
     if not isinstance(answer, dict) or "ok" not in answer:

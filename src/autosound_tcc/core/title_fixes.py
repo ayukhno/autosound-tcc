@@ -22,15 +22,14 @@ not a failure here: the rename and the import were the whole fix.
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal, Optional
 
-from autosound_tcc.core import app_log, capture_import, child, process_writer, vendor_loader
+from autosound_tcc.core import app_log, capture_import, process_writer, vendor_loader
 
 Kind = Literal["grammar", "typo"]
-REASON = "renamed in REW by TCC (A17)"
+REASON = process_writer.SUPERSEDE_REASON
 
 
 @dataclass(frozen=True)
@@ -60,18 +59,14 @@ def proposals(rew_titles: Iterable[str], expected: Iterable[str],
 
 def supersede(project_dir: Path, wrong: str, right: str) -> tuple[bool, str]:
     """`capture-supersede` in the open round. `(done, what the method said)`; exit 1 — the round
-    never took the wrong title — counts as done: the REW rename was the whole fix."""
+    never took the wrong title — counts as done: the REW rename was the whole fix. A call that got
+    no answer is `(False, why)` — busy behind another write, timed out, a method without it."""
     try:
-        proc = subprocess.run(
-            [child.script_interpreter(), str(process_writer.script_path()),
-             str(Path(project_dir) / "process"), "capture-supersede", wrong, right, REASON],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-            env=vendor_loader.child_env(), **child.quiet())
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, f"{type(exc).__name__}: {exc}"
-    app_log.logger().info("capture-supersede %r -> %r: exit %s", wrong, right, proc.returncode)
-    said = (proc.stdout.strip() or proc.stderr.strip())
-    return proc.returncode in (0, 1), said
+        code, out, err = process_writer.supersede_capture(Path(project_dir), wrong, right)
+    except process_writer.ProcessWriterError as exc:
+        return False, str(exc)
+    app_log.logger().info("capture-supersede %r -> %r: exit %s", wrong, right, code)
+    return code in (0, 1), out or err
 
 
 def glossary_for(project_dir: Path):

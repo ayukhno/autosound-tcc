@@ -19,6 +19,7 @@ our own venv's, never a bare `python` the shell has to guess — `child.script_i
 is that venv's CONSOLE binary rather than the windowed `pythonw.exe` TCC itself runs under, because
 a script with no console hands none down and the git it calls then opens a window (TCC-006) — and
 the script is located through `vendor_loader`, not through an address only one harness understands.
+Both happen in `method_cli`, the one place a method script is started.
 
 Reads stay where they were: `mcp_server._load_process_state()` imports the skill's module in-process
 and calls `Process(...).load()`. Writes go out-of-process for the same reason profile writes do —
@@ -27,31 +28,26 @@ one implementation of "record a step" in the world rather than an in-process cop
 
 from __future__ import annotations
 
-import subprocess
-import threading
 from pathlib import Path
 from typing import Any, Optional
 
-from autosound_tcc.core import app_log
-from autosound_tcc.core import child
-from autosound_tcc.core import project_lock
+from autosound_tcc.core import method_cli
 from autosound_tcc.core import vendor_loader
 
 # Local file I/O and a JSON rewrite; anything near this is a hang, not slowness.
 DEFAULT_TIMEOUT_S = 20.0
 
-#: How long a write waits for the project's lock (`project_lock.hold`) before answering `Busy`
-#: (#171), read when the call runs. The main thread is the window, and a window frozen behind a
-#: 120 s `capture-check` — or a quit behind a queue of them — is the bug. Any other thread (an MCP
-#: call, a QThread worker) freezes nobody's window, so it can afford to queue. `timeout_s` still
-#: bounds the child alone.
-GUI_LOCK_WAIT_S = 5.0
-LOCK_WAIT_S = 60.0
+#: The writer, relative to the method's `rew_tool/`.
+_SCRIPT = "state/process.py"
 
 #: Every command TCC sends, and the first method tag whose `process.py` has it — read from the
 #: skill's history (2026-09-14), never guessed. `2.8.0` is the oldest tag with the file at this
 #: path, so for those it means "by then", not "since then". An old method answers an unknown command
 #: with its usage text; `_refuse_if_too_old` turns that into this version (tcc#26).
+#: `capture-supersede` and `handoff` were read on 2026-10-07 as the first release tag whose
+#: `process.py` dispatches the command (`git show <tag>:…/state/process.py`, tags in version order):
+#: the submodule is a shallow clone, and `git log -S` names its cut-off commit as the one that added
+#: any command older than the cut — `session-close` came out as 3.0.52 that way.
 LANDED_IN = {
     "add-step": "2.8.0",
     "block": "2.8.0",
@@ -61,11 +57,13 @@ LANDED_IN = {
     "capture-protective": "3.0.20",
     "capture-skip": "3.0.0",
     "capture-start": "3.0.0",
+    "capture-supersede": "3.0.60",
     "capture-taken": "3.0.0",
     "check": "2.8.0",
     "decision": "3.0.0",
     "done": "2.8.0",
     "enter-phase": "2.8.0",
+    "handoff": "3.0.60",
     "listening-verdict": "3.0.29",
     "listening-verdicts": "3.0.29",
     "plan": "2.8.0",
@@ -79,25 +77,14 @@ LANDED_IN = {
 }
 
 
-class ProcessWriterError(RuntimeError):
-    """The skill's writer refused or could not run. Carries its own message verbatim.
-
-    A refusal is information, not a crash: `done` rejecting a step with no evidence is the план-факт
-    gate doing its job (SCR-004), and the caller has to be told exactly that so it can supply the
-    evidence rather than retry the same call.
-    """
-
-
-class Busy(ProcessWriterError):
-    """Another write to this project held the lock past the wait, so this one never started.
-
-    The one failure that means "nothing happened, and the same call will work in a moment" — and a
-    `ProcessWriterError`, so every caller that already shows a refusal shows this one too.
-    """
+#: `method_cli`'s, under the names every caller already catches — the same classes, not copies, so
+#: an `except process_writer.ProcessWriterError` (or `.Busy`) catches what `method_cli` raises.
+ProcessWriterError = method_cli.ProcessWriterError
+Busy = method_cli.Busy
 
 
 def script_path() -> Path:
-    return vendor_loader.REW_TOOL_DIR / "state" / "process.py"
+    return vendor_loader.REW_TOOL_DIR / _SCRIPT
 
 
 def is_available() -> bool:
@@ -110,50 +97,13 @@ def _process_dir(project_dir: Path) -> Path:
 
 
 def _spawn(
-    project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S
+    project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S, **kw
 ) -> tuple[int, str, str]:
-    script = script_path()
-    if not script.is_file():
-        raise ProcessWriterError(
-            f"process.py not found at {script}. Run: git submodule update --init --recursive"
-        )
-    # One writer at a time, from this process and from any other (`project_lock`). How long to
-    # wait for it is the calling THREAD's question, asked here and not bound at import.
-    on_gui_thread = threading.current_thread() is threading.main_thread()
-    lock_wait_s = GUI_LOCK_WAIT_S if on_gui_thread else LOCK_WAIT_S
-    try:
-        with project_lock.hold(project_dir, lock_wait_s):
-            proc = subprocess.run(
-                # The CONSOLE interpreter, not ours. TCC is a GUI app, so `sys.executable` is
-                # `pythonw.exe`, which has no console — and the git this script runs then opens
-                # its own window. Every flash the user saw while saving was this line (TCC-006).
-                [child.script_interpreter(), str(script), str(_process_dir(project_dir)), *args],
-                capture_output=True,
-                text=True,
-                # NOT the locale's, which is what `text=True` alone means. The skill writes UTF-8
-                # to disk on every platform and folds only what a CONSOLE cannot draw, so its
-                # bytes are always UTF-8 — and decoding them with a Windows ANSI page turned a
-                # listening verdict into mojibake on the way back (first Windows CI run,
-                # 2026-09-07). The tuner's own words about what they heard are the one thing here
-                # that has to survive the trip verbatim.
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout_s,
-                env=vendor_loader.child_env(),
-                **child.quiet(),
-            )
-    except project_lock.LockTimeout as exc:
-        # Into the log too: the caller may have nobody left to tell — `close_session` at quit
-        # posts its refusal to a window that is closing, and the write would go without a trace.
-        app_log.logger().warning("busy: `%s` on %s was not run: %s", args[0], project_dir, exc)
-        raise Busy(
-            "busy: another write to this project is still running — nothing was written, try again"
-        ) from exc
-    except subprocess.TimeoutExpired:
-        raise ProcessWriterError(f"process.py timed out after {timeout_s:.0f}s") from None
-    except OSError as exc:
-        raise ProcessWriterError(str(exc)) from None
-    return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+    """`process.py <process-dir> <command> …` through `method_cli.spawn`, which holds the lock,
+    bounds the child and gives it its environment. `kw` is spawn's own: `lock=`, `lock_wait_s=`."""
+    return method_cli.spawn(
+        project_dir, _SCRIPT, [str(_process_dir(project_dir)), *args], timeout_s=timeout_s, **kw
+    )
 
 
 def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
@@ -442,6 +392,39 @@ def close_session(project_dir: Path) -> tuple[bool, str]:
     if code not in (0, 1):
         raise ProcessWriterError((err or out).strip() or f"process.py exited {code}")
     return code == 0, out or err
+
+
+#: The reason a title fix gives the round for superseding a row (A17).
+SUPERSEDE_REASON = "renamed in REW by TCC (A17)"
+
+
+def supersede_capture(project_dir: Path, wrong: str, right: str) -> tuple[int, str, str]:
+    """The open round took a capture as `wrong`, and it is `right` (A17): `capture-supersede`.
+    Returns `(exit code, stdout, stderr)`.
+
+    **The exit code is an answer**, as in `close_session`: 1 is the method's refusal — no round
+    open, or the round never took `wrong` — which `title_fixes.supersede` reads as nothing left to
+    correct. A write like any other, so it holds the lock: on the GUI thread, the short wait and
+    then `Busy`.
+    """
+    args = ["capture-supersede", str(wrong), str(right), SUPERSEDE_REASON]
+    code, out, err = _spawn(project_dir, args, timeout_s=30.0)
+    _refuse_if_too_old("capture-supersede", out, err)
+    return code, out, err
+
+
+def handoff_json(project_dir: Path) -> tuple[int, str, str]:
+    """Is everything the next session needs on disk (hub #201): `handoff --json`. Returns
+    `(exit code, stdout, stderr)` — 0 ready, 1 not, and the JSON on stdout either way, which
+    `handoff.check` reads.
+
+    A READ: the command writes nothing, so it takes no lock. On the GUI thread a wait behind a
+    120 s `capture-check` would be the bug, and so would the lock's own `process/`, made in a
+    project that has none.
+    """
+    code, out, err = _spawn(project_dir, ["handoff", "--json"], timeout_s=30.0, lock=False)
+    _refuse_if_too_old("handoff", out, err)
+    return code, out, err
 
 
 def _refuse_if_too_old(command: str, out: str, err: str) -> None:
