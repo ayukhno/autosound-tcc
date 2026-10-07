@@ -1,0 +1,332 @@
+"""Which copy of the method a project runs, and whether TCC trusts it (#169, G5 S1).
+
+A project links its own copy at `<project>/.claude/skills/autosound-tuning` — both session adapters
+read that path and nothing else — while every writer started TCC's own `process.py` whatever the link
+pointed at, and `vendor_loader.link_skill_into` leaves an existing entry alone whatever it points at.
+So a session could advise from one copy while the writers wrote with another, and a project that came
+from a backup, a customer or a clone could bring a copy of its own and have it run (HUB-050).
+
+Decision 2: a link is trusted when it is a copy TCC knows, or one approved once on this machine. The
+reason is ORIGIN, not shape: a copy inside the project travels with the project, so it is refused
+however much it looks like the method. `for_project` answers one `Binding`:
+
+    same      no entry, or a link to TCC's own copy: TCC's copy runs, as it always did
+    known     a link to another copy TCC finds itself (`vendor_loader._candidates()`), by realpath
+    approved  a link to a copy approved on this machine (`config.approved_methods()`, never the project)
+    refused   anything else, with one sentence naming the entry and what to do; `can_approve` when
+              approving is the remedy — a 3.x copy outside the project that TCC does not know
+
+«Is a link» is `realpath(entry) != realpath(entry.parent)/entry.name`. Never `realpath != abspath`: that
+holds for every path under a linked parent (macOS's `/var`, pytest's temp folders, a mapped drive),
+link or not. The realpath also sees a Windows junction, which answers False to `is_symlink()`. Absence
+is `os.lstat` raising FileNotFoundError or NotADirectoryError — exactly what `os.path.lexists` tests,
+a broken link included — and nothing else is: `lexists` answers False on a permission error too,
+which would read an entry TCC cannot see as «no entry» and trust TCC's copy without a word.
+
+A copy's contract number (`CONTRACT_VERSION` in its `rew_tool/contract.py`) is read with `ast`, never
+by import — importing a copy TCC has not decided to trust would run it — and a copy newer than
+`KNOWN_CONTRACT` is refused. Not TCC's own copy: holding that one to the number is S3's (W-10).
+
+Qt-free and light (`tests/test_packaging.py`).
+"""
+
+from __future__ import annotations
+
+import ast
+import os
+import stat
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Union
+
+from autosound_tcc.core import config, vendor_loader
+
+#: The newest contract this TCC drives. 0 in this build: no released copy carries a number yet
+#: (v3.1.1's `contract.py` has none), so a copy that names any number was written for a newer TCC.
+#: A copy that names none reads as allowed — every copy up to v3.1.1 is one.
+KNOWN_CONTRACT = 0
+
+SAME, KNOWN, APPROVED, REFUSED = "same", "known", "approved", "refused"
+
+#: What the method reads as «the copy this session runs» (`rew_tool/deployment.py`, `DECLARED_ENV`):
+#: the skill FOLDER, not the repository around it.
+SKILL_ROOT_ENV = "AUTOSOUND_SKILL_ROOT"
+
+
+class MethodRefused(RuntimeError):
+    """The project's copy of the method is not one TCC will run. Carries the sentence that says why."""
+
+
+@dataclass(frozen=True)
+class Binding:
+    """Which copy a project runs. `skill_dir` is None exactly when `state` is `refused`."""
+
+    project_dir: Path
+    state: str
+    skill_dir: Optional[Path]
+    entry: Path
+    reason: str = ""
+    can_approve: bool = False
+
+    def require(self) -> Path:
+        """The skill folder to run, or `MethodRefused` with the binding's sentence."""
+        if self.state == REFUSED or self.skill_dir is None:
+            raise MethodRefused(self.reason or f"{self.entry} is not bound to a copy of the method; "
+                                               f"re-link it to TCC's copy.")
+        return self.skill_dir
+
+    def script(self, rel: str) -> Path:
+        """A script of the bound copy, `rew_tool/<rel>` — `MethodRefused` when refused."""
+        return self.require() / "rew_tool" / rel
+
+    def plugin_root(self) -> Optional[Path]:
+        """The bound copy's repository, where `.claude-plugin/plugin.json` or `.git` is — found the
+        way `vendor_loader.skill_repo_root` finds TCC's own: the link followed first, then at most
+        four levels up. None when refused, or when the copy is in no repository."""
+        if self.state == REFUSED or self.skill_dir is None:
+            return None
+        here = Path(os.path.realpath(self.skill_dir))
+        for parent in (here, *here.parents)[:4]:
+            if os.path.isfile(parent / ".claude-plugin" / "plugin.json") \
+                    or os.path.exists(parent / ".git"):
+                return parent
+        return None
+
+    def session_env(self) -> dict[str, str]:
+        """What a child of the method is told about the copy it runs; empty when refused."""
+        if self.state == REFUSED or self.skill_dir is None:
+            return {}
+        return {SKILL_ROOT_ENV: str(self.skill_dir)}
+
+
+def for_project(project_dir: Union[str, os.PathLike]) -> Binding:
+    """The copy this project runs, and whether TCC trusts it. Never raises: whatever goes wrong
+    while looking is itself an answer — `refused`, with the sentence that says what."""
+    project_dir = Path(project_dir)
+    entry = project_dir / ".claude" / "skills" / vendor_loader.SKILL_NAME
+    try:
+        return _bind(project_dir, entry)
+    except Exception as exc:  # noqa: BLE001 — the promise is an answer, and a crash is not one
+        return _refused(project_dir, entry, f"TCC could not check {entry} "
+                                            f"({type(exc).__name__}: {exc}); re-link it to TCC's copy.")
+
+
+def _bind(project_dir: Path, entry: Path) -> Binding:
+    try:
+        entry_stat = os.lstat(entry)
+    except (FileNotFoundError, NotADirectoryError):  # what `os.path.lexists` reads as absent
+        return Binding(project_dir, SAME, vendor_loader.skill_dir(), entry)
+    except OSError as exc:  # what `lexists` would have read as absent too
+        return _refused(project_dir, entry, f"TCC cannot read {entry} ({_why(exc)}); fix the "
+                                            f"permissions of {entry.parent} and check again.")
+    target = os.path.realpath(entry)
+    if not _is_link(entry, target):
+        if stat.S_ISDIR(entry_stat.st_mode):
+            return _refused(project_dir, entry, f"{entry} is a folder, not a link, and a copy inside "
+                                                f"the project cannot be trusted; re-link it to TCC's copy.")
+        return _refused(project_dir, entry, f"{entry} is a file, not a link to a copy of the method; "
+                                            f"re-link it to TCC's copy.")
+    try:
+        os.stat(entry)  # the link followed to its end
+    except (FileNotFoundError, NotADirectoryError):
+        return _refused(project_dir, entry, f"{entry} points at {target}, which is not on this "
+                                            f"machine; re-link it to TCC's copy.")
+    except OSError as exc:
+        return _refused(project_dir, entry, f"TCC cannot read what {entry} points at ({_why(exc)}); "
+                                            f"fix the permissions of {target}, or re-link it to TCC's copy.")
+    own = vendor_loader.skill_dir()
+    if _same(target, os.path.realpath(own)):
+        return Binding(project_dir, SAME, own, entry)
+    if _inside(target, os.path.realpath(project_dir)):
+        return _refused(project_dir, entry, f"{entry} points at {target}, inside the project, and a "
+                                            f"copy inside the project cannot be trusted; re-link it "
+                                            f"to TCC's copy.")
+    copy = Path(target)
+    if not vendor_loader._looks_like_the_skill(copy):
+        if vendor_loader._looks_like_an_older_skill(copy):
+            return _refused(project_dir, entry, f"{entry} points at {target}, a 2.x copy of the "
+                                                f"method — an older line this TCC cannot drive; "
+                                                f"re-link it to TCC's copy.")
+        return _refused(project_dir, entry, f"{entry} points at {target}, which is not a 3.x copy of "
+                                            f"the method; re-link it to TCC's copy.")
+    number = read_contract_version(copy)
+    if number is not None and number > KNOWN_CONTRACT:
+        return _refused(project_dir, entry, f"{entry} points at {target}, a copy of the method on "
+                                            f"contract {number}, newer than this TCC — update TCC "
+                                            f"first, or re-link it to TCC's copy.")
+    if _is_known(target, own):
+        return Binding(project_dir, KNOWN, copy, entry)
+    if any(_same(target, approved) for approved in config.approved_methods()):
+        return Binding(project_dir, APPROVED, copy, entry)
+    return Binding(project_dir, REFUSED, None, entry,
+                   f"{entry} points at {target}, a copy of the method TCC does not know; approve it "
+                   f"on this machine, or re-link it to TCC's copy.", can_approve=True)
+
+
+def _refused(project_dir: Path, entry: Path, reason: str) -> Binding:
+    return Binding(project_dir, REFUSED, None, entry, reason, False)
+
+
+def _why(exc: OSError) -> str:
+    return exc.strerror or str(exc)
+
+
+def _same(a, b) -> bool:
+    return os.path.normcase(os.fspath(a)) == os.path.normcase(os.fspath(b))
+
+
+def _inside(path: str, folder: str) -> bool:
+    path, folder = os.path.normcase(path), os.path.normcase(folder)
+    return path == folder or path.startswith(folder.rstrip(os.sep) + os.sep)
+
+
+def _is_link(entry: Path, real: str) -> bool:
+    """A symlink or a junction, wherever the project itself is reached through a link."""
+    return not _same(real, os.path.join(os.path.realpath(entry.parent), entry.name))
+
+
+def _is_known(target: str, own: Path) -> bool:
+    """A copy TCC finds itself, other than the one it chose: `_candidates()` yields the paths it
+    found, and an installed copy is a link into its clone, so they are compared by realpath."""
+    own_real = os.path.realpath(own)
+    for candidate in vendor_loader._candidates():
+        real = os.path.realpath(candidate)
+        if not _same(real, own_real) and _same(real, target) \
+                and vendor_loader._looks_like_the_skill(candidate):
+            return True
+    return False
+
+
+# ---- the contract number ----------------------------------------------------------------------
+
+#: path -> (st_mtime_ns, st_size, number): one entry per `contract.py`, read again when it changes.
+_CONTRACT_CACHE: dict[str, tuple[int, int, Optional[int]]] = {}
+
+
+def contract_number(text: Union[str, bytes]) -> Optional[int]:
+    """The top-level `CONTRACT_VERSION = <int>` of a `contract.py`'s text (an annotated one counts),
+    or None. Found with `ast`, never by import: a file that raises on import still answers, and
+    nothing in it runs. Text that does not parse, or a value that is not an int literal, is None."""
+    return _top_level_int(text, "CONTRACT_VERSION")
+
+
+def _top_level_int(text: Union[str, bytes], name: str) -> Optional[int]:
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+    number = None
+    for node in tree.body:  # top level only: a name inside a function or an `if` is not the module's
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if any(isinstance(target, ast.Name) and target.id == name for target in targets):
+            # The last assignment is the value the module ends up with. A bool is an int to Python
+            # and not a contract number to anyone.
+            literal = isinstance(value, ast.Constant) and type(value.value) is int
+            number = value.value if literal else None
+    return number
+
+
+def read_contract_version(skill_dir: Union[str, os.PathLike]) -> Optional[int]:
+    """The contract number of the copy at `skill_dir`, or None when it names none or cannot be read.
+    Cached by path, mtime and size: diagnostics asks on the GUI thread, and `contract.py` is 1800
+    lines of `ast` to walk."""
+    path = os.path.join(os.fspath(skill_dir), "rew_tool", "contract.py")
+    try:
+        info = os.stat(path)
+        key = (info.st_mtime_ns, info.st_size)
+        cached = _CONTRACT_CACHE.get(path)
+        if cached is not None and cached[:2] == key:
+            return cached[2]
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    number = contract_number(text)
+    _CONTRACT_CACHE[path] = (*key, number)
+    return number
+
+
+# ---- what the person can do about a refusal ---------------------------------------------------
+
+
+def approve(binding: Binding) -> Binding:
+    """Trust, on this machine, the copy an approvable binding points at, and bind the project to it.
+
+    Only a binding with `can_approve`. The approval is kept in TCC's own settings, never in the
+    project — a project must not be able to approve itself — as the copy's realpath, the thing every
+    look compares. The link is looked at again first: the person approved the copy the sentence
+    named, and a link re-pointed since is another copy. `MethodRefused` when the settings do not
+    keep the approval (`config.approve_method` reads it back).
+    """
+    if not binding.can_approve:
+        if binding.state == REFUSED:
+            raise MethodRefused(binding.reason)
+        raise MethodRefused(f"{binding.entry} already runs a copy TCC trusts ({binding.state}); "
+                            f"there is nothing to approve.")
+    now = for_project(binding.project_dir)
+    if now.state != REFUSED:
+        return now
+    if not now.can_approve:
+        raise MethodRefused(now.reason)
+    if now.reason != binding.reason:
+        raise MethodRefused(f"{binding.entry} points at another copy than when it was checked; look "
+                            f"at it again before approving it.")
+    target = os.path.realpath(binding.entry)
+    if not config.approve_method(target):
+        raise MethodRefused(f"TCC could not keep the approval of {target} for {binding.entry}: its "
+                            f"settings on this machine did not store it; approve it again once they "
+                            f"can be written.")
+    return for_project(binding.project_dir)
+
+
+def relink(binding: Binding) -> Binding:
+    """Put a link to TCC's own copy at the project's entry, and whatever was there out of the way.
+
+    `link_skill_into` leaves an existing entry alone, so the entry moves first, by `os.rename` of the
+    entry itself: a link moves as a link and is never followed, so what it points at stays where it
+    is. It goes to `<project>/.tcc/method-aside/<YYYYMMDD-HHMMSS>/autosound-tuning` — out of
+    `.claude/skills/`, where omp would still load it. Nothing is deleted; putting it back is a move.
+    A project already on TCC's copy has nothing to move. `MethodRefused` when the move fails.
+    """
+    project_dir, entry = binding.project_dir, binding.entry
+    if for_project(project_dir).state != SAME:
+        try:
+            if _present(entry):
+                os.rename(entry, _aside_folder(project_dir) / entry.name)
+        except OSError as exc:
+            raise MethodRefused(f"TCC could not move {entry} out of the way ({_why(exc)}); move it out "
+                                f"of {entry.parent} yourself, then re-link it to TCC's copy.") from exc
+    vendor_loader.link_skill_into(project_dir)
+    return for_project(project_dir)
+
+
+def _present(entry: Path) -> bool:
+    try:
+        os.lstat(entry)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    return True
+
+
+def _stamp() -> str:
+    return time.strftime("%Y%m%d-%H%M%S")
+
+
+def _aside_folder(project_dir: Path) -> Path:
+    """A new folder under `.tcc/method-aside/`, never one already holding an earlier entry: two
+    re-links in one second get `<stamp>` and `<stamp>-1`."""
+    base = config.tcc_dir(project_dir) / "method-aside"
+    stamp = _stamp()
+    for n in range(100):
+        folder = base / (stamp if n == 0 else f"{stamp}-{n}")
+        try:
+            folder.mkdir(parents=True)
+        except FileExistsError:
+            continue
+        return folder
+    raise FileExistsError(f"{base / stamp} and 99 folders after it already exist")

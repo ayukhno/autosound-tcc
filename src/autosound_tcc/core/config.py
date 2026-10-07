@@ -138,6 +138,44 @@ def set_feedback_sender(value: str) -> None:
     _settings().setValue(_FEEDBACK_SENDER_KEY, value)
 
 
+#: Copies of the method approved on THIS machine (#169, `core/method_binding.py`): their realpaths,
+#: in TCC's own settings and never in a project — a project that could approve its own copy would
+#: make the approval mean nothing.
+_APPROVED_METHODS_KEY = "method/approved"
+
+
+def approved_methods() -> tuple[str, ...]:
+    """The realpaths of the copies of the method approved on this machine, oldest first."""
+    value = _settings().value(_APPROVED_METHODS_KEY, [])
+    if isinstance(value, str):  # QSettings collapses a 1-element list back to a bare string
+        return (value,) if value else ()
+    return tuple(str(v) for v in (value or []) if v)
+
+
+def approve_method(path) -> bool:
+    """Approve the copy of the method at `path` on this machine; its realpath is what is kept.
+
+    True only when the store reads the approval back. `_NoSettings` keeps nothing (no store was
+    handed in: the light half, headless), and a QSettings whose file cannot be written keeps the
+    value only until TCC quits and says so in `status()` alone — either way the approval would be
+    gone while the caller reported it given.
+    """
+    real = os.path.realpath(os.fspath(path))
+    settings = _settings()
+    kept = list(approved_methods())
+    if real not in kept:
+        kept.append(real)
+    settings.setValue(_APPROVED_METHODS_KEY, kept)
+    sync = getattr(settings, "sync", None)
+    if callable(sync):
+        sync()
+    status = getattr(settings, "status", None)
+    no_error = getattr(getattr(settings, "Status", None), "NoError", None)
+    if callable(status) and no_error is not None and status() != no_error:
+        return False
+    return real in approved_methods()
+
+
 def recent_projects() -> list[Path]:
     """Recently opened project folders, newest first, filtered to ones that still exist."""
     return [Path(p) for p in _recent_raw(_settings()) if Path(p).is_dir()]

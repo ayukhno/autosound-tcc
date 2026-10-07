@@ -33,6 +33,7 @@ LIGHT_MODULES = (
     "autosound_tcc.core.delay_bank",
     "autosound_tcc.core.project_settings",
     "autosound_tcc.core.contract_check",
+    "autosound_tcc.core.method_binding",
 )
 
 #: Blocked as a group: shiboken6 is PySide6's own runtime, and numpy arrives with pyqtgraph.
