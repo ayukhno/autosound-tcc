@@ -262,6 +262,13 @@ STRINGS: dict[str, dict[str, str]] = {
             ' darauf verlässt.'
         ),
     },
+    # «Copy» pressed with no source named (the G13 review).
+    'npSeedEmpty': {
+        'en': 'Choose the project to copy from first.',
+        'uk': 'Спершу виберіть проєкт, з якого копіювати.',
+        'pl': 'Choose the project to copy from first.',
+        'de': 'Choose the project to copy from first.',
+    },
     'npSeedFailed': {
         'en': 'Nothing was copied: {problem}',
         'uk': 'Нічого не скопійовано: {problem}',

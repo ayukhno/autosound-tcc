@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from autosound_tcc.core import config, model_choices, terminal_launcher, vendor_loader
+from autosound_tcc.core import app_log, config, model_choices, terminal_launcher, vendor_loader
 from autosound_tcc.ui.tcc import car_source, i18n
 from autosound_tcc.ui.tcc.mock_data import AI_MAIN_MODELS, AI_MODEL_IDS
 
@@ -47,9 +47,17 @@ def _field_label(text: str) -> QLabel:
 
 
 def _said(line: car_source.Line) -> str:
-    """A source's sentence in the reader's language."""
+    """A source's sentence in the reader's language; unfilled, and logged, when its arguments do
+    not fit the sentence -- a note slot that raised would leave the note on the previous path."""
     text = i18n.t(line.key)
-    return text.format(**line.args) if line.args else text
+    if not line.args:
+        return text
+    try:
+        return text.format(**line.args)
+    except (KeyError, IndexError, ValueError):
+        app_log.logger().warning("the sentence %r does not take the arguments %s", line.key,
+                                 sorted(line.args), exc_info=True)
+        return text
 
 
 def _seeder():
@@ -431,7 +439,12 @@ class NewProjectDialog(QDialog):
             self._set_seed_note(_said(problem) if problem else "", warn=problem is not None)
             return
         if summary is None:
-            self._set_seed_note(i18n.t("npSeedNotAProject"), warn=True)
+            # What the source says about itself stays: a package that unpacked into no project
+            # still names itself and what it warns of.
+            resolved = self._seed_resolved
+            lines = [i18n.t("npSeedNotAProject")] + [
+                _said(line) for line in ((resolved.about + resolved.warnings) if resolved else ())]
+            self._set_seed_note("\n".join(lines), warn=True)
             return
         self._prefill_dsp(source)
         # At once, not on the typing delay: picking a folder is one deliberate act, and the note
@@ -658,11 +671,12 @@ class NewProjectDialog(QDialog):
         super().done(result)
 
     def _on_create(self) -> None:
-        self._seed_source()  # what the picker holds for the text as it is now
+        source = self._seed_source()  # what the picker holds for the text as it is now
         problem = self._seed_problem()
-        if problem is not None:
-            # A refused source creates nothing — not an empty project in the copy's place.
-            self._set_seed_note(_said(problem), warn=True)
+        if problem is not None or (source is None and self._seed_combo.currentData() == "copy"):
+            # A refused source creates nothing — not an empty project in the copy's place; and
+            # «Copy» with nothing named is not a new project either.
+            self._set_seed_note(_said(problem) if problem else i18n.t("npSeedEmpty"), warn=True)
             return
         project_dir = Path(self._folder_edit.text().strip()).expanduser()
         vendor = self._vendor_edit.text().strip()
@@ -674,7 +688,6 @@ class NewProjectDialog(QDialog):
 
         # Before `set_project_dir`, deliberately: a seeding that fails leaves the folder as it was
         # and TCC pointed where it was, rather than parked on a half-made project.
-        source = self._seed_source()
         if source is not None:
             seeder = _seeder()
             if seeder is None:
@@ -697,7 +710,10 @@ class NewProjectDialog(QDialog):
                 # theirs, and the raw sentence is kept only for the ones nobody predicted.
                 self._set_seed_note(self._why_refused(source, project_dir, report), warn=True)
                 return
-            self.seeded, self.seeded_from = report, source
+            # Named after what the person picked (a package file, later), not the folder a source
+            # unpacked it into: that one is gone once the dialog closes.
+            self.seeded = report
+            self.seeded_from = Path(self._seed_edit.text().strip()).expanduser()
 
         config.set_project_dir(project_dir)
         self.project_dir = project_dir

@@ -628,7 +628,7 @@ class _FileSource:
                 None, problem=car_source.Line("npSeedFailed", {"problem": "not a car file"}))
         return car_source.Resolved(type(self).folder,
                                    about=(car_source.Line("npSeedNoSkill"),),
-                                   warnings=(car_source.Line("npSeedFindingsEvidence"),))
+                                   warnings=(car_source.Line("npSeedPlaceholder"),))
 
     def release(self):
         type(self).released.append(True)
@@ -637,7 +637,9 @@ class _FileSource:
 def test_a_second_source_needs_no_dialog_code(tmp_path, monkeypatch):
     """G13 C2: a new source of a car is a module, not dialog code. Registered, it gets its own
     browse button; what it resolves is copied from, with its note under the summary and its
-    warning last; a refused file says why and creates no project; closing lets go of it."""
+    warning last; a refused file says why while it is typed and creates no project; the copy is
+    made from the folder the source resolved, and named after what the person picked; closing
+    lets go of it."""
     from autosound_tcc.ui.tcc import car_source
 
     source = tmp_path / "source"
@@ -649,22 +651,155 @@ def test_a_second_source_needs_no_dialog_code(tmp_path, monkeypatch):
     monkeypatch.setattr(car_source, "SOURCES", (_FileSource, car_source.FolderSource))
     seeder = _StubSeeder(_Described("VW Passat B8 2017", "Helix DSP Ultra S", 20), _Report(20))
 
-    dlg = _dialog_on(tmp_path / "the.car", seeder, monkeypatch)
+    picked = tmp_path / "the.car"
+    dlg = _dialog_on(picked, seeder, monkeypatch)
 
     assert len(dlg._seed_browse_buttons) == 2, "one browse button per source"
+    assert {src for src, _into, _kw in seeder.seeded_into} == {str(source)}, \
+        "the preview runs on what the source resolved, not on the typed file"
     said = dlg._seed_summary.text().split("\n")
     assert said[0].startswith(npd.i18n.t("npSeedSummary").split("{")[0])
     assert said[1] == npd.i18n.t("npSeedNoSkill"), "the source's note sits under the summary"
-    assert said[-1] == npd.i18n.t("npSeedFindingsEvidence"), "its warning comes last"
+    assert said[-1] == npd.i18n.t("npSeedPlaceholder"), "its warning comes last"
 
     dlg._seed_edit.setText(str(tmp_path / "x.bad"))
+    refusal = npd.i18n.t("npSeedFailed").format(problem="not a car file")
+    assert dlg._seed_summary.text() == refusal, "said while it is typed, not after Create"
+    assert dlg._seed_summary.property("class") == "kv-warn"
     target = tmp_path / "new"
     dlg._folder_edit.setText(str(target))
     dlg._on_create()
-    assert npd.i18n.t("npSeedFailed").format(problem="not a car file") in dlg._seed_summary.text()
+    assert dlg._seed_summary.text() == refusal
     assert not target.exists(), "a refused file creates no project"
-    assert all(into != str(target) for _src, into, _kw in seeder.seeded_into), "nor copies into it"
 
+    dlg._seed_edit.setText(str(picked))
     released = len(_FileSource.released)
-    dlg.reject()
+    dlg._on_create()
+    assert seeder.seeded_into[-1][:2] == (str(source), str(target)), "copied from what it resolved"
+    assert dlg.seeded_from == picked, "and named after what the person picked"
+    assert dlg.result() == npd.QDialog.DialogCode.Accepted
     assert len(_FileSource.released) == released + 1, "closing lets go of what was held"
+
+
+class _BrokenSource:
+    """A source whose reading fails: a package that will not unpack (G13 review)."""
+
+    chooser = None  # set by the test
+    released: list = []
+
+    def accepts(self, path):
+        return path.suffix == ".car"
+
+    def resolve(self, path):
+        raise OSError("the package is damaged")
+
+    def release(self):
+        type(self).released.append(True)
+
+
+class _StuckSource(_BrokenSource):
+    """A source that reads, then cannot let go: a temporary folder Windows keeps."""
+
+    folder = None
+
+    def resolve(self, path):
+        from autosound_tcc.ui.tcc import car_source
+
+        return car_source.Resolved(type(self).folder)
+
+    def release(self):
+        type(self).released.append(True)
+        raise PermissionError(32, "The file is in use", "car.tmp")
+
+
+def _with_source(kind, monkeypatch):
+    from autosound_tcc.ui.tcc import car_source
+
+    kind.chooser = car_source.Chooser("file", "npBrowse", "npSeedFrom")
+    kind.released = []
+    monkeypatch.setattr(car_source, "SOURCES", (kind, car_source.FolderSource))
+
+
+def test_a_source_that_raises_refuses_the_copy_and_creates_nothing(tmp_path, monkeypatch):
+    """A raised fault read as "nothing typed": the note went blank, «Copy» stayed enabled, and
+    pressing it made and opened an empty, unseeded project (the G13 review reproduced it)."""
+    _with_source(_BrokenSource, monkeypatch)
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), _Report(4))
+    dlg = _dialog_on(tmp_path / "broken.car", seeder, monkeypatch)
+
+    refusal = npd.i18n.t("npSeedFailed").format(problem="the package is damaged")
+    assert dlg._seed_summary.text() == refusal
+    assert dlg._seed_summary.property("class") == "kv-warn"
+    target = tmp_path / "new"
+    dlg._folder_edit.setText(str(target))
+    dlg._on_create()
+    assert not target.exists() and dlg.project_dir is None and seeder.seeded_into == []
+
+
+def test_copy_with_nothing_named_creates_nothing(tmp_path, monkeypatch):
+    """«Copy» with the source field empty made an empty project, as if copying were not chosen."""
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), _Report(4))
+    dlg = _dialog_on("", seeder, monkeypatch)
+    target = tmp_path / "new"
+    dlg._folder_edit.setText(str(target))
+    dlg._on_create()
+    assert not target.exists() and dlg.project_dir is None
+    assert dlg._seed_summary.text() == npd.i18n.t("npSeedEmpty")
+    assert dlg._seed_summary.property("class") == "kv-warn"
+
+
+def test_a_source_that_cannot_let_go_does_not_keep_the_dialog_open(tmp_path, monkeypatch):
+    _with_source(_StuckSource, monkeypatch)
+    _StuckSource.folder = tmp_path
+    seeder = _StubSeeder(None, _Report(0))
+    dlg = _dialog_on(tmp_path / "held.car", seeder, monkeypatch)
+    dlg.show()
+    dlg.reject()
+    assert not dlg.isVisible() and dlg.result() == npd.QDialog.DialogCode.Rejected
+    assert _StuckSource.released == [True], "it was asked to let go"
+
+
+def test_a_source_s_lines_stay_when_what_it_holds_is_not_a_project(tmp_path, monkeypatch):
+    """A package that unpacks without a project.json still says what it is and what it warns of."""
+    from autosound_tcc.ui.tcc import car_source
+
+    _FileSource.chooser = car_source.Chooser("file", "npBrowse", "npSeedFrom")
+    _FileSource.folder = tmp_path
+    monkeypatch.setattr(car_source, "SOURCES", (_FileSource, car_source.FolderSource))
+    dlg = _dialog_on(tmp_path / "the.car", _StubSeeder(None, _Report(0)), monkeypatch)
+    assert dlg._seed_summary.text().split("\n") == [
+        npd.i18n.t(key) for key in ("npSeedNotAProject", "npSeedNoSkill", "npSeedPlaceholder")]
+
+
+def test_each_browse_button_opens_its_own_source_s_chooser(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc import car_source
+
+    _FileSource.chooser = car_source.Chooser("file", "npSeedFindings", "npSeedFrom",
+                                             "npSeedPlaceholder")
+    _FileSource.folder = tmp_path
+    monkeypatch.setattr(car_source, "SOURCES", (_FileSource, car_source.FolderSource))
+    asked = []
+    monkeypatch.setattr(npd.QFileDialog, "getOpenFileName",
+                        lambda _parent, title, _start, wanted:
+                        asked.append(("file", title, wanted)) or (str(tmp_path / "p.car"), wanted))
+    monkeypatch.setattr(npd.QFileDialog, "getExistingDirectory",
+                        lambda _parent, title, _start:
+                        asked.append(("folder", title)) or str(tmp_path / "picked"))
+    dlg = _dialog_on("", _StubSeeder(None, _Report(0)), monkeypatch)
+
+    file_button, folder_button = dlg._seed_browse_buttons
+    assert file_button.text() == npd.i18n.t("npSeedFindings") and dlg._seed_browse is file_button
+    assert folder_button.text() == npd.i18n.t("npBrowse")
+    file_button.click()
+    assert dlg._seed_edit.text() == str(tmp_path / "p.car")
+    folder_button.click()
+    assert dlg._seed_edit.text() == str(tmp_path / "picked")
+    assert asked == [("file", npd.i18n.t("npSeedFrom"), npd.i18n.t("npSeedPlaceholder")),
+                     ("folder", npd.i18n.t("npSeedFrom"))]
+
+
+def test_a_sentence_missing_its_argument_is_shown_unfilled_and_logged(caplog):
+    from autosound_tcc.ui.tcc import car_source
+
+    said = npd._said(car_source.Line("npSeedFailed", {"wrong": "x"}))
+    assert said == npd.i18n.t("npSeedFailed") and "npSeedFailed" in caplog.text
