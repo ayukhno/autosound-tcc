@@ -8,6 +8,11 @@ an expected failure until then. On a copy whose `rew_tool/write_lock.py` declare
 the mark's condition is False and the test runs as a plain one; a copy that closes the race some
 other way passes it under the mark, and `strict` turns that into a red. Either way the mark comes
 off in that commit.
+
+The order is forced, never timed. On a copy that does not lock itself — every copy today — the bare
+writer is let go only once TCC's write has returned, however long that takes. Only on a copy that
+locks itself, where TCC's write cannot land while the bare one is held, is it let go after
+`TCC_LANDS_S`.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import process_writer, project_lock, vendor_loader
+from autosound_tcc.core import method_cli, process_writer, project_lock, vendor_loader
 
 from tests import _intake
 
@@ -30,12 +35,16 @@ from tests import _intake
 TCC_STEP = ("2.6", "added by TCC")
 BARE_STEP = ("2.7", "added by the bare CLI")
 
-#: How long TCC's write may take to land while the bare one is held. Today nothing it waits for is
-#: held by the bare writer, so «go» follows the moment it lands. A method that locks itself holds
-#: its lock across load → write → append, so there TCC's write cannot land until the bare one lets
-#: go: this is when it is let go, and it stays short of the 10 s a locking child waits for its lock
-#: (PLAN-AUDIT-2026-10 §5.4).
+#: Only where the method locks itself: when the held bare writer is let go. Such a method holds its
+#: lock across load → write → append, so TCC's write cannot land while the bare one is held, and
+#: waiting for it would wait out the lock. Short of the 10 s a locking child waits for its lock
+#: (PLAN-AUDIT-2026-10 §5.4). Today it plays no part: «go» waits for TCC's write.
 TCC_LANDS_S = 5.0
+
+#: TCC's write is bounded on its own: the lock wait off the GUI thread, then the child's timeout.
+#: One that has not returned by this point never will, and the test fails saying so instead of
+#: letting the bare writer go first.
+_TCC_RETURNS_S = method_cli.LOCK_WAIT_S + process_writer.DEFAULT_TIMEOUT_S + 10.0
 
 #: The bare CLI as a person or another agent runs it — `python process.py <process-dir> add-step
 #: <id> <name>`, from the copy TCC runs — held at the one point that decides the race: its first
@@ -97,13 +106,15 @@ def _tcc_writes_while_the_bare_cli_is_held(project: Path, harness: Path) -> None
 
     The order is forced, not hoped for: the race test in `test_process_writer.py` lost its race
     about one run in twelve, and under `strict` a race that happens not to lose is a red. The bare
-    writer loads and says «loaded»; TCC's write lands; «go»; the bare writer saves what it loaded.
-    TCC's write runs on a worker so that a method that locks itself can make it wait rather than
-    deadlock the test — see `TCC_LANDS_S`.
+    writer loads and says «loaded»; TCC's write runs and returns, on a slow runner as on a fast one;
+    «go»; the bare writer saves what it loaded. Only on a copy that locks itself is «go» sent after
+    `TCC_LANDS_S` instead, because there TCC's write waits for the bare writer's lock — which is
+    why it runs on a worker: the test can let the bare one go rather than deadlock.
 
     A harness that breaks fails as itself — a RuntimeError, or TCC's own exception — never as the
     AssertionError the expected failure is about.
     """
+    locks_itself = project_lock.locks_itself(vendor_loader.skill_dir())
     harness.mkdir()
     loaded, go = harness / "loaded", harness / "go"
     wrapper = harness / "bare_write.py"
@@ -115,15 +126,18 @@ def _tcc_writes_while_the_bare_cli_is_held(project: Path, harness: Path) -> None
         env=vendor_loader.child_env(),
     )
     said_loaded = False
+    pool = ThreadPoolExecutor(max_workers=1)
     try:
         said_loaded = _held_until_loaded(loaded, bare)
         if said_loaded:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                tcc = pool.submit(process_writer.add_step, project, *TCC_STEP)
-                wait([tcc], timeout=TCC_LANDS_S)
-                go.touch()
-                tcc.result()  # TCC's own failure, raised as itself
+            tcc = pool.submit(process_writer.add_step, project, *TCC_STEP)
+            wait([tcc], timeout=TCC_LANDS_S if locks_itself else _TCC_RETURNS_S)
+            if not tcc.done() and not locks_itself:
+                raise RuntimeError(f"TCC's write did not return within {_TCC_RETURNS_S:g} s")
+            go.touch()
+            tcc.result(timeout=_TCC_RETURNS_S)  # TCC's own failure, raised as itself
     finally:
+        pool.shutdown(wait=False)  # a write that never returns does not hold the test with it
         go.touch()  # whatever happened above, the bare writer is not left waiting
         try:
             out, err = bare.communicate(timeout=30)
