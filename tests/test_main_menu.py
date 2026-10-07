@@ -170,3 +170,41 @@ def test_a_tip_shows_in_the_rounded_popup_and_a_bare_line_hides_it():
     assert popup.isVisible()
     main_menu.show_action_tip(menu.action("bare"))
     assert not popup.isVisible()
+
+
+def test_the_tip_follows_the_highlight_and_goes_with_the_menu():
+    menu = _menu([MenuEntry("tipped", "project", label="Tipped", tip_key="projectFreshSessionTip",
+                            on=print)])
+    drawn = menu.render()
+    popup = rounded_tooltip.RoundedTooltip.instance()
+    drawn.hovered.emit(menu.action("tipped"))
+    assert popup.isVisible()
+    drawn.aboutToHide.emit()
+    assert not popup.isVisible()
+
+
+def test_a_predicate_that_fails_greys_its_line_and_the_rest_still_sync(caplog):
+    """A line whose state cannot be asked is shown off and unticked, and said in the log; before,
+    the first one stopped `sync()` and left «Save state» enabled with no gate or EQ tick."""
+    def broken(_w):
+        raise AttributeError("_view")
+
+    host = _Host()
+    entries = [MenuEntry("bad", "session", label="Bad", on=print, enabled=broken),
+               MenuEntry("tick", "session", label="Tick", on=print, checked=broken),
+               MenuEntry("save", "session", label="Save", on=print, enabled=lambda w: w.running)]
+    menu = _menu(entries, host)
+    menu.render()
+    assert not menu.action("bad").isEnabled()
+    assert not menu.action("tick").isEnabled() and not menu.action("tick").isChecked()
+    host.running = True
+    menu.sync()
+    assert menu.action("save").isEnabled(), "a broken line does not stop the others"
+    assert "'bad'" in caplog.text and "'tick'" in caplog.text
+
+
+def test_a_render_says_what_is_wrong_with_its_lines(caplog):
+    menu = _menu([MenuEntry("twice", "project", label="One", on=print),
+                  MenuEntry("twice", "help", label="Two", on=print)])
+    menu.render()
+    assert "main menu" in caplog.text and "'twice'" in caplog.text

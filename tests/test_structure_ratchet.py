@@ -3,7 +3,9 @@
 Progress is two numbers — the file's lines and the full windows the tests build. A decision pulled
 out of the window into a Qt-free module (the `row_rule` precedent, F-091) lowers both: its window
 tests become plain-function tests. A bound is lowered in the commit that shrinks the file, never
-raised.
+raised -- and a measure that sits more than its slack under the bound fails too, so the room a
+change frees is not spent by the next one. A build inside a helper counts once however many tests
+call it: moving builds into a helper is not a way to lower the bound (the G13 review).
 
 The next decisions to pull out — they live only on the window and are pinned by window tests:
 `_capture_version`, `_effective_gate`, the compare default, the preset choice in `_load_project`,
@@ -30,6 +32,9 @@ MAIN_WINDOW_MAX_LINES = 6270
 #: Full-window builds in the tests, outside comments (W-8: 223 on 2026-10-06, 218 after the menu
 #: tests became renderer tests, #161).
 WINDOW_BUILDS_MAX = 218
+#: How far under its bound a measure may sit before the bound must come down with it.
+SLACK_LINES = 20
+SLACK_BUILDS = 2
 
 
 def lines_of(path: Path) -> int:
@@ -51,12 +56,24 @@ def over(measured: int, bound: int, what: str) -> Optional[str]:
             "precedent) instead of adding to it; the bound is lowered, never raised.")
 
 
+def slack(measured: int, bound: int, allowed: int, what: str) -> Optional[str]:
+    if bound - measured <= allowed:
+        return None
+    return (f"{what}: {measured} is {bound - measured} under its bound {bound}. Lower the bound to "
+            f"{measured} in this commit, so the room is not spent by the next change.")
+
+
 def test_main_window_does_not_grow():
-    assert over(lines_of(WINDOW), MAIN_WINDOW_MAX_LINES, "main_window.py lines") is None
+    measured = lines_of(WINDOW)
+    assert over(measured, MAIN_WINDOW_MAX_LINES, "main_window.py lines") is None
+    assert slack(measured, MAIN_WINDOW_MAX_LINES, SLACK_LINES, "main_window.py lines") is None
 
 
 def test_the_tests_build_no_more_full_windows():
-    assert over(window_builds(ROOT / "tests"), WINDOW_BUILDS_MAX, "full-window builds") is None
+    measured = window_builds(ROOT / "tests")
+    assert measured > 0, "the walk found no test files: a moved folder would pass this"
+    assert over(measured, WINDOW_BUILDS_MAX, "full-window builds") is None
+    assert slack(measured, WINDOW_BUILDS_MAX, SLACK_BUILDS, "full-window builds") is None
 
 
 def test_the_ratchet_goes_red_past_its_bound(tmp_path):
@@ -68,3 +85,4 @@ def test_the_ratchet_goes_red_past_its_bound(tmp_path):
     assert over(lines_of(tmp_path / "w.py"), 2, "w") is not None
     assert over(lines_of(tmp_path / "w.py"), 3, "w") is None
     assert window_builds(tmp_path) == 2
+    assert slack(3, 24, 20, "w") is not None and slack(3, 23, 20, "w") is None

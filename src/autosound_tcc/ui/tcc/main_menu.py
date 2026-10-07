@@ -14,6 +14,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtGui import QAction, QCursor, QDesktopServices
 from PySide6.QtWidgets import QMenu
 
+from autosound_tcc.core import app_log
 from autosound_tcc.ui.tcc import i18n, menu_registry, rounded_tooltip
 from autosound_tcc.ui.tcc.menu_registry import MenuEntry
 
@@ -76,6 +77,8 @@ class MainMenu:
 
     def render(self) -> QMenu:
         entries = self._entries()
+        for problem in menu_registry.problems(entries, set(i18n.T["en"])):
+            app_log.logger().warning("main menu: %s", problem)
         self._actions, self._lines = {}, []
         menu = tip_menu(self._button)
         for section, key in menu_registry.SECTIONS:
@@ -93,12 +96,18 @@ class MainMenu:
         return menu
 
     def sync(self) -> None:
-        """Re-ask every line whether it is enabled and whether it is ticked."""
+        """Re-ask every line whether it is enabled and whether it is ticked. A line whose state
+        cannot be asked is shown off and unticked, and logged; the others still sync."""
         for entry, action in self._lines:
-            if entry.enabled is not None:
-                action.setEnabled(bool(entry.enabled(self._host)))
-            if entry.checked is not None:
-                action.setChecked(bool(entry.checked(self._host)))
+            try:
+                action.setEnabled(bool(entry.enabled(self._host)) if entry.enabled else True)
+                if entry.checked is not None:
+                    action.setChecked(bool(entry.checked(self._host)))
+            except Exception:  # noqa: BLE001 — one line must not stop the menu's state
+                app_log.logger().warning("main menu: the line %r could not say its state",
+                                         entry.id, exc_info=True)
+                action.setEnabled(False)
+                action.setChecked(False)
 
     def action(self, entry_id: str) -> Optional[QAction]:
         return self._actions.get(entry_id)

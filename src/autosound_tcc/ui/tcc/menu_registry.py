@@ -8,7 +8,9 @@ wins, or `url()`, a page opened in the browser. A handler gets the host and noth
 
 A feature adds its lines without touching the window: its module is named in `PROVIDERS`, its
 `menu_entries()` returns them, and `before=` / `after=` another line's id puts each one where it
-belongs. `main_menu.py` draws the tree; this module imports no Qt.
+belongs. `main_menu.py` draws the tree; this module imports no Qt. A provider that fails is logged
+and left out, so one bad feature cannot stop the window from opening; `problems()` names what
+would draw wrong, and the renderer logs it on every render.
 
 The order is the order of a working day, not an alphabet: which project · what the session is
 doing · the tools beside the work · where to ask for help. Frequently-used items keep their own
@@ -23,7 +25,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from autosound_tcc.core import guide
+from autosound_tcc.core import app_log, guide
 from autosound_tcc.core.shell_gate import GATE_AUTO, GATE_FOREIGN, GATE_NEVER, GATE_WRITES
 from autosound_tcc.ui.tcc import i18n
 
@@ -64,6 +66,10 @@ SECTIONS: tuple[tuple[str, str], ...] = (("project", "menuProject"), ("session",
 #: Modules whose `menu_entries()` adds lines; read when `collect()` runs.
 PROVIDERS: tuple[str, ...] = ()
 
+#: The window attributes tests drive lines by — closed at these five (G13, #161).
+WINDOW_ALIASES = frozenset({"_intake_action", "_reload_action", "_import_action",
+                            "_gate_actions", "_eq_order_actions"})
+
 # Support links (user request 2026-07-28), same two channels + wording as the skill's own
 # README (all locales) -- GitHub Sponsors first (no fees, familiar to devs with an account),
 # Monobank jar as the no-account fallback (one tap, Apple Pay/Google Pay/card).
@@ -72,8 +78,9 @@ MONOBANK_URL = "https://send.monobank.ua/jar/8wThVcodjm"
 
 
 def _session_running(host) -> bool:
-    """Saving the state and a fresh session need a session to act on."""
-    return getattr(host, "_agent_worker", None) is not None
+    """Saving the state and a fresh session need a session to act on. Read straight: a renamed
+    attribute fails loudly (`MainMenu.sync` logs it) instead of greying both lines for good."""
+    return host._agent_worker is not None
 
 
 def _eq_orders() -> list[MenuEntry]:
@@ -197,7 +204,10 @@ def collect() -> list[MenuEntry]:
     """The window's lines, then every provider's, in `PROVIDERS` order."""
     entries = window_entries()
     for name in PROVIDERS:
-        entries.extend(importlib.import_module(name).menu_entries())
+        try:
+            entries.extend(importlib.import_module(name).menu_entries())
+        except Exception:  # noqa: BLE001 — one bad feature must not stop the window opening
+            app_log.logger().exception("main menu: the lines of %s are left out", name)
     return entries
 
 
@@ -229,12 +239,27 @@ def problems(entries, known_keys) -> list[str]:
     found = []
     counts = Counter(e.id for e in entries)
     found += [f"{entry_id!r}: the id is used {n} times" for entry_id, n in counts.items() if n > 1]
-    places = {section for section, _key in SECTIONS} | {e.id for e in entries if e.submenu}
+    sections = {section for section, _key in SECTIONS}
+    submenus = {e.id for e in entries if e.submenu}
+    reachable = set(sections)
+    grown = True
+    while grown:  # a submenu is drawn only inside a place that is drawn
+        more = {e.id for e in entries if e.submenu and e.place in reachable} - reachable
+        reachable |= more
+        grown = bool(more)
     found += [f"section heading key {key!r} is not in the strings"
               for _section, key in SECTIONS if key not in known_keys]
     for entry in entries:
-        if entry.place not in places:
+        if entry.place not in sections | submenus:
             found.append(f"{entry.id!r}: no section or submenu is called {entry.place!r}")
+        elif entry.place not in reachable:
+            found.append(f"{entry.id!r}: its place {entry.place!r} is not reached from any section")
+        if entry.submenu and entry.id in sections:
+            found.append(f"{entry.id!r}: a submenu may not be named like a section")
+        if entry.alias and entry.alias not in WINDOW_ALIASES:
+            found.append(f"{entry.id!r}: the alias {entry.alias!r} is not one of the window's five")
+        if entry.alias_key and not entry.alias:
+            found.append(f"{entry.id!r}: an alias_key without an alias")
         if entry.before and entry.after:
             found.append(f"{entry.id!r}: both before= and after= are set")
         for anchor in (entry.before, entry.after):

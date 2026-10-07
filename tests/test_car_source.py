@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
-import textwrap
 
 import pytest
 
 from autosound_tcc.ui.tcc import car_source
 from autosound_tcc.ui.tcc.car_source import Chooser, FolderSource, Line, Picker, Resolved
+from tests._fresh import qt_loaded
 
 
 class _Counting:
@@ -70,13 +68,10 @@ def test_the_sources_are_read_when_a_picker_is_made(monkeypatch, tmp_path):
 
 
 def test_the_car_source_imports_no_qt():
-    done = subprocess.run([sys.executable, "-c", textwrap.dedent("""
-        import sys
+    assert qt_loaded("""
         from autosound_tcc.ui.tcc import car_source
-        print(sorted(m for m in sys.modules if m.split(".")[0] in ("PySide6", "shiboken6")))
-    """)], capture_output=True, text=True, timeout=120, check=False)
-    assert done.returncode == 0, done.stderr
-    assert done.stdout.strip() == "[]"
+        car_source.Picker().resolve(".")
+    """) == "[]"
 
 
 class _Raising:

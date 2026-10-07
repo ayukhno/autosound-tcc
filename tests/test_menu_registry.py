@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import subprocess
+import inspect
 import sys
-import textwrap
 import types
 
 from autosound_tcc.core import guide
 from autosound_tcc.ui.tcc import i18n, menu_registry
 from autosound_tcc.ui.tcc.menu_registry import MenuEntry
 from tests import _menu_pin
+from tests._fresh import qt_loaded
 
 
 class _Recorder:
@@ -61,15 +61,64 @@ def test_copy_the_car_asks_for_a_seeded_dialog():
                           ("_open_new_project_dialog", (), {})]
 
 
-def test_a_handler_is_called_with_its_own_argument_and_nothing_of_qt_s():
+def _does(entry):
+    """What pressing the line does: the one window call it makes, or the page it opens."""
+    if entry.url is not None:
+        return ("page", entry.url())
     host = _Recorder()
-    for entry_id in ("gate_foreign", "eq_q_first", "lang_uk", "start_session", "target_tool"):
-        _entry(entry_id).on(host)
-    assert host.calls == [("_set_gate_mode", ("foreign",), {}),
-                          ("_set_eq_order_pref", ("q_first",), {}),
-                          ("_on_language_selected", ("uk",), {}),
-                          ("_start_tuning_session", (), {}),
-                          ("_open_target_curve_tool", (), {})]
+    entry.on(host)
+    (call,) = host.calls
+    return call
+
+
+def test_every_line_does_what_the_old_menu_did(monkeypatch):
+    """Keyed by what the line SAYS, from the deleted `_build_main_menu`: two handlers swapped, a
+    lambda that lost its captured value, or two EQ orders swapped under unchanged labels all fail
+    here (the G13 review's mutants passed the earlier five-line sample). Each call also binds to
+    the window method's own signature."""
+    from autosound_tcc.ui.tcc.main_window import MainWindow
+
+    monkeypatch.setattr(guide, "installed_guide_url", lambda page=guide.QUICK_GUIDE: f"v9/{page}")
+    t = i18n.t
+    expected = [
+        (t("projectOpen"), ("_choose_project_folder", (), {})),
+        (t("projectNew"), ("_open_new_project_dialog", (), {})),
+        (t("menuCopyCar"), ("_open_new_project_dialog", (), {"seed": True})),
+        (t("menuIntake"), ("_open_intake_form", (), {})),
+        (t("menuReload"), ("_on_reload_pressed", (), {})),
+        (t("menuStartSession"), ("_start_tuning_session", (), {})),
+        (t("menuTerminal"), ("_open_terminal", (), {})),
+        (t("projectSaveState"), ("_save_project_state", (), {})),
+        (t("projectFreshSession"), ("_start_fresh_session", (), {})),
+        (t("menuDiagnostics"), ("_open_diagnostics", (), {})),
+        (t("riImport"), ("_open_resonalyze_import", (), {})),
+        (t("menuTargetTool"), ("_open_target_curve_tool", (), {})),
+        (t("eqOrderAuto"), ("_set_eq_order_pref", ("auto",), {})),
+        ("Freq · Gain · Q", ("_set_eq_order_pref", ("gain_first",), {})),
+        ("Freq · Q · Gain", ("_set_eq_order_pref", ("q_first",), {})),
+        (t("menuModels"), ("_open_model_config", (), {})),
+        (t("menuReviewerKey"), ("_open_reviewer_key", (), {})),
+        (t("gateWrites"), ("_set_gate_mode", ("writes",), {})),
+        (t("gateForeign"), ("_set_gate_mode", ("foreign",), {})),
+        (t("gateAuto"), ("_set_gate_mode", ("auto",), {})),
+        (t("gateNever"), ("_set_gate_mode", ("never",), {})),
+        ("◐ " + t("menuTheme"), ("_toggle_theme", (), {})),
+        *[(t(key), ("_on_language_selected", (code,), {})) for code, key, _badge in i18n.LANGS],
+        (t("menuZoomIn"), ("_zoom_in", (), {})),
+        (t("menuZoomOut"), ("_zoom_out", (), {})),
+        (t("menuGuideQuick"), ("page", "v9/QUICK-GUIDE.md")),
+        (t("menuGuideFull"), ("page", "v9/REFERENCE.md")),
+        (t("menuGuideCurve"), ("page", "v9/HOUSE-CURVE.md")),
+        ("💬 " + t("fbBig"), ("_open_feedback", (), {})),
+        (t("supportGithub"), ("page", menu_registry.SPONSORS_URL)),
+        (t("supportMonobank"), ("page", menu_registry.MONOBANK_URL)),
+    ]
+    lines = [e for e in menu_registry.window_entries() if not e.submenu]
+    assert [(e.text(), _does(e)) for e in lines] == expected
+    for _text, (name, *rest) in expected:
+        if name != "page":
+            args, kwargs = rest
+            inspect.signature(getattr(MainWindow, name)).bind(None, *args, **kwargs)
 
 
 def test_the_window_s_menu_has_no_problems():
@@ -163,6 +212,58 @@ def test_problems_name_a_line_that_does_nothing_and_an_anchor_nowhere():
     assert "'mute'" in said and "'lost'" in said and "ghost" in said
 
 
+def test_an_anchor_to_an_anchored_line_follows_it():
+    entries = [MenuEntry("p", "tools", label="P", on=print, before="q"),
+               MenuEntry("q", "tools", label="Q", on=print, before="b"),
+               MenuEntry("a", "tools", label="A", on=print),
+               MenuEntry("b", "tools", label="B", on=print)]
+    assert [e.id for e in menu_registry.ordered(entries, "tools")] == ["a", "p", "q", "b"]
+
+
+def test_problems_name_a_submenu_nothing_reaches_and_one_named_like_a_section():
+    """Each drew wrong with no word said: a submenu placed inside itself vanished with its lines,
+    and a submenu called "tools" drew the whole TOOLS section twice."""
+    entries = [MenuEntry("loop", "loop", label="Loop", submenu=True),
+               MenuEntry("inside", "loop", label="In", on=print),
+               MenuEntry("tools", "help", label="Tools again", submenu=True)]
+    said = " ".join(menu_registry.problems(entries, set(i18n.T["en"])))
+    assert "'loop'" in said and "'inside'" in said and "'tools'" in said
+
+
+def test_problems_refuse_an_alias_outside_the_window_s_five():
+    """A provider line with alias="_status_strip" replaced the window's status strip."""
+    entries = [MenuEntry("x", "tools", label="X", on=print, alias="_status_strip"),
+               MenuEntry("y", "tools", label="Y", on=print, alias_key="k")]
+    said = " ".join(menu_registry.problems(entries, set(i18n.T["en"])))
+    assert "_status_strip" in said and "'y'" in said
+
+
+def test_problems_name_both_anchors_a_line_that_says_nothing_and_a_lost_heading(monkeypatch):
+    monkeypatch.setattr(menu_registry, "SECTIONS",
+                        menu_registry.SECTIONS + (("extra", "noSuchHeading"),))
+    entries = [MenuEntry("both", "tools", label="B", on=print, before="a", after="a"),
+               MenuEntry("a", "tools", label="A", on=print),
+               MenuEntry("mute", "tools", on=print)]
+    said = " ".join(menu_registry.problems(entries, set(i18n.T["en"])))
+    assert "'both'" in said and "'mute'" in said and "noSuchHeading" in said
+
+
+def test_a_provider_that_fails_is_logged_and_skipped(monkeypatch, caplog):
+    """One bad feature must not stop the window from opening: its lines are left out, and why is
+    in the log."""
+    feature = types.ModuleType("tcc_broken_feature")
+
+    def menu_entries():
+        raise RuntimeError("the feature broke")
+
+    feature.menu_entries = menu_entries
+    monkeypatch.setitem(sys.modules, "tcc_broken_feature", feature)
+    monkeypatch.setattr(menu_registry, "PROVIDERS", ("tcc_missing_feature", "tcc_broken_feature"))
+    assert [e.id for e in menu_registry.collect()] == [e.id for e in menu_registry.window_entries()]
+    assert "tcc_broken_feature" in caplog.text and "the feature broke" in caplog.text
+    assert "tcc_missing_feature" in caplog.text
+
+
 def test_collect_reads_the_providers_when_it_is_called(monkeypatch):
     """A feature adds its line by naming its module in PROVIDERS: nothing in the window changes."""
     feature = types.ModuleType("tcc_fake_feature")
@@ -177,14 +278,10 @@ def test_collect_reads_the_providers_when_it_is_called(monkeypatch):
 
 
 def test_the_registry_imports_no_qt():
-    done = subprocess.run([sys.executable, "-c", textwrap.dedent("""
-        import sys
+    assert qt_loaded("""
         from autosound_tcc.ui.tcc import i18n, menu_registry
         entries = menu_registry.collect()
         assert menu_registry.problems(entries, set(i18n.T["en"])) == []
         for place, _key in menu_registry.SECTIONS:
             menu_registry.ordered(entries, place)
-        print(sorted(m for m in sys.modules if m.split(".")[0] in ("PySide6", "shiboken6")))
-    """)], capture_output=True, text=True, timeout=120, check=False)
-    assert done.returncode == 0, done.stderr
-    assert done.stdout.strip() == "[]"
+    """) == "[]"

@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
-import textwrap
-
 import pytest
 
 from autosound_tcc.ui.tcc import i18n
+from tests._fresh import qt_loaded
 
 LANGS = ("en", "uk", "pl", "de")
 
@@ -35,7 +32,17 @@ def test_a_key_in_two_tables_is_refused_naming_both():
 def test_a_row_without_one_of_the_languages_is_refused():
     with pytest.raises(ValueError) as caught:
         i18n.assemble(_core(), [("strings.demo", {"c": {"en": "C", "uk": "C", "pl": "C"}})])
-    assert "'c'" in str(caught.value) and "de" in str(caught.value)
+    said = str(caught.value)
+    assert "'c'" in said and "de" in said and "strings.demo" in said
+
+
+def test_a_row_with_a_language_core_does_not_have_is_refused():
+    """A stray "ru", or "ua" beside "uk", would otherwise be dropped without a word."""
+    row = {lang: "E" for lang in LANGS} | {"ru": "E"}
+    with pytest.raises(ValueError) as caught:
+        i18n.assemble(_core(), [("strings.demo", {"e": row})])
+    said = str(caught.value)
+    assert "'e'" in said and "ru" in said and "strings.demo" in said
 
 
 def test_a_table_s_rows_reach_every_language():
@@ -48,21 +55,17 @@ def test_the_table_the_app_uses_is_the_join():
     assert i18n.T == i18n.assemble(i18n._CORE, i18n.strings.tables())
 
 
-def _fresh(code: str) -> str:
-    done = subprocess.run([sys.executable, "-c", textwrap.dedent(code)], capture_output=True,
-                          text=True, timeout=120, check=False)
-    assert done.returncode == 0, done.stderr
-    return done.stdout.strip()
-
-
 def test_the_lookup_imports_no_qt():
-    loaded = _fresh("""
-        import sys
+    assert qt_loaded("""
         from autosound_tcc.ui.tcc import i18n
         i18n.t("npCancel")
-        print(sorted(m for m in sys.modules if m.split(".")[0] in ("PySide6", "shiboken6")))
-    """)
-    assert loaded == "[]"
+    """) == "[]"
+
+
+def test_the_no_qt_probe_goes_red_on_code_that_loads_qt():
+    """Green by design, so shown failing: the probes of i18n, menu_registry and car_source share
+    this one."""
+    assert "PySide6.QtCore" in qt_loaded("import PySide6.QtCore")
 
 
 def test_the_copy_strings_live_with_their_feature():
