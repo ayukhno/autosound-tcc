@@ -231,6 +231,13 @@ class SignalBus:
                 return True
             return any(s.id == signal_id for s in self._pending)
 
+    def open_ids(self) -> set[str]:
+        """The ids `unacked_brief` lists — every signal raised and not yet acked — asked of the bus
+        rather than read back out of the brief's text, where a payload saying «id » sits before
+        the real one (G13, the window's nudge)."""
+        with self._cond:
+            return {signal.id for signal in (*self._pending, *self._delivered.values())}
+
     def unacked_brief(self) -> str:
         """The per-turn preamble: every open signal, or "" when there is nothing to say.
 

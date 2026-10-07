@@ -55,9 +55,15 @@ class ConfirmBar(QWidget):
     # reason is the one measured here all day: a gate that fires constantly is a gate that gets
     # clicked through, so the way to keep it meaningful is to let it be narrowed deliberately.
     alwaysAllowed = Signal(str)
+    # Asked, then given up on before an answer: the tool's clock ran out, and it was denied then.
+    # Said instead of `resolved`, so a click after it is never recorded as a verdict (G1 review).
+    expired = Signal(str)
+    #: A request's future finished — from the session's thread, so it arrives here queued.
+    _gave_up = Signal(object)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._gave_up.connect(self._on_gave_up)
         self._queue: list[tuple[ConfirmRequest, "Future[bool]"]] = []
         self._current: Optional[tuple[ConfirmRequest, "Future[bool]"]] = None
 
@@ -139,6 +145,14 @@ class ConfirmBar(QWidget):
         """Queue a confirmation. Safe to call for a request whose caller already gave up."""
         if future.done():  # the tool timed out or was cancelled while we were busy
             return
+
+        def finished(done, tell=self._gave_up.emit) -> None:
+            try:
+                tell(done)
+            except RuntimeError:  # the bar is gone: TCC is closing
+                pass
+
+        future.add_done_callback(finished)
         self._queue.append((request, future))
         if self._current is None:
             self._advance()
@@ -164,13 +178,26 @@ class ConfirmBar(QWidget):
         if self._current is None:
             return
         request, future = self._current
-        if allowed and self._always.isChecked():
-            self.alwaysAllowed.emit(request.tool)
+        always = allowed and self._always.isChecked()
         self._always.setChecked(False)  # a decision covers one kind, not the next one by accident
         self._current = None
-        if not future.done():
+        if future.done():  # given up on before this click: denied then, and said as that
+            self.expired.emit(request.tool)
+        else:
+            if always:
+                self.alwaysAllowed.emit(request.tool)
             future.set_result(allowed)
-        self.resolved.emit(request.tool, allowed)
+            self.resolved.emit(request.tool, allowed)
+        self._advance()
+
+    def _on_gave_up(self, future) -> None:
+        """The request on screen was given up on by its caller: take it down and say so."""
+        if self._current is None or self._current[1] is not future:
+            return  # answered here, or still queued (`_advance` skips a done one)
+        request, _future = self._current
+        self._current = None
+        self._always.setChecked(False)
+        self.expired.emit(request.tool)
         self._advance()
 
     def _advance(self) -> None:

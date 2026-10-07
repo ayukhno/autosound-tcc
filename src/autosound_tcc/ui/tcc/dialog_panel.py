@@ -416,6 +416,7 @@ class DialogPanel(QWidget):
         # next to the reasoning that led to it.
         self.confirm_bar = ConfirmBar()
         self.confirm_bar.resolved.connect(self._on_confirmation_resolved)
+        self.confirm_bar.expired.connect(self._on_confirmation_expired)
         outer.addWidget(self.confirm_bar)
 
         self._scroll = QScrollArea()
@@ -1134,7 +1135,10 @@ class DialogPanel(QWidget):
             # The adapter talking about the harness. Under the model's byline it read as the model
             # saying "omp has said nothing", which is a sentence no model would write.
             self._end_live_bubble()
-            self._add_system_message(f"⚠️ {item.text}", role=_SYS_ROLE_TCC)
+            # Escaped, line breaks kept: the text now carries the SDK's error and omp's stderr,
+            # and a model name in `<…>` vanished from the rich-text bubble (the G1 review).
+            self._add_system_message("⚠️ " + html.escape(item.text).replace("\n", "<br>"),
+                                     role=_SYS_ROLE_TCC)
         elif isinstance(item, Unasked):
             # The fourth gate choice asks about nothing (tcc#115), and what it let through that
             # would have asked under `auto` is said here, by TCC — never silently. Escaped: a shell
@@ -1170,11 +1174,14 @@ class DialogPanel(QWidget):
 
     def _end_live_bubble(self) -> None:
         """The live answer is over — a tool call, a notice, a question, the turn's end: draw what is
-        still waiting, then let the next text start a new bubble."""
-        self._draw_live_text()
-        self._live_bubble = None
-        self._live_text = ""
-        self._live_drawn = ""
+        still waiting, then let the next text start a new bubble. The reset holds even if the draw
+        raises: a turn's end must still re-enable the composer (the G2 review)."""
+        try:
+            self._draw_live_text()
+        finally:
+            self._live_bubble = None
+            self._live_text = ""
+            self._live_drawn = ""
 
     def _add_question(self, question: Question) -> None:
         """A structured question from the agent. The turn is parked inside the harness until it is
@@ -1477,6 +1484,9 @@ class DialogPanel(QWidget):
     def _on_confirmation_resolved(self, tool: str, allowed: bool) -> None:
         key = "confirmAllowed" if allowed else "confirmDenied"
         self._add_system_message(i18n.t(key).format(tool=tool))
+
+    def _on_confirmation_expired(self, tool: str) -> None:
+        self._add_system_message(i18n.t("confirmExpired").format(tool=tool))
 
     def _on_not_visible(self) -> None:
         if self._bus is None:

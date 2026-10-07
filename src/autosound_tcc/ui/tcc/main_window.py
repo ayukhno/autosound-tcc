@@ -29,7 +29,6 @@ from PySide6.QtCore import (
     QEvent,
     QFileSystemWatcher,
     QObject,
-    QPoint,
     QProcess,
     QRect,
     QThread,
@@ -81,6 +80,7 @@ from autosound_tcc.core import (
     project_trust,
     reviewer_key,
     self_check,
+    shell_gate,
     target_curve,
     terminal_launcher,
     title_fixes,
@@ -1790,6 +1790,7 @@ class MainWindow(QMainWindow):
 
     def _reread_after_agent(self) -> None:
         if getattr(self, "_closing", False):
+            app_log.logger().info("the agent's re-read is skipped: the window is closing")
             return  # a window on its way out — or left behind by a test — reloads nothing (F-053)
         self._safe_load_project()
         self._start_contract_check()
@@ -1808,9 +1809,9 @@ class MainWindow(QMainWindow):
         try:
             self._load_project()
         except Exception as exc:  # noqa: BLE001 - a rendering fault must not end the session
-            self._status_strip.notify(
-                i18n.t("projectRenderFailed").format(error=str(exc)[:200]), level="warn"
-            )
+            app_log.logger().exception("the project could not be drawn from disk")
+            self._status_strip.notify(i18n.t("projectRenderFailed").format(
+                error=f"{type(exc).__name__}: {str(exc)[:200]}"), level="warn")
 
     def _start_contract_check(self) -> None:
         """Ask the skill's own checker what this project looks like on disk (`contract.py --json`).
@@ -2770,16 +2771,8 @@ class MainWindow(QMainWindow):
         account, the Monobank jar as the no-account one-tap fallback. They are in the main menu
         too; this is the impulse path, and it costs one click instead of three.
         """
-        menu = main_menu.tip_menu(self)
-        github_action = menu.addAction(i18n.t("supportGithub"))
-        github_action.triggered.connect(
-            lambda: QDesktopServices.openUrl(QUrl(menu_registry.SPONSORS_URL))
-        )
-        mono_action = menu.addAction(i18n.t("supportMonobank"))
-        mono_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(menu_registry.MONOBANK_URL)))
-        top_left = self._coffee_btn.mapToGlobal(QPoint(0, 0))
-        menu.adjustSize()
-        menu.exec(QPoint(top_left.x(), top_left.y() - menu.sizeHint().height()))
+        support = [e for e in menu_registry.window_entries() if e.id.startswith("support_")]
+        main_menu.show_above(self._coffee_btn, main_menu.popup(self._coffee_btn, support, self))
 
     def _open_target_curve_tool(self, _event=None) -> None:
         """Open the method's comparison tool — and hand it this project's curve if it lacks it.
@@ -3476,6 +3469,7 @@ class MainWindow(QMainWindow):
                 curves.apply_theme()
             except RuntimeError:
                 self._curve_dialog = None  # closed and deleted since
+        self._publish_snapshot()  # the snapshot names the theme (the G2 review)
 
     def _repolish_all(self) -> None:
         """Force a re-polish so already-visible widgets pick up the new stylesheet immediately.
@@ -3843,9 +3837,7 @@ class MainWindow(QMainWindow):
         count = server.bus.pending_count
         if not count:
             return
-        brief = server.bus.unacked_brief()
-        fresh = [line for line in brief.splitlines() if "id " in line]
-        ids = {line.rsplit("id ", 1)[-1].rstrip(")") for line in fresh}
+        ids = server.bus.open_ids()  # what the turn's preamble lists, asked of the bus
         if ids <= open_ids:
             return  # nothing here that has not already been handed a turn
         if self._dialog.nudge_for_signals(count, i18n.t("signalNudgePrompt")):
@@ -4515,7 +4507,8 @@ class MainWindow(QMainWindow):
         server = self._mcp_server
         facts = {
             "MCP": (server.url if server is not None and getattr(server, "serving", False)
-                    else (getattr(self, "_mcp_error", "") or "not running")),
+                    else (getattr(server, "stopped_reason", None) or getattr(self, "_mcp_error", "")
+                          or "not running")),
         }
         model = getattr(self, "_running_model", None)
         if model:
@@ -4933,7 +4926,12 @@ class MainWindow(QMainWindow):
         one already knew, which costs more.
         """
         if getattr(self, "_handoff_timer", None) is not None:
-            return  # already saving; a second click must not start a second handoff
+            # Already saving: a second click starts no second handoff — but a quit asked meanwhile
+            # takes the running one over, or the window stayed open, closing (the G2 review).
+            if mode == "quit":
+                self._handoff_mode = mode
+                self._start_quit_wait()
+            return
         if _ended(worker) or not getattr(worker, "spoke", True):
             self._skip_handoff(worker, mode)
             return
@@ -4947,22 +4945,7 @@ class MainWindow(QMainWindow):
         }.get(mode, "sessionHandoff")))
         self._session_btn.setEnabled(False)
         if mode == "quit":
-            # The window is already on its way out and only waits for this turn -- for up to
-            # `_HANDOFF_TIMEOUT_MS`, which is three minutes of a window that looks frozen. Say so
-            # where a wait is normally reported, and stop the composer's queue from dispatching
-            # into a session being wound down: a message typed here used to be sent the instant
-            # the handoff turn ended, starting a fresh turn as the window closed (user,
-            # 2026-08-21, whose "як справи?" is what left a worker mid-turn during teardown).
-            self._status_strip.notify(i18n.t("quitSaving"), level="info")
-            # A three-minute wait behind a static line looks exactly like a hang, and that is
-            # what it looked like: "the command was sent and I cannot tell whether it is running,
-            # hung, or already done" (user, 2026-08-23). So the line counts, once a second, and
-            # names the ceiling it is counting towards.
-            self._quit_started = time.monotonic()
-            self._quit_tick = QTimer(self)
-            self._quit_tick.timeout.connect(self._tick_quit_saving)
-            self._quit_tick.start(1000)
-            self._dialog.hold_queue_for_quit()
+            self._start_quit_wait()
         worker.turn_done.connect(self._finish_handoff)
         worker.failed.connect(self._finish_handoff)
         # An agent that never finishes the turn must not strand the restart -- the point of the
@@ -4972,6 +4955,24 @@ class MainWindow(QMainWindow):
         self._handoff_timer.timeout.connect(self._finish_handoff)
         self._handoff_timer.start(_HANDOFF_TIMEOUT_MS)
         worker.send(_HANDOFF_PROMPT)
+
+    def _start_quit_wait(self) -> None:
+        # The window is already on its way out and only waits for this turn -- for up to
+        # `_HANDOFF_TIMEOUT_MS`, which is three minutes of a window that looks frozen. Say so
+        # where a wait is normally reported, and stop the composer's queue from dispatching
+        # into a session being wound down: a message typed here used to be sent the instant
+        # the handoff turn ended, starting a fresh turn as the window closed (user,
+        # 2026-08-21, whose "як справи?" is what left a worker mid-turn during teardown).
+        self._status_strip.notify(i18n.t("quitSaving"), level="info")
+        # A three-minute wait behind a static line looks exactly like a hang, and that is
+        # what it looked like: "the command was sent and I cannot tell whether it is running,
+        # hung, or already done" (user, 2026-08-23). So the line counts, once a second, and
+        # names the ceiling it is counting towards.
+        self._quit_started = time.monotonic()
+        self._quit_tick = QTimer(self)
+        self._quit_tick.timeout.connect(self._tick_quit_saving)
+        self._quit_tick.start(1000)
+        self._dialog.hold_queue_for_quit()
 
     def _skip_handoff(self, worker, mode: str) -> None:
         """A session with nothing to write down gets no save turn (tcc#56): one whose thread has
@@ -5155,6 +5156,10 @@ class MainWindow(QMainWindow):
             return
         if choice.harness == "omp" and not omp_session.is_available():
             self._dialog._add_system_message(i18n.t("ompMissing"))
+            return
+        if choice.harness == "omp" and getattr(server, "config_error", ""):
+            # omp reaches TCC only through `.mcp.json`: unwritten, it ran without TCC's tools.
+            self._dialog._add_system_message(i18n.t("mcpNoConfigOmp").format(error=server.config_error))
             return
         probe = TuningSession(project_dir=server.project_dir)  # cheap: only reads the registry
         # "Start a new session" means an empty context on purpose: the project's state is on disk
@@ -5647,17 +5652,9 @@ class MainWindow(QMainWindow):
     # ---- the project menu ---------------------------------------------------
 
     def _effective_gate(self) -> str:
-        """Which mode this project runs in: its own choice, else this machine's, else asked once.
-
-        Three layers and they are not interchangeable. The PROJECT wins when it was set — that is
-        somebody deciding about this car. The MACHINE answer is what a new project starts from.
-        And when the machine has never been asked, it is asked here, once, and the answer is kept.
-        """
-        return (
-            self._project_setting(_GATE_KEY)
-            or str(self._settings.value(_MACHINE_GATE_KEY, "") or "")
-            or omp_session.GATE_DEFAULT
-        )
+        """The mode this project runs in (`shell_gate.effective_gate`: project, machine, default)."""
+        return shell_gate.effective_gate(self._project_setting(_GATE_KEY),
+                                         str(self._settings.value(_MACHINE_GATE_KEY, "") or ""))
 
     def _ensure_default_terminal_answered(self) -> None:
         """Offer, once per machine, to make Windows' default terminal the old console host.
@@ -6053,6 +6050,9 @@ class MainWindow(QMainWindow):
                 # Cancel keeps the window, so it is not closing: every guard that reads the flag (the
                 # agent's re-read, the watcher, the settings writes) works again (review of #152).
                 self._closing = False
+                # What landed while the question was up was skipped: re-read it, once (G2 review).
+                self._agent_refresh_timer.start()
+                self._project_reload.start()
                 event.ignore()
                 return
             self._flush_own_state()  # instant and free either way

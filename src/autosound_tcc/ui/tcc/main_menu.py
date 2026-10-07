@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QPoint, QUrl
 from PySide6.QtGui import QAction, QCursor, QDesktopServices
 from PySide6.QtWidgets import QMenu
 
@@ -56,6 +56,30 @@ def add_heading(menu, text) -> None:
     # every other label in this window says "this names what is under it" (`apply_caps`).
     heading = menu.addAction(text.upper())
     heading.setEnabled(False)
+
+
+def popup(anchor, entries, host) -> QMenu:
+    """`entries` as a menu of their own for `anchor` — the footer's coffee button, the impulse path
+    to the menu's support lines (user, 2026-07-28): one click instead of three."""
+    menu = tip_menu(anchor)
+    for entry in entries:
+        action = menu.addAction(entry.text())
+        action.triggered.connect(lambda _checked=False, e=entry: _act(e, host))
+    return menu
+
+
+def show_above(anchor, menu) -> None:
+    """Open `menu` upward from `anchor`: the footer sits on the window's bottom edge."""
+    top_left = anchor.mapToGlobal(QPoint(0, 0))
+    menu.adjustSize()
+    menu.exec(QPoint(top_left.x(), top_left.y() - menu.sizeHint().height()))
+
+
+def _act(entry: MenuEntry, host) -> None:
+    if entry.on is not None:
+        entry.on(host)
+    elif entry.url is not None:
+        QDesktopServices.openUrl(QUrl(entry.url()))
 
 
 def _embolden(action) -> None:
@@ -131,10 +155,7 @@ class MainMenu:
             self._lines.append((entry, action))
 
     def _fire(self, entry: MenuEntry) -> None:
-        if entry.on is not None:
-            entry.on(self._host)
-        elif entry.url is not None:
-            QDesktopServices.openUrl(QUrl(entry.url()))
+        _act(entry, self._host)
 
     def _set_aliases(self) -> None:
         """The window attributes tests drive lines by; a dict alias starts empty on each render,

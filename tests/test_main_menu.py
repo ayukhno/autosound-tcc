@@ -208,3 +208,22 @@ def test_a_render_says_what_is_wrong_with_its_lines(caplog):
                   MenuEntry("twice", "help", label="Two", on=print)])
     menu.render()
     assert "main menu" in caplog.text and "'twice'" in caplog.text
+
+
+def test_a_popup_of_its_own_draws_the_lines_it_is_given_and_acts_on_them(monkeypatch):
+    """The coffee button's popup, from the registry's lines rather than a second copy of them."""
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+    _app()
+    button = QToolButton()
+    seen = []
+    host = _Host()
+    menu = main_menu.popup(button, [
+        MenuEntry("page", "help", label="Page", url=lambda: "https://example.invalid/p"),
+        MenuEntry("act", "help", label="Act", on=lambda *args: seen.append(args))], host)
+
+    assert [a.text() for a in menu.actions()] == ["Page", "Act"]
+    assert menu.property("class") == "support-menu"
+    for action in menu.actions():
+        action.trigger()
+    assert opened == ["https://example.invalid/p"] and seen == [(host,)]

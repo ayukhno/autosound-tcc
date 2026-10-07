@@ -8,10 +8,10 @@ change frees is not spent by the next one. A build inside a helper counts once h
 call it: moving builds into a helper is not a way to lower the bound (the G13 review).
 
 The next decisions to pull out — they live only on the window and are pinned by window tests:
-`_capture_version`, `_effective_gate`, the compare default, the preset choice in `_load_project`,
-the «settled» verdict parsed from text, the signal ids parsed from `unacked_brief` (pinned by
-`test_the_signal_nudge_reads_every_open_signals_id_from_the_brief`), the reviewer's state, and the
-delay maths mirrored in `curve_view` (`delay_bank`, `curve_sum`).
+`_capture_version`, the compare default, the preset choice in `_load_project`, the «settled»
+verdict parsed from text, the reviewer's state, and the delay maths mirrored in `curve_view`
+(`delay_bank`, `curve_sum`). Out already: the menu (`menu_registry`), the gate's three layers
+(`shell_gate.effective_gate`), the open signals' ids (`SignalBus.open_ids`) — W-8.
 """
 
 from __future__ import annotations

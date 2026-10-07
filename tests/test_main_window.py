@@ -1153,6 +1153,17 @@ def test_a_second_click_does_not_start_a_second_handoff(monkeypatch):
 
     assert len(worker.sent) == 1
 
+    # A quit asked while that handoff runs takes it over: it was dropped, and the window stayed
+    # open and closing, so every later agent write was skipped (the G2 review).
+    window._quitting = True  # as `closeEvent` sets it before asking for the quit handoff
+    window._hand_off(worker, "quit")
+    assert len(worker.sent) == 1, "still one turn"
+    assert window._handoff_mode == "quit" and window._quit_tick.isActive()
+    closed = []
+    monkeypatch.setattr(window, "close", lambda: closed.append(True))
+    worker.turn_done.emit()
+    assert closed == [True], "the turn landing closes the window"
+
 
 def test_a_failed_handoff_still_restarts(monkeypatch):
     """The handoff saves what can be saved; it does not make the swap conditional on saving it."""
@@ -3647,6 +3658,18 @@ def test_the_main_menu_gathers_the_whole_window_in_sections(monkeypatch):
                     (0, "line", "Save the car…", i18n.t("menuCopyCarTip"), False, False))
     assert _menu_pin.rows_of(window._menu_btn.menu()) == expected
 
+    # The greyed lines follow the window's own `_agent_worker` (the G13 review: only stand-in
+    # hosts were asked after the move).
+    menu = window._main_menu
+    assert not menu.action("save_state").isEnabled()
+    window._agent_worker = object()
+    try:
+        window._sync_menu_state()
+        assert menu.action("save_state").isEnabled() and menu.action("fresh_session").isEnabled()
+    finally:
+        window._agent_worker = None
+        window._sync_menu_state()
+
 
 def test_the_guides_submenu_is_bold_and_opens_the_three_guides_at_the_installed_version(
         monkeypatch):
@@ -3783,7 +3806,7 @@ def test_the_footer_s_omp_button_reads_omp_in_every_language(monkeypatch):
         window.hide()
 
 
-def test_the_thanks_and_feedback_buttons_are_in_the_footer_and_in_the_menu():
+def test_the_thanks_and_feedback_buttons_are_in_the_footer_and_in_the_menu(monkeypatch):
     """Both, on purpose (user, 2026-08-23). Saying thank you and reporting a bug are the two
     things somebody does on impulse, and an impulse does not open a menu -- but the menu is where
     a person LOOKS for a thing they have not pressed before."""
@@ -3797,6 +3820,23 @@ def test_the_thanks_and_feedback_buttons_are_in_the_footer_and_in_the_menu():
     labels = [a.text() for a in window._menu_btn.menu().actions()]
     assert any(i18n.t("fbBig") in label for label in labels)
     assert i18n.t("supportGithub") in labels and i18n.t("supportMonobank") in labels
+
+    # The coffee button's popup: the menu's own two support lines (G13; no test opened it).
+    from PySide6.QtGui import QDesktopServices
+
+    from autosound_tcc.ui.tcc import main_menu, menu_registry
+
+    shown, opened = [], []
+    monkeypatch.setattr(main_menu, "show_above", lambda _anchor, menu: shown.append(menu))
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+    window._open_support_menu()
+    (popup,) = shown
+    assert popup.property("class") == "support-menu"
+    assert [a.text() for a in popup.actions()] == [i18n.t("supportGithub"),
+                                                   i18n.t("supportMonobank")]
+    for action in popup.actions():
+        action.trigger()
+    assert opened == [menu_registry.SPONSORS_URL, menu_registry.MONOBANK_URL]
 
 
 def _row_width_report(window, footer) -> str:
@@ -7616,6 +7656,14 @@ def test_edit_mode_reaches_the_agent(tmp_path, monkeypatch):
     window._dialog._finish_editing()
     assert window._bridge.snapshot()["param_edit_mode"] is False
 
+    # And the theme: ◐ did not republish, so the agent heard the old one (the G2 review).
+    before = window._mode
+    try:
+        window._apply_theme("light" if before == "dark" else "dark")
+        assert window._bridge.snapshot()["theme"] == window._mode != before
+    finally:
+        window._apply_theme(before)
+
 
 def test_an_agent_write_rereads_the_project_without_the_full_recheck(monkeypatch):
     """TA-3: every `report_phase` ran the header's ↻ — REW, the models, the refusals — and a
@@ -7675,26 +7723,51 @@ def test_a_cancelled_close_still_rereads_after_an_agent_write(monkeypatch, tmp_p
     window = MainWindow()
     _KEEP_WINDOWS.append(window)
     window._agent_worker = SimpleNamespace(shutdown=lambda: None)
-    monkeypatch.setattr(window, "_ask_save_before_quit",
-                        lambda: QMessageBox.StandardButton.Cancel)
+    loads = []
+    monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: loads.append(1))
+    monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: None)
+
+    def asked():
+        # A write lands while the question is up, and the box's own loop runs past the timer:
+        # the re-read was skipped then, and Cancel never replayed it (the G2 review).
+        window._bridge.refresh_from_disk()
+        _pump_until(lambda: False, seconds=(main_window._AGENT_REFRESH_MS + 300) / 1000)
+        return QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(window, "_ask_save_before_quit", asked)
     event = QCloseEvent()
     try:
         window.closeEvent(event)
         assert not event.isAccepted(), "the situation this is about: the window stays"
+        assert loads == [], "skipped while the question was up"
+        assert _pump_until(lambda: bool(loads), seconds=3), "Cancel re-reads what landed meanwhile"
 
-        loads = []
-        monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: loads.append(1))
-        monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: None)
+        _pump_until(lambda: False, seconds=0.6)
+        loads.clear()
         window._bridge.refresh_from_disk()
-
         assert _pump_until(lambda: bool(loads), seconds=3), "an agent write after Cancel is re-read"
     finally:
         window._agent_worker = None
 
 
+def test_a_render_fault_on_a_reread_is_logged_with_its_type(caplog):
+    """The strip said «… 'slot'» and tcc.log had nothing to debug from (the G2 review)."""
+    notes = []
+
+    def broken():
+        raise KeyError("slot")
+
+    host = SimpleNamespace(_load_project=broken,
+                           _status_strip=SimpleNamespace(notify=lambda text, **_k: notes.append(text)))
+    MainWindow._safe_load_project(host)
+    assert "KeyError" in notes[0] and "slot" in notes[0]
+    assert "could not be drawn" in caplog.text
+
+
 def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):
     """F3c: the window held a server whose thread had died and handed its URL to the next session;
     it now says why the server is down, once, as it does for one that never started."""
+    from autosound_tcc.core import model_choices as mc
     from autosound_tcc.core.mcp_server import TccMcpServer
 
     _app()
@@ -7703,17 +7776,35 @@ def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):
     dead = TccMcpServer(project_dir=tmp_path)
     dead._server = SimpleNamespace(started=True)
     dead.failure = OSError("p")
-    said = []
+    said, built = [], []
     monkeypatch.setattr(window._dialog, "_add_system_message",
                         lambda text, *_a, **_k: said.append(text))
-    window._mcp_server = dead
+    # A model is picked, so a missing `return` would build a session here (the G1 review: with
+    # none picked the method stopped anyway, and the test could not see a start).
+    monkeypatch.setattr(main_window, "AgentWorker", lambda *a, **k: built.append(a))
+    picked = {"choice": mc.Choice(harness="sdk", model="claude-opus-5", label="Opus 5")}
+    monkeypatch.setattr(window, "_generator_choice", lambda: picked["choice"])
     try:
+        window._mcp_server = dead
+        window._launch_session()
+        assert window._install_facts()["MCP"] == "OSError: p", "the report names it too"
+        window._mcp_server, window._mcp_error = None, "OSError: bind"  # never started
+        window._launch_session()
+        # Up, but `.mcp.json` unwritten: omp reaches TCC only through that file.
+        monkeypatch.setattr(main_window.omp_session, "is_available", lambda: True)
+        picked["choice"] = mc.Choice(harness="omp", model="google/gemini", label="Gemini")
+        window._mcp_server = SimpleNamespace(stopped_reason=None, serving=True,
+                                             config_error="PermissionError: read-only",
+                                             project_dir=tmp_path)
         window._launch_session()
     finally:
-        window._mcp_server = None
+        window._mcp_server, window._mcp_error = None, ""
 
-    assert len(said) == 1
+    assert built == [] and window._agent_worker is None
+    assert len(said) == 3
     assert i18n.t("mcpDown") in said[0] and "OSError: p" in said[0]
+    assert i18n.t("mcpDown") in said[1] and "OSError: bind" in said[1]
+    assert said[2] == i18n.t("mcpNoConfigOmp").format(error="PermissionError: read-only")
 
 
 def test_the_signal_nudge_reads_every_open_signals_id_from_the_brief(tmp_path, monkeypatch):

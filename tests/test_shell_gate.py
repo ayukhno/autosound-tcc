@@ -582,3 +582,16 @@ def test_a_cd_spelled_through_a_builtin_cdpath_or_cmd_s_if_is_followed(command, 
     makes a relative `cd` land where the line does not say (except `./x`, which CDPATH skips); and
     cmd's `if exist x cd /d C:\\` moves it behind its condition."""
     assert bash_is_dangerous(command, [tmp_path]) is asks, command
+
+
+@pytest.mark.parametrize("project, machine, gate", [
+    ("never", "writes", "never"),       # somebody decided about this car
+    ("", "foreign", "foreign"),         # what a new project starts from
+    ("", "", "auto"),                   # never asked: the default
+])
+def test_the_gate_is_the_project_s_then_the_machine_s_then_the_default(project, machine, gate):
+    """Out of the window (G13, the ratchet's list): three layers, not interchangeable."""
+    from autosound_tcc.core.shell_gate import GATE_DEFAULT, effective_gate
+
+    assert effective_gate(project, machine) == gate
+    assert effective_gate() == GATE_DEFAULT

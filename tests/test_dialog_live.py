@@ -1438,3 +1438,73 @@ def test_text_waiting_to_be_drawn_is_drawn_before_a_tool_call(tmp_path):
     worker.chunk.emit(ToolCall(name="mcp__tcc__get_tcc_state"))
 
     assert panel._bubbles[0]._source == "ab"
+
+
+def test_a_paced_stream_is_redrawn_at_about_fifteen_a_second(tmp_path, monkeypatch):
+    """TA-2's rate, in both directions (the G2 review): deltas arrive with the event loop running
+    between them, as the worker's queued signals do. A 0 ms timer redrew 99 times for 100 deltas;
+    a timer restarted on every delta drew nothing until the end. The bound grows with the time
+    measured, so a slow runner loosens it instead of failing."""
+    import time as clock
+
+    panel, worker, _ = _attached(tmp_path)
+    drawn = []
+    real = MessageBubble.set_html
+
+    def counting(self, html, source=""):
+        drawn.append(source)
+        return real(self, html, source)
+
+    monkeypatch.setattr(MessageBubble, "set_html", counting)
+    app = QApplication.instance()
+    started = clock.monotonic()
+    for i in range(100):
+        worker.chunk.emit(TextDelta(f"w{i} "))
+        app.processEvents()
+        clock.sleep(0.005)
+    elapsed = clock.monotonic() - started
+
+    assert 3 <= len(drawn) <= elapsed / 0.050 + 3, f"{len(drawn)} redraws in {elapsed:.2f} s"
+
+
+@pytest.mark.parametrize("event", ["question", "notice", "unasked"])
+def test_text_waiting_to_be_drawn_is_drawn_before_whatever_ends_the_bubble(tmp_path, event):
+    """Pinned at the tool call and the turn's end before; a question, a Notice or an Unasked end the
+    bubble too, and the last tick's words were dropped there for good (the G2 review)."""
+    from autosound_tcc.core.agent_events import Notice, Unasked
+
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(TextDelta("a"))
+    worker.chunk.emit(TextDelta("b"))  # waiting for the timer
+
+    worker.chunk.emit({"question": Question(id="q1", question="Which seat?"),
+                       "notice": Notice("omp has said nothing."),
+                       "unasked": Unasked("rm x")}[event])
+
+    assert panel._bubbles[0]._plain == "ab"
+
+
+def test_a_notice_keeps_its_angle_brackets_and_its_lines(tmp_path):
+    """The bubble is rich text: «model <google/gemini-x> is not available» lost the model's name,
+    the one thing the Arbiter needed (the G1 review)."""
+    from autosound_tcc.core.agent_events import Notice
+
+    panel, worker, _ = _attached(tmp_path)
+    from PySide6.QtGui import QTextDocument
+
+    worker.chunk.emit(Notice("Error: model <google/gemini-x> is not available\nomp: exit 1"))
+
+    shown = QTextDocument()
+    shown.setHtml(panel._bubbles[-1]._body.text())  # what the rich-text label draws
+    lines = shown.toPlainText().splitlines()
+    assert lines[-2].endswith("Error: model <google/gemini-x> is not available"), lines
+    assert lines[-1] == "omp: exit 1", lines
+
+
+def test_a_confirmation_that_timed_out_is_said_as_denied(tmp_path):
+    panel, _worker, _ = _attached(tmp_path)
+    panel.confirm_bar.expired.emit("write_rew_filters")
+
+    said = panel._bubbles[-1]._plain
+    assert "write_rew_filters" in said and said != i18n.t("confirmAllowed").format(tool="x")
+    assert said.startswith(i18n.t("confirmExpired").split(":")[0])

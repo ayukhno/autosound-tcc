@@ -254,3 +254,16 @@ def test_the_brief_is_prepended_to_the_turn_not_appended(tmp_path):
 
     assert text.startswith("[TCC]")
     assert text.endswith("what next?")
+
+
+def test_the_open_ids_are_the_ones_the_brief_lists(tmp_path):
+    """The window's nudge read them back out of the brief's text with `rsplit("id ")`; the bus
+    knows them (G13, the ratchet's list) — a payload saying «id x» no longer stands in the way."""
+    from autosound_tcc.core.signal_bus import CHANNEL_TOGGLE, SignalBus
+
+    bus = SignalBus(tmp_path)
+    one = bus.push(CHANNEL_TOGGLE, group="rear", channel="r-L", on=False)
+    two = bus.push(CHANNEL_TOGGLE, group="rear", channel="r-R", on=False, note="said id x")
+
+    assert bus.open_ids() == {one.id, two.id}
+    assert all(f"id {sid})" in bus.unacked_brief() for sid in bus.open_ids())

@@ -296,3 +296,44 @@ def test_a_request_without_a_reason_shows_its_detail_as_it_was():
     bar.enqueue(_request(), Future())
 
     assert bar._detail.text() == "detail"
+
+
+def test_a_request_that_timed_out_on_screen_is_withdrawn_and_said_not_recorded():
+    """The tool gave up after its 10 minutes (the future cancelled) while the question was still
+    up, and a later Allow was recorded as «Arbiter allowed write_rew_filters» for a write REW
+    never got (the G1 review). Withdrawn now, and said as what it was."""
+    bar = ConfirmBar()
+    resolved, expired = [], []
+    bar.resolved.connect(lambda tool, ok: resolved.append((tool, ok)))
+    bar.expired.connect(expired.append)
+    timed_out, following = Future(), Future()
+    bar.enqueue(_request("write_rew_filters"), timed_out)
+    bar.enqueue(_request("copy_helix_eq"), following)
+
+    timed_out.cancel()  # what `await_confirmation`'s clock does
+
+    assert expired == ["write_rew_filters"] and resolved == []
+    assert bar._title.text() == "Allow copy_helix_eq?", "the next one is up"
+    bar._allow.click()
+    assert resolved == [("copy_helix_eq", True)] and following.result(timeout=1) is True
+
+
+def test_a_click_that_beats_the_withdrawal_is_said_as_expired_once():
+    """The withdrawal comes queued from the session's thread, so a click can land first."""
+    import threading
+
+    bar = ConfirmBar()
+    resolved, expired = [], []
+    bar.resolved.connect(lambda tool, ok: resolved.append((tool, ok)))
+    bar.expired.connect(expired.append)
+    future = Future()
+    bar.enqueue(_request("write_rew_filters"), future)
+
+    canceller = threading.Thread(target=future.cancel)
+    canceller.start()
+    canceller.join()
+    bar._allow.click()  # before the queued withdrawal is delivered
+    QApplication.processEvents()
+
+    assert resolved == [] and expired == ["write_rew_filters"]
+    assert bar.isHidden()

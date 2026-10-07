@@ -50,6 +50,16 @@ GATE_NEVER = "never"
 GATE_DEFAULT = GATE_AUTO
 
 
+def effective_gate(project_choice: str = "", machine_choice: str = "") -> str:
+    """Which mode a project runs in: its own choice, else this machine's, else the default.
+
+    Three layers and they are not interchangeable. The PROJECT wins when it was set — that is
+    somebody deciding about this car. The MACHINE answer is what a new project starts from.
+    And when the machine has never been asked, the window asks it once and keeps the answer.
+    """
+    return project_choice or machine_choice or GATE_DEFAULT
+
+
 # Read-only commands the skill runs constantly. Anything outside this set still works -- it just
 # has to be confirmed by the Arbiter first, rather than being refused outright.
 _SAFE_COMMANDS = frozenset(
