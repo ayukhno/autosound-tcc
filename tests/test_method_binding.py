@@ -235,6 +235,91 @@ def test_a_link_into_the_project_is_refused(project, other_copy, kind):
     assert str(entry) in binding.reason and "inside the project" in binding.reason
 
 
+# ---- «inside the project» is what a folder IS, not how a link spells it ------------------------
+# `realpath` keeps whatever spelling the link wrote, and on macOS `normcase` changes nothing: the
+# project's own copy, spelled `CAR`, in NFD, or through `/System/Volumes/Data`, read as a copy from
+# outside — offered for approval, and approved (review of 4f83676, C1).
+
+
+def _case_insensitive(folder: Path) -> bool:
+    probe = folder / "Probe-Of-Case"
+    probe.mkdir()
+    try:
+        return os.path.exists(folder / "PROBE-OF-CASE")
+    finally:
+        probe.rmdir()
+
+
+def _refused_as_inside(project: Path) -> None:
+    binding = method_binding.for_project(project)
+    assert (binding.state, binding.can_approve, binding.skill_dir) == ("refused", False, None), \
+        binding.reason
+    assert "inside the project" in binding.reason
+    with pytest.raises(method_binding.MethodRefused):
+        method_binding.approve(binding)
+    assert config.approved_methods() == ()
+
+
+@pytest.mark.parametrize("written", ["relative", "absolute"])
+def test_a_link_into_the_project_in_another_case_is_inside(tmp_path, other_copy, written):
+    if not _case_insensitive(tmp_path):
+        pytest.skip("this disk tells CAR from Car")
+    project = tmp_path / "Car"
+    shutil.copytree(other_copy, project / "copies" / vendor_loader.SKILL_NAME)
+    target = {
+        "relative": Path("..", "..", "..", "CAR", "copies", vendor_loader.SKILL_NAME),
+        "absolute": tmp_path / "CAR" / "copies" / vendor_loader.SKILL_NAME,
+    }[written]
+    entry = _link(_entry(project), target)
+    if sys.platform == "darwin":
+        assert "/CAR/" in os.path.realpath(entry), "realpath answers the spelling the link wrote"
+
+    _refused_as_inside(project)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS's disks take NFD and NFC as one name")
+def test_a_link_into_the_project_spelled_in_nfd_is_inside(tmp_path, other_copy):
+    nfc, nfd = "Café", "Café"
+    project = tmp_path / nfc
+    shutil.copytree(other_copy, project / "copies" / vendor_loader.SKILL_NAME)
+    if not os.path.exists(tmp_path / nfd):
+        pytest.skip("this disk tells the NFD spelling from the NFC one")
+    _link(_entry(project), tmp_path / nfd / "copies" / vendor_loader.SKILL_NAME)
+
+    _refused_as_inside(project)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="the Data-volume firmlink is macOS's")
+def test_a_link_into_the_project_through_the_data_firmlink_is_inside(project, other_copy):
+    inside = project / "copies" / vendor_loader.SKILL_NAME
+    shutil.copytree(other_copy, inside)
+    firm = Path("/System/Volumes/Data" + os.path.realpath(inside))
+    if not (firm.exists() and os.path.samefile(firm, inside)):
+        pytest.skip("this folder has no Data-volume spelling")
+    _link(_entry(project), firm)
+
+    _refused_as_inside(project)
+
+
+def test_a_disk_that_numbers_every_folder_zero_proves_no_two_folders_one(tmp_path, monkeypatch):
+    """Identity is (device, inode), and some filesystems give every folder inode 0: there it would
+    make every folder on the disk «the project». Where it cannot tell, the spelling alone decides."""
+    one, other = tmp_path / "one", tmp_path / "other"
+    one.mkdir()
+    other.mkdir()
+    real_stat = os.stat
+
+    def inode_zero(path, *args, **kwargs):
+        st = real_stat(path, *args, **kwargs)
+        return os.stat_result((st.st_mode, 0, st.st_dev, st.st_nlink, st.st_uid, st.st_gid,
+                               st.st_size, int(st.st_atime), int(st.st_mtime), int(st.st_ctime)))
+
+    with monkeypatch.context() as patched:
+        patched.setattr(os, "stat", inode_zero)
+        assert method_binding._inside(str(other), str(one)) is False
+        assert method_binding._inside(str(one / "copies"), str(one)) is True, "spelled inside is inside"
+
+
 def test_a_real_folder_is_refused_and_cannot_be_approved(project, other_copy):
     shutil.copytree(other_copy, _entry(project))  # a whole 3.x copy, and still not trusted
 
@@ -605,6 +690,79 @@ def test_relink_with_no_entry_links_tccs_copy(project):
     assert relinked.state == "same"
     assert _same_path(_entry(project), vendor_loader.skill_dir())
     assert not (project / ".tcc" / "method-aside").exists(), "nothing was there to move aside"
+
+
+def test_a_relink_that_cannot_make_the_link_says_where_the_old_entry_went(project, other_copy,
+                                                                          monkeypatch):
+    """`link_skill_into` answers None when there is nothing to link or the disk refuses — a Windows
+    VM over a shared folder, where no junction can be made — and by then the entry is moved: an
+    empty entry would read `same`, re-linked, with no method in the project (review of 4f83676, I1)."""
+    entry = _link(_entry(project), other_copy)
+    refused = method_binding.for_project(project)
+    monkeypatch.setattr(vendor_loader, "link_skill_into", lambda project_dir: None)
+
+    with pytest.raises(method_binding.MethodRefused) as caught:
+        method_binding.relink(refused)
+
+    stamps = os.listdir(project / ".tcc" / "method-aside")
+    moved = project / ".tcc" / "method-aside" / stamps[0] / vendor_loader.SKILL_NAME
+    assert _is_a_link(moved) and _same_path(moved, other_copy), "the old entry is aside, a link still"
+    assert not os.path.lexists(entry)
+    assert str(moved) in str(caught.value) and "no link" in str(caught.value).lower()
+
+
+def test_a_relink_with_nothing_to_move_that_cannot_make_the_link_raises(project, monkeypatch):
+    monkeypatch.setattr(vendor_loader, "link_skill_into", lambda project_dir: None)
+
+    with pytest.raises(method_binding.MethodRefused) as caught:
+        method_binding.relink(method_binding.for_project(project))
+
+    assert str(_entry(project)) in str(caught.value) and "no link" in str(caught.value).lower()
+    assert not (project / ".tcc" / "method-aside").exists()
+
+
+# ---- `.claude/skills` that leads out of the project (review of 4f83676, I2) -------------------
+# A project whose `.claude` or `.claude/skills` is a link elsewhere — to `~/.claude/skills`, where
+# a personal install can be a real folder — does not hold what sits there. The folder row must not
+# call it «inside the project», and a re-link must not move it out of there into this project.
+
+
+def _skills_lead_home(project: Path, personal_install: str, other_copy: Path) -> Path:
+    personal = Path.home() / ".claude" / "skills"
+    if personal_install == "folder":
+        shutil.copytree(other_copy, personal / vendor_loader.SKILL_NAME)
+    else:
+        _link(personal / vendor_loader.SKILL_NAME, other_copy)
+    (project / ".claude").mkdir()
+    (project / ".claude" / "skills").symlink_to(personal, target_is_directory=True)
+    return personal
+
+
+def test_a_folder_reached_through_skills_that_lead_out_is_not_called_inside(project, other_copy):
+    _skills_lead_home(project, "folder", other_copy)
+
+    binding = method_binding.for_project(project)
+
+    assert (binding.state, binding.can_approve) == ("refused", False)
+    assert str(_entry(project)) in binding.reason
+    assert "inside the project" not in binding.reason, binding.reason
+    assert "outside the project" in binding.reason
+
+
+@pytest.mark.parametrize("personal_install", ["folder", "link"])
+def test_relink_moves_nothing_outside_the_project(project, other_copy, personal_install):
+    personal = _skills_lead_home(project, personal_install, other_copy)
+    before = method_binding.for_project(project)
+    assert before.state == ("refused" if personal_install == "folder" else "known"), before.reason
+
+    with pytest.raises(method_binding.MethodRefused) as caught:
+        method_binding.relink(before)
+
+    assert str(_entry(project).parent) in str(caught.value)
+    assert os.listdir(personal) == [vendor_loader.SKILL_NAME], "nothing linked or moved there"
+    assert _is_a_link(personal / vendor_loader.SKILL_NAME) == (personal_install == "link")
+    assert (personal / vendor_loader.SKILL_NAME / "SKILL.md").is_file()
+    assert not (project / ".tcc").exists(), "nothing moved aside"
 
 
 # ---- the bound copy's repository ------------------------------------------------------------

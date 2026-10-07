@@ -23,6 +23,11 @@ is `os.lstat` raising FileNotFoundError or NotADirectoryError — exactly what `
 a broken link included — and nothing else is: `lexists` answers False on a permission error too,
 which would read an entry TCC cannot see as «no entry» and trust TCC's copy without a word.
 
+«Inside the project» is the folder a path IS, not how a link spells it (`_inside`): `realpath` keeps
+the link's spelling, and on macOS `CAR`, an NFD name or `/System/Volumes/Data/…` reach the project's
+own folder past any string test. Where `.claude/skills` itself leads out of the project, what sits
+there is not the project's: no sentence calls it inside, and `relink` moves nothing out of there.
+
 A copy's contract number (`CONTRACT_VERSION` in its `rew_tool/contract.py`) is read with `ast`, never
 by import — importing a copy TCC has not decided to trust would run it — and a copy newer than
 `KNOWN_CONTRACT` is refused. Not TCC's own copy: holding that one to the number is S3's (W-10).
@@ -121,47 +126,57 @@ def _bind(project_dir: Path, entry: Path) -> Binding:
         return _refused(project_dir, entry, f"TCC cannot read {entry} ({_why(exc)}); fix the "
                                             f"permissions of {entry.parent} and check again.")
     target = os.path.realpath(entry)
-    if not _is_link(entry, target):
-        if stat.S_ISDIR(entry_stat.st_mode):
+    home = os.path.realpath(project_dir)
+    parent = os.path.realpath(entry.parent)
+    # Where `.claude/skills` really is. Linked out of the project — to `~/.claude/skills`, say — what
+    # sits there is not the project's, and `relink` will not move it, so no sentence advises it.
+    ours = _inside(parent, home)
+    remedy = ("re-link it to TCC's copy" if ours else
+              f"make {entry.parent} a folder of the project's own (it leads to {parent} now), then "
+              f"re-link it to TCC's copy")
+    if not _is_link(entry, target, parent):
+        if not stat.S_ISDIR(entry_stat.st_mode):
+            return _refused(project_dir, entry, f"{entry} is a file, not a link to a copy of the "
+                                                f"method; {remedy}.")
+        if ours:
             return _refused(project_dir, entry, f"{entry} is a folder, not a link, and a copy inside "
-                                                f"the project cannot be trusted; re-link it to TCC's copy.")
-        return _refused(project_dir, entry, f"{entry} is a file, not a link to a copy of the method; "
-                                            f"re-link it to TCC's copy.")
+                                                f"the project cannot be trusted; {remedy}.")
+        return _refused(project_dir, entry, f"{entry} is a folder outside the project, not a link; "
+                                            f"{remedy}.")
     try:
         os.stat(entry)  # the link followed to its end
     except (FileNotFoundError, NotADirectoryError):
         return _refused(project_dir, entry, f"{entry} points at {target}, which is not on this "
-                                            f"machine; re-link it to TCC's copy.")
+                                            f"machine; {remedy}.")
     except OSError as exc:
         return _refused(project_dir, entry, f"TCC cannot read what {entry} points at ({_why(exc)}); "
-                                            f"fix the permissions of {target}, or re-link it to TCC's copy.")
+                                            f"fix the permissions of {target}, or {remedy}.")
     own = vendor_loader.skill_dir()
     if _same(target, os.path.realpath(own)):
         return Binding(project_dir, SAME, own, entry)
-    if _inside(target, os.path.realpath(project_dir)):
+    if _inside(target, home):
         return _refused(project_dir, entry, f"{entry} points at {target}, inside the project, and a "
-                                            f"copy inside the project cannot be trusted; re-link it "
-                                            f"to TCC's copy.")
+                                            f"copy inside the project cannot be trusted; {remedy}.")
     copy = Path(target)
     if not vendor_loader._looks_like_the_skill(copy):
         if vendor_loader._looks_like_an_older_skill(copy):
             return _refused(project_dir, entry, f"{entry} points at {target}, a 2.x copy of the "
                                                 f"method — an older line this TCC cannot drive; "
-                                                f"re-link it to TCC's copy.")
+                                                f"{remedy}.")
         return _refused(project_dir, entry, f"{entry} points at {target}, which is not a 3.x copy of "
-                                            f"the method; re-link it to TCC's copy.")
+                                            f"the method; {remedy}.")
     number = read_contract_version(copy)
     if number is not None and number > KNOWN_CONTRACT:
         return _refused(project_dir, entry, f"{entry} points at {target}, a copy of the method on "
                                             f"contract {number}, newer than this TCC — update TCC "
-                                            f"first, or re-link it to TCC's copy.")
+                                            f"first, or {remedy}.")
     if _is_known(target, own):
         return Binding(project_dir, KNOWN, copy, entry)
     if any(_same(target, approved) for approved in config.approved_methods()):
         return Binding(project_dir, APPROVED, copy, entry)
     return Binding(project_dir, REFUSED, None, entry,
                    f"{entry} points at {target}, a copy of the method TCC does not know; approve it "
-                   f"on this machine, or re-link it to TCC's copy.", can_approve=True)
+                   f"on this machine, or {remedy}.", can_approve=True)
 
 
 def _refused(project_dir: Path, entry: Path, reason: str) -> Binding:
@@ -177,13 +192,41 @@ def _same(a, b) -> bool:
 
 
 def _inside(path: str, folder: str) -> bool:
-    path, folder = os.path.normcase(path), os.path.normcase(folder)
-    return path == folder or path.startswith(folder.rstrip(os.sep) + os.sep)
+    """Whether `path` is `folder` or lies under it — the folder it IS, not how it is spelled.
+
+    `realpath` keeps whatever spelling a link wrote, and one folder has several: `CAR` for `Car` on a
+    disk that ignores case, NFD for NFC on macOS, `/System/Volumes/Data/…` through the firmlink — and
+    on macOS `normcase` changes none of them. The spelling can only say «inside» rightly, so it is
+    asked first; past it, the folder's identity (device and inode) is looked for in `path` and in
+    every folder above it. A disk that numbers every folder 0 has no identity to compare — every
+    folder on it would be «the project» — and there the spelling alone answers.
+    """
+    spelled, home_spelled = os.path.normcase(path), os.path.normcase(folder)
+    if spelled == home_spelled or spelled.startswith(home_spelled.rstrip(os.sep) + os.sep):
+        return True
+    try:
+        home = os.stat(folder)
+    except OSError:
+        return False
+    if not home.st_ino:
+        return False
+    here = path
+    while True:
+        try:
+            if os.path.samestat(os.stat(here), home):
+                return True
+        except OSError:  # this spelling of a folder is not there; the one above it still may be
+            pass
+        above = os.path.dirname(here)
+        if above == here:
+            return False
+        here = above
 
 
-def _is_link(entry: Path, real: str) -> bool:
-    """A symlink or a junction, wherever the project itself is reached through a link."""
-    return not _same(real, os.path.join(os.path.realpath(entry.parent), entry.name))
+def _is_link(entry: Path, real: str, parent: str) -> bool:
+    """A symlink or a junction, wherever the project itself is reached through a link: the entry's
+    realpath is not its parent's realpath with its own name on the end."""
+    return not _same(real, os.path.join(parent, entry.name))
 
 
 def _is_known(target: str, own: Path) -> bool:
@@ -291,17 +334,36 @@ def relink(binding: Binding) -> Binding:
     entry itself: a link moves as a link and is never followed, so what it points at stays where it
     is. It goes to `<project>/.tcc/method-aside/<YYYYMMDD-HHMMSS>/autosound-tuning` — out of
     `.claude/skills/`, where omp would still load it. Nothing is deleted; putting it back is a move.
-    A project already on TCC's copy has nothing to move. `MethodRefused` when the move fails.
+    A project already on TCC's copy has nothing to move.
+
+    `MethodRefused`, having touched nothing, when `.claude/skills` leads out of the project: what sits
+    there — a personal install in `~/.claude/skills`, say — is not the project's to move, and a link
+    made there would change every project that reads it. `MethodRefused` too when the move fails,
+    and when no link could be made (`link_skill_into` answers None): by then the entry is aside, and
+    an empty entry would read `same` with no method in the project.
     """
     project_dir, entry = binding.project_dir, binding.entry
+    parent = os.path.realpath(entry.parent)
+    if not _inside(parent, os.path.realpath(project_dir)):
+        raise MethodRefused(f"{entry.parent} leads out of the project to {parent}, so TCC will not move "
+                            f"{entry} or link anything there; make {entry.parent} a folder of the "
+                            f"project's own, then re-link it to TCC's copy.")
+    moved = None
     if for_project(project_dir).state != SAME:
         try:
             if _present(entry):
-                os.rename(entry, _aside_folder(project_dir) / entry.name)
+                moved = _aside_folder(project_dir) / entry.name
+                os.rename(entry, moved)
         except OSError as exc:
             raise MethodRefused(f"TCC could not move {entry} out of the way ({_why(exc)}); move it out "
                                 f"of {entry.parent} yourself, then re-link it to TCC's copy.") from exc
-    vendor_loader.link_skill_into(project_dir)
+    if vendor_loader.link_skill_into(project_dir) is None:
+        if moved is not None:
+            raise MethodRefused(f"TCC moved {entry} to {moved}, but no link to its own copy could be "
+                                f"made in its place; make that link by hand, or move the old entry "
+                                f"back.")
+        raise MethodRefused(f"No link to TCC's own copy could be made at {entry}; make that link by "
+                            f"hand.")
     return for_project(project_dir)
 
 
