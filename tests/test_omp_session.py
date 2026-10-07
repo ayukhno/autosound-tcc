@@ -949,6 +949,53 @@ def test_a_frame_the_reader_cannot_read_ends_the_turn_out_loud(tmp_path):
     assert events[-1] is None, "the drain is told nothing more is coming"
 
 
+def _read(session, data: bytes) -> list:
+    """What the reader queues for `data` followed by EOF."""
+    import asyncio as aio
+    from types import SimpleNamespace
+
+    async def run():
+        reader = aio.StreamReader()
+        reader.feed_data(data)
+        reader.feed_eof()
+        session._proc = SimpleNamespace(stdout=reader)
+        await session._read_frames()
+        events = []
+        while not session._events.empty():
+            events.append(session._events.get_nowait())
+        return events
+
+    return aio.run(run())
+
+
+@pytest.mark.parametrize("line", [b"42", b'"a string"', b"null"])
+def test_a_frame_that_is_not_an_object_is_skipped_not_fatal(tmp_path, caplog, line):
+    """`42` killed the reader with AttributeError, outside its except: nothing was logged and the
+    turn waited forever, omp alive (the branch review)."""
+    session = OmpSession(project_dir=tmp_path)
+
+    events = _read(session, line + b"\n")
+
+    assert session._ended_by_reader == "", "the reader went on to the end of the stream"
+    assert events == [None] and "not an object" in caplog.text
+
+
+@pytest.mark.parametrize("frame", [
+    b'{"type": "tool_execution_start", "toolName": "bash", "args": 5}',
+    b'{"type": "message_update", "assistantMessageEvent": "text"}',
+])
+def test_a_frame_the_handler_cannot_read_ends_the_turn_out_loud(tmp_path, caplog, frame):
+    from autosound_tcc.core.agent_events import Notice
+
+    session = OmpSession(project_dir=tmp_path)
+
+    events = _read(session, frame + b"\n")
+
+    assert any(isinstance(e, Notice) and "could not read" in e.text for e in events)
+    assert events[-1] is None and session._ended_by_reader
+    assert "could not handle" in caplog.text
+
+
 def test_omp_waits_for_a_tool_as_long_as_a_review_may_take(tmp_path, monkeypatch):
     """Finding 97 (tcc#85): the session's `call_critic` was cut ~30 s in and the session read it
     as «збій транспорту MCP» while the reviewer still worked — omp aborts an MCP request after

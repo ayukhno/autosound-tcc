@@ -1501,10 +1501,29 @@ def test_a_notice_keeps_its_angle_brackets_and_its_lines(tmp_path):
     assert lines[-1] == "omp: exit 1", lines
 
 
-def test_a_confirmation_that_timed_out_is_said_as_denied(tmp_path):
+def test_a_confirmation_given_up_on_is_said_as_withdrawn_not_allowed(tmp_path):
+    import re
+
     panel, _worker, _ = _attached(tmp_path)
     panel.confirm_bar.expired.emit("write_rew_filters")
 
     said = panel._bubbles[-1]._plain
-    assert "write_rew_filters" in said and said != i18n.t("confirmAllowed").format(tool="x")
-    assert said.startswith(i18n.t("confirmExpired").split(":")[0])
+    assert said == re.sub(r"<[^>]+>", "", i18n.t("confirmExpired").format(tool="write_rew_filters"))
+    assert "allowed" not in said.lower()
+
+
+def test_a_turn_ends_even_when_its_last_words_cannot_be_drawn(tmp_path, monkeypatch, caplog):
+    """The reset held but the raise went on past it, and the composer stayed on «thinking» with
+    its queue unsent (the branch review)."""
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(TextDelta("a"))
+    worker.chunk.emit(TextDelta("b"))  # waiting for the timer
+
+    def broken(self, html, source=""):
+        raise RuntimeError("the bubble is gone")
+
+    monkeypatch.setattr(MessageBubble, "set_html", broken)
+    worker.turn_done.emit()
+
+    assert panel._busy is False and panel._live_bubble is None
+    assert "could not be drawn" in caplog.text

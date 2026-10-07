@@ -342,6 +342,10 @@ def language_rule_path(project_dir: Path, language: str) -> Path:
     return path
 
 
+
+class _UnreadableFrame(Exception):
+    """A frame omp sent that TCC's handler could not read: the reader stops, out loud."""
+
 class OmpSession:
     """A tuning conversation bound to one project folder, run by an `omp` subprocess."""
 
@@ -681,11 +685,22 @@ class OmpSession:
                     continue
                 self._last_frame_at = time.time()
                 self._log("in", frame)
-                for event in self._handle(frame):
+                if not isinstance(frame, dict):  # `42`, `null`: nothing a frame can say
+                    app_log.logger().warning("omp: a frame that is not an object, skipped: %s",
+                                             line[:200])
+                    continue
+                try:
+                    events = self._handle(frame)
+                except Exception as exc:  # noqa: BLE001 — said below, as any reader failure is
+                    app_log.logger().warning("omp: the reader could not handle a frame: %s",
+                                             line[:200], exc_info=True)
+                    raise _UnreadableFrame(f"{type(exc).__name__}: {exc}") from exc
+                for event in events:
                     await self._events.put(event)
-        except (ValueError, asyncio.LimitOverrunError, OSError) as exc:
+        except (ValueError, asyncio.LimitOverrunError, OSError, _UnreadableFrame) as exc:
             # A reader that dies must say so and end the turn: it died silently once, on a frame
-            # past asyncio's line limit, and every turn after it hung (tcc#72, finding 80).
+            # past asyncio's line limit, and every turn after it hung (tcc#72, finding 80) — and
+            # again on a frame of a shape `_handle` did not expect (the W-8 branch review).
             app_log.logger().warning("omp: the frame reader stopped: %s", exc)
             self._ended_by_reader = f"{type(exc).__name__}: {exc}"
             await self._events.put(Notice(

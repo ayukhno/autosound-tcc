@@ -276,8 +276,9 @@ def test_a_reviewer_that_timed_out_says_what_it_last_printed(stubbed, tmp_path):
             "time.sleep(30)\n")
     project = _project(tmp_path)
 
+    # Three seconds, not one: the child must start and print before the kill, on a loaded runner.
     result = critic.run(
-        "pkg", project_dir=project, timeout_s=1.0, python_executable=sys.executable
+        "pkg", project_dir=project, timeout_s=3.0, python_executable=sys.executable
     )
 
     assert result.mode == critic.MODE_ERROR

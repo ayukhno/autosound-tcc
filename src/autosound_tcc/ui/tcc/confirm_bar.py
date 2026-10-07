@@ -55,8 +55,9 @@ class ConfirmBar(QWidget):
     # reason is the one measured here all day: a gate that fires constantly is a gate that gets
     # clicked through, so the way to keep it meaningful is to let it be narrowed deliberately.
     alwaysAllowed = Signal(str)
-    # Asked, then given up on before an answer: the tool's clock ran out, and it was denied then.
-    # Said instead of `resolved`, so a click after it is never recorded as a verdict (G1 review).
+    # Asked, then given up on before an answer — the tool's clock ran out, or its session ended:
+    # either way it was not run. Said instead of `resolved`, so a click after it is never recorded
+    # as a verdict (G1 review), and worded for both (the branch review).
     expired = Signal(str)
     #: A request's future finished — from the session's thread, so it arrives here queued.
     _gave_up = Signal(object)

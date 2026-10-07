@@ -740,6 +740,23 @@ def test_a_lone_surrogate_in_the_user_s_config_is_written_escaped(tmp_path, monk
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["mcpServers"]["other"]["note"] == "cut \ud83d" and "tcc" in data["mcpServers"]
 
+    # And taken back out the same way: the withdrawal raised UnicodeEncodeError out of `stop()`,
+    # and every quit skipped the rest of its teardown (the branch review).
+    mcp_server.forget_mcp_config(tmp_path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert "tcc" not in data["mcpServers"] and data["mcpServers"]["other"]["note"] == "cut \ud83d"
+
+
+def test_a_stop_survives_an_advertisement_it_cannot_withdraw(tmp_path, monkeypatch):
+    """`stop()` runs on the way out: whatever withdrawing raises is logged there, not let through
+    into the window's close."""
+    def broken(project_dir):
+        raise ValueError("not this time")
+
+    monkeypatch.setattr(mcp_server, "forget_mcp_config", broken)
+    server = TccMcpServer(project_dir=tmp_path)
+    server.stop()  # nothing started: only the withdrawal runs, and it raises
+
 
 def test_start_keeps_any_failure_of_the_advertisement_as_config_error(tmp_path, monkeypatch):
     """The server is up when `.mcp.json` is written; whatever that write raises is the
@@ -2656,6 +2673,29 @@ def test_a_server_that_dies_after_a_good_start_reads_dead_and_is_logged(
         assert any("stopped serving" in r.getMessage() for r in app_log_warnings)
     finally:
         server.stop()
+
+
+def test_a_server_that_stops_on_its_own_says_so(monkeypatch, tmp_path, app_log_warnings):
+    """A serve() that returns without `stop()` asking is a server gone with no exception."""
+    import uvicorn
+
+    class _ServerThatEnds:
+        started = False
+
+        def __init__(self, config):
+            self.config, self.should_exit = config, False
+
+        async def serve(self, sockets=None):
+            self.started = True
+
+    monkeypatch.setattr(uvicorn, "Server", _ServerThatEnds)
+    server = mcp_server.TccMcpServer(project_dir=tmp_path)
+    server.start(write_config=False)
+    server._thread.join(5)
+    assert any("on its own" in r.getMessage() for r in app_log_warnings)
+    app_log_warnings.clear()
+    server.stop()
+    assert not any("on its own" in r.getMessage() for r in app_log_warnings), "a stop is asked for"
 
 
 def test_a_server_whose_thread_died_is_not_serving_and_says_why(tmp_path):

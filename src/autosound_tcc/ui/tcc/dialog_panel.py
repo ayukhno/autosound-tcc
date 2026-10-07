@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import signal_bus
+from autosound_tcc.core import app_log, signal_bus
 from autosound_tcc.core.agent_events import (
     Notice,
     Question,
@@ -1178,6 +1178,8 @@ class DialogPanel(QWidget):
         raises: a turn's end must still re-enable the composer (the G2 review)."""
         try:
             self._draw_live_text()
+        except Exception:  # noqa: BLE001 — logged; the turn's end goes on (the branch review)
+            app_log.logger().exception("the live answer could not be drawn")
         finally:
             self._live_bubble = None
             self._live_text = ""

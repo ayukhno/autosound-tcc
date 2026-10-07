@@ -3662,6 +3662,7 @@ def test_the_main_menu_gathers_the_whole_window_in_sections(monkeypatch):
     # hosts were asked after the move).
     menu = window._main_menu
     assert not menu.action("save_state").isEnabled()
+    assert "_agent_worker" in vars(window), "the window's own attribute, not one this test makes"
     window._agent_worker = object()
     try:
         window._sync_menu_state()
@@ -7694,10 +7695,13 @@ def test_an_agent_write_rereads_the_project_without_the_full_recheck(monkeypatch
                         lambda self, force=False: catalogues.append(force))
     monkeypatch.setattr(main_window.availability, "forget_refusals", lambda: forgets.append(1))
 
-    for _ in range(5):  # 100 ms apart, the event loop running: a throttle would re-read mid-burst
-        window._bridge.refresh_from_disk()
-        _pump_until(lambda: False, seconds=0.1)
-    assert loads == [], "nothing is re-read while the writes keep coming (the G2 review)"
+    import time as clock
+
+    for _ in range(5):  # 80 ms apart with no events run, so the timer cannot fire, only its clock
+        window._bridge.refresh_from_disk()  # moves: each write must restart it (the G2 review;
+        assert window._agent_refresh_timer.remainingTime() > 250  # a throttle reads ~220 here)
+        clock.sleep(0.08)
+    assert loads == [], "nothing is re-read while the writes keep coming"
 
     assert _pump_until(lambda: bool(loads), seconds=5), "the re-read comes once the writes settle"
     _pump_until(lambda: False, seconds=0.6)  # and no second one after it
@@ -7814,6 +7818,18 @@ def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):
                                              config_error="PermissionError: read-only",
                                              project_dir=tmp_path)
         window._launch_session()
+
+        # A Claude session never reads `.mcp.json`: the same unwritten file refuses nothing.
+        class _PastTheGate(Exception):
+            pass
+
+        def past_the_gate(**_kwargs):
+            raise _PastTheGate
+
+        monkeypatch.setattr(main_window, "TuningSession", past_the_gate)
+        picked["choice"] = mc.Choice(harness="sdk", model="claude-opus-5", label="Opus 5")
+        with pytest.raises(_PastTheGate):
+            window._launch_session()
     finally:
         window._mcp_server, window._mcp_error = None, ""
 

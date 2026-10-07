@@ -337,3 +337,36 @@ def test_a_click_that_beats_the_withdrawal_is_said_as_expired_once():
 
     assert resolved == [] and expired == ["write_rew_filters"]
     assert bar.isHidden()
+
+
+def test_an_answer_never_reads_as_a_withdrawal_and_the_next_one_comes_up():
+    """The bar clears its current request before it answers the future: answered the other way
+    round, its own done-callback took the answer for a withdrawal, said «withdrawn» after an Allow,
+    and lost the next request (the branch review's mutant)."""
+    bar = ConfirmBar()
+    resolved, expired = [], []
+    bar.resolved.connect(lambda tool, ok: resolved.append((tool, ok)))
+    bar.expired.connect(expired.append)
+    first, second = Future(), Future()
+    bar.enqueue(_request("write_rew_filters"), first)
+    bar.enqueue(_request("copy_helix_eq"), second)
+
+    bar._allow.click()
+
+    assert resolved == [("write_rew_filters", True)] and expired == []
+    assert bar._title.text() == "Allow copy_helix_eq?" and not second.done()
+
+
+def test_a_queued_request_given_up_does_not_take_down_the_one_on_screen():
+    bar = ConfirmBar()
+    expired = []
+    bar.expired.connect(expired.append)
+    shown, queued = Future(), Future()
+    bar.enqueue(_request("write_rew_filters"), shown)
+    bar.enqueue(_request("copy_helix_eq"), queued)
+
+    queued.cancel()
+
+    assert expired == [] and bar._title.text() == "Allow write_rew_filters?"
+    bar._deny.click()
+    assert shown.result(timeout=1) is False and bar.isHidden(), "the given-up one is skipped"

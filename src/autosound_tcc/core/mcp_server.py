@@ -1624,6 +1624,18 @@ def _teach_git_to_ignore(project_dir: Path) -> None:
         app_log.logger().warning("could not add %s to %s: %s", ", ".join(missing), path, exc)
 
 
+def _config_body(data: dict) -> str:
+    """`.mcp.json`'s text for `data`: as written by hand, or escaped when the user's file carries
+    a lone surrogate (a string cut mid-emoji), which UTF-8 cannot hold. Both directions use it: a
+    file TCC could write its entry into is a file it can take the entry back out of."""
+    body = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    try:
+        body.encode("utf-8")
+    except UnicodeEncodeError:
+        body = json.dumps(data, indent=2) + "\n"
+    return body
+
+
 def forget_mcp_config(project_dir: Path) -> None:
     """Take TCC's entry back out of `.mcp.json` when the server goes down.
 
@@ -1647,8 +1659,8 @@ def forget_mcp_config(project_dir: Path) -> None:
         return
     servers.pop(SERVER_NAME)
     try:
-        _write_atomically(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-    except OSError as exc:
+        _write_atomically(path, _config_body(data))
+    except (OSError, ValueError) as exc:
         app_log.logger().warning("could not withdraw %s from %s: %s", SERVER_NAME, path, exc)
 
 
@@ -1685,11 +1697,7 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
         "url": f"http://127.0.0.1:{port}/mcp",
         "headers": {"X-TCC-Token": token},
     }
-    body = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-    try:
-        body.encode("utf-8")
-    except UnicodeEncodeError:  # a lone surrogate the user's file carried: written escaped
-        body = json.dumps(data, indent=2) + "\n"
+    body = _config_body(data)
     for attempt in range(1, _CONFIG_WRITE_TRIES + 1):
         try:
             _write_atomically(path, body)
@@ -1888,7 +1896,7 @@ class TccMcpServer:
                 self.config_error = f"{type(exc).__name__}: {exc}"
                 app_log.logger().warning("mcp config not written (%s): %s — the server is up; a "
                                          "CLI started in the project folder will not find it",
-                                         type(exc).__name__, exc)
+                                         type(exc).__name__, exc, exc_info=True)
         return self.port
 
     def _wait_until_serving(self, timeout: float = 5.0) -> None:
@@ -1943,5 +1951,9 @@ class TccMcpServer:
             self._thread.join(timeout=timeout)
         self._thread = None
         self._server = None
-        # The advertisement goes down with the thing it advertises.
-        forget_mcp_config(self.project_dir)
+        # The advertisement goes down with the thing it advertises. Guarded: this runs on the way
+        # out, and a raise here skipped the rest of the window's close (the branch review).
+        try:
+            forget_mcp_config(self.project_dir)
+        except Exception:  # noqa: BLE001 — logged; the close goes on
+            app_log.logger().exception("the MCP advertisement could not be withdrawn")
