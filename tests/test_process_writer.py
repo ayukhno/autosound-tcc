@@ -7,10 +7,12 @@ TCC owns: getting one call at a time to it.
 from __future__ import annotations
 
 import json
+import threading
+import time
 
 import pytest
 
-from autosound_tcc.core import process_writer, vendor_loader
+from autosound_tcc.core import process_writer, project_lock, vendor_loader
 
 from tests import _intake
 
@@ -85,6 +87,40 @@ def project(tmp_path):
     process.add_step("2.4", "target-match, second try")
     process.add_step("2.5", "a step nobody got to")
     return tmp_path
+
+
+def test_a_write_off_the_gui_thread_waits_lock_wait_s_not_the_gui_s(project, monkeypatch):
+    """#171: the GUI thread gives up after `GUI_LOCK_WAIT_S`, so the window never freezes behind a
+    `capture-check`; any other thread — an MCP call, a QThread worker — waits `LOCK_WAIT_S`. Both
+    are read when the call runs, which is what lets this test move them: had the worker taken the
+    GUI's 30 s, it would have outwaited the holder and written."""
+    monkeypatch.setattr(process_writer, "GUI_LOCK_WAIT_S", 30.0)
+    monkeypatch.setattr(process_writer, "LOCK_WAIT_S", 0.3)
+    held, release = threading.Event(), threading.Event()
+
+    def holder():
+        with project_lock.hold(project, timeout_s=5):
+            held.set()
+            release.wait(5)
+
+    threading.Thread(target=holder, daemon=True).start()
+    assert held.wait(5)
+    answered: list[Exception] = []
+
+    def write():
+        try:
+            process_writer.enter_phase(project, "1")
+        except process_writer.ProcessWriterError as exc:
+            answered.append(exc)
+
+    started = time.monotonic()
+    worker = threading.Thread(target=write)
+    worker.start()
+    worker.join(10)
+    release.set()
+
+    assert time.monotonic() - started < 2.0
+    assert [type(exc) for exc in answered] == [process_writer.Busy], answered
 
 
 def _skips(project_dir) -> list[dict]:

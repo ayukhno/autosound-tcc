@@ -29,25 +29,23 @@ from __future__ import annotations
 
 import subprocess
 import threading
-import time
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 
 from autosound_tcc.core import child
+from autosound_tcc.core import project_lock
 from autosound_tcc.core import vendor_loader
-
-try:  # POSIX only; Windows falls back to the thread lock alone.
-    import fcntl
-except ImportError:  # pragma: no cover - not exercised on macOS/Linux
-    fcntl = None  # type: ignore[assignment]
 
 # Local file I/O and a JSON rewrite; anything near this is a hang, not slowness.
 DEFAULT_TIMEOUT_S = 20.0
 
-# One writer at a time, from this process and from any other. See `_exclusive`.
-_LOCK_NAME = ".process-write.lock"
-_THREAD_LOCK = threading.Lock()
+#: How long a write waits for the project's lock (`project_lock.hold`) before answering `Busy`
+#: (#171), read when the call runs. The main thread is the window, and a window frozen behind a
+#: 120 s `capture-check` — or a quit behind a queue of them — is the bug. Any other thread (an MCP
+#: call, a QThread worker) freezes nobody's window, so it can afford to queue. `timeout_s` still
+#: bounds the child alone.
+GUI_LOCK_WAIT_S = 5.0
+LOCK_WAIT_S = 60.0
 
 #: Every command TCC sends, and the first method tag whose `process.py` has it — read from the
 #: skill's history (2026-09-14), never guessed. `2.8.0` is the oldest tag with the file at this
@@ -89,6 +87,14 @@ class ProcessWriterError(RuntimeError):
     """
 
 
+class Busy(ProcessWriterError):
+    """Another write to this project held the lock past the wait, so this one never started.
+
+    The one failure that means "nothing happened, and the same call will work in a moment" — and a
+    `ProcessWriterError`, so every caller that already shows a refusal shows this one too.
+    """
+
+
 def script_path() -> Path:
     return vendor_loader.REW_TOOL_DIR / "state" / "process.py"
 
@@ -102,51 +108,6 @@ def _process_dir(project_dir: Path) -> Path:
     return project_dir / "process"
 
 
-@contextmanager
-def _exclusive(project_dir: Path, timeout_s: float) -> Iterator[None]:
-    """Hold the project's process-state lock for the length of one write.
-
-    `process.py` is a read-modify-write over a single JSON file, and nothing was serialising it.
-    That is not theoretical: omp starts tool calls concurrently, and a real run fired
-    `enter_phase` and two `add_step`s before any of them returned — two came back with a traceback
-    and the third with `active_phase: null`, leaving a plan with one nameless step in it. The model
-    had done everything right.
-
-    A file lock rather than a thread lock because the other front-end is a separate process: the
-    user's own CLI can be driving the same project through the same skill (that is what
-    `signal_bus` exists for), and a lock only TCC's threads respect would not see it. The skill's
-    own CLI does not take this lock, so this narrows the window rather than closing it — closing it
-    belongs in `process.py`, as a change request.
-    """
-    lock_path = _process_dir(project_dir)
-    lock_path.mkdir(parents=True, exist_ok=True)
-    # Nothing is ever written into it — the file IS the lock — but it is opened in text mode,
-    # and a text handle with no encoding is the same defect as the one that emptied the DSP
-    # panel on a Ukrainian Windows. One rule, no exceptions to remember.
-    handle = (lock_path / _LOCK_NAME).open("a+", encoding="utf-8")
-    try:
-        if fcntl is None:  # no flock here; the caller is still serialised by `_THREAD_LOCK`
-            yield
-            return
-        deadline = time.monotonic() + timeout_s
-        while True:
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    raise ProcessWriterError(
-                        f"another writer held {lock_path / _LOCK_NAME} for {timeout_s:.0f}s"
-                    ) from None
-                time.sleep(0.05)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    finally:
-        handle.close()
-
-
 def _spawn(
     project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S
 ) -> tuple[int, str, str]:
@@ -155,8 +116,12 @@ def _spawn(
         raise ProcessWriterError(
             f"process.py not found at {script}. Run: git submodule update --init --recursive"
         )
+    # One writer at a time, from this process and from any other (`project_lock`). How long to
+    # wait for it is the calling THREAD's question, asked here and not bound at import.
+    on_gui_thread = threading.current_thread() is threading.main_thread()
+    lock_wait_s = GUI_LOCK_WAIT_S if on_gui_thread else LOCK_WAIT_S
     try:
-        with _THREAD_LOCK, _exclusive(project_dir, timeout_s):
+        with project_lock.hold(project_dir, lock_wait_s):
             proc = subprocess.run(
                 # The CONSOLE interpreter, not ours. TCC is a GUI app, so `sys.executable` is
                 # `pythonw.exe`, which has no console — and the git this script runs then opens
@@ -176,6 +141,10 @@ def _spawn(
                 env=vendor_loader.child_env(),
                 **child.quiet(),
             )
+    except project_lock.LockTimeout:
+        raise Busy(
+            "busy: another write to this project is still running — nothing was written, try again"
+        ) from None
     except subprocess.TimeoutExpired:
         raise ProcessWriterError(f"process.py timed out after {timeout_s:.0f}s") from None
     except OSError as exc:

@@ -1,0 +1,230 @@
+"""`core.project_lock` — one write per project at a time, under ONE deadline (#171, G8 phase 0).
+
+The writer lock used to wait without bound: `_THREAD_LOCK.acquire()` had no timeout, so a write
+queued behind a 120 s `capture-check` — or `close_session` at quit, behind a queue of them — waited
+for all of it, and the flock's only deadline was the child's own `timeout_s`. What is tested here:
+one deadline over the thread lock and the flock, nothing left held past it, and a write that cannot
+get the lock in time answering «busy» instead of waiting — with nothing written.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+import threading
+import time
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from autosound_tcc.core import process_writer, project_lock, vendor_loader
+
+from tests import _intake
+
+#: Windows has no flock in phase 0: the thread lock is all `hold` takes there, so a holder in
+#: another process is a POSIX-only scene.
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="no flock on Windows in phase 0")
+
+#: Another process holding the project's flock — the user's own CLI, or a second TCC. It says
+#: `held` once it has the lock and keeps it until its stdin closes.
+_FLOCK_HOLDER = (
+    "import fcntl, sys\n"
+    "handle = open(sys.argv[1], 'a+', encoding='utf-8')\n"
+    "fcntl.flock(handle.fileno(), fcntl.LOCK_EX)\n"
+    "print('held', flush=True)\n"
+    "sys.stdin.read()\n"
+)
+
+
+@pytest.fixture
+def project(tmp_path):
+    """A project the skill's own writers built, so an `enter_phase` there really would write.
+
+    Modelled on `test_process_writer.py`'s: a fixture that faked `process/` would fake the very
+    bytes a busy answer has to leave alone.
+    """
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    snapshot = tmp_path / "state" / "FULL" / "v_003.json"
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_text("{}", encoding="utf-8")
+    module = vendor_loader.load_process()
+    _intake.seed(tmp_path)
+    process = module.Process(str(tmp_path / "process"))
+    _intake.open_phases(process)
+    process.set_target("FULL", "EPY")
+    process.enter_phase("2")
+    process.add_step("2.3", "target-match")
+    return tmp_path
+
+
+@pytest.fixture
+def holder_process(tmp_path):
+    """Another process holding `process/.process-write.lock` until `let_go()` or the test's end.
+
+    The file's name is spelled out rather than borrowed from the module: every TCC on the machine,
+    an older build included, has to agree on it, so a test that moved with a rename would miss
+    exactly the break that matters.
+    """
+    lock_file = tmp_path / "process" / ".process-write.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    child = subprocess.Popen(
+        [sys.executable, "-c", _FLOCK_HOLDER, str(lock_file)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8",
+    )
+
+    def let_go():
+        if not child.stdin.closed:
+            child.stdin.close()  # its `read()` returns, it exits, and the flock goes with it
+        try:
+            child.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait()
+
+    try:
+        assert child.stdout.readline().strip() == "held", "the holder never took the flock"
+        yield SimpleNamespace(let_go=let_go)
+    finally:
+        let_go()
+        child.stdout.close()
+
+
+@contextmanager
+def _held_by_another_thread(lock):
+    """`lock` — a `hold(...)`, or a bare thread lock — held by another thread for the block."""
+    held, release = threading.Event(), threading.Event()
+
+    def holder():
+        with lock:
+            held.set()
+            release.wait(5)
+
+    thread = threading.Thread(target=holder, daemon=True)
+    thread.start()
+    assert held.wait(5)
+    try:
+        yield
+    finally:
+        release.set()
+        thread.join(5)
+
+
+def _bytes_of(folder: Path) -> dict[str, bytes]:
+    """Every file under `folder`, as {relative path: bytes}.
+
+    Not the lock file: that IS the lock. The holder makes it on taking the flock, and nothing is
+    ever written into it.
+    """
+    return {
+        path.relative_to(folder).as_posix(): path.read_bytes()
+        for path in sorted(folder.rglob("*"))
+        if path.is_file() and path.name != ".process-write.lock"
+    }
+
+
+def test_a_held_lock_answers_busy_within_the_deadline_and_writes_nothing(project, monkeypatch):
+    monkeypatch.setattr(process_writer, "GUI_LOCK_WAIT_S", 0.3)   # method_cli's from Task 2
+    before = _bytes_of(project / "process")          # {relative path: bytes}
+    held, release = threading.Event(), threading.Event()
+
+    def holder():
+        with project_lock.hold(project, timeout_s=5):
+            held.set()
+            release.wait(5)
+
+    threading.Thread(target=holder, daemon=True).start()
+    assert held.wait(5)
+    started = time.monotonic()
+    with pytest.raises(process_writer.Busy, match="nothing was written"):
+        process_writer.enter_phase(project, "1")
+    release.set()
+    assert time.monotonic() - started < 2.0
+    assert _bytes_of(project / "process") == before
+
+
+def test_a_free_lock_is_taken_at_once(tmp_path):
+    """No time to wait at all, and none needed: a free lock is tried before the deadline is."""
+    with project_lock.hold(tmp_path, timeout_s=0):
+        pass
+
+
+def test_a_hold_past_its_deadline_raises_lock_timeout_and_leaves_nothing_held(tmp_path):
+    with _held_by_another_thread(project_lock.hold(tmp_path, timeout_s=5)):
+        started = time.monotonic()
+        with pytest.raises(project_lock.LockTimeout):
+            with project_lock.hold(tmp_path, timeout_s=0.2):
+                pass
+        assert time.monotonic() - started < 2.0, "it gave up at its deadline, not at the release"
+
+    with project_lock.hold(tmp_path, timeout_s=0):  # the second hold takes it at once
+        pass
+
+
+def test_a_timeout_on_a_project_with_no_process_folder_creates_nothing(tmp_path):
+    """`process/` is made only on taking the flock, so a write that never got the lock leaves a
+    project with none exactly as it was — no folder for the skill to read as a started project."""
+    car = tmp_path / "car"
+    car.mkdir()
+    # The holder takes only the thread lock: a full `hold` takes the flock, which makes `process/`.
+    with _held_by_another_thread(project_lock._thread_lock(car)):
+        with pytest.raises(project_lock.LockTimeout):
+            with project_lock.hold(car, timeout_s=0.2):
+                pass
+
+    assert list(car.iterdir()) == []
+
+
+@posix_only
+def test_a_lock_another_process_holds_answers_busy_within_the_same_deadline(
+    project, holder_process, monkeypatch
+):
+    """The twin with a holder PROCESS, which no thread lock here can see. The flock used to wait
+    out the child's own `timeout_s` (20 s for `enter_phase`); now it spends the same deadline the
+    thread lock does."""
+    monkeypatch.setattr(process_writer, "GUI_LOCK_WAIT_S", 0.3)
+    before = _bytes_of(project / "process")
+
+    started = time.monotonic()
+    with pytest.raises(process_writer.Busy, match="nothing was written"):
+        process_writer.enter_phase(project, "1")
+
+    assert time.monotonic() - started < 2.0
+    assert _bytes_of(project / "process") == before
+
+
+@posix_only
+def test_a_timeout_on_the_flock_gives_the_thread_lock_back(tmp_path, holder_process):
+    """Past the deadline on the FLOCK, the thread lock already taken goes back with it: once the
+    other process lets go, the next hold takes both at once."""
+    with pytest.raises(project_lock.LockTimeout):
+        with project_lock.hold(tmp_path, timeout_s=0.2):
+            pass
+
+    holder_process.let_go()
+    with project_lock.hold(tmp_path, timeout_s=0):
+        pass
+
+
+@posix_only
+def test_one_deadline_covers_both_locks_rather_than_one_each(tmp_path, holder_process):
+    """What the wait for the thread lock spent comes off the flock's. A deadline per lock would
+    let a write on the GUI thread freeze the window for twice its budget — here at least 1.9 s
+    (0.9 s for the thread lock, then a whole second for the flock), so the bound below cannot
+    pass it however fast the machine is, and a slow machine still has 0.8 s of slack."""
+    thread_lock = project_lock._thread_lock(tmp_path)
+    thread_lock.acquire()
+    frees = threading.Timer(0.9, thread_lock.release)  # free at 0.9 s of a 1 s budget...
+    frees.daemon = True
+    frees.start()
+
+    started = time.monotonic()
+    with pytest.raises(project_lock.LockTimeout):
+        with project_lock.hold(tmp_path, timeout_s=1.0):  # ...so the flock gets what is left
+            pass
+    elapsed = time.monotonic() - started
+    frees.join(5)
+
+    assert elapsed < 1.8, f"{elapsed:.2f}s on a 1 s deadline: one deadline per lock"
