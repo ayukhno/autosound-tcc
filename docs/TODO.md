@@ -2070,7 +2070,8 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 **Статус**: чекає · the next wave's collection takes them in · from W-8's group reviews and its end-of-branch
 review (2026-10-07), each judged not this wave's: a contract change, a window line the ratchet would have to
-pay for, or a test shape · the reports are in W-8's ledger folder (`.superpowers/sdd/PLAN-W-8/review-*.md`, local)
+pay for, or a test shape · the reports are in W-8's ledger folder (`.superpowers/sdd/PLAN-W-8/review-*.md`, local) · with them, the Arbiter's TEST-FINDINGS 156 from the release look (Sonnet shows no
+restart button)
 
 - **Agent contract (a ticket to the skill first):** `report_phase`, `_record` and `session_close` answer
   `refreshed: true` when the re-read is only requested — `refresh_requested`, with the docstring saying it lands

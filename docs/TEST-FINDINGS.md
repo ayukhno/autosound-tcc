@@ -3673,3 +3673,13 @@ button with a «Refresh» icon; on it, the task's rows that REW already holds tu
 **Weight.** Low: a convenience — what is taken shows without opening the import window.
 
 **Task.** W-8's pool.
+
+### 156. Switching the model to Sonnet shows no «restart the session» button; to Fable it does
+
+**What.** The Arbiter, 2026-10-07, on the VM, looking at v1.1.2 (`140da37`) before its tag: with a session
+running, picking Sonnet in the model selector does not bring up the button that restarts the session on the newly
+picked model; picking Fable does.
+
+**Weight.** Medium: the switch to Sonnet cannot be made from the window the way the switch to Fable is.
+
+**Task.** W-9's pool.
