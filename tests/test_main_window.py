@@ -3623,6 +3623,11 @@ def test_the_main_menu_gathers_the_whole_window_in_sections():
     assert settings.menuAction().font().bold()
     assert labels.index(i18n.t("menuTools").upper()) < actions.index(visible[-1])
 
+    # And the whole tree, line by line, as the user sees it today (G13, #161): the pin the menu
+    # registry keeps when the window starts drawing it.
+    from tests import _menu_pin
+    assert _menu_pin.rows_of(window._menu_btn.menu()) == _menu_pin.pinned_rows()
+
 
 def test_the_guides_submenu_is_bold_and_opens_the_three_guides_at_the_installed_version(
         monkeypatch):
