@@ -2055,7 +2055,7 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
 ### F-099 — W-9: the audit's second wave — at review
 
-**Статус**: open · stage 3 started 2026-10-07 — **all 12 `ok`, one milestone** (the Arbiter, 2026-10-07: «ок. ок.»); the architects' step is the audit's own design passes (`docs/PLAN-AUDIT-2026-10.md` §5: three approaches each, «Balance» named in every issue the Arbiter OK'd), so it is not run again; four code maps against today's main (W-8 moved the code, `.superpowers/sdd/PLAN-W-9/map-*.md`), then `docs/PLAN-W-9.md` and its cost before the build · milestone `W-9 · v1.1.3` (#9), 12
+**Статус**: open · stage 3 started 2026-10-07 — **all 12 `ok`, one milestone** (the Arbiter, 2026-10-07: «ок. ок.»); the architects' step is the audit's own design passes (§5, «Balance» named in every issue the Arbiter OK'd), not run again; four code maps against `80519f1` (`.superpowers/sdd/PLAN-W-9/map-*.md`); **the plan is written** — `docs/PLAN-W-9.md`, 32 tasks in five groups (G5+G8 1–14, G9+G3+G4 15–23, G6+G7 24–29, G10 30–31, G13 32), 11 rulings, about 30–35 h of session time; next the Arbiter's «го» on the plan, then the build on `wave-9` · milestone `W-9 · v1.1.3` (#9), 12
 issues: G5 S1 #169, G5 S2 #170, G8 phase 0 #171 · G9 S1 #172, G3 #173, G4 part 1 #174 · G6 slice 1
 #175, G7 now #176 · G10 S #177 · the re-pin to the skill's W-8 tag #178 · a G13 slice #179 · N2 #164 · from
 `docs/PLAN-AUDIT-2026-10.md` §3's W-9 row (~70 h of TCC work); the collected findings (F-094, F-096, F-098's
@@ -2067,6 +2067,8 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   · the skill's side (#178, #164; blocked on the skill's W-8 tag) · G13 (#179).
 - The plan's own note: ~70 h, so the milestone may split in two; the advice is one milestone built group by group,
   cutting what is left into the next wave if G5+G8 run long.
+- Found while mapping, not on the milestone: `model_overrides.save/load` and `model_choices` (the machine
+  `models.json`) read an unparseable file as empty and write over it — G3's bug class (`PLAN-W-9.md` ruling 11).
 
 ### F-097 — W-8: the audit's first wave — released in v1.1.2
 
