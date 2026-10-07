@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from autosound_tcc.core import app_log, method_cli, process_writer, project_lock, vendor_loader
+from autosound_tcc.core import app_log, method_cli, process_writer, project_lock
 
 from tests import _intake
 
@@ -43,22 +43,12 @@ _FLOCK_HOLDER = (
 def project(tmp_path):
     """A project the skill's own writers built, so an `enter_phase` there really would write.
 
-    Modelled on `test_process_writer.py`'s: a fixture that faked `process/` would fake the very
-    bytes a busy answer has to leave alone.
+    The one `test_process_writer.py` builds (`_intake.planned_project`): a fixture that faked
+    `process/` would fake the very bytes a busy answer has to leave alone.
     """
     if not process_writer.is_available():
         pytest.skip("skill submodule not checked out")
-    snapshot = tmp_path / "state" / "FULL" / "v_003.json"
-    snapshot.parent.mkdir(parents=True, exist_ok=True)
-    snapshot.write_text("{}", encoding="utf-8")
-    module = vendor_loader.load_process()
-    _intake.seed(tmp_path)
-    process = module.Process(str(tmp_path / "process"))
-    _intake.open_phases(process)
-    process.set_target("FULL", "EPY")
-    process.enter_phase("2")
-    process.add_step("2.3", "target-match")
-    return tmp_path
+    return _intake.planned_project(tmp_path, ("2.3", "target-match"))
 
 
 @pytest.fixture

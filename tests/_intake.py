@@ -76,3 +76,24 @@ def open_phases(process) -> None:
     object, and because a test that only reads state should not have to build one.
     """
     process.set_target("FULL", "EPY")
+
+
+def planned_project(project_dir, *steps: tuple[str, str]) -> Path:
+    """A project at phase 2 with `steps` — `(id, name)` pairs — in its plan and a `v_003` ledger
+    snapshot on disk; returned.
+
+    For tests of the CLI calls TCC makes, which is why it is built through the skill's own writers
+    like the rest of this file: a project that faked `process/` would fake the very refusal, or the
+    very bytes, the test is about.
+    """
+    root = Path(project_dir)
+    snapshot = root / "state" / "FULL" / "v_003.json"
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_text("{}", encoding="utf-8")
+    seed(root)
+    process = vendor_loader.load_process().Process(str(root / "process"))
+    open_phases(process)
+    process.enter_phase("2")
+    for step_id, name in steps:
+        process.add_step(step_id, name)
+    return root

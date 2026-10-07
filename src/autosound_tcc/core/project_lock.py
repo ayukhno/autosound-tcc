@@ -12,7 +12,8 @@ POSIX, a flock on `process/.process-write.lock`, because the other front-end is 
 the user's own CLI can be driving the same project through the same skill (that is what
 `signal_bus` exists for), and a lock only TCC's threads respect would not see it. The skill's own
 CLI does not take this lock, so this narrows the window rather than closing it — closing it belongs
-in the method, as a change request. Windows has no flock here, and the thread lock is all there is.
+in the method (G8 phase 1, W-11), and `locks_itself` reads whether a copy has. Windows has no flock
+here, and the thread lock is all there is.
 
 ONE deadline over both. The thread lock used to wait without bound, so a write queued behind a
 120 s `capture-check` — or `close_session` at quit, behind a queue of them — waited for all of it,
@@ -25,6 +26,7 @@ Qt-free. No other module imports `fcntl` or holds the writer lock.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -44,12 +46,32 @@ _LOCK_NAME = ".process-write.lock"
 # flock has no timed wait, so a held one is tried again this often until the deadline.
 _POLL_S = 0.05
 
+# The method's own writer lock, the day it has one: this file, declaring the protocol TCC speaks.
+# Read as text and never imported — importing it would run the method's code in TCC's process.
+_WRITE_LOCK = ("rew_tool", "write_lock.py")
+_PROTOCOL_1 = re.compile(r"^PROTOCOL\s*=\s*1[ \t]*(?:#.*)?$", re.MULTILINE)
+
 _THREAD_LOCKS: dict[Path, threading.Lock] = {}
 _THREAD_LOCKS_GUARD = threading.Lock()
 
 
 class LockTimeout(RuntimeError):
     """The project's writer lock was still held when the deadline passed. Nothing was taken."""
+
+
+def locks_itself(skill_dir: Path | str) -> bool:
+    """Whether this copy of the method takes its own writer lock: `rew_tool/write_lock.py` there,
+    declaring `PROTOCOL = 1` on a line of its own.
+
+    No copy up to v3.1.1 has the file, so today the skill's CLI, run bare, writes past `hold`, and
+    `tests/test_writer_race.py` says so as an expected failure until a copy answers True. Never
+    raises: a file that cannot be read as text is a copy that does not lock itself.
+    """
+    try:
+        text = Path(skill_dir, *_WRITE_LOCK).read_text(encoding="utf-8")
+    except (OSError, ValueError):  # missing, a folder, unreadable, not UTF-8
+        return False
+    return _PROTOCOL_1.search(text) is not None
 
 
 def _thread_lock(project_dir: Path | str) -> threading.Lock:

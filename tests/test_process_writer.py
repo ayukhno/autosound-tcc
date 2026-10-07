@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from autosound_tcc.core import method_cli, process_writer, project_lock, vendor_loader
+from autosound_tcc.core import method_cli, process_writer, project_lock
 
 from tests import _intake
 
@@ -68,25 +68,18 @@ def test_concurrent_writes_do_not_corrupt_the_process_state(tmp_path):
 def project(tmp_path):
     """A project that passes the phase −1 gate, with a plan to skip steps out of.
 
-    Built the same way `test_process_view` builds one — through the skill's own writers — because
-    what is under test here is the CLI call, and a fixture that fakes the project would fake the
-    refusal too.
+    Built the same way `test_process_view` builds one — through the skill's own writers
+    (`_intake.planned_project`) — because what is under test here is the CLI call, and a fixture
+    that fakes the project would fake the refusal too.
     """
     if not process_writer.is_available():
         pytest.skip("skill submodule not checked out")
-    snapshot = tmp_path / "state" / "FULL" / "v_003.json"
-    snapshot.parent.mkdir(parents=True, exist_ok=True)
-    snapshot.write_text("{}", encoding="utf-8")
-    module = vendor_loader.load_process()
-    _intake.seed(tmp_path)
-    process = module.Process(str(tmp_path / "process"))
-    _intake.open_phases(process)
-    process.set_target("FULL", "EPY")
-    process.enter_phase("2")
-    process.add_step("2.3", "target-match")
-    process.add_step("2.4", "target-match, second try")
-    process.add_step("2.5", "a step nobody got to")
-    return tmp_path
+    return _intake.planned_project(
+        tmp_path,
+        ("2.3", "target-match"),
+        ("2.4", "target-match, second try"),
+        ("2.5", "a step nobody got to"),
+    )
 
 
 def test_a_write_off_the_gui_thread_waits_lock_wait_s_not_the_gui_s(project, monkeypatch):
