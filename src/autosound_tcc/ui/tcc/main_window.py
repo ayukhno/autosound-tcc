@@ -38,7 +38,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QGuiApplication, QImage
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QImage
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -48,7 +48,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QFileDialog,
-    QMenu,
     QMessageBox,
     QToolButton,
     QPushButton,
@@ -103,6 +102,7 @@ from autosound_tcc.state import (
 from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, VersionRefused, load_project_view, rig_view
 from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, sizing
+from autosound_tcc.ui.tcc import main_menu, menu_registry
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc import qt_shutdown
@@ -123,7 +123,6 @@ from autosound_tcc.ui.tcc.resonalyze_import_dialog import ResonalyzeImportDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedButton, ElidedLabel
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
-from autosound_tcc.ui.tcc import rounded_tooltip
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 # Imported from the curve view because that is where it was written and where it is used most.
 # It belongs beside `rounded_tooltip`, whose widget it formats for, and moving it there is a
@@ -281,12 +280,6 @@ _TARGET_CURVE_TOOL_URL = (
     "https://ayukhno.github.io/autosound-tuning-skill/skills/autosound-tuning/references/"
     "patterns/target-curves/target_curves_visualizer.html"
 )
-
-# Support links (user request 2026-07-28), same two channels + wording as the skill's own
-# README (all locales) -- GitHub Sponsors first (no fees, familiar to devs with an account),
-# Monobank jar as the no-account fallback (one tap, Apple Pay/Google Pay/card).
-_GITHUB_SPONSORS_URL = "https://github.com/sponsors/ayukhno?frequency=one-time"
-_MONOBANK_JAR_URL = "https://send.monobank.ua/jar/8wThVcodjm"
 
 # REW's own default local HTTP port (see core/rew_bridge.py's module docstring -- the vendored
 # `rew_api` talks to http://localhost:4735). Shown as a fact in the "System params" sidebar
@@ -991,7 +984,8 @@ class MainWindow(QMainWindow):
         self._menu_btn.setProperty("class", "reason-btn menu-btn")
         self._menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._build_main_menu()
+        self._main_menu = main_menu.MainMenu(self._menu_btn, self)
+        self._main_menu.render()
         layout.addWidget(self._menu_btn)
 
         # Elided rather than wrapped or truncated: project folders are dated and long
@@ -1142,37 +1136,7 @@ class MainWindow(QMainWindow):
 
         return header
 
-    # ---- the main menu ------------------------------------------------------
-
-    def _tip_menu(self, parent) -> QMenu:
-        """A menu styled and tipped like the rest of the app.
-
-        `setToolTipsVisible` is deliberately NOT used: the platform tooltip's window frame stays
-        square on macOS whatever the QSS says, which is the exact limitation `rounded_tooltip`
-        exists for. The menu drives the shared rounded popup as the highlight moves instead.
-        """
-        menu = QMenu(parent)
-        menu.setProperty("class", "support-menu")
-        menu.hovered.connect(self._show_action_tip)
-        menu.aboutToHide.connect(rounded_tooltip.RoundedTooltip.instance().hide_tip)
-        return menu
-
-    def _build_eq_order_menu(self, settings: QMenu) -> None:
-        """The EQ card's Freq / Gain / Q order: the processor's own by default, or fixed by the
-        Arbiter (finding 70, tcc#67 — finding 68 built only the vendor's rule). Per machine: it
-        is how this person reads a card, not a fact about the car."""
-        order_menu = self._tip_menu(settings)
-        order_menu.setTitle(i18n.t("eqOrderMenu"))
-        settings.addMenu(order_menu)
-        chosen = self._eq_order_pref()
-        self._eq_order_actions = {}
-        for pref, label in (("auto", i18n.t("eqOrderAuto")),
-                            ("gain_first", "Freq · Gain · Q"), ("q_first", "Freq · Q · Gain")):
-            action = order_menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(pref == chosen)
-            action.triggered.connect(lambda _c=False, p=pref: self._set_eq_order_pref(p))
-            self._eq_order_actions[pref] = action
+    # ---- the EQ card's field order ------------------------------------------
 
     @staticmethod
     def _eq_order_pref() -> str:
@@ -1181,8 +1145,7 @@ class MainWindow(QMainWindow):
 
     def _set_eq_order_pref(self, pref: str) -> None:
         get_settings().setValue(_EQ_ORDER_KEY, pref)
-        for key, action in getattr(self, "_eq_order_actions", {}).items():
-            action.setChecked(key == pref)
+        self._sync_menu_state()
         self._apply_eq_order()
 
     def _apply_eq_order(self) -> None:
@@ -1196,188 +1159,6 @@ class MainWindow(QMainWindow):
             page = tabs.widget(index)
             if isinstance(page, DetailPane):
                 page.set_eq_order(self._eq_order)
-
-    def _menu_section(self, menu: QMenu, key: str) -> None:
-        """A visible section heading.
-
-        NOT `QMenu.addSection`, which is the obvious call and draws nothing here: with a custom
-        stylesheet Qt renders a section as a plain separator and drops its text on the floor
-        (grabbed the menu and looked -- five headings, none of them visible). A disabled action
-        is text a style cannot swallow, and it is unclickable, which is what a heading is.
-        """
-        if not menu.isEmpty():
-            menu.addSeparator()
-        # Upper case in the text, because QSS has no `text-transform` -- and the caps are how
-        # every other label in this window says "this names what is under it" (`apply_caps`).
-        heading = menu.addAction(i18n.t(key).upper())
-        heading.setEnabled(False)
-
-    def _build_main_menu(self) -> None:
-        """Everything the window can do, in one menu, in five sections.
-
-        Rebuilt rather than retranslated: a menu's labels are set once at construction, so before
-        this the items kept the language they were born in while the rest of the window switched
-        around them. `_retranslate` calls this again, which is also what keeps the language
-        check marks honest.
-
-        The order is the order of a working day, not an alphabet: which project · what the
-        session is doing · how the window looks · the tools beside the work · where to ask for
-        help. Frequently-used items keep their own buttons in the chrome as well -- a menu that
-        is the only way to reach a thing you press ten times an hour is not a kindness.
-        """
-        menu = self._tip_menu(self._menu_btn)
-
-        self._menu_section(menu, "menuProject")
-        self._open_project_action = menu.addAction(i18n.t("projectOpen"))
-        self._open_project_action.setToolTip(i18n.t("projectOpenTip"))
-        self._open_project_action.triggered.connect(self._choose_project_folder)
-        self._new_project_action = menu.addAction(i18n.t("projectNew"))
-        self._new_project_action.setToolTip(i18n.t("projectNewTip"))
-        # Through a lambda, not straight: `triggered` carries the action's `checked` flag, which
-        # would land in `seed` and make "new project" mean "copy the car" the day somebody makes
-        # this action checkable.
-        self._new_project_action.triggered.connect(
-            lambda _checked=False: self._open_new_project_dialog()
-        )
-        # Its own line, because it is a different intent from "new project", not a different
-        # button for it: this one starts from a car that is already described (user, 2026-08-23 --
-        # "call it 'copy the car' and say in the hint that it is the car, the equipment and the
-        # installation"). It opens the same dialog with the copying already chosen.
-        self._copy_car_action = menu.addAction(i18n.t("menuCopyCar"))
-        self._copy_car_action.setToolTip(i18n.t("menuCopyCarTip"))
-        self._copy_car_action.triggered.connect(
-            lambda _checked=False: self._open_new_project_dialog(seed=True)
-        )
-        # The intake is the skill's own form, served and opened in the browser (hub #194): one
-        # form for every front end, so TCC starts it and never draws its own copy of it.
-        self._intake_action = menu.addAction(i18n.t("menuIntake"))
-        self._intake_action.setToolTip(i18n.t("menuIntakeTip"))
-        self._intake_action.triggered.connect(lambda _checked=False: self._open_intake_form())
-        self._reload_action = menu.addAction(i18n.t("menuReload"))
-        self._reload_action.setToolTip(i18n.t("refreshProjectTip"))
-        self._reload_action.triggered.connect(self._on_reload_pressed)
-
-        self._menu_section(menu, "menuSession")
-        # Menu wording, not the buttons': "▶ Session in TCC" and "⧉ Terminal" are labels for
-        # things you can SEE, sized to a footer. A menu line has room to say what it does.
-        self._session_action = menu.addAction(i18n.t("menuStartSession"))
-        self._session_action.triggered.connect(self._start_tuning_session)
-        self._terminal_action = menu.addAction(i18n.t("menuTerminal"))
-        self._terminal_action.triggered.connect(self._open_terminal)
-        self._save_state_action = menu.addAction(i18n.t("projectSaveState"))
-        self._save_state_action.setToolTip(i18n.t("projectSaveStateTip"))
-        self._save_state_action.triggered.connect(self._save_project_state)
-        self._fresh_session_action = menu.addAction(i18n.t("projectFreshSession"))
-        self._fresh_session_action.setToolTip(i18n.t("projectFreshSessionTip"))
-        self._fresh_session_action.triggered.connect(self._start_fresh_session)
-        # «Налаштування»: every technical setting of TCC in one place (finding 70, tcc#67) — they
-        # were scattered over the session and view sections, and the EQ card's field order had no
-        # place at all.
-        settings = self._tip_menu(menu)
-        settings.setTitle("⚙ " + i18n.t("menuSettings"))
-        self._settings_menu = settings  # placed at the end of TOOLS, below
-        self._build_eq_order_menu(settings)
-        self._models_action = settings.addAction(i18n.t("menuModels"))
-        self._models_action.setToolTip(i18n.t("menuModelsTip"))
-        self._models_action.triggered.connect(self._open_model_config)
-        self._reviewer_key_action = settings.addAction(i18n.t("menuReviewerKey"))
-        self._reviewer_key_action.setToolTip(i18n.t("menuReviewerKeyTip"))
-        self._reviewer_key_action.triggered.connect(self._open_reviewer_key)
-        gate_menu = self._tip_menu(settings)
-        gate_menu.setTitle(i18n.t("gateMode"))
-        settings.addMenu(gate_menu)
-        self._gate_actions = {}
-        # The fourth, `never`, is the Arbiter's own (2026-10-01, tcc#115): it lifts what `auto`
-        # still asks about, and its tooltip names what that lets through.
-        tips = {omp_session.GATE_AUTO: "gateAutoTip", omp_session.GATE_NEVER: "gateNeverTip"}
-        for mode, label in ((omp_session.GATE_WRITES, "gateWrites"),
-                            (omp_session.GATE_FOREIGN, "gateForeign"),
-                            (omp_session.GATE_AUTO, "gateAuto"),
-                            (omp_session.GATE_NEVER, "gateNever")):
-            action = gate_menu.addAction(i18n.t(label))
-            action.setCheckable(True)
-            action.setToolTip(i18n.t(tips.get(mode, "gateModeTip")))
-            action.triggered.connect(lambda _c=False, m=mode: self._set_gate_mode(m))
-            self._gate_actions[mode] = action
-
-        theme_action = settings.addAction("◐ " + i18n.t("menuTheme"))
-        theme_action.triggered.connect(self._toggle_theme)
-        lang_menu = self._tip_menu(settings)
-        lang_menu.setTitle(i18n.t("menuLanguage"))
-        settings.addMenu(lang_menu)
-        for code, label in i18n.language_choices():
-            action = lang_menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(i18n.current_language() == code)
-            action.triggered.connect(lambda _c=False, lang=code: self._on_language_selected(lang))
-        zoom_in_action = settings.addAction(i18n.t("menuZoomIn"))
-        zoom_in_action.triggered.connect(self._zoom_in)
-        zoom_out_action = settings.addAction(i18n.t("menuZoomOut"))
-        zoom_out_action.triggered.connect(self._zoom_out)
-
-        self._menu_section(menu, "menuTools")
-        diag_action = menu.addAction(i18n.t("menuDiagnostics"))
-        diag_action.setToolTip(i18n.t("diagBtnTip"))
-        diag_action.triggered.connect(self._open_diagnostics)
-        # In TOOLS, not in project (user, 2026-08-23): "it does not import a session, it takes
-        # the settings -- crossovers, delays, EQ". He is right, and the old placement said
-        # otherwise. Nothing about a project changes here: a file is read, every value is checked
-        # against the processor, and the answer is a report. That is a tool, beside diagnostics
-        # and the target-curve tool -- and it has nothing to do with the AI session either.
-        self._import_action = menu.addAction(i18n.t("riImport"))
-        self._import_action.setToolTip(i18n.t("riImportTip"))
-        self._import_action.triggered.connect(self._open_resonalyze_import)
-        target_action = menu.addAction(i18n.t("menuTargetTool"))
-        target_action.setToolTip(i18n.t("targetToolTip"))
-        target_action.triggered.connect(self._open_target_curve_tool)
-        # The last line of TOOLS (the Arbiter, 2026-09-27); it closed SESSION before. Bold, so it
-        # reads as a submenu (finding 91, tcc#81).
-        menu.addMenu(settings)
-        title_font = settings.menuAction().font()
-        title_font.setBold(True)
-        settings.menuAction().setFont(title_font)
-
-        self._menu_section(menu, "menuHelp")
-        # Online, at this build's own tag: `docs/` is not in the installed package, and a link to
-        # `main` would show the screens of another version (tcc #49, hub #202 SKL-053). The three
-        # pages in one submenu, bold like «Налаштування» (the Arbiter, finding 134, tcc#120:
-        # «підменю (жирним), в середині квік-гайд, фул-гайд і цільова крива гайд»).
-        guides = self._tip_menu(menu)
-        guides.setTitle("📖 " + i18n.t("menuGuides"))
-        for label, tip, page in (("menuGuideQuick", "menuGuideQuickTip", guide.QUICK_GUIDE),
-                                 ("menuGuideFull", "menuGuideFullTip", guide.REFERENCE),
-                                 ("menuGuideCurve", "menuGuideCurveTip", guide.HOUSE_CURVE)):
-            action = guides.addAction(i18n.t(label))
-            action.setToolTip(i18n.t(tip))
-            action.triggered.connect(
-                lambda _c=False, p=page: QDesktopServices.openUrl(
-                    QUrl(guide.installed_guide_url(p)))
-            )
-        menu.addMenu(guides)
-        title_font = guides.menuAction().font()
-        title_font.setBold(True)
-        guides.menuAction().setFont(title_font)
-        feedback_action = menu.addAction("💬 " + i18n.t("fbBig"))
-        feedback_action.setToolTip(i18n.t("fbBigTip"))
-        feedback_action.triggered.connect(self._open_feedback)
-        # The same two channels, and the same wording, as the method's own README -- GitHub
-        # Sponsors for people with an account, the Monobank jar as the one-tap fallback. Not a
-        # choice TCC makes on the user's behalf.
-        github_action = menu.addAction(i18n.t("supportGithub"))
-        github_action.triggered.connect(
-            lambda: QDesktopServices.openUrl(QUrl(_GITHUB_SPONSORS_URL))
-        )
-        mono_action = menu.addAction(i18n.t("supportMonobank"))
-        mono_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(_MONOBANK_JAR_URL)))
-
-        previous = self._menu_btn.menu()
-        self._menu_btn.setMenu(menu)
-        if previous is not None:
-            # Deferred, never here: this can run from inside a language action's own handler, and
-            # destroying the menu that emitted it is the crash shape this app has paid for twice.
-            previous.deleteLater()
-        # The check marks and enabled states the freshly built actions do not have yet.
-        self._sync_menu_state()
 
     def _build_footer(self) -> QFrame:
         footer = _panel()
@@ -2989,13 +2770,13 @@ class MainWindow(QMainWindow):
         account, the Monobank jar as the no-account one-tap fallback. They are in the main menu
         too; this is the impulse path, and it costs one click instead of three.
         """
-        menu = self._tip_menu(self)
+        menu = main_menu.tip_menu(self)
         github_action = menu.addAction(i18n.t("supportGithub"))
         github_action.triggered.connect(
-            lambda: QDesktopServices.openUrl(QUrl(_GITHUB_SPONSORS_URL))
+            lambda: QDesktopServices.openUrl(QUrl(menu_registry.SPONSORS_URL))
         )
         mono_action = menu.addAction(i18n.t("supportMonobank"))
-        mono_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(_MONOBANK_JAR_URL)))
+        mono_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(menu_registry.MONOBANK_URL)))
         top_left = self._coffee_btn.mapToGlobal(QPoint(0, 0))
         menu.adjustSize()
         menu.exec(QPoint(top_left.x(), top_left.y() - menu.sizeHint().height()))
@@ -5865,14 +5646,6 @@ class MainWindow(QMainWindow):
 
     # ---- the project menu ---------------------------------------------------
 
-    def _show_action_tip(self, action) -> None:
-        tip = action.toolTip()
-        popup = rounded_tooltip.RoundedTooltip.instance()
-        if not tip or tip == action.text():
-            popup.hide_tip()
-            return
-        popup.show_at(QCursor.pos(), tip)
-
     def _effective_gate(self) -> str:
         """Which mode this project runs in: its own choice, else this machine's, else asked once.
 
@@ -6004,18 +5777,9 @@ class MainWindow(QMainWindow):
         self._set_project_params(getattr(self, "_view", None))
 
     def _sync_menu_state(self) -> None:
-        """The menu's own state: which gate is ticked, and what a session-less window cannot do.
-
-        Split out of `_refresh_project_button` because `_build_main_menu` needs exactly this and
-        nothing else -- it runs while the header is still being assembled, before the project
-        label it would otherwise touch exists.
-        """
-        current = self._effective_gate()
-        for mode, action in getattr(self, "_gate_actions", {}).items():
-            action.setChecked(mode == current)
-        running = getattr(self, "_agent_worker", None) is not None
-        self._save_state_action.setEnabled(running)
-        self._fresh_session_action.setEnabled(running)
+        """The menu's ticks and greyed lines: the gate, the EQ order, the language, and what a
+        session-less window cannot do (`menu_registry`'s predicates, re-asked)."""
+        self._main_menu.sync()
 
     def _refresh_project_button(self) -> None:
         """The name of the project in the header, plus the menu state that goes with it."""
@@ -6429,7 +6193,7 @@ class MainWindow(QMainWindow):
         # The menu's items keep the language they were BORN in -- a label is set once -- so the
         # main menu is rebuilt rather than re-set. It is also what makes the language check marks
         # follow the choice that was just made.
-        self._build_main_menu()
+        self._main_menu.render()
         self._menu_btn.setText(i18n.t("menuButton"))
         self._theme_btn.setToolTip(i18n.t("theme"))
         self._feedback_btn.setText("💬 " + i18n.t("fbBig"))

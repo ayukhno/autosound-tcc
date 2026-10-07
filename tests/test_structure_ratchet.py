@@ -24,10 +24,12 @@ WINDOW = ROOT / "src" / "autosound_tcc" / "ui" / "tcc" / "main_window.py"
 #: count itself.
 BUILD = "Main" + "Window("
 
-#: Lowered by every wave that moves a decision out; never raised (W-8, measured 2026-10-06).
-MAIN_WINDOW_MAX_LINES = 6506
-#: Full-window builds in the tests, outside comments (W-8, measured 2026-10-06).
-WINDOW_BUILDS_MAX = 223
+#: Lowered by every wave that moves a decision out; never raised (W-8: 6506 on 2026-10-06, 6270
+#: after the menu moved into its registry, #161).
+MAIN_WINDOW_MAX_LINES = 6270
+#: Full-window builds in the tests, outside comments (W-8: 223 on 2026-10-06, 218 after the menu
+#: tests became renderer tests, #161).
+WINDOW_BUILDS_MAX = 218
 
 
 def lines_of(path: Path) -> int:

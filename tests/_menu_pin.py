@@ -74,7 +74,7 @@ def pinned_rows() -> list[tuple]:
 
 def rows_of(menu, depth: int = 0) -> list[tuple]:
     """The drawn tree of a QMenu, in `pinned_rows()`'s shape. A heading is a disabled line in
-    capitals (`_menu_section`); a tip equal to the text is Qt's default, so no tip."""
+    capitals (`main_menu.add_heading`); a tip equal to the text is Qt's default, so no tip."""
     rows = []
     for action in menu.actions():
         if action.isSeparator():

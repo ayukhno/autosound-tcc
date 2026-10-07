@@ -1405,14 +1405,50 @@ def test_the_project_menu_names_the_open_folder(monkeypatch):
     assert config.chosen_project_dir().name in window._project_label.text()
 
 
-def test_saving_and_starting_over_need_a_running_session(monkeypatch):
-    """Both act on what the model currently knows; with nothing running there is nothing to save."""
-    _catalogue(monkeypatch, [])
-    _app()
-    window = MainWindow()
+class _MenuHost:
+    """What the window's menu asks of the window, and a log of the window methods it calls: the
+    menu's own tests need no window (G13, #161)."""
 
-    assert not window._save_state_action.isEnabled()
-    assert not window._fresh_session_action.isEnabled()
+    def __init__(self):
+        self.calls = []
+        self._agent_worker = None
+
+    def _effective_gate(self):
+        return "auto"
+
+    def _eq_order_pref(self):
+        return "auto"
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return lambda *args, **kwargs: self.calls.append((name, args, kwargs))
+
+
+def _window_menu(host=None):
+    """The window's menu, drawn by its renderer on a bare button (kept alive on the renderer)."""
+    from PySide6.QtWidgets import QToolButton
+
+    from autosound_tcc.ui.tcc import main_menu
+
+    _app()
+    button = QToolButton()
+    menu = main_menu.MainMenu(button, host or _MenuHost())
+    menu.button = button
+    menu.render()
+    return menu
+
+
+def test_saving_and_starting_over_need_a_running_session():
+    """Both act on what the model currently knows; with nothing running there is nothing to save."""
+    host = _MenuHost()
+    menu = _window_menu(host)
+
+    assert not menu.action("save_state").isEnabled()
+    assert not menu.action("fresh_session").isEnabled()
+    host._agent_worker = object()
+    menu.sync()
+    assert menu.action("save_state").isEnabled() and menu.action("fresh_session").isEnabled()
 
 
 def test_saving_writes_the_state_and_keeps_talking(monkeypatch):
@@ -1451,25 +1487,23 @@ def test_a_fresh_session_saves_first_then_clears_the_context(monkeypatch):
     assert launched == [True]  # not resumed: the project state is on disk to be re-read
 
 
-def test_the_menu_explains_what_the_labels_cannot(monkeypatch):
+def test_the_menu_explains_what_the_labels_cannot():
     """"Start a new session" and "restart on a different model" are different acts, and the
     difference is the whole reason the third action exists."""
-    _catalogue(monkeypatch, [])
-    _app()
-    window = MainWindow()
+    menu = _window_menu()
 
-    tip = window._fresh_session_action.toolTip().lower()
+    tip = menu.action("fresh_session").toolTip().lower()
     assert "same model" in tip or "тій самій" in tip
-    assert window._save_state_action.toolTip()
-    assert window._open_project_action.toolTip()
+    assert menu.action("save_state").toolTip()
+    assert menu.action("open_project").toolTip()
 
     # Shown through the app's own rounded popup, not the platform tooltip whose window frame
     # stays square on macOS regardless of QSS (user report 2026-07-28).
-    from autosound_tcc.ui.tcc import rounded_tooltip
+    from autosound_tcc.ui.tcc import main_menu, rounded_tooltip
 
-    window._show_action_tip(window._fresh_session_action)
+    main_menu.show_action_tip(menu.action("fresh_session"))
     assert rounded_tooltip.RoundedTooltip.instance().isVisible()
-    assert window._menu_btn.menu().property("class") == "support-menu"
+    assert menu.button.menu().property("class") == "support-menu"
 
 
 def test_choosing_a_different_folder_relaunches_rather_than_pretending(monkeypatch, tmp_path):
@@ -3541,24 +3575,20 @@ def test_the_header_reload_asks_again_for_the_title(monkeypatch):
     assert len(asked) == 2
 
 
-def test_the_project_menu_can_reach_the_new_project_dialog(monkeypatch):
+def test_the_project_menu_can_reach_the_new_project_dialog():
     """The dialog behind it is the only path to the DSP-profile interview and to seeding a project
     from an existing one -- and its button in the left column has been hidden ever since "which
     project" moved into this menu, which had no "new project" item. So the feature shipped with no
     door: found by the user asking where it was."""
-    _app()
-    window = MainWindow()
-    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    host = _MenuHost()
+    menu = _window_menu(host)
 
-    labels = [action.text() for action in window._menu_btn.menu().actions()]
+    labels = [action.text() for action in menu.button.menu().actions()]
     assert i18n.t("projectNew") in labels
-    assert window._new_project_action.toolTip()
+    assert menu.action("new_project").toolTip()
 
-    opened = []
-    monkeypatch.setattr(window, "_open_new_project_dialog",
-                        lambda *a, **k: opened.append(True))
-    window._new_project_action.trigger()
-    assert opened == [True]
+    menu.action("new_project").trigger()
+    assert host.calls == [("_open_new_project_dialog", (), {})]
 
 
 def test_the_resonalyze_import_is_reachable_before_there_is_a_ledger():
@@ -3580,7 +3610,7 @@ def test_the_resonalyze_import_is_reachable_before_there_is_a_ledger():
 
 
 
-def test_the_main_menu_gathers_the_whole_window_in_sections():
+def test_the_main_menu_gathers_the_whole_window_in_sections(monkeypatch):
     """"Let us make this the main menu and gather everything there logically" (user, 2026-08-23).
     Before it, the same window's vocabulary was spread over a header, a footer, a hidden button in
     the left column and two popups -- so a person looking for a thing had four places to look and
@@ -3588,45 +3618,34 @@ def test_the_main_menu_gathers_the_whole_window_in_sections():
 
     The sections are DISABLED actions, which is also why they are asserted here: `addSection`
     draws no text under a stylesheet, and the failure is invisible rather than loud.
+
+    The window draws `menu_registry.collect()` (G13, #161): every line pinned in
+    `tests/_menu_pin.py` (Settings bold and last in TOOLS, the Arbiter 2026-09-27 and finding 91),
+    and a feature's line where its anchor puts it, with no line of the window's own code -- the
+    car package's «Save the car…» right before Intake.
     """
+    import sys
+    import types
+
+    from autosound_tcc.ui.tcc import menu_registry
+    from autosound_tcc.ui.tcc.menu_registry import MenuEntry
+    from tests import _menu_pin
+
+    feature = types.ModuleType("tcc_fake_window_feature")
+    feature.menu_entries = lambda: [MenuEntry("save_car", "project", label="Save the car…",
+                                              tip_key="menuCopyCarTip", on=lambda _w: None,
+                                              before="intake")]
+    monkeypatch.setitem(sys.modules, "tcc_fake_window_feature", feature)
+    monkeypatch.setattr(menu_registry, "PROVIDERS", ("tcc_fake_window_feature",))
     _app()
     window = MainWindow()
     _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
 
-    actions = window._menu_btn.menu().actions()
-    labels = [a.text() for a in actions]
-    for key in ("menuProject", "menuSession", "menuTools", "menuHelp"):
-        assert i18n.t(key).upper() in labels, key
-    headings = [a for a in actions if a.text() in {i18n.t(k).upper() for k in
-                ("menuProject", "menuSession", "menuTools", "menuHelp")}]
-    assert all(not a.isEnabled() for a in headings), "a heading is not a thing you can press"
-
-    # Every act the chrome no longer carries has a home here.
-    for key in ("projectOpen", "projectNew", "menuCopyCar", "riImport", "menuReload",
-                "menuStartSession", "menuTerminal",
-                "menuDiagnostics", "menuTargetTool", "supportGithub", "supportMonobank"):
-        assert any(i18n.t(key) in label for label in labels), key
-    # The technical settings in one submenu (finding 70, tcc#67).
-    settings = next(a.menu() for a in actions if a.menu() and i18n.t("menuSettings") in a.text())
-    inside = settings.actions()
-    inner = [a.text() for a in inside]
-    for key in ("menuModels", "menuReviewerKey", "menuTheme", "menuZoomIn", "menuZoomOut"):
-        assert any(i18n.t(key) in label for label in inner), key
-    for key in ("eqOrderMenu", "gateMode", "menuLanguage"):
-        assert any(a.menu() and a.text() == i18n.t(key) for a in inside), key
-    # The last line of TOOLS, right above HELP (the Arbiter, 2026-09-27: «перенеси … в наступний
-    # розділ в кінець»); it closed SESSION before.
-    help_at = labels.index(i18n.t("menuHelp").upper())
-    visible = [a for a in actions[:help_at] if not a.isSeparator()]
-    assert visible[-1].menu() is settings
-    # Bold, so it reads as a submenu (the Arbiter, finding 91, tcc#81).
-    assert settings.menuAction().font().bold()
-    assert labels.index(i18n.t("menuTools").upper()) < actions.index(visible[-1])
-
-    # And the whole tree, line by line, as the user sees it today (G13, #161): the pin the menu
-    # registry keeps when the window starts drawing it.
-    from tests import _menu_pin
-    assert _menu_pin.rows_of(window._menu_btn.menu()) == _menu_pin.pinned_rows()
+    expected = _menu_pin.pinned_rows()
+    intake = (0, "line", i18n.t("menuIntake"), i18n.t("menuIntakeTip"), False, False)
+    expected.insert(expected.index(intake),
+                    (0, "line", "Save the car…", i18n.t("menuCopyCarTip"), False, False))
+    assert _menu_pin.rows_of(window._menu_btn.menu()) == expected
 
 
 def test_the_guides_submenu_is_bold_and_opens_the_three_guides_at_the_installed_version(
@@ -3639,15 +3658,13 @@ def test_the_guides_submenu_is_bold_and_opens_the_three_guides_at_the_installed_
 
     from autosound_tcc.core import guide
 
-    _app()
     monkeypatch.setattr(guide, "installed_guide_url", lambda page=guide.QUICK_GUIDE:
                         f"https://example.invalid/v9.9.9/{page}")
     opened: list[str] = []
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
-    window = MainWindow()
-    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
+    menu = _window_menu()
 
-    actions = window._menu_btn.menu().actions()
+    actions = menu.button.menu().actions()
     help_at = next(i for i, a in enumerate(actions) if a.text() == i18n.t("menuHelp").upper())
     guides = next(a.menu() for a in actions[help_at:]
                   if a.menu() and i18n.t("menuGuides") in a.text())
@@ -3719,16 +3736,13 @@ def test_the_main_menu_follows_a_language_switch():
         window._on_language_selected("en")
 
 
-def test_copy_the_car_opens_the_dialog_already_copying(monkeypatch):
+def test_copy_the_car_opens_the_dialog_already_copying():
     """Its own act, not a second button for "new project": starting from a car somebody has
     already described is a different intent from starting from nothing, and the menu says so in
     the words the user chose."""
     from autosound_tcc.ui.tcc import new_project_dialog as npd
 
     _app()
-    window = MainWindow()
-    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
-
     dialog = npd.NewProjectDialog(seed_first=True)
     assert dialog._seed_combo.currentData() == "copy"
     assert dialog._seed_edit.isVisible() or dialog._seed_edit.isVisibleTo(dialog)
@@ -3736,11 +3750,12 @@ def test_copy_the_car_opens_the_dialog_already_copying(monkeypatch):
     plain = npd.NewProjectDialog()
     assert plain._seed_combo.currentData() is None, "the plain path still starts from nothing"
 
-    seeds = []
-    monkeypatch.setattr(window, "_open_new_project_dialog", lambda seed=False: seeds.append(seed))
-    window._copy_car_action.trigger()
-    window._new_project_action.trigger()
-    assert seeds == [True, False]
+    host = _MenuHost()
+    menu = _window_menu(host)
+    menu.action("copy_car").trigger()
+    menu.action("new_project").trigger()
+    assert host.calls == [("_open_new_project_dialog", (), {"seed": True}),
+                          ("_open_new_project_dialog", (), {})]
 
 
 def test_the_footer_s_omp_button_reads_omp_in_every_language(monkeypatch):
