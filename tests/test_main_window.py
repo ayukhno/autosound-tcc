@@ -7630,6 +7630,19 @@ def test_a_preset_switch_reaches_the_agent(tmp_path, monkeypatch):
 
     assert window._bridge.snapshot()["preset"] == "SECOND"
 
+    # A render that fails after the choice still tells the agent the preset on screen: that is
+    # the load wrapper's `finally`, and nothing pinned it (the G2 review).
+    def broken(*_a, **_k):
+        raise KeyError("slot")
+
+    monkeypatch.setattr(window, "_rebuild_system_params", broken)
+    notes = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **_k: notes.append(text))
+    window._preset_override = "FULL"
+    window._safe_load_project()
+    assert any("KeyError" in note for note in notes), "the render did fail after the choice"
+    assert window._bridge.snapshot()["preset"] == window._preset_combo.currentData() == "FULL"
+
 
 def test_a_preset_left_by_another_project_is_not_reported(tmp_path, monkeypatch):
     """`ui/preset` is global; the load ignores a name this project does not have, and the
@@ -7681,8 +7694,10 @@ def test_an_agent_write_rereads_the_project_without_the_full_recheck(monkeypatch
                         lambda self, force=False: catalogues.append(force))
     monkeypatch.setattr(main_window.availability, "forget_refusals", lambda: forgets.append(1))
 
-    for _ in range(5):
+    for _ in range(5):  # 100 ms apart, the event loop running: a throttle would re-read mid-burst
         window._bridge.refresh_from_disk()
+        _pump_until(lambda: False, seconds=0.1)
+    assert loads == [], "nothing is re-read while the writes keep coming (the G2 review)"
 
     assert _pump_until(lambda: bool(loads), seconds=5), "the re-read comes once the writes settle"
     _pump_until(lambda: False, seconds=0.6)  # and no second one after it
@@ -7701,10 +7716,12 @@ def test_a_window_closing_before_the_agents_reread_reloads_nothing(monkeypatch):
     monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: loads.append(1))
     monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: checks.append(1))
 
+    fired = []
+    window._agent_refresh_timer.timeout.connect(lambda: fired.append(1))
     window._bridge.refresh_from_disk()  # a write lands...
     window._closing = True  # ...and the window starts closing before the re-read
     try:
-        _pump_until(lambda: False, seconds=(main_window._AGENT_REFRESH_MS + 300) / 1000)
+        assert _pump_until(lambda: bool(fired), seconds=3), "the timer did fire: the guard held"
     finally:
         window._closing = False  # the kept window is not left half-closed for later tests
     assert loads == [] and checks == []
