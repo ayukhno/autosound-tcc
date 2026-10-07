@@ -12,6 +12,60 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [v1.1.2] — 2026-10-07 · boundaries that say what happened, the session told what is on screen, the menu as data, the method at v3.1.1
+
+Paired with method `e8dabf7145dea459a9f3c591c0828c9dbeb51669` — the tag on that commit is **`v3.1.1`**.
+
+The wave W-8 · v1.1.2, the audit's first wave (`docs/PLAN-AUDIT-2026-10.md` §2: G1, G2 and G13's first step
+with its three seams), reviewed group by group and once more as a whole branch. The method stays at v3.1.1.
+
+### Fixed
+
+- **The session is told the preset and the edit mode that are on screen** (tcc#151): with two presets it was
+  told none, and an override left by another project was reported as if it were shown. A theme switch is told
+  too.
+- **An agent's write re-reads the project once, not the whole ↻** (tcc#152): a burst of writes is one re-read
+  after it settles, with no REW ping, no model refresh and no update question per write. A write that lands
+  while the close question is up is re-read after Cancel, and a quit asked during a save closes the window
+  when the save lands — both used to leave the window ignoring the session's writes.
+- **A long answer streams without freezing the window** (tcc#153): it is redrawn about fifteen times a second,
+  not once per word, and the last words are drawn before a tool call, a question, a notice or the turn's end.
+- **A dead MCP server is said, not handed to the next session** (tcc#156): a session is refused with the
+  reason, and the installation report names it too. An omp session is refused while `.mcp.json` could not be
+  written — omp reaches TCC only through that file — and the strip no longer says it is unaffected. A quit
+  no longer stops halfway on a `.mcp.json` holding a cut emoji.
+- **A confirmation that failed or was given up on says so** (tcc#157): a failure is logged with the command
+  and stays a denial; a request withdrawn before an answer — its ten minutes ran out, or its session ended —
+  is taken off the screen and said as not run, so an Allow pressed later is no longer recorded as «Arbiter
+  allowed» for a write REW never got.
+- **The turn after omp stopped says so instead of waiting** (tcc#154), with omp's exit code and its last
+  lines; when it is TCC that stopped reading omp, that is what is said — including on a frame of a shape it
+  does not know, which an omp update can send and which killed the reader silently.
+- **An SDK result that ended in error is said** (tcc#155) with the API's own text («API Error: 529
+  overloaded», never «error: success»); a Stop is not reported as an error.
+- **The reviewer's and the updater's child processes are bounded on Windows** (tcc#158); a reviewer that
+  timed out says what it last printed — a sign-in prompt, usually.
+- **A file of the wrong shape is said, not read as green** (tcc#159): a contract report TCC cannot read is an
+  error, not «OK — nothing to fix»; a `.gitignore` that is not UTF-8 is left alone and a `.mcp.json` with a
+  cut emoji is written, instead of either stopping the MCP server's advertisement.
+- **Copying a car refuses a source it cannot read** (tcc#163): a folder TCC may not open, or a source that
+  fails, said the copy was fine and created an empty project; «Copy» with no source named is refused too.
+  The source's own notes stay when what it holds is not a project.
+- **A notice keeps what is in angle brackets**: a model name such as `<google/gemini-x>` vanished from the
+  chat line.
+
+### Changed
+
+- **The main menu is data** (tcc#161): one registry of its lines and one renderer, so a feature adds its
+  lines without touching the window — the car package's «Save the car…» is the first that will. The menu
+  says what is wrong with its lines in the log, and one bad feature cannot stop the window from opening.
+- **Strings live beside their feature** (tcc#162), the new-project dialog's first; every key the UI names
+  is checked to exist.
+- **Copying a car goes through a source** (tcc#163): a folder today, a car package next, with no code in the
+  dialog for it.
+- **`main_window.py` may not grow** (tcc#160): a ratchet on its lines and on the windows the tests build.
+  The wave took it from 6506 to 6270 lines.
+
 ## [v1.1.1] — 2026-10-03 · drop-downs that read in the dark, a sweep judged over its own range, the card with the import window, the method at v3.1.1
 
 Paired with method `e8dabf7145dea459a9f3c591c0828c9dbeb51669` — the tag on that commit is **`v3.1.1`**.

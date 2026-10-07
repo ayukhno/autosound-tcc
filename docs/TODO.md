@@ -2053,9 +2053,9 @@ every screen in about two minutes.
 
 Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
-### F-097 — W-8: the audit's first wave, at work — built and reviewed
+### F-097 — W-8: the audit's first wave — released in v1.1.2
 
-**Статус**: open · stage 3, the work, paused 2026-10-06 by the Arbiter for the token limit, **resumed 2026-10-07 07:00** by the scheduled continuation · milestone `W-8 · v1.1.2` (#8), 14 issues, all `ok` · branch `wave-8`, plan `docs/PLAN-W-8.md`: 18 tasks — G2 1–3 (#151–#153), G1 4–9 (#154–#159), G13 step 0 10 (#160), G13's seams 11–18 (#161–#163, the Arbiter's choice «Balance» of three architects' designs) · done: Task 1 #151 (ca101a0, reviewed clean) · Task 2 #152 done (5b95cec, 530ce7c, f709f03 — the review's Important fixed: Cancel on close clears `_closing`; its re-review rides in the G2 group review) · Task 3 #153 done (900eb47) · Task 4 #156 done (ec9c0fc) · Task 5 #157 done (fe82e74) · Task 6 #154 done (7e957b9) · Task 7 #155 done (32433b2) · Task 8 #158 done (a3ae82d) · Task 9 #159 done (d8633ed) · Task 10 #160 done (aad1760: the ratchet at 6506 lines / 223 window builds) · Task 11 #162 B1 done (038c844) · Task 12 #162 B2 done (57fe891) · Task 16 #163 C1 done (0fb5b75) · Task 18 #162 B3 done (8d05f36: 39 np* keys moved, the table's hash unchanged) · Task 17 #163 C2 done (eadcd30) · Task 13 #161 A1 done (f16fce7: the menu registry; today's menu pinned line by line first) · Task 14 #161 A2 done (2ef0414: one renderer) · Task 15 #161 A3 done (f5c985c: the window draws the registry; main_window.py 6506 → 6270 lines, window builds 223 → 218) · **all 18 tasks built** · Task 2's last fix and Tasks 3–18 were built by the session itself, without a task review, to save the token limit — the group reviews (G2 of Tasks 1–3, G1 of Tasks 4–9) are their gate · the group reviews ran 07.10 (7 seats, reports `review-G*.md` in the ledger folder; Critical 0 in all) and their **fix round is done** (07.10, 11:10): 2f8b0af and 6b2f68c (G13: a failing car source refuses the copy instead of an empty project; every menu line's action pinned; problems, providers and predicates said), b52c65f and fa1ddee (G1: SDK and omp ends said by cause, a Stop not an error; the server, the gate, the contract report and the children say what failed), cdb6877 (the window side: a timed-out confirmation is no longer recorded as allowed, omp refused without `.mcp.json`, a quit during a save closes, Cancel replays the skipped re-read; `main_window.py` held at 6270 by moving the gate choice and the open signals' ids out), 4596034 (the timers' tests) · deferred to W-9, in the ledger: `refresh_requested` and `view_shown` (agent contract), a typed confirmation failure, uvicorn's loggers, G3's config read · next: the end-of-branch review, CHANGELOG and v1.1.2, the full suite once (the VM suspended), one PR with the full CI; before the release one live Stop in a session (no «reported an error» line) · resume: `hub/bin/role tcc --resume 6727cc78-880d-4190-93a5-3e54eca2a0df`
+**Статус**: done 2026-10-07 · released in **v1.1.2** (the tag on the merge of `wave-8`, method `v3.1.1`) · was: open · stage 3, the work, paused 2026-10-06 by the Arbiter for the token limit, **resumed 2026-10-07 07:00** by the scheduled continuation · milestone `W-8 · v1.1.2` (#8), 14 issues, all `ok` · branch `wave-8`, plan `docs/PLAN-W-8.md`: 18 tasks — G2 1–3 (#151–#153), G1 4–9 (#154–#159), G13 step 0 10 (#160), G13's seams 11–18 (#161–#163, the Arbiter's choice «Balance» of three architects' designs) · done: Task 1 #151 (ca101a0, reviewed clean) · Task 2 #152 done (5b95cec, 530ce7c, f709f03 — the review's Important fixed: Cancel on close clears `_closing`; its re-review rides in the G2 group review) · Task 3 #153 done (900eb47) · Task 4 #156 done (ec9c0fc) · Task 5 #157 done (fe82e74) · Task 6 #154 done (7e957b9) · Task 7 #155 done (32433b2) · Task 8 #158 done (a3ae82d) · Task 9 #159 done (d8633ed) · Task 10 #160 done (aad1760: the ratchet at 6506 lines / 223 window builds) · Task 11 #162 B1 done (038c844) · Task 12 #162 B2 done (57fe891) · Task 16 #163 C1 done (0fb5b75) · Task 18 #162 B3 done (8d05f36: 39 np* keys moved, the table's hash unchanged) · Task 17 #163 C2 done (eadcd30) · Task 13 #161 A1 done (f16fce7: the menu registry; today's menu pinned line by line first) · Task 14 #161 A2 done (2ef0414: one renderer) · Task 15 #161 A3 done (f5c985c: the window draws the registry; main_window.py 6506 → 6270 lines, window builds 223 → 218) · **all 18 tasks built** · Task 2's last fix and Tasks 3–18 were built by the session itself, without a task review, to save the token limit — the group reviews (G2 of Tasks 1–3, G1 of Tasks 4–9) are their gate · the group reviews ran 07.10 (7 seats, reports `review-G*.md` in the ledger folder; Critical 0 in all) and their **fix round is done** (07.10, 11:10): 2f8b0af and 6b2f68c (G13: a failing car source refuses the copy instead of an empty project; every menu line's action pinned; problems, providers and predicates said), b52c65f and fa1ddee (G1: SDK and omp ends said by cause, a Stop not an error; the server, the gate, the contract report and the children say what failed), cdb6877 (the window side: a timed-out confirmation is no longer recorded as allowed, omp refused without `.mcp.json`, a quit during a save closes, Cancel replays the skipped re-read; `main_window.py` held at 6270 by moving the gate choice and the open signals' ids out), 4596034 (the timers' tests) · deferred to W-9, in the ledger: `refresh_requested` and `view_shown` (agent contract), a typed confirmation failure, uvicorn's loggers, G3's config read · next: the end-of-branch review, CHANGELOG and v1.1.2, the full suite once (the VM suspended), one PR with the full CI; before the release one live Stop in a session (no «reported an error» line) · resume: `hub/bin/role tcc --resume 6727cc78-880d-4190-93a5-3e54eca2a0df`
 
 - The work's memory is the SDD ledger `.superpowers/sdd/PLAN-W-8/progress.md` (local, git-ignored): briefs, reports, the
   rulings, the deferred minors for the final review; the three designs `arch-*.md` and the code map `g13-map.md` beside it.
@@ -2066,9 +2066,36 @@ Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 - After the tasks: the group reviews (G2 after Task 3, G1 after Task 9 with a Fable review, G13 after Task 18), the
   end-of-branch review, CHANGELOG and v1.1.2, one PR with the full CI; N2 runs when the skill names a candidate.
 
+### F-098 — W-8's review findings left for W-9
+
+**Статус**: чекає · the next wave's collection takes them in · from W-8's group reviews and its end-of-branch
+review (2026-10-07), each judged not this wave's: a contract change, a window line the ratchet would have to
+pay for, or a test shape · the reports are in W-8's ledger folder (`.superpowers/sdd/PLAN-W-8/review-*.md`, local)
+
+- **Agent contract (a ticket to the skill first):** `report_phase`, `_record` and `session_close` answer
+  `refreshed: true` when the re-read is only requested — `refresh_requested`, with the docstring saying it lands
+  within about a second (G2-silent M1); a `view_shown` beside `preset` in the snapshot, since a preset whose view
+  failed to draw is still reported as on screen (G2-silent M2).
+- **A typed confirmation failure** (G1-silent M2): the three callers tell the model «the Arbiter did not approve»
+  when the bar could not even be shown; `await_confirmation` returning why lets them say «not the Arbiter's answer».
+- **uvicorn's own log lines into tcc.log** (G1-silent M7): `autosound_tcc` does not propagate, so they fall to
+  stderr, which a windowed Windows build does not have; the death of the server is logged by TCC already.
+- **`write_mcp_config` replaces the file on any `OSError` while reading** (G1-silent, for G3/F16-6): a permission
+  or sharing error on the read followed by a good rename drops the user's other servers.
+- **A restart onto omp with `.mcp.json` unwritten** is refused only after the Claude session was saved and ended
+  (branch-silent M3): check the new choice before the handoff.
+- **Cancel on a project switch** re-reads the new folder into the old window (branch-code M2; on `main` it came
+  with the next `report_phase`): the window reads the process-global folder after a cancelled switch; replay and
+  reload only while it is still this window's folder.
+- **Tests:** the agent path through the re-read to the snapshot and a write emitted from a thread (G2-tests M2);
+  Cancel's two replays apart; the header-reload test still waits a fixed 0.5 s (G2-tests M4); the ratchet counts a
+  helper-built window once (G13 M5/M8, written in its docstring).
+
 ### F-096 — the car package: bring it into the product, reviewed first (W-8)
 
 **Статус**: open · recorded 2026-10-06 in W-8's collection; **the Arbiter, 2026-10-06: W-8's findings collection waits until after the audit's changes**, so this is built last, on the structure those changes leave · the Arbiter tested the package of 2026-09-18 (`passat-b8-2026-car-2026-09-18.zip`) and says it belongs in the product; this replaces F-064's "closed on his command", which lives only on the local branch `car-package`
+
+- When the package source lands (W-8's end-of-branch review, M5): the picker remembers a source that raised for the same path, so a package fixed and typed again is refused without being asked again — re-ask a failed path on Browse and on Create, or forget a failure after a while.
 
 - The ask: "Save the car to a file…" in the ☰ menu, **before «Intake…»**; the «Copy the car…» picker takes that file as it takes a folder (F-062, `c15473b`).
 - **Not a plain merge** (the Arbiter): read the code and the logic first, and check
