@@ -16,6 +16,8 @@ import pytest
 from autosound_tcc.core import capture_import as ci
 from autosound_tcc.core import vendor_loader
 
+from tests import _rew_fakes
+
 
 def _rew(*rows) -> dict:
     """REW's own answer shape: `{ordinal: {title, uuid, date}}`, ordinals as strings."""
@@ -836,11 +838,8 @@ def test_where_rew_holds_no_range_none_is_made_up(range_):
 def _rew_fr(monkeypatch, listing, low, high, level=85.0, slope=True):
     """REW faked at the method's own boundary (`verify._api`), no HTTP, holding the captures of
     `listing`: an FR from `low` to `high` Hz at 1/12 octave, falling 12 dB an octave above a third
-    of the way if `slope`, and no impulse — answered as REW answers it: HTTP 400 naming the
-    capture asked (the skill's live pass at REW, 2026-10-07), not an error of ours. The method
-    lets that one answer through; any other failed impulse read on a sweep is an issue (v3.1.2)."""
+    of the way if `slope`, and no impulse — answered as REW answers it (`_rew_fakes.no_impulse`)."""
     import math
-    import urllib.error
 
     verify = vendor_loader.load_verify()
     n = int(math.log2(high / low) * 12) + 1
@@ -848,16 +847,9 @@ def _rew_fr(monkeypatch, listing, low, high, level=85.0, slope=True):
     knee = low * (high / low) ** (1 / 3)
     mag = [level - (12 * math.log2(f / knee) if slope and f > knee else 0) for f in freqs]
 
-    def no_impulse(mid, normalised=False):
-        held = listing[mid]
-        url = (f"{verify._api.BASE_URL}/measurements/{mid}/impulse-response"
-               + ("" if normalised else "?normalised=false"))
-        raise urllib.error.HTTPError(
-            url, 400, f"{held['title']} at index {mid} uuid {held['uuid']} does not have an "
-                      f"impulse response", {}, None)
-
     monkeypatch.setattr(verify._api, "get_fr", lambda mid, smoothing=None: (freqs, mag, None))
-    monkeypatch.setattr(verify._api, "get_impulse_response", no_impulse)
+    monkeypatch.setattr(verify._api, "get_impulse_response",
+                        _rew_fakes.no_impulse(verify._api, listing))
 
 
 @needs_the_method

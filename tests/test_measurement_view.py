@@ -15,7 +15,7 @@ import pytest
 from autosound_tcc.core import vendor_loader
 from autosound_tcc.state import measurement_view, process_view
 
-from tests import _intake
+from tests import _intake, _rew_fakes
 from autosound_tcc.state import measurement_view as mv
 
 pytestmark = pytest.mark.skipif(
@@ -1001,27 +1001,17 @@ def test_taken_as_it_is_is_said_only_on_a_row_that_reads_done(project):
 def _methods_truncated_line(monkeypatch) -> str:
     """The method's own «covers … — truncated», as its real `verify.verdict` words it for a sub
     swept over 20-1001 Hz and judged over its default 20-20000 — REW faked at the method's edge.
-    REW keeps no impulse for it, and says so as it does: HTTP 400 naming the capture (the skill's
-    live pass at REW, 2026-10-07) — the one failed impulse read the method lets through (v3.1.2)."""
+    REW keeps no impulse for it, and says so as REW does (`_rew_fakes.no_impulse`)."""
     import math
-    import urllib.error
 
     verify = vendor_loader.load_verify()
     freqs = [20.0 * 2 ** (i / 12) for i in range(int(math.log2(1001 / 20) * 12) + 1)]
     listing = {"1": {"title": "sw_7 (sw)", "uuid": "u-sw", "notes": "DELAY 6.1 ms"}}
-
-    def no_impulse(mid, normalised=False):
-        held = listing[mid]
-        url = (f"{verify._api.BASE_URL}/measurements/{mid}/impulse-response"
-               + ("" if normalised else "?normalised=false"))
-        raise urllib.error.HTTPError(
-            url, 400, f"{held['title']} at index {mid} uuid {held['uuid']} does not have an "
-                      f"impulse response", {}, None)
-
     monkeypatch.setattr(verify._api, "get_fr",
                         lambda mid, smoothing=None: (freqs, [85.0 - i * 0.2 for i in range(len(freqs))],
                                                      None))
-    monkeypatch.setattr(verify._api, "get_impulse_response", no_impulse)
+    monkeypatch.setattr(verify._api, "get_impulse_response",
+                        _rew_fakes.no_impulse(verify._api, listing))
     issues = verify.verdict("sw_7 (sw)", measurements=listing)["issues"]
     assert len(issues) == 1 and "truncated" in issues[0], issues
     return issues[0]
