@@ -1135,27 +1135,64 @@ def test_a_failed_confirmation_in_the_sdk_session_is_logged(tmp_path, caplog):
     assert any("boom" in r.getMessage() for r in caplog.records)
 
 
-def test_an_sdk_result_that_ended_in_error_is_said(tmp_path):
-    """F3b: a ResultMessage with is_error=True was read as a normal end, so a turn the SDK failed
-    looked finished and said nothing. A real SDK type, so the field names are the SDK's."""
+def _answered(tmp_path, **fields):
+    """The events of one turn the SDK ends with a ResultMessage of these fields (a real SDK type,
+    so the field names are the SDK's)."""
     from claude_agent_sdk import ResultMessage
 
     from autosound_tcc.core import claude_sdk
     from autosound_tcc.core import tuning_session as ts
-    from autosound_tcc.core.agent_events import Notice, TurnEnd
 
     claude_sdk.bind(ts.SDK_NAMES, vars(ts))
-    failed = ResultMessage(subtype="error_during_execution", duration_ms=1, duration_api_ms=1,
-                           is_error=True, num_turns=1, session_id="s-1", errors=["x"])
+    message = ResultMessage(**({"subtype": "success", "duration_ms": 1, "duration_api_ms": 1,
+                                "is_error": False, "num_turns": 1, "session_id": "s-1"} | fields))
 
-    class _Failing(_RecordingClient):
+    class _Answering(_RecordingClient):
         async def receive_response(self):
-            yield failed
+            yield message
 
     session = _live_session(tmp_path)
-    session._client = _Failing()
+    session._client = _Answering()
+    return _run_turn(session, "go")
 
-    events = _run_turn(session, "go")
 
-    assert isinstance(events[-2], Notice) and "x" in events[-2].text
+@pytest.mark.parametrize("fields, said, not_said", [
+    ({"subtype": "error_during_execution", "errors": ["quota exhausted", "retry later"]},
+     "quota exhausted; retry later", "error_during_execution"),
+    ({"result": "API Error: 529 overloaded"}, "API Error: 529 overloaded", "success"),
+    ({"api_error_status": 429}, "API error (HTTP 429)", "success"),
+    ({"subtype": "error_max_turns"}, "error_max_turns", None),
+    ({}, "unknown error", "success"),
+])
+def test_an_sdk_result_that_ended_in_error_is_said(tmp_path, caplog, fields, said, not_said):
+    """F3b: a ResultMessage with is_error=True was read as a normal end, so a turn the SDK failed
+    looked finished and said nothing. The detail in the SDK's own order -- errors, the result, a
+    subtype that is not "success", the HTTP status -- so the CLI's API-error shape never reads
+    «error: success» (the G1 review); and in the log, which is what a bug report carries."""
+    from autosound_tcc.core.agent_events import Notice, TurnEnd
+
+    events = _answered(tmp_path, is_error=True, **fields)
+
+    assert isinstance(events[-2], Notice) and said in events[-2].text
+    assert not_said is None or not_said not in events[-2].text
     assert isinstance(events[-1], TurnEnd) and events[-1].session_id == "s-1"
+    assert said in caplog.text
+
+
+def test_a_turn_that_ended_well_says_nothing_more(tmp_path):
+    """The healthy side: a Notice after every answer passed the whole file before (the G1 review)."""
+    from autosound_tcc.core.agent_events import TurnEnd
+
+    assert _answered(tmp_path, result="done") == [TurnEnd(session_id="s-1")]
+
+
+@pytest.mark.parametrize("why", ["aborted_streaming", "aborted_tools"])
+def test_a_stop_the_arbiter_pressed_is_not_an_error(tmp_path, why):
+    """An interrupt ends the turn with an error result whose terminal_reason says it was aborted
+    (the SDK's own marker); a warning after every Stop would teach the Arbiter to skip the real
+    ones."""
+    from autosound_tcc.core.agent_events import TurnEnd
+
+    events = _answered(tmp_path, subtype="error_during_execution", is_error=True,
+                       errors=["[ede_diagnostic] result_type=user"], terminal_reason=why)
+    assert events == [TurnEnd(session_id="s-1")]

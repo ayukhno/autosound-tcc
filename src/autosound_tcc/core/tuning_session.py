@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from autosound_tcc.core import openers
-from autosound_tcc.core import claude_sdk, config, critic, model_choices, signal_bus, vendor_loader
+from autosound_tcc.core import (app_log, claude_sdk, config, critic, model_choices, signal_bus,
+                                vendor_loader)
 from autosound_tcc.core.agent_events import (
     AgentEvent,
     Notice,
@@ -61,13 +62,32 @@ SDK_NAMES = (
 DEFAULT_MODEL = model_choices.DEFAULT_SDK_MODEL
 
 
+#: How an SDK result says the turn was cancelled (an interrupt): not an error to tell anyone.
+_ABORTED = ("aborted_streaming", "aborted_tools")
+
+
 def _result_error_text(result: Any) -> str:
     """What an SDK result that ended in error says (F3b): it read as a normal end, so a turn the
-    SDK had failed looked finished and said nothing."""
-    said = [str(e) for e in (getattr(result, "errors", None) or []) if str(e).strip()]
-    if not said and getattr(result, "result", None):
-        said = [str(result.result)]
-    detail = "; ".join(said) or str(getattr(result, "subtype", "") or "no reason given")
+    SDK had failed looked finished and said nothing.
+
+    In the SDK's own order (`claude_agent_sdk._internal.query._error_result_text`): errors, the
+    result, a subtype that is not "success", the HTTP status. The CLI's API-error shape is
+    subtype "success" with the prose in `result`, and the subtype alone read «error: success».
+    """
+    said = [str(e).strip() for e in (getattr(result, "errors", None) or []) if str(e).strip()]
+    text = str(getattr(result, "result", None) or "").strip()
+    subtype = str(getattr(result, "subtype", "") or "")
+    status = getattr(result, "api_error_status", None)
+    if said:
+        detail = "; ".join(said)
+    elif text:
+        detail = text
+    elif subtype and subtype != "success":
+        detail = subtype
+    elif status is not None:
+        detail = f"API error (HTTP {status})"
+    else:
+        detail = "unknown error"
     return f"The session reported an error: {detail}"
 SKILL_NAME = "autosound-tuning"
 
@@ -429,8 +449,14 @@ class TuningSession:
                     yield event
                 if isinstance(message, ResultMessage):
                     self._remember_session(message)
-                    if getattr(message, "is_error", False):
-                        yield Notice(_result_error_text(message))
+                    stopped = getattr(message, "terminal_reason", None) in _ABORTED
+                    if getattr(message, "is_error", False) and not stopped:
+                        said = _result_error_text(message)
+                        app_log.logger().warning(
+                            "%s (subtype %s, terminal_reason %s, api_error_status %s)", said,
+                            message.subtype, getattr(message, "terminal_reason", None),
+                            getattr(message, "api_error_status", None))
+                        yield Notice(said)
                     yield TurnEnd(session_id=message.session_id)
                     return
                 for event in self._translate(message):

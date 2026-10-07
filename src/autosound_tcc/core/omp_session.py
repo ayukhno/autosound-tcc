@@ -398,6 +398,7 @@ class OmpSession:
         self._ready = asyncio.Event()
         self._saw_ready = False
         self._ended = asyncio.Event()
+        self._ended_by_reader = ""  # why TCC's reader stopped; omp itself is alive then
         #: The built-ins this session allows, narrowed to what this omp has (`tools_omp_takes`).
         self._tools = list(_ENABLED_TOOLS)
         # The UI's signal bus, for delivering un-acknowledged signals inside the turn itself.
@@ -686,6 +687,7 @@ class OmpSession:
             # A reader that dies must say so and end the turn: it died silently once, on a frame
             # past asyncio's line limit, and every turn after it hung (tcc#72, finding 80).
             app_log.logger().warning("omp: the frame reader stopped: %s", exc)
+            self._ended_by_reader = f"{type(exc).__name__}: {exc}"
             await self._events.put(Notice(
                 f"TCC could not read what omp sent ({type(exc).__name__}: {exc}); the session "
                 "stopped here. Start a new session to go on."))
@@ -927,6 +929,7 @@ class OmpSession:
                 self._events = asyncio.Queue()
                 self._ready = asyncio.Event()
                 self._ended = asyncio.Event()
+                self._ended_by_reader = ""
                 self._saw_ready = False
                 self._stderr_tail = []
 
@@ -1047,17 +1050,34 @@ class OmpSession:
         )
 
     def _ended_notice(self) -> Notice:
-        """What a turn says when omp is gone (F3a): the next prompt went to the dead process and
-        waited on a queue nothing would fill, saying only «no output» every two minutes. A close
-        cancels the reader, so `_ended` and the `None` come only from omp ending on its own."""
-        return Notice(self._why("omp has stopped, so this session cannot go on. Start a new session."))
+        """What a turn says when the session cannot go on (F3a): the next prompt went to the dead
+        process and waited on a queue nothing would fill. A close cancels the reader, so `_ended`
+        comes only from omp ending -- said with its exit code and last stderr lines -- or from
+        TCC's reader stopping on a frame it could not read, when omp is alive (the G1 review)."""
+        if self._ended_by_reader:
+            said = (f"TCC stopped reading omp ({self._ended_by_reader}), so this session cannot "
+                    "go on. Start a new session.")
+        else:
+            code = getattr(self._proc, "returncode", None)
+            said = self._why("omp has stopped" + (f" (exit code {code})" if code is not None else "")
+                             + ", so this session cannot go on. Start a new session.")
+        app_log.logger().warning("omp: %s", said.replace("\n", " | "))
+        return Notice(said)
 
     async def _prompt(self, text: str) -> AsyncIterator[AgentEvent]:
         self._round_ended_at = 0.0  # a round that ended before this prompt did not end this one
         self._retrying = False  # a storm belongs to the turn it happened in
         self._retry_reason = ""
         if self._ended.is_set():
-            yield self._ended_notice()
+            said = False
+            while not self._events.empty():  # what the reader said before it stopped comes first
+                event = self._events.get_nowait()
+                if event is None:
+                    break
+                said = said or isinstance(event, Notice)
+                yield event
+            if not (said and self._ended_by_reader):
+                yield self._ended_notice()
             return
         # The F-009 injection point: every turn -- the opener included -- passes through here, so
         # un-acknowledged signals reach the model even in a turn where it calls no tcc tool at
@@ -1097,8 +1117,9 @@ class OmpSession:
                         yield Notice(f"{int(SILENCE_WARN_S)}s with no output. {self._why(where)}")
                     continue
                 warned = False
-                if event is None:  # process ended mid-turn
-                    yield self._ended_notice()
+                if event is None:  # process ended mid-turn, or the reader stopped
+                    if not self._ended_by_reader:  # the reader's own Notice has said it
+                        yield self._ended_notice()
                     return
                 yield event
                 if isinstance(event, TurnEnd):

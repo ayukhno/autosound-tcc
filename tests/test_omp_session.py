@@ -1154,10 +1154,11 @@ def test_the_turn_after_omp_died_says_so_instead_of_waiting(tmp_path):
     async def run():
         reader = asyncio.StreamReader()
         reader.feed_eof()  # omp is gone
-        session._proc = SimpleNamespace(stdout=reader, stdin=None)
+        session._proc = SimpleNamespace(stdout=reader, stdin=None, returncode=3)
         await session._read_frames()
         while not session._events.empty():  # the turn that was running took its None
             session._events.get_nowait()
+        session._stderr_tail = ["FatalError: the reason"]
         turn = session._prompt("next?")
         return await asyncio.wait_for(turn.__anext__(), timeout=2.0)
 
@@ -1165,7 +1166,89 @@ def test_the_turn_after_omp_died_says_so_instead_of_waiting(tmp_path):
     assert isinstance(first, Notice)
     assert "no output" not in first.text, "the silence notice is not the answer"
     assert "omp has stopped" in first.text
+    assert "FatalError: the reason" in first.text and "exit code 3" in first.text, \
+        "omp's last words and its exit code are the part a bug report needs"
     assert session.sent == [], "nothing is written to a process that is gone"
+
+
+def _oversized(reader):
+    reader.feed_data(b'{"type": "message_update", "pad": "' + b"x" * 5000 + b'"}\n')
+    reader.feed_eof()
+
+
+def test_a_reader_that_stopped_between_turns_is_said_by_the_next_turn(tmp_path, caplog):
+    """The reader's own sentence was left in the queue: the next prompt said «omp has stopped»
+    about an omp that was alive, blocked on its full pipe (the G1 review)."""
+    from types import SimpleNamespace
+
+    from autosound_tcc.core.agent_events import Notice
+
+    session = _session(tmp_path)
+
+    async def turn():
+        return [event async for event in session._prompt("next?")]
+
+    async def run():
+        reader = asyncio.StreamReader(limit=1024)
+        _oversized(reader)
+        session._proc = SimpleNamespace(stdout=reader, stdin=None)
+        await session._read_frames()  # no turn running
+        first = await asyncio.wait_for(turn(), timeout=2.0)
+        second = await asyncio.wait_for(turn(), timeout=2.0)
+        return first, second
+
+    first, second = asyncio.run(run())
+    assert [type(e) for e in first] == [Notice] and "could not read" in first[0].text
+    assert len(second) == 1 and "TCC stopped reading omp" in second[0].text
+    assert "omp has stopped" not in first[0].text + second[0].text
+    assert "TCC stopped reading omp" in caplog.text
+    assert session.sent == []
+
+
+def test_a_reader_that_stopped_mid_turn_says_it_once(tmp_path):
+    from types import SimpleNamespace
+
+    from autosound_tcc.core.agent_events import Notice
+
+    session = _session(tmp_path)
+
+    async def collect():
+        return [event async for event in session._prompt("go")]
+
+    async def run():
+        reader = asyncio.StreamReader(limit=1024)
+        session._proc = SimpleNamespace(stdout=reader, stdin=None)
+        turn = asyncio.ensure_future(collect())
+        await asyncio.sleep(0.05)  # the turn has sent its prompt and waits on the queue
+        _oversized(reader)
+        await session._read_frames()
+        return await asyncio.wait_for(turn, timeout=2.0)
+
+    events = asyncio.run(run())
+    notices = [e for e in events if isinstance(e, Notice)]
+    assert len(notices) == 1 and "could not read" in notices[0].text, notices
+
+
+def test_a_close_is_not_a_death(tmp_path):
+    """A Stop or a model switch cancels the reader: no «omp has stopped», no end marker (the
+    spec's risk: a wrong Notice ends a healthy turn)."""
+    from types import SimpleNamespace
+
+    session = _session(tmp_path)
+
+    async def run():
+        reader = asyncio.StreamReader()  # omp alive, saying nothing
+        session._proc = SimpleNamespace(stdout=reader, stdin=None)
+        reading = asyncio.ensure_future(session._read_frames())
+        await asyncio.sleep(0)
+        reading.cancel()
+        try:
+            await reading
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(run())
+    assert not session._ended.is_set() and session._events.empty()
 
 
 def test_omp_ending_mid_turn_ends_the_turn_out_loud(tmp_path):
