@@ -62,7 +62,37 @@ def supersede(project_dir: Path, wrong: str, right: str) -> tuple[bool, str]:
     never took the wrong title — counts as done: the REW rename was the whole fix. A call that got
     no answer is `(False, why)` — busy behind another write, timed out, a method without it."""
     try:
+        return _supersede(project_dir, wrong, right)
+    except process_writer.Busy as exc:
+        return False, str(exc)
+
+
+def supersede_each(
+    project_dir: Path, fixes: Iterable[tuple[str, str]]
+) -> tuple[list[tuple[str, str, str]], list[tuple[str, str]]]:
+    """`supersede` for each `(wrong, right)` in turn, as the import renames them. Returns
+    `(refused, not_asked)`: `(wrong, right, what was said)` for each one the round did not take,
+    and the `(wrong, right)` left unasked after a busy answer — every next one would wait the same
+    wait for the same answer, so they are handed back to be named instead."""
+    fixes = list(fixes)
+    refused: list[tuple[str, str, str]] = []
+    for index, (wrong, right) in enumerate(fixes):
+        try:
+            done, said = _supersede(project_dir, wrong, right)
+        except process_writer.Busy as exc:
+            return refused + [(wrong, right, str(exc))], fixes[index + 1:]
+        if not done:
+            refused.append((wrong, right, said))
+    return refused, []
+
+
+def _supersede(project_dir: Path, wrong: str, right: str) -> tuple[bool, str]:
+    """`supersede`, with a busy answer left raised (`process_writer.Busy`): the one refusal that
+    says something about the calls still to come."""
+    try:
         code, out, err = process_writer.supersede_capture(Path(project_dir), wrong, right)
+    except process_writer.Busy:
+        raise
     except process_writer.ProcessWriterError as exc:
         return False, str(exc)
     app_log.logger().info("capture-supersede %r -> %r: exit %s", wrong, right, code)

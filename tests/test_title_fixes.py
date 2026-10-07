@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from autosound_tcc.core import method_cli, project_lock, title_fixes, vendor_loader
+from autosound_tcc.core import method_cli, process_writer, project_lock, title_fixes, vendor_loader
 
 
 def test_a_grammar_difference_is_the_methods_rename_and_ticked():
@@ -86,6 +86,33 @@ def test_a_supersede_behind_another_write_answers_busy_and_writes_nothing(tmp_pa
     assert done is False and said.startswith("busy:") and "nothing was written" in said, said
     assert time.monotonic() - started < 2.0, "it waited longer than the GUI's wait"
     assert _bytes_of(tmp_path / "process") == before
+
+
+def test_each_rename_is_asked_until_a_busy_answer_and_none_after_it(tmp_path, monkeypatch):
+    """`supersede_each`, which the import uses: a refusal of one title leaves the next to be asked,
+    and exit 1 (the round never took it) is done, as in `supersede`. A busy answer is the one that
+    stops it — every next one would wait the same wait for the same answer — and what is left is
+    handed back unasked, to be named."""
+    old = "this project's method does not have `capture-supersede`"
+    answers = iter([process_writer.ProcessWriterError(old),
+                    (1, "", "error: round r1 never took 'b'"),
+                    process_writer.Busy("busy: nothing was written")])
+    asked = []
+
+    def supersede_capture(project_dir, wrong, right):
+        asked.append(wrong)
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(process_writer, "supersede_capture", supersede_capture)
+    refused, not_asked = title_fixes.supersede_each(
+        tmp_path, [("a", "A"), ("b", "B"), ("c", "C"), ("d", "D")])
+
+    assert asked == ["a", "b", "c"]
+    assert refused == [("a", "A", old), ("c", "C", "busy: nothing was written")]
+    assert not_asked == [("d", "D")]
 
 
 def test_the_import_form_fills_found_names_and_leaves_them_unticked(tmp_path):

@@ -487,6 +487,54 @@ def test_a_batch_that_went_through_is_written_down_under_its_new_names(tmp_path,
     assert i18n.t("capImportRenamed").format(n=1, renamed=1) in panel._status_label.text()
 
 
+def test_a_rename_the_open_round_did_not_take_is_said_and_none_is_asked_behind_busy(
+        tmp_path, monkeypatch):
+    """#169/#171: the round learns a rename through `capture-supersede`, which takes the writer
+    lock — so a rename made while a long write runs (a 120 s `capture-check`) is refused as busy
+    after the GUI's wait. The round then keeps the OLD title as taken while the store and the
+    ledger take the new one, and the status said only «renamed». The refusal is said now, with the
+    method's sentence; the renames after a busy one are not asked — each would wait the same wait
+    for the same answer — and are named instead. The import itself goes on as it did."""
+    from autosound_tcc.core import capture_import, config, process_writer
+    from autosound_tcc.state import process_view
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(process_view, "capture_round", lambda *_a, **_k: {
+        "id": "r1", "taken": {"w-L_01 (sw)": {}, "w-R_01 (sw)": {}}})
+    busy = "busy: another write to this project is still running — nothing was written, try again"
+    asked = []
+
+    def supersede_capture(project_dir, wrong, right):
+        asked.append((wrong, right))
+        raise process_writer.Busy(busy)
+
+    monkeypatch.setattr(process_writer, "supersede_capture", supersede_capture)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    ledger = []
+    monkeypatch.setattr(panel, "_write_ledger",
+                        lambda rows, titles: ledger.append(([r.uuid for r in rows], dict(titles))))
+    answer = {"1": {"title": "w-L_01 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:10:00"},
+              "2": {"title": "w-R_01 (sw)", "uuid": "u2", "date": "2026-Aug-25 20:10:10"}}
+    panel._taking = capture_import.candidates(answer, tmp_path)
+    renamed = [("u1", "w-L_02 (sw)"), ("u2", "w-R_02 (sw)")]
+    panel._renaming = list(renamed)
+
+    panel._on_import_renamed(renamed)
+
+    said = panel._status_label.text()
+    assert "w-L_01 (sw) → w-L_02 (sw)" in said and busy in said, said
+    assert i18n.t("capImportSupersedeRefused").format(
+        pairs="w-L_01 (sw) → w-L_02 (sw)", why=busy) in said, said
+    assert i18n.t("capImportSupersedeNotAsked").format(pairs="w-R_01 (sw) → w-R_02 (sw)") in said
+    assert asked == [("w-L_01 (sw)", "w-L_02 (sw)")], "behind a busy answer the next is not asked"
+    # Nothing else changes: the store, the status's lead and the ledger write are as they were.
+    assert capture_import.imported_titles(tmp_path) == ["w-L_02 (sw)", "w-R_02 (sw)"]
+    assert i18n.t("capImportRenamed").format(n=2, renamed=2) in said
+    assert ledger == [(["u1", "u2"], dict(renamed))]
+
+
 def test_method_channel_pairs_uses_meas_order_by_default():
     _app()
     panel = MeasurementPanel()
