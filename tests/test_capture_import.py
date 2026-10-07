@@ -833,11 +833,14 @@ def test_where_rew_holds_no_range_none_is_made_up(range_):
     assert asked == [{}]
 
 
-def _rew_fr(monkeypatch, low, high, level=85.0, slope=True):
-    """REW faked at the method's own boundary (`verify._api`), no HTTP: an FR from `low` to `high`
-    Hz at 1/12 octave, falling 12 dB an octave above a third of the way if `slope`, and no
-    impulse."""
+def _rew_fr(monkeypatch, listing, low, high, level=85.0, slope=True):
+    """REW faked at the method's own boundary (`verify._api`), no HTTP, holding the captures of
+    `listing`: an FR from `low` to `high` Hz at 1/12 octave, falling 12 dB an octave above a third
+    of the way if `slope`, and no impulse — answered as REW answers it: HTTP 400 naming the
+    capture asked (the skill's live pass at REW, 2026-10-07), not an error of ours. The method
+    lets that one answer through; any other failed impulse read on a sweep is an issue (v3.1.2)."""
     import math
+    import urllib.error
 
     verify = vendor_loader.load_verify()
     n = int(math.log2(high / low) * 12) + 1
@@ -845,8 +848,13 @@ def _rew_fr(monkeypatch, low, high, level=85.0, slope=True):
     knee = low * (high / low) ** (1 / 3)
     mag = [level - (12 * math.log2(f / knee) if slope and f > knee else 0) for f in freqs]
 
-    def no_impulse(*_args, **_kwargs):
-        raise RuntimeError("no impulse in this fake")
+    def no_impulse(mid, normalised=False):
+        held = listing[mid]
+        url = (f"{verify._api.BASE_URL}/measurements/{mid}/impulse-response"
+               + ("" if normalised else "?normalised=false"))
+        raise urllib.error.HTTPError(
+            url, 400, f"{held['title']} at index {mid} uuid {held['uuid']} does not have an "
+                      f"impulse response", {}, None)
 
     monkeypatch.setattr(verify._api, "get_fr", lambda mid, smoothing=None: (freqs, mag, None))
     monkeypatch.setattr(verify._api, "get_impulse_response", no_impulse)
@@ -859,23 +867,24 @@ def test_a_band_limited_sweep_is_usable_by_the_method_s_own_verdict(monkeypatch)
     stand there (a silent capture is still red). A sweep that stops short of the range REW holds
     for it is still «truncated»: that is what the word means now."""
     rows = lambda listing: ci.candidates(listing, imported={})  # noqa: E731
-    _rew_fr(monkeypatch, 20.0, 1001.0)
 
     held = {"1": _listed("sw_7 (sw)", "u1", startFreq=20.0, endFreq=1001.0)}
+    _rew_fr(monkeypatch, held, 20.0, 1001.0)
     found = ci.check_sweeps(rows(held), listing=lambda: held)
     assert not ci.unusable(found["u1"]), found["u1"]["issues"]
 
     bare = {"1": _listed("sw_7 (sw)", "u1")}
+    _rew_fr(monkeypatch, bare, 20.0, 1001.0)
     found = ci.check_sweeps(rows(bare), listing=lambda: bare)
     assert not ci.unusable(found["u1"]), found["u1"]["issues"]
 
-    _rew_fr(monkeypatch, 20.0, 1001.0, level=-95.0)
+    _rew_fr(monkeypatch, bare, 20.0, 1001.0, level=-95.0)
     found = ci.check_sweeps(rows(bare), listing=lambda: bare)
     assert ci.unusable(found["u1"]) and "silence" in " ".join(found["u1"]["issues"])
     assert not any("truncated" in issue for issue in found["u1"]["issues"])
 
-    _rew_fr(monkeypatch, 20.0, 300.0)
     full = {"1": _listed("w-L_7 (sw)", "u1", startFreq=20.0, endFreq=20000.0)}
+    _rew_fr(monkeypatch, full, 20.0, 300.0)
     found = ci.check_sweeps(rows(full), listing=lambda: full)
     assert ci.unusable(found["u1"]) and "truncated" in " ".join(found["u1"]["issues"])
 
@@ -975,9 +984,9 @@ def test_finding_146_as_the_arbiter_met_it(monkeypatch, tmp_path):
     """One sub sweep at 20-1001 Hz, taken twice: `sw_7 (sw)` and `sw_7 (rta)`. Before, both read
     red, «truncated». His rule: «перше брати не можна, а друге можна» — the first is usable, the
     second is not, for its title alone. The method's real verdict, REW faked at its edge."""
-    _rew_fr(monkeypatch, 20.0, 1001.0)
     listing = {"1": _listed("sw_7 (sw)", "u-sw", startFreq=20.0, endFreq=1001.0),
                "2": _listed("sw_7 (rta)", "u-rta", startFreq=20.0, endFreq=1001.0)}
+    _rew_fr(monkeypatch, listing, 20.0, 1001.0)
     judge = ci.verdict_reader(tmp_path)
 
     titles = {raw["uuid"]: raw["title"] for raw in listing.values()}
@@ -1016,8 +1025,8 @@ def test_what_the_window_judged_is_kept_by_the_capture_s_uuid(tmp_path):
 def test_only_truncated_reads_the_method_s_own_line(monkeypatch):
     """The card's drop (tcc#149) and the window's (tcc#148) are one match, made against the
     method's real wording: a verdict failing for «covers … — truncated» alone, and nothing else."""
-    _rew_fr(monkeypatch, 20.0, 1001.0)
     listing = {"1": _listed("sw_7 (sw)", "u1")}
+    _rew_fr(monkeypatch, listing, 20.0, 1001.0)
     line = vendor_loader.load_verify().verdict("sw_7 (sw)", measurements=listing)["issues"]
 
     assert ci.only_truncated(line), line

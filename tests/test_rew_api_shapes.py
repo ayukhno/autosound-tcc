@@ -18,6 +18,8 @@ code cannot drift away from that research again.
 from __future__ import annotations
 
 import json
+import re
+import urllib.parse
 
 import pytest
 
@@ -27,16 +29,45 @@ pytestmark = pytest.mark.skipif(
     not vendor_loader.is_available(), reason="rew_tool submodule not checked out"
 )
 
+#: The filter slots REW lists for a measurement: every slot of its equaliser -- 30 under the
+#: Audiotec Fischer "Full EQ (30 bands)" of the live pass at REW (2026-10-07, the skill's
+#: `rew_tool/testdata/rew/filters-after-pk.json`).
+_SLOTS = 30
+_FILTERS = re.compile(r"/measurements/\d+/filters")
+#: A cleared slot as REW lists it: its index, type, enabled and isAuto, and no values.
+_CLEARED = ("index", "type", "enabled", "isAuto")
+
 
 @pytest.fixture
 def rew(monkeypatch):
-    """The vendored module with its HTTP layer replaced by a recorder.
+    """The vendored module with its HTTP layer replaced by a recorder that answers as REW does.
 
     Patches `urllib.request.urlopen` inside the module rather than its `_get`/`_post`/`_put`
     helpers, so the verb, path and JSON body a real REW would receive are all observable.
+
+    The filters are answered as the live pass at REW saw them (the skill's #134, 2026-10-07): a GET
+    of `/measurements/<id>/filters` is a list of every slot, each a dict with its `index`; a write
+    is applied before REW answers it; a POST keeps the slots it does not name; a slot past the
+    equaliser's count is dropped. The method reads every filter write back (v3.1.2), so a fake
+    answering `[]` read as REW keeping none of them. The values written here sit on REW's grid,
+    so REW holds them as written.
     """
     api = vendor_loader.load_rew_api()
     sent: list[dict] = []
+    banks: dict[str, dict[int, dict]] = {}
+
+    def slots(path):
+        return banks.setdefault(path, {n: {"index": n, "type": "None", "enabled": True,
+                                           "isAuto": True} for n in range(1, _SLOTS + 1)})
+
+    def keep(path, wrote):
+        bank = slots(path)
+        if wrote["index"] not in bank:
+            return
+        held = {**bank[wrote["index"]], **wrote}
+        if held["type"] == "None":
+            held = {key: held[key] for key in _CLEARED}
+        bank[wrote["index"]] = held
 
     class _Response:
         def __init__(self, payload: bytes) -> None:
@@ -54,20 +85,35 @@ def rew(monkeypatch):
     def fake_urlopen(req, timeout=None):
         if isinstance(req, str):  # a GET built from a bare URL
             sent.append({"method": "GET", "url": req, "body": None, "timeout": timeout})
-            return _Response(b"[]")
+            path = urllib.parse.urlsplit(req).path
+            assert _FILTERS.fullmatch(path), f"this fake answers a GET of the filters only: {req}"
+            return _Response(json.dumps(list(slots(path).values())).encode())
         body = req.data.decode() if req.data else None
-        sent.append(
-            {
-                "method": req.get_method(),
-                "url": req.full_url,
-                "body": json.loads(body) if body else None,
-                "timeout": timeout,
-            }
-        )
+        call = {
+            "method": req.get_method(),
+            "url": req.full_url,
+            "body": json.loads(body) if body else None,
+            "timeout": timeout,
+        }
+        sent.append(call)
+        path = urllib.parse.urlsplit(req.full_url).path
+        if _FILTERS.fullmatch(path) and call["method"] == "POST":
+            for wrote in call["body"]["filters"]:
+                keep(path, wrote)
+            return _Response(b'{"message": "Filters set"}')
+        if _FILTERS.fullmatch(path) and call["method"] == "PUT":
+            keep(path, call["body"])
+            return _Response(b'{"message": "Filter set"}')
         return _Response(b'{"message": "ok"}')
 
     monkeypatch.setattr(api.urllib.request, "urlopen", fake_urlopen)
     return api, sent
+
+
+def _writes(sent):
+    """The requests that wrote, in order: the method reads the filters back after a filter write
+    (v3.1.2), so a write is no longer the last request it sends."""
+    return [call for call in sent if call["method"] != "GET"]
 
 
 def test_every_call_carries_a_timeout(rew):
@@ -88,7 +134,7 @@ def test_set_filters_posts_an_object_not_a_bare_array(rew):
 
     api.set_filters(7, bands)
 
-    call = sent[-1]
+    (call,) = _writes(sent)
     assert call["method"] == "POST"
     assert call["url"].endswith("/measurements/7/filters")
     assert isinstance(call["body"], dict), "a bare array is rejected at REW's JSON layer"
@@ -102,7 +148,7 @@ def test_set_filter_puts_a_single_filter_object(rew):
 
     api.set_filter(7, band)
 
-    call = sent[-1]
+    (call,) = _writes(sent)
     assert call["method"] == "PUT"
     assert call["url"].endswith("/measurements/7/filters")
     assert call["body"] == band
