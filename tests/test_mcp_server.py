@@ -685,6 +685,27 @@ def test_an_advertisement_that_cannot_be_withdrawn_is_logged_not_raised(
     assert any(".mcp.json" in r.getMessage() for r in app_log_warnings)
 
 
+def test_a_withdrawal_reads_an_mcp_json_saved_with_a_byte_order_mark(tmp_path, monkeypatch):
+    """The re-review of Task 19, N3. The withdrawal reads `.mcp.json` on its own now (I1), and
+    older Windows Notepad saves UTF-8 with a byte-order mark. Read as plain `utf-8`, such a file
+    does not parse: every quit would leave this instance's entry behind, naming a dead port for the
+    next CLI, with only the log to say so. Read as `utf-8-sig`, this instance's entry is taken out
+    and the rest written back."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = tmp_path / ".mcp.json"
+    theirs = {"type": "http", "url": "http://x/mcp"}
+    ours = {"type": "http", "url": "http://127.0.0.1:8765/mcp", "headers": {"X-TCC-Token": "tok"}}
+    body = json.dumps({"mcpServers": {"theirs": theirs, "tcc": ours}}, indent=2)
+    path.write_bytes(b"\xef\xbb\xbf" + body.encode("utf-8"))
+
+    mcp_server.forget_mcp_config(tmp_path, port=8765, token="tok")
+
+    written = path.read_bytes()
+    assert b'"tcc"' not in written, "this instance's entry is taken out"
+    assert json.loads(written.decode("utf-8")) == {"mcpServers": {"theirs": theirs}}, (
+        "and the rest written back")
+
+
 def test_an_mcp_json_nested_too_deep_to_write_back_is_left_as_it_was(tmp_path, monkeypatch,
                                                                      app_log_warnings):
     """The review of Task 19, M2. `json.dumps(indent=2)` takes the pure-Python encoder, which runs
