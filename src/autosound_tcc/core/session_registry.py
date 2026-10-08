@@ -23,16 +23,25 @@ session id belongs to which phase, and whether that session is spent.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+from autosound_tcc.core import own_store
 
 SCHEMA_VERSION = 1
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _shaped(data: dict[str, Any]) -> dict[str, Any]:
+    """The registry's three keys, filled in where the file has none."""
+    data.setdefault("schema_version", SCHEMA_VERSION)
+    data.setdefault("current_phase", None)
+    data.setdefault("phases", {})
+    return data
 
 
 class SessionRegistry:
@@ -49,14 +58,22 @@ class SessionRegistry:
     # ---- reads -------------------------------------------------------------
 
     def load(self) -> dict[str, Any]:
+        """The registry as it stands — an empty one when there is none, and never an exception.
+
+        A plain read (R-l): the window builds a session only to read this, unguarded. A broken
+        file has been set aside with its bytes and said by `own_store`, and one that cannot be
+        opened has been said; here both read as an empty registry, the way a missing one does.
+        The writes read through `_read`, where the one that cannot be opened raises (#173).
+        """
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {"schema_version": SCHEMA_VERSION, "current_phase": None, "phases": {}}
-        data.setdefault("schema_version", SCHEMA_VERSION)
-        data.setdefault("current_phase", None)
-        data.setdefault("phases", {})
-        return data
+            return self._read()
+        except own_store.StoreUnreadable:
+            return _shaped({})
+
+    def _read(self) -> dict[str, Any]:
+        """The read under a write: `StoreUnreadable` goes through, so a registry that is there
+        and cannot be read is never written over — the live session's id with it (#173)."""
+        return _shaped(own_store.read_json(self.path))
 
     def current_phase(self) -> Optional[str]:
         return self.load().get("current_phase")
@@ -90,7 +107,7 @@ class SessionRegistry:
         Nothing about the process itself is stored: step, status and evidence live in the skill's
         file, and this registry deliberately keeps no second copy.
         """
-        data = self.load()
+        data = self._read()
         phase = str(phase)
         previous = data.get("current_phase")
         if previous and previous != phase:
@@ -105,7 +122,7 @@ class SessionRegistry:
 
     def bind_session(self, phase: str, session_id: str) -> None:
         """Attach the SDK's session id to a phase, so a later launch can resume it."""
-        data = self.load()
+        data = self._read()
         entry = data["phases"].setdefault(str(phase), {"closed": False})
         entry["session_id"] = session_id
         entry["updated"] = _now()
@@ -113,16 +130,17 @@ class SessionRegistry:
         self._write(data)
 
     def close_phase(self, phase: str) -> None:
-        data = self.load()
+        data = self._read()
         entry = data["phases"].setdefault(str(phase), {})
         entry["closed"] = True
         entry["updated"] = _now()
         self._write(data)
 
     def _write(self, data: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         # Write-then-rename: a crash mid-write would otherwise leave truncated JSON, and the next
         # launch would silently fall back to "no resumable session" and drop a live context.
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        tmp.replace(self.path)
+        # Through a temp file of this write's own (`own_store.write_json`), not a fixed
+        # `sessions.json.tmp`: the MCP server and the session each hold a registry over the same
+        # project, and a write landing between the other's temp file and its rename took that
+        # file from under it (#173).
+        own_store.write_json(self.path, data)
