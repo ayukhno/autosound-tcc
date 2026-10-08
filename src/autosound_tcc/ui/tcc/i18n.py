@@ -232,6 +232,10 @@ _CORE: dict[Lang, dict[str, str]] = {
         "updWhy_newer_contract": "this method is newer than this TCC — update TCC first",
         # #170: git could not read the release's contract.py, which another try may mend.
         "updWhy_read_failed": "could not read the release — try again",
+        # Git answered, and none of the names it listed is a release: not git failing (M2).
+        "updWhy_no_release": "no release-shaped tag was found among the tags git listed",
+        # A verify-tag that did not run — git missing, timed out, refused — checked nothing (M3).
+        "updWhy_not_checked": "could not check the signature",
         "updSkillLooking": "looking for changes made to the method on this machine…",
         "updKeepTitle": "Changes in the method",
         "updKeepText": "The method installed here has changes that are not in its release:\n\n{files}\n\nBefore updating, TCC keeps them in a file beside the method, so nothing is lost. Then it puts the method back to its release and updates it.\n\nSend these changes to the method's author as an issue on GitHub? They leave this machine.",
@@ -1546,6 +1550,8 @@ Choose sweeps (sw) above to read this.",
         "updWhy_upkeep_failed": "оновлювач Скіла не завершив роботу",
         "updWhy_newer_contract": "цей Скіл новіший за цей TCC — спершу онови TCC",
         "updWhy_read_failed": "не вдалося прочитати реліз — спробуй ще раз",
+        "updWhy_no_release": "серед тегів, які назвав git, немає жодного у формі релізу",
+        "updWhy_not_checked": "не вдалося перевірити підпис",
         "updSkillLooking": "дивлюсь, чи міняли Скіл на цій машині…",
         "updKeepTitle": "Зміни у Скілі",
         "updKeepText": "У Скілі на цій машині є зміни, яких нема в релізі:\n\n{files}\n\nПеред оновленням ТСС збереже їх окремим файлом поруч зі Скілом — нічого не пропаде. Потім поверне Скіл до релізу й оновить.\n\nНадіслати ці зміни авторові Скіла як issue на GitHub? Вони підуть з цієї машини.",
@@ -2787,6 +2793,10 @@ Choose sweeps (sw) above to read this.",
         # #170: the English until the Advisor.
         "updWhy_newer_contract": "this method is newer than this TCC — update TCC first",
         "updWhy_read_failed": "could not read the release — try again",
+        # #170: the English until the Advisor.
+        "updWhy_no_release": "no release-shaped tag was found among the tags git listed",
+        # #170: the English until the Advisor.
+        "updWhy_not_checked": "could not check the signature",
         "updSkillLooking": "sprawdzam, czy metodę zmieniano na tej maszynie…",
         "updKeepTitle": "Zmiany w metodzie",
         "updKeepText": "Metoda zainstalowana tutaj ma zmiany, których nie ma w jej wydaniu:\n\n{files}\n\nPrzed aktualizacją TCC zachowa je w pliku obok metody — nic nie przepadnie. Potem przywróci metodę do wydania i ją zaktualizuje.\n\nWysłać te zmiany autorowi metody jako issue na GitHubie? Opuszczą tę maszynę.",
@@ -4089,6 +4099,10 @@ Choose sweeps (sw) above to read this.",
         # #170: the English until the Advisor.
         "updWhy_newer_contract": "this method is newer than this TCC — update TCC first",
         "updWhy_read_failed": "could not read the release — try again",
+        # #170: the English until the Advisor.
+        "updWhy_no_release": "no release-shaped tag was found among the tags git listed",
+        # #170: the English until the Advisor.
+        "updWhy_not_checked": "could not check the signature",
         "updSkillLooking": "sehe nach, ob die Methode auf dieser Maschine geändert wurde…",
         "updKeepTitle": "Änderungen an der Methode",
         "updKeepText": "Die hier installierte Methode hat Änderungen, die nicht in ihrem Release sind:\n\n{files}\n\nVor dem Update legt TCC sie in einer Datei neben der Methode ab — nichts geht verloren. Dann setzt es die Methode auf ihr Release zurück und aktualisiert sie.\n\nDiese Änderungen dem Autor der Methode als Issue auf GitHub schicken? Sie verlassen diese Maschine.",

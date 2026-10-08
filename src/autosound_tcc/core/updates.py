@@ -382,6 +382,13 @@ _NO_PROMPTING = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never", "GIT_AS
 _log = logging.getLogger("autosound_tcc")
 
 
+class _DidNotRun(str):
+    """`_git`'s answer for a git that did not run at all — missing, timed out, refused by the
+    system — as the text it always answered (`TimeoutExpired: …`), told apart by its type alone,
+    so every caller that shows it shows it as before. A verify-tag that never ran checked nothing,
+    and is not a bad signature (the group review, M3)."""
+
+
 def _git(*args: str, cwd: Optional[Path] = None, timeout: float = _ASK_TIMEOUT,
          base_env: Optional[dict[str, str]] = None) -> tuple[bool, str]:
     """Run git, return `(ok, output)`. Never raises — a failed probe is an answer, not a crash.
@@ -411,7 +418,7 @@ def _git(*args: str, cwd: Optional[Path] = None, timeout: float = _ASK_TIMEOUT,
         # missing git and a timed-out probe were the two failures that left no line at all while
         # the window said "could not reach GitHub" (2026-09-20).
         _log.warning("git %s did not run: %s: %s", " ".join(args), type(exc).__name__, exc)
-        return False, f"{type(exc).__name__}: {exc}"
+        return False, _DidNotRun(f"{type(exc).__name__}: {exc}")
     out = (done.stdout or "").strip() or (done.stderr or "").strip()
     if done.returncode != 0:
         # The log used to record that git was SPAWNED and never what it answered, so every failure
@@ -495,10 +502,23 @@ def _shown_tcc(version: str, revision: str) -> str:
 #: dialog), and the update row blamed GitHub — so both of us went and checked the network.
 _last_probe_error = ""
 
+#: What `_last_probe_error` begins with when git answered and none of the names it listed is a
+#: release (the group review, M2), the names after it: a fourth answer, which is not git failing.
+_NO_RELEASE = "no release among the tags git listed: "
+
 
 def last_probe_error() -> str:
     """Git's own words from the last failed probe, or "" when the last one worked."""
     return _last_probe_error
+
+
+def probe_answer() -> tuple[str, str]:
+    """The reason key and its detail for the last probe that found no tag: `no_release` and the
+    names git listed when none of them is a release (M2), else `probe_failed` and git's words."""
+    said = last_probe_error() or "no tag matched"
+    if said.startswith(_NO_RELEASE):
+        return "no_release", said[len(_NO_RELEASE):]
+    return "probe_failed", said
 
 
 def _newest_tag_in(repo: str, *globs: str, key) -> tuple[str, str]:
@@ -548,6 +568,11 @@ def _newest_tag_in(repo: str, *globs: str, key) -> tuple[str, str]:
             shas[name] = sha.strip()
     ranked = {name: sha for name, sha in shas.items() if key(name) is not None}
     if not ranked:
+        # The repository answered and named tags, none of them a release: the fourth answer, said
+        # as itself rather than as git failing, and logged as the «matched nothing» one is (M2).
+        listed = sorted(shas)
+        _last_probe_error = _NO_RELEASE + ", ".join(listed[:8]) + (" …" if len(listed) > 8 else "")
+        _log.warning("git ls-remote %s: %s", repo, _last_probe_error)
         return "", ""
     newest = max(ranked, key=key)
     return newest, ranked[newest]
@@ -686,7 +711,7 @@ def check_tcc(channel: str = STABLE) -> Status:
     if not tag:
         # WHY, not just "no". `git` unable to run at all is a different problem from a network
         # that is down, and the window had git's own sentence in hand while saying the second.
-        return Status("tcc", version, "", False, "probe_failed", last_probe_error())
+        return Status("tcc", version, "", False, *probe_answer())
     latest = tag.lstrip("v")
     revision = install_report.requested_revision()
     if _ahead(_tcc_release(version, revision), tag):
@@ -856,6 +881,7 @@ def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM,
     says it predates signing. The developer's switch skips it, and the line says so. Anything else
     at or after it is refused: `git_too_old` when git could not check at all (`_CANNOT_CHECK`),
     `openssh_too_old` when it was ssh-keygen that could not (`_OPENSSH_CANNOT`, tcc#123),
+    `not_checked` when git itself did not run (`_DidNotRun`: missing, timed out, refused — M3),
     `bad_signature` for an unsigned tag, a stranger's key, a name that is not a release — in git's
     own words either way.
 
@@ -880,6 +906,10 @@ def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM,
                         base_env=verify_env(os.environ))
     if ok and 'Good "git" signature' in said:
         return True, f"{tag}: signature good ({principal})", ""
+    if isinstance(said, _DidNotRun):
+        # Nothing was checked — an antivirus scanning ssh-keygen on its first run on Windows can
+        # hold it past the bound — so «bad signature», which accuses the release, is wrong (M3).
+        return False, f"{tag}: {said}", "not_checked"
     last = (said.splitlines() or ["git verify-tag failed"])[-1]
     if any(mark in said for mark in _CANNOT_CHECK):
         _known, version = _git("--version")
@@ -1114,12 +1144,13 @@ class LocalChanges:
     detail: str = ""
 
 
-def _target(tag: str) -> tuple[str, str]:
-    """`(tag, "")`, or `("", git's words)` when no tag was given and the newest cannot be asked."""
+def _target(tag: str) -> tuple[str, str, str]:
+    """`(tag, "", "")`, or `("", reason, detail)` when no tag was given and the newest cannot be
+    found: git's words, or the names it listed when none is a release (`probe_answer`, M2)."""
     if tag:
-        return tag, ""
+        return tag, "", ""
     newest = newest_tag()
-    return newest, "" if newest else (last_probe_error() or "no tag matched")
+    return (newest, "", "") if newest else ("", *probe_answer())
 
 
 def local_changes(tag: str = "") -> LocalChanges:
@@ -1130,9 +1161,9 @@ def local_changes(tag: str = "") -> LocalChanges:
     why, detail = _ours_to_run(repo)
     if why:
         return LocalChanges(False, reason=why, detail=detail)
-    target, said = _target(tag)
+    target, why, said = _target(tag)
     if not target:
-        return LocalChanges(False, reason="probe_failed", detail=said)
+        return LocalChanges(False, reason=why, detail=said)
     with _upkeep_from_tag(repo, target) as got:
         if got.script is None:
             return LocalChanges(False, reason=got.reason, detail=got.detail)
@@ -1211,9 +1242,9 @@ def apply_skill(tag: str = "", *, keep_local: bool = False, send: bool = False) 
     why, detail = _ours_to_run(repo)
     if why:
         return SkillUpdate(False, why, detail)
-    target, said = _target(tag)
+    target, why, said = _target(tag)
     if not target:
-        return SkillUpdate(False, "probe_failed", said)
+        return SkillUpdate(False, why, said)
     here = _clone_version(repo)
     if _ahead(_release_of(here), target):
         _log.warning("skill: %s is ahead of %s — not moved back", here, target)
@@ -1450,7 +1481,7 @@ def prepare_tcc_update(channel: str = STABLE, *, pid: Optional[int] = None,
     """
     tag = newest_tcc_tag(channel)
     if not tag:
-        return TccUpdate(None, "probe_failed", last_probe_error() or "no tag matched")
+        return TccUpdate(None, *probe_answer())
     version, revision = install_report.app_version(), install_report.requested_revision()
     if _ahead(_tcc_release(version, revision), tag):
         shown = _shown_tcc(version, revision)

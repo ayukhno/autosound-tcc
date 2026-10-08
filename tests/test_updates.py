@@ -2341,3 +2341,62 @@ def test_an_upkeep_run_that_never_answers_is_bounded_on_windows(monkeypatch):
 
     assert code == -1 and out == "" and err.startswith("TimeoutExpired")
     assert spawns.hung and all(child.killed for child in spawns.hung)
+
+
+def test_a_listing_with_no_release_in_it_is_said_as_that_not_as_git_failing(
+        monkeypatch, tmp_path, app_log_warnings):
+    """The group review, M2: git answered with tags, and `_release_key` refused every name. The
+    probe returned nothing with `last_probe_error` empty and said nothing to the log, so the row
+    read «the version could not be asked for — git said», with nothing after it. It says that no
+    release was found, names what git listed, and logs it — on TCC's row, its press, and the
+    method's press alike."""
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc.diagnostics_panel import _reason
+
+    monkeypatch.setattr(updates, "_last_probe_error", "")  # read by the next test's row: put back
+    monkeypatch.setattr(install_report, "app_version", lambda: "1.1.2")
+    monkeypatch.setattr(install_report, "install_source", lambda: ("u", "a" * 40))
+    monkeypatch.setattr(install_report, "requested_revision", lambda: "")
+    _an_installed_clone(monkeypatch, tmp_path)
+    _git_answers(monkeypatch, {"ls-remote": (
+        True, f"{_THERE}\trefs/tags/v1.2.0-wip\n{_HERE}\trefs/tags/nightly")})
+
+    status = updates.check_tcc()
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+    skill = updates.apply_skill()
+
+    for reason, detail in ((status.reason, status.detail), (ready.reason, ready.detail),
+                           (skill.reason, skill.detail)):
+        assert reason == "no_release" and "v1.2.0-wip" in detail and "nightly" in detail, \
+            (reason, detail)
+    assert _reason(status.reason, status.detail).startswith(i18n.t("updWhy_no_release"))
+    assert any("v1.2.0-wip" in record.getMessage() for record in app_log_warnings)
+
+
+@pytest.mark.parametrize("failure", [
+    subprocess.TimeoutExpired(["git", "verify-tag"], 12),   # ssh-keygen scanned on its first run
+    FileNotFoundError(2, "No such file or directory", "git"),  # no git at all
+    PermissionError(13, "Permission denied", "git"),         # the system refused to start it
+])
+def test_a_verify_tag_that_did_not_run_is_not_a_bad_signature(monkeypatch, tmp_path, failure):
+    """The group review, M3: `_git` turns its own failure to run into `(False, "TimeoutExpired:
+    …")`, a text no `_CANNOT_CHECK` sentence matches, so the release was refused as a bad
+    signature — not the author's — when nothing had been checked. It could not be checked: said
+    with why, and another try may do it."""
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc.diagnostics_panel import _reason
+
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+
+    def runs(argv, **kwargs):
+        if "verify-tag" in argv:
+            raise failure
+        return subprocess.CompletedProcess(argv, 0, stdout="git version 2.51.0", stderr="")
+
+    monkeypatch.setattr(updates.child, "run_bounded", runs)
+
+    ok, line, reason = updates._verify_tag(tmp_path, "v3.0.64")
+
+    assert (ok, reason) == (False, "not_checked"), (reason, line)
+    assert line.startswith("v3.0.64: ") and type(failure).__name__ in line, line
+    assert _reason(reason, line) == f"{i18n.t('updWhy_not_checked')}: {line}"
