@@ -121,31 +121,61 @@ def load_imported(project_dir: Optional[Path] = None) -> dict[str, dict]:
     """`uuid -> {title, round, when, date[, as_is]}`, or `{}` — `as_is` once a capture the check
     called unusable was taken anyway (tcc#21).
 
-    A missing file is the normal state of a project nobody has imported into yet. A broken one is
-    set aside with its bytes and said, and one that cannot be opened is said and left where it is
-    (`own_store`, #173); for a reader both still degrade to "nothing imported" rather than taking
-    the dialog down: the worst that follows is a list showing rows the tuner has seen before,
-    which they can read. A write must not do the same — see `record_imported`.
+    A missing file is the normal state of a project nobody has imported into yet. A broken one, or
+    one shaped wrong inside (`_misshapen`), is set aside with its bytes and said, and one that
+    cannot be opened is said and left where it is (`own_store`, #173); for a reader all of them
+    still degrade to "nothing imported" rather than taking the dialog down: the worst that follows
+    is a list showing rows the tuner has seen before, which they can read. A write must not do the
+    same — see `record_imported`.
     """
     return _section(_read_store(project_dir), "measurements")
 
 
+#: The store's two `uuid -> entry` maps: what was imported, and what was left for a re-take.
+_SECTIONS = ("measurements", "retake")
+
+
+def _misshapen(store: dict[str, Any]) -> str:
+    """Why `store` is not an import store this module can read, or "" when it is (`own_store`).
+
+    Each section, when there is one, is a `uuid -> entry` map with every entry an object. A
+    section that was a list, or an entry that was a string, read as "nothing imported" — or as
+    the entries that were — and the next write replaced it: every earlier round gone, F5 one level
+    down (#173, R-bm). Such a store is set aside like a broken one instead.
+    """
+    for name in _SECTIONS:
+        section = store.get(name, {})
+        if not isinstance(section, dict):
+            return f'"{name}" is not an object'
+        for uuid, entry in section.items():
+            if not isinstance(entry, dict):
+                return f'the "{name}" entry for {uuid} is not an object'
+    return ""
+
+
 def _read_store(project_dir: Optional[Path]) -> dict[str, Any]:
-    """The whole store for a reader: `{}` when it is not there, was broken, or cannot be opened.
+    """The whole store for a reader: `{}` when it is not there, was broken or shaped wrong, or
+    cannot be opened.
 
     Never raises (R-l): `own_store` has already said what was wrong. The writers read through
-    `own_store.read_json` themselves, so that a store they cannot read is never written over.
+    `_read_store_for_write`, so that a store they cannot read is never written over.
     """
     try:
-        return own_store.read_json(store_path(project_dir))
+        return _read_store_for_write(project_dir)
     except own_store.StoreUnreadable:
         return {}
 
 
+def _read_store_for_write(project_dir: Optional[Path]) -> dict[str, Any]:
+    """The read under a write: `StoreUnreadable` goes through. A broken store, or one shaped wrong
+    inside, has been set aside with its bytes and said by the time this answers `{}`."""
+    return own_store.read_json(store_path(project_dir), misshapen=_misshapen)
+
+
 def _section(store: dict[str, Any], name: str) -> dict[str, dict]:
-    """One `uuid -> entry` map of the store, `{}` when the map is missing or not a map."""
-    entries = store.get(name)
-    return {str(k): v for k, v in entries.items() if isinstance(v, dict)} if isinstance(entries, dict) else {}
+    """One `uuid -> entry` map of the store, `{}` when it has none. A copy, for the writers to
+    change; that it is a map of objects is `_misshapen`'s to check, before the store is let in."""
+    return dict(store.get(name) or {})
 
 
 def _write_store(measurements: dict, retake: dict, project_dir: Optional[Path]) -> None:
@@ -175,7 +205,7 @@ def record_retakes(rows: Iterable["Candidate"], project_dir: Optional[Path] = No
     Read once, and the way `record_imported` reads: a store that cannot be read raises
     `StoreUnreadable` here rather than come back empty and be written over (#173, R-l).
     """
-    store = own_store.read_json(store_path(project_dir))
+    store = _read_store_for_write(project_dir)
     left = _section(store, "retake")
     stamp = datetime.now().replace(microsecond=0).isoformat()
     added = 0
@@ -232,13 +262,14 @@ def record_imported(rows: Iterable["Candidate"], round_id: str = "",
     half-written store would read as "nothing was imported" and put the whole round back on the
     checklist.
 
-    Read once, through `own_store.read_json` itself rather than `load_imported`: both halves put
-    back come from one state of the file, and a store that is there and cannot be read raises
+    Read once, through `_read_store_for_write` rather than `load_imported`: both halves put back
+    come from one state of the file, and a store that is there and cannot be read raises
     `StoreUnreadable` out of here instead of coming back as `{}` — which, written back with this
     round in it, was every earlier round, «Take it as it is» answer and re-take gone (#173, R-l).
-    A broken store has been set aside, bytes and all, by the time this writes a fresh one.
+    A broken store, or one shaped wrong inside, has been set aside, bytes and all, by the time
+    this writes a fresh one.
     """
-    store = own_store.read_json(store_path(project_dir))
+    store = _read_store_for_write(project_dir)
     measurements = _section(store, "measurements")
     left = _section(store, "retake")
     stamp = datetime.now().replace(microsecond=0).isoformat()

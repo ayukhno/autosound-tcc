@@ -278,6 +278,34 @@ def test_a_broken_store_is_set_aside_and_said_and_the_write_starts_a_fresh_one(t
     assert len(app_log_told) == 1 and str(path) in app_log_told[0], app_log_told
 
 
+@pytest.mark.parametrize("misshapen", [
+    b'{"schema": 1, "measurements": [{"title": "w-R_01 (sw)", "round": "cap_001"}]}',
+    b'{"schema": 1, "measurements": {"0a1b2c3d": "w-R_01 (sw)"}}',
+    b'{"schema": 1, "measurements": {}, "retake": ["0a1b2c3d"]}',
+], ids=["measurements-not-an-object", "an-entry-not-an-object", "retake-not-an-object"])
+def test_a_store_shaped_wrong_inside_is_set_aside_and_said_and_the_write_starts_a_fresh_one(
+        tmp_path, app_log_told, misshapen):
+    """#173, R-bm. Valid JSON and an object, but a section that is not a `uuid -> entry` map, or an
+    entry that is not an object, read as "nothing imported" — or as the entries that were — and
+    the next write replaced it: F5 again, one level down. Now such a store goes the broken way:
+    set aside with its bytes, said once, and the write starts a fresh store."""
+    rows = ci.candidates(_rew(*_LIVE), tmp_path)
+    path = ci.store_path(tmp_path)
+    path.parent.mkdir()
+    path.write_bytes(misshapen)
+
+    assert ci.record_imported(rows, round_id="cap_002", project_dir=tmp_path) == 3
+
+    aside = list(path.parent.glob(f"{ci.FILENAME}.corrupt-*"))
+    assert len(aside) == 1, f"exactly one copy set aside: {aside}"
+    assert aside[0].read_bytes() == misshapen, "holding the original bytes"
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert set(saved) == {"schema", "measurements"}, saved
+    assert set(saved["measurements"]) == {"4f81d739", "c716f1e4", "7868f377"}, (
+        "the new store holds only what this write took")
+    assert len(app_log_told) == 1 and str(path) in app_log_told[0], app_log_told
+
+
 @pytest.mark.parametrize("write", ["record_imported", "record_retakes"])
 def test_a_write_reads_the_store_once(tmp_path, monkeypatch, write):
     """Both halves a write puts back — the imports and the re-takes — come from one reading of the
