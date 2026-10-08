@@ -2883,11 +2883,16 @@ def test_a_receipt_stays_through_its_reports_redraws_until_a_newer_report_or_a_r
 
 
 def test_a_fix_pressed_while_a_check_runs_lands_its_receipt_on_the_check_after_it(project,
-                                                                                  other_copy):
+                                                                                  other_copy,
+                                                                                  monkeypatch):
     """I1's second half. The window shows its last report while a check runs, and a Re-check
     asked for meanwhile waits for that check (`main_window._open_diagnostics`,
     `_start_contract_check`). Its report comes first, begun before the fix — the old state, here
-    the refusal — and the receipt is not spent on it: it lands on the report of the check after."""
+    the refusal — and the receipt is not spent on it: it lands on the report of the check after.
+
+    On a clock that does not move from the running check's start to the press (N1): CPython 3.12's
+    `time.monotonic()` on Windows moves in 15.625 ms steps, and the two used to tie there."""
+    monkeypatch.setattr(time, "monotonic", lambda: 1000.0)
     linked(project, other_copy)
     _app()
     dialog = DiagnosticsDialog()

@@ -237,3 +237,27 @@ def test_a_well_formed_report_reads_as_it_says():
         "/p", "now", 0.1)
 
     assert out.ok and not out.complete and out.error == "" and len(out.files) == 1
+
+
+def test_checks_begun_inside_one_step_of_the_clock_are_still_ordered(tmp_path, monkeypatch):
+    """Fix round 2 of #169's diagnostics row, N1. A fix's receipt waits for a report begun after
+    the fix (`ContractReport.started`), and a clock cannot say «after» inside one of its steps:
+    CPython 3.12's `time.monotonic()` on Windows moves in 15.625 ms, so a check that was running
+    and the fix pressed after it often read the same time. A count can — every stamp is later than
+    the one before it, from either thread, whatever the clock does."""
+    import time
+
+    from tests._method_copies import entry
+
+    project = tmp_path / "car"
+    entry(project).mkdir(parents=True)  # a copy TCC refuses: the check answers with no child
+    monkeypatch.setattr(time, "monotonic", lambda: 1000.0)  # a clock that does not move
+
+    first = contract_check.run(project)
+    second = contract_check.run(project)
+
+    assert not first.available and not second.available, "both answered without a child"
+    assert first.started < second.started, "two checks inside one step of the clock"
+    between = contract_check.stamp()
+    built = contract_check.ContractReport(ok=True, project_dir=str(project))
+    assert second.started < between < built.started, "a fix's stamp and a report built by hand"

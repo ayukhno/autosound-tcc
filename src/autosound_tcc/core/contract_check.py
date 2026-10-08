@@ -20,8 +20,10 @@ window when the thing it diagnoses is broken would be the wrong instrument.
 
 from __future__ import annotations
 
+import itertools
 import json
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -37,6 +39,23 @@ DEFAULT_TIMEOUT_S = 30.0
 
 #: The checker, relative to the method's `rew_tool/`.
 _SCRIPT = "contract.py"
+
+#: One count for the whole process, behind a lock so the check's thread and the window's draw
+#: from it alike (`stamp`).
+_STAMPS = itertools.count(1)
+_STAMPS_LOCK = threading.Lock()
+
+
+def stamp() -> int:
+    """A number greater than every one handed out before it in this process: what orders a
+    check's start against anything else (`ContractReport.started`).
+
+    A count, not a clock (fix round 2 of #169's diagnostics row, N1): a fix's receipt waits for a
+    report begun after the fix, and inside one step of a clock nothing is after anything. CPython
+    3.12's `time.monotonic()` on Windows moves in 15.625 ms steps, and a check running when the
+    fix was pressed read the same time as the press there."""
+    with _STAMPS_LOCK:
+        return next(_STAMPS)
 
 
 @dataclass(frozen=True)
@@ -64,11 +83,11 @@ class ContractReport:
     #: The phase −1 gate: intake left everything phase 0 needs (`contract.py`'s own `complete`,
     #: what `--gate` exits on). False when the method does not say -- not a green gate.
     complete: bool = False
-    #: When the check this report answers began, on `time.monotonic()`: what tells a check begun
-    #: before something from one begun after it. A fix's receipt in the diagnostics lands only on
-    #: a report begun after the fix (#169) — the check that was running when it was pressed
-    #: reports the old state. A report built by hand is begun when it is built.
-    started: float = field(default_factory=time.monotonic, compare=False)
+    #: When the check this report answers began, as a `stamp()`: what tells a check begun before
+    #: something from one begun after it. A fix's receipt in the diagnostics lands only on a
+    #: report begun after the fix (#169) — the check that was running when it was pressed reports
+    #: the old state. A report built by hand is begun when it is built.
+    started: int = field(default_factory=stamp, compare=False)
 
     @property
     def available(self) -> bool:
@@ -182,6 +201,7 @@ def run(
     sentence, with nothing started.
     """
     project_dir = Path(project_dir or config.project_dir())
+    begun = stamp()  # the report's `started`; the clock below only times the check
     started = time.monotonic()
     checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -192,7 +212,7 @@ def run(
             error=message,
             checked_at=checked_at,
             duration_s=time.monotonic() - started,
-            started=started,
+            started=begun,
         )
 
     args = ["check", str(project_dir), "--json"]
@@ -257,7 +277,7 @@ def run(
         return failed(tail or f"contract.py produced no report (exit {proc.returncode})")
 
     return replace(report_from_json(report, project_dir, checked_at, time.monotonic() - started),
-                   started=started)
+                   started=begun)
 
 
 def report_from_json(report: Any, project_dir, checked_at: str, duration_s: float) -> ContractReport:

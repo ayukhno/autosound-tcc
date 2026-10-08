@@ -57,7 +57,7 @@ from autosound_tcc.core import (
     updates,
     vendor_loader,
 )
-from autosound_tcc.core.contract_check import ContractReport
+from autosound_tcc.core.contract_check import ContractReport, stamp
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
 from autosound_tcc.ui.tcc.measurement_panel import TrafficLight
@@ -502,10 +502,11 @@ class DiagnosticsDialog(QDialog):
         #: A fix's receipt (`_on_fixed`), said above the verdict of the report it lands on for as
         #: long as that report is on screen — through every redraw of it — until a newer report, a
         #: Re-check or the next fix. `_receipt_on` is that report, None while the receipt waits
-        #: for one begun after `_receipt_after` (`ContractReport.started`).
+        #: for one begun after `_receipt_after` — both `contract_check.stamp()`s, a count and
+        #: not a clock, so the two can never tie (N1).
         self._receipt = ""
         self._receipt_on: Optional[ContractReport] = None
-        self._receipt_after = 0.0
+        self._receipt_after = 0
         self.setModal(False)
         self.setMinimumSize(560, 420)
         self.setProperty("class", "fb-card")
@@ -1659,7 +1660,7 @@ class DiagnosticsDialog(QDialog):
         check's report, coming first, is the old state."""
         self._receipt = i18n.t("diagFixDone").format(what=message)
         if self._report is not None and not self._report.available:
-            self._receipt_on, self._receipt_after = None, time.monotonic()
+            self._receipt_on, self._receipt_after = None, stamp()
             self.set_report(None)
             self.refreshRequested.emit()
             return
@@ -1670,7 +1671,7 @@ class DiagnosticsDialog(QDialog):
         """The verdict, under the receipt of a fix when this is its report: the one on screen when
         it was made, or the first one begun after it when it asked for the check again."""
         if (self._receipt and self._receipt_on is None
-                and self._report.started >= self._receipt_after):
+                and self._report.started > self._receipt_after):
             self._receipt_on = self._report
         if self._receipt and self._receipt_on is self._report:
             verdict = f"{self._receipt}\n{verdict}"
