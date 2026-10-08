@@ -31,7 +31,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from autosound_tcc.core import app_log
 
@@ -52,10 +52,16 @@ _said: dict[tuple[str, str], tuple] = {}
 _said_lock = threading.Lock()
 
 
-def read_json(path: Path) -> dict[str, Any]:
+def read_json(path: Path, *,
+              misshapen: Optional[Callable[[dict[str, Any]], str]] = None) -> dict[str, Any]:
     """The store's object — `{}` when it is not there, or was broken and has been set aside.
 
     Raises `StoreUnreadable` when the file is there and cannot be read (see the module's header).
+
+    `misshapen`, when given, is the owner's own look inside the object: why it is not a shape the
+    owner can read, or "" when it is. An object it refuses goes the broken way — set aside with
+    its bytes, and said with that reason: `sessions.json` holding `"phases": []` was valid JSON
+    and an object, and the registry's code tripped over it on every read (#173).
     """
     path = Path(path)
     try:
@@ -74,6 +80,9 @@ def read_json(path: Path) -> dict[str, Any]:
         return _set_aside(path, _why(exc))
     if not isinstance(data, dict):
         return _set_aside(path, "valid JSON, but not an object")
+    wrong = misshapen(data) if misshapen is not None else ""
+    if wrong:
+        return _set_aside(path, f"valid JSON, but {wrong}")
     _forget(path)
     return data
 

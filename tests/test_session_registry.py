@@ -126,6 +126,31 @@ def test_a_registry_that_is_not_an_object_is_set_aside_not_an_attribute_error(tm
     assert len(app_log_told) == 1 and str(registry.path) in app_log_told[0], app_log_told
 
 
+@pytest.mark.parametrize("misshapen", [
+    b'{"current_phase": "2", "phases": []}',
+    b'{"current_phase": "2", "phases": {"2": "sess-abc"}}',
+    b'{"current_phase": ["2"], "phases": {}}',
+], ids=["phases-not-an-object", "an-entry-not-an-object", "current-phase-not-a-string"])
+def test_a_registry_shaped_wrong_inside_is_set_aside_not_an_error(tmp_path, app_log_told,
+                                                                  misshapen):
+    """The `[]` class one level down (#173, the review of Task 18, Minor 1). Missing keys were
+    filled in and nothing that was there was looked at: `phases` holding a list, or a phase entry
+    holding a string, raised AttributeError out of `resumable_session` — which
+    `TuningSession.__init__` calls unguarded, so every session start failed naming no file — and
+    a `current_phase` holding a list raised TypeError out of the next phase change. Set aside
+    with its bytes and said once, and the next phase starts a fresh registry."""
+    registry = SessionRegistry(tmp_path)
+    registry.path.write_bytes(misshapen)
+
+    assert registry.resumable_session() is None
+    registry.sync_phase("3")
+
+    assert registry.current_phase() == "3"
+    aside = list(tmp_path.glob("sessions.json.corrupt-*"))
+    assert len(aside) == 1 and aside[0].read_bytes() == misshapen, aside
+    assert len(app_log_told) == 1 and str(registry.path) in app_log_told[0], app_log_told
+
+
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
                     reason="POSIX permissions, and root reads a file whatever its mode")
 @pytest.mark.parametrize("write", [

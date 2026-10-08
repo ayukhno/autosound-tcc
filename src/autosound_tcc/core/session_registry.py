@@ -36,6 +36,26 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _misshapen(data: dict[str, Any]) -> str:
+    """Why `data` is not a registry this module can read, or "" when it is (`own_store`).
+
+    What the code below takes for granted: `current_phase` a string or null, `phases` an object,
+    and each phase's entry an object. A hand edit that breaks one raised out of every read and
+    every write — `resumable_session` among them, which `TuningSession.__init__` calls unguarded
+    — so the file is set aside like a broken one instead (#173).
+    """
+    phase = data.get("current_phase")
+    if phase is not None and not isinstance(phase, str):
+        return '"current_phase" is not a string or null'
+    phases = data.get("phases", {})
+    if not isinstance(phases, dict):
+        return '"phases" is not an object'
+    for name, entry in phases.items():
+        if not isinstance(entry, dict):
+            return f'the entry for phase "{name}" is not an object'
+    return ""
+
+
 def _shaped(data: dict[str, Any]) -> dict[str, Any]:
     """The registry's three keys, filled in where the file has none."""
     data.setdefault("schema_version", SCHEMA_VERSION)
@@ -61,8 +81,9 @@ class SessionRegistry:
         """The registry as it stands — an empty one when there is none, and never an exception.
 
         A plain read (R-l): the window builds a session only to read this, unguarded. A broken
-        file has been set aside with its bytes and said by `own_store`, and one that cannot be
-        opened has been said; here both read as an empty registry, the way a missing one does.
+        file — or one shaped wrong inside (`_misshapen`) — has been set aside with its bytes and
+        said by `own_store`, and one that cannot be opened has been said; here both read as an
+        empty registry, the way a missing one does.
         The writes read through `_read`, where the one that cannot be opened raises (#173).
         """
         try:
@@ -73,7 +94,7 @@ class SessionRegistry:
     def _read(self) -> dict[str, Any]:
         """The read under a write: `StoreUnreadable` goes through, so a registry that is there
         and cannot be read is never written over — the live session's id with it (#173)."""
-        return _shaped(own_store.read_json(self.path))
+        return _shaped(own_store.read_json(self.path, misshapen=_misshapen))
 
     def current_phase(self) -> Optional[str]:
         return self.load().get("current_phase")

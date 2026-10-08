@@ -91,6 +91,18 @@ def test_the_phase_of_each_session_comes_from_tcc_s_registry(tmp_path):
     assert session_export.phases_by_session(tmp_path) == {"s1": "-1", "s2": "0"}
 
 
+def test_a_registry_whose_phases_are_not_an_object_names_no_phase_and_raises_nothing(tmp_path):
+    """`(phases or {}).items()` on a list raised AttributeError out of the Diagnostics sessions tab
+    (#173, the review of Task 18, Minor 1). The export only reads; the registry's own next read
+    sets such a file aside and says so."""
+    tcc = tmp_path / ".tcc"
+    tcc.mkdir()
+    (tcc / "sessions.json").write_text(json.dumps({"phases": [{"session_id": "s1"}]}),
+                                       encoding="utf-8")
+
+    assert session_export.phases_by_session(tmp_path) == {}
+
+
 def test_a_session_that_runs_past_midnight_names_both_days(tmp_path):
     lines = [
         {"type": "user", "timestamp": "2026-09-16T23:50:00Z",

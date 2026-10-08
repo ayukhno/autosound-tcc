@@ -199,3 +199,26 @@ def test_a_store_saved_with_a_byte_order_mark_is_read_not_set_aside(store, app_l
 
     assert own_store.read_json(store) == {"generator": "sdk:claude-opus-5"}
     assert _left(store) == ["store.json"] and app_log_told == []
+
+
+def test_a_store_its_owner_calls_misshapen_is_set_aside_like_a_broken_one(store, app_log_told):
+    """Valid JSON and an object, but not what its owner can read — `sessions.json` holding
+    `"phases": []` (the review of Task 18, Minor 1): the owner's code tripped over it on every
+    read and nothing was said. The owner's `misshapen` says why, and the store goes the broken
+    way: set aside with its bytes, said once with the reason, `{}` back. A store it finds well
+    shaped is read as it is."""
+    body = b'{"phases": []}'
+    store.write_bytes(body)
+
+    def misshapen(data):
+        return "" if isinstance(data.get("phases", {}), dict) else '"phases" is not an object'
+
+    assert own_store.read_json(store, misshapen=misshapen) == {}
+    assert own_store.read_json(store, misshapen=misshapen) == {}, "nothing more to say"
+
+    left = _left(store)
+    assert len(left) == 1 and _ASIDE.fullmatch(left[0]), left
+    assert (store.parent / left[0]).read_bytes() == body, "the original bytes are kept"
+    assert len(app_log_told) == 1 and '"phases" is not an object' in app_log_told[0], app_log_told
+    store.write_bytes(b'{"phases": {}}')
+    assert own_store.read_json(store, misshapen=misshapen) == {"phases": {}}

@@ -147,7 +147,11 @@ def save_each_file(rows: Sequence[SessionRow], target, title: str = "",
     return target
 
 def phases_by_session(project_dir) -> dict[str, str]:
-    """`session id -> phase`, from TCC's own `.tcc/sessions.json`; {} when there is none."""
+    """`session id -> phase`, from TCC's own `.tcc/sessions.json`; {} when there is none.
+
+    Read only, so a file it cannot use is no phase rather than an error: the registry's own next
+    read sets a broken or wrongly shaped one aside and says so (#173).
+    """
     try:
         data = json.loads((Path(project_dir) / ".tcc" / "sessions.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -155,7 +159,7 @@ def phases_by_session(project_dir) -> dict[str, str]:
     phases = data.get("phases") if isinstance(data, dict) else None
     return {
         str(entry["session_id"]): str(phase)
-        for phase, entry in (phases or {}).items()
+        for phase, entry in (phases if isinstance(phases, dict) else {}).items()
         if isinstance(entry, dict) and entry.get("session_id")
     }
 
