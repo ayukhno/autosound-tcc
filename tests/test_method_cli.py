@@ -30,10 +30,15 @@ def method_copy(tmp_path, monkeypatch):
 
 
 def test_process_writer_raises_and_catches_the_same_classes():
-    """Every `except process_writer.ProcessWriterError` (or `.Busy`) has to catch what `method_cli`
-    raises: one class under two names, not two classes that look alike."""
+    """Every `except process_writer.ProcessWriterError` (or `.Busy`, `.Refused`) has to catch what
+    `method_cli` raises: one class under two names, not two classes that look alike. A refusal of
+    the project's copy is a `ProcessWriterError`, so every caller that shows one shows it — and not
+    a `Busy`, whose promise is that the same call will work in a moment."""
     assert process_writer.ProcessWriterError is method_cli.ProcessWriterError
     assert process_writer.Busy is method_cli.Busy
+    assert process_writer.Refused is method_cli.Refused
+    assert issubclass(method_cli.Refused, method_cli.ProcessWriterError)
+    assert not issubclass(method_cli.Refused, method_cli.Busy)
 
 
 def test_a_child_past_its_timeout_is_cut_and_answered_timed_out_not_busy(tmp_path, method_copy):

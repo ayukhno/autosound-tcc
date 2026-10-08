@@ -1554,6 +1554,42 @@ def test_a_busy_answer_to_the_plan_is_not_read_as_cannot_plan(tmp_path, monkeypa
     assert not [c for c in calls if c[0] == "taken"], "nothing recorded without a round"
 
 
+def test_a_refused_copy_of_the_method_is_not_read_as_cannot_plan(tmp_path, monkeypatch):
+    """#169: a project whose copy of the method TCC will not run answers every write `Refused`,
+    with the binding's sentence. That says nothing about the plan either: retried without `--plan`,
+    it is refused again, and the sentence would stand as the gate's reason why the method could not
+    plan. Refused whole, as a busy answer is: one `start_capture`, and the binding's sentence where
+    a refusal goes."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+    sentence = ("/car/.claude/skills/autosound-tuning is a folder, not a link, and a copy inside "
+                "the project cannot be trusted; re-link it to TCC's copy.")
+
+    def _start(d, v, e, step="", origin="", plan=False, **_kw):
+        calls.append(("start", v, tuple(e), origin, plan))
+        raise process_writer.Refused(sentence)
+
+    monkeypatch.setattr(mp.process_writer, "start_capture", _start)
+    worker = _LedgerWriteWorker(
+        project_dir=tmp_path, round_id="", version=6,
+        expected=["w-L_6 (sw)"], titles=["w-L_6 (sw)"], protective={},
+    )
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert [c for c in calls if c[0] == "start"] == [("start", "6", (), "", True)]
+    assert seen["refused"] == [sentence]
+    assert seen["unplanned"] == ""
+    assert seen["opened"] == ""
+    assert not [c for c in calls if c[0] == "taken"], "nothing recorded without a round"
+
+
 def test_the_columns_scroll_sideways_on_tcc_s_own_bar(monkeypatch):
     """VM-10 (the Windows VM): under the measurement grid, whose «GROUP (RTA)» column did not fit,
     a native grey bar with «‹ ›» arrows. The columns scroll on their own both ways on purpose (the

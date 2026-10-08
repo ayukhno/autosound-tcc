@@ -6,13 +6,17 @@ TCC owns: getting one call at a time to it.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import shutil
+import subprocess
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import method_cli, process_writer, project_lock
+from autosound_tcc.core import method_binding, method_cli, process_writer, project_lock, vendor_loader
 
 from tests import _intake
 
@@ -336,3 +340,127 @@ def test_a_round_can_be_opened_from_the_methods_plan(tmp_path, monkeypatch):
     assert "--plan" in seen["args"]
     assert seen["args"][seen["args"].index("--optional") + 1] == "Ws_61 (sw)"
     assert seen["args"][seen["args"].index("--start") + 1] == "rta"
+
+
+# ---- which copy a write runs (#169, G5 S1) ------------------------------------------------------
+# Every write started TCC's own `process.py`, whatever the project linked at
+# `.claude/skills/autosound-tuning` — so a session could advise from one copy while the writers wrote
+# with another. A write now runs the copy `method_binding` binds the project to, and is told which.
+
+
+def _entry(project: Path) -> Path:
+    return project / ".claude" / "skills" / vendor_loader.SKILL_NAME
+
+
+@pytest.fixture
+def own_copy_is_the_submodule(monkeypatch):
+    """TCC's own copy is the vendored one, whatever the developer's shell points the override at,
+    and the child hears of a copy only from TCC — not from a variable left in that shell."""
+    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
+    monkeypatch.delenv(method_binding.SKILL_ROOT_ENV, raising=False)
+    if not vendor_loader._looks_like_the_skill(vendor_loader._SUBMODULE_DIR):
+        pytest.skip("skill submodule not checked out")
+    assert vendor_loader.skill_dir() == vendor_loader._SUBMODULE_DIR
+
+
+def _second_copy(root: Path, marker: Path) -> Path:
+    """The vendored method copied to `root/skills/autosound-tuning`, the layout of its own repository,
+    with one change: its `process.py`, run as a CLI, also appends one line to `marker` — the
+    `AUTOSOUND_SKILL_ROOT` it was started with. `vendor/` itself is never touched."""
+    skill = root / "skills" / vendor_loader.SKILL_NAME
+    shutil.copytree(vendor_loader._SUBMODULE_DIR, skill,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    script = skill / "rew_tool" / "state" / "process.py"
+    text = script.read_text(encoding="utf-8")
+    guard = 'if __name__ == "__main__":\n'
+    assert text.count(guard) == 1, "the CLI's guard moved: the marker has nowhere to go"
+    marked = (f"    with open({str(marker)!r}, 'a', encoding='utf-8') as _marker:\n"
+              f"        _marker.write(os.environ.get({method_binding.SKILL_ROOT_ENV!r}, '-') + '\\n')\n")
+    script.write_text(text.replace(guard, guard + marked), encoding="utf-8")
+    return skill
+
+
+def test_a_write_runs_the_copy_the_project_is_bound_to(tmp_path, own_copy_is_the_submodule):
+    """The issue's first: a project linked to a copy approved on this machine has its writes run by
+    THAT copy, and the child is told which one it is — `AUTOSOUND_SKILL_ROOT`, the skill folder,
+    which the method reads as «the copy this session runs» (`deployment.py`)."""
+    marker = tmp_path / "second-copy-ran.txt"
+    second = _second_copy(tmp_path / "second-method", marker)
+    project = tmp_path / "car"
+    _entry(project).parent.mkdir(parents=True)
+    _entry(project).symlink_to(second, target_is_directory=True)
+    binding = method_binding.approve(method_binding.for_project(project))
+    assert binding.state == "approved", binding.reason
+
+    process_writer.enter_phase(project, "-1")
+
+    assert marker.is_file(), "TCC's own copy wrote, not the one the project is bound to"
+    assert marker.read_text(encoding="utf-8").splitlines() == [str(binding.skill_dir)]
+    state = json.loads((project / "process" / "process-state.json").read_text(encoding="utf-8"))
+    assert state["active_phase"] == "-1", "and the bound copy did the write"
+
+
+@pytest.mark.parametrize("call", [
+    pytest.param(lambda p: process_writer.enter_phase(p, "1"), id="a write"),
+    pytest.param(lambda p: process_writer.handoff_json(p), id="a read, which takes no lock"),
+])
+def test_a_refused_binding_answers_refused_with_its_sentence_and_starts_nothing(
+        tmp_path, monkeypatch, call):
+    """A project whose copy TCC will not run — here a real folder at the entry: a copy inside the
+    project travels with it, from a backup or a clone (HUB-050) — is answered with the binding's own
+    sentence, before the lock is taken and before any child starts. Retrying cannot help, and the
+    sentence says what does."""
+    project = tmp_path / "car"
+    _entry(project).mkdir(parents=True)
+    binding = method_binding.for_project(project)
+    assert binding.state == "refused" and binding.reason, binding
+    started, locked = [], []
+    monkeypatch.setattr(method_cli.child, "run_bounded",
+                        lambda argv, **_kw: started.append(argv) or pytest.fail("a child started"))
+    monkeypatch.setattr(project_lock, "hold",
+                        lambda *a, **_k: locked.append(a) or contextlib.nullcontext())
+
+    with pytest.raises(process_writer.Refused) as refused:
+        call(project)
+
+    assert str(refused.value) == binding.reason
+    assert (started, locked) == ([], []), "nothing started and no lock taken"
+    assert not (project / "process").exists(), "nothing written either"
+
+
+def test_a_project_with_no_entry_runs_tccs_own_copy_and_says_so(tmp_path, monkeypatch,
+                                                                own_copy_is_the_submodule):
+    """No entry is `same`: TCC's own copy runs, as before #169 — the copy the bare CLI runs too
+    (`script_path`) — and the child is now told which one it is, as a bound copy is."""
+    project = tmp_path / "car"
+    project.mkdir()
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append((argv, kwargs["env"]))
+        return subprocess.CompletedProcess(argv, 0, "ok", "")
+
+    monkeypatch.setattr(method_cli.child, "run_bounded", run)
+
+    process_writer.enter_phase(project, "-1")
+
+    [(argv, env)] = seen
+    own = vendor_loader.skill_dir()
+    assert argv[1] == str(own / "rew_tool" / "state" / "process.py") == str(process_writer.script_path())
+    assert env[method_binding.SKILL_ROOT_ENV] == str(own)
+
+
+def test_the_copy_with_no_project_is_the_one_a_project_with_no_entry_runs(tmp_path, monkeypatch):
+    """`script_path` and `is_available` answer for a caller with no project — the race test's bare
+    CLI, the import's «is there a method at all». They used to find TCC's copy by a lookup of their
+    own, beside the resolver; they ask the binding's answer now, so the two cannot drift apart."""
+    elsewhere = tmp_path / "tccs-own"
+    monkeypatch.setattr(method_binding, "own_copy", lambda: elsewhere)
+
+    script = elsewhere / "rew_tool" / "state" / "process.py"
+    assert method_binding.for_project(tmp_path / "car").script("state/process.py") == script
+    assert process_writer.script_path() == script
+    assert process_writer.is_available() is False
+    script.parent.mkdir(parents=True)
+    script.write_text("", encoding="utf-8")
+    assert process_writer.is_available() is True

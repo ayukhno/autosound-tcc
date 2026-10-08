@@ -14,7 +14,9 @@ waiting behind a 120 s `capture-check` — or the lock's own `process/`, made in
 none — would be the bug. `timeout_s` bounds the child alone, under `child.run_bounded`: the child's
 whole tree is killed at the timeout, and the wait for its pipes after that is bounded too.
 
-Which copy of the method runs, and in what environment, is `_resolve`'s alone. Qt-free.
+Which copy of the method runs, and in what environment, is `_resolve`'s alone: the copy the
+project is bound to (`method_binding`), or `Refused` with the binding's sentence and nothing
+started. Qt-free.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ import threading
 from pathlib import Path
 from typing import Optional, Sequence
 
-from autosound_tcc.core import app_log, child, project_lock, vendor_loader
+from autosound_tcc.core import app_log, child, method_binding, project_lock, vendor_loader
 
 #: How long a write waits for the project's lock (`project_lock.hold`) before answering `Busy`
 #: (#171), read when the call runs. The main thread is the window, and a window frozen behind a
@@ -53,14 +55,34 @@ class Busy(ProcessWriterError):
     """
 
 
-def _resolve(project_dir: Path, script_rel: str) -> tuple[Path, dict[str, str]]:
-    """The script to run and the environment to run it in: TCC's own copy of the method.
+class Refused(ProcessWriterError):
+    """The project's copy of the method is not one TCC will run (`method_binding`), so nothing was
+    started: no lock taken, no child. Carries the binding's sentence verbatim — it names the entry
+    and what to do about it.
 
-    The one place that says which copy, so that running another one changes this function and
-    nothing else. `REW_TOOL_DIR` is resolved on every read, so the env override
-    (`AUTOSOUND_SKILL_DIR`) holds here as it does everywhere else.
+    Unlike `Busy`, the same call will NOT work in a moment: every call to this project is refused
+    alike until the link is approved or re-linked. So a caller that stops after `Busy` stops after
+    this too, rather than ask the rest only to be refused the same way.
     """
-    return vendor_loader.REW_TOOL_DIR / script_rel, vendor_loader.child_env()
+
+
+def _resolve(project_dir: Path, script_rel: str) -> tuple[Path, dict[str, str]]:
+    """The script to run and the environment to run it in: the copy of the method the project is
+    bound to (`method_binding.for_project`, asked once per spawn), and `AUTOSOUND_SKILL_ROOT` naming
+    that copy's skill folder to the child.
+
+    The one place that says which copy (#169). Every write used to run TCC's own copy whatever the
+    project linked, so a session could advise from one copy while the writers wrote with another.
+    A binding TCC will not run is `Refused`, with its own sentence — asked first in `spawn`, so
+    before the lock and before any child. TCC's own copy is resolved on every call, so the env
+    override (`AUTOSOUND_SKILL_DIR`) holds here as it does everywhere else.
+    """
+    binding = method_binding.for_project(project_dir)
+    try:
+        script = binding.script(script_rel)
+    except method_binding.MethodRefused as exc:
+        raise Refused(str(exc)) from exc
+    return script, vendor_loader.child_env(**binding.session_env())
 
 
 def _named(script: Path, args: Sequence[str], project_dir: Path) -> str:
@@ -79,11 +101,15 @@ def spawn(
     lock: bool = True,
     lock_wait_s: Optional[float] = None,
 ) -> tuple[int, str, str]:
-    """Run `rew_tool/<script_rel> *args` and return `(exit code, stdout, stderr)`, both stripped.
+    """Run `rew_tool/<script_rel> *args` of the project's bound copy and return `(exit code,
+    stdout, stderr)`, both stripped.
 
     The exit code is handed back, not judged: for most commands non-zero is a refusal, for some it
     is the answer (`session-close`, `capture-supersede`, `handoff --json`), and only the caller
     knows which.
+
+    A project whose copy TCC will not run answers `Refused`, with the binding's sentence, before
+    the lock and before any child — a read as much as a write.
 
     `lock` holds the project's writer lock around the child, and `lock_wait_s` is how long to wait
     for it — by default `GUI_LOCK_WAIT_S` on the main thread and `LOCK_WAIT_S` on any other, read

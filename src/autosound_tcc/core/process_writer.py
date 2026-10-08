@@ -18,8 +18,9 @@ Two things this fixes for free, both measured skill defects (SCR-028, SCR-029): 
 our own venv's, never a bare `python` the shell has to guess — `child.script_interpreter()`, which
 is that venv's CONSOLE binary rather than the windowed `pythonw.exe` TCC itself runs under, because
 a script with no console hands none down and the git it calls then opens a window (TCC-006) — and
-the script is located through `vendor_loader`, not through an address only one harness understands.
-Both happen in `method_cli`, the one place a method script is started.
+the script is the one of the copy the project is bound to (`method_binding`), not an address only
+one harness understands. Both happen in `method_cli`, the one place a method script is started; a
+binding TCC will not run answers `Refused` there, with its own sentence.
 
 Reads stay where they were: `mcp_server._load_process_state()` imports the skill's module in-process
 and calls `Process(...).load()`. Writes go out-of-process for the same reason profile writes do —
@@ -31,8 +32,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from autosound_tcc.core import method_cli
-from autosound_tcc.core import vendor_loader
+from autosound_tcc.core import method_binding, method_cli
 
 # Local file I/O and a JSON rewrite; anything near this is a hang, not slowness.
 DEFAULT_TIMEOUT_S = 20.0
@@ -78,16 +78,24 @@ LANDED_IN = {
 
 
 #: `method_cli`'s, under the names every caller already catches — the same classes, not copies, so
-#: an `except process_writer.ProcessWriterError` (or `.Busy`) catches what `method_cli` raises.
+#: an `except process_writer.ProcessWriterError` (or `.Busy`, `.Refused`) catches what `method_cli`
+#: raises.
 ProcessWriterError = method_cli.ProcessWriterError
 Busy = method_cli.Busy
+Refused = method_cli.Refused
 
 
 def script_path() -> Path:
-    return vendor_loader.REW_TOOL_DIR / _SCRIPT
+    """TCC's own `process.py`, for a caller with no project: `is_available`, a bare CLI run beside
+    TCC (`test_writer_race.py`). A write runs the PROJECT's bound copy (`method_cli.spawn`); this is
+    the copy a project with no entry is bound to, taken from the binding's own answer
+    (`method_binding.own_copy`) so the two cannot drift apart."""
+    return method_binding.own_copy() / "rew_tool" / _SCRIPT
 
 
 def is_available() -> bool:
+    """Whether TCC's own copy has its writer. A project bound to another copy is answered for by
+    that copy when it writes — `Refused`, or the script not found there."""
     return script_path().is_file()
 
 

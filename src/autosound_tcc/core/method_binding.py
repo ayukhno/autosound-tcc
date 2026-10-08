@@ -105,6 +105,14 @@ class Binding:
         return {SKILL_ROOT_ENV: str(self.skill_dir)}
 
 
+def own_copy() -> Path:
+    """TCC's own copy of the method: the skill folder a project binds `same` to — with no entry, or
+    an entry that links it. The one answer for `for_project` and for a caller with no project
+    (`process_writer.script_path`), so the two cannot name different copies. Resolved on every
+    call (`vendor_loader.skill_dir`), so the env override holds."""
+    return vendor_loader.skill_dir()
+
+
 def for_project(project_dir: Union[str, os.PathLike]) -> Binding:
     """The copy this project runs, and whether TCC trusts it. Never raises: whatever goes wrong
     while looking is itself an answer — `refused`, with the sentence that says what."""
@@ -121,7 +129,7 @@ def _bind(project_dir: Path, entry: Path) -> Binding:
     try:
         entry_stat = os.lstat(entry)
     except (FileNotFoundError, NotADirectoryError):  # what `os.path.lexists` reads as absent
-        return Binding(project_dir, SAME, vendor_loader.skill_dir(), entry)
+        return Binding(project_dir, SAME, own_copy(), entry)
     except OSError as exc:  # what `lexists` would have read as absent too
         return _refused(project_dir, entry, f"TCC cannot read {entry} ({_why(exc)}); fix the "
                                             f"permissions of {entry.parent} and check again.")
@@ -151,7 +159,7 @@ def _bind(project_dir: Path, entry: Path) -> Binding:
     except OSError as exc:
         return _refused(project_dir, entry, f"TCC cannot read what {entry} points at ({_why(exc)}); "
                                             f"fix the permissions of {target}, or {remedy}.")
-    own = vendor_loader.skill_dir()
+    own = own_copy()
     if _same(target, os.path.realpath(own)):
         return Binding(project_dir, SAME, own, entry)
     if _inside(target, home):

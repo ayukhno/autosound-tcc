@@ -115,6 +115,27 @@ def test_each_rename_is_asked_until_a_busy_answer_and_none_after_it(tmp_path, mo
     assert not_asked == [("d", "D")]
 
 
+def test_a_refused_copy_of_the_method_stops_the_renames_as_busy_does(tmp_path, monkeypatch):
+    """#169: a project whose copy of the method TCC will not run refuses every write the same way,
+    with the binding's sentence — so, as after a busy answer, the renames still to come are not
+    asked, each one only to be refused alike, but handed back to be named. `supersede` alone answers
+    it as not done, as it does busy."""
+    sentence = "/car/.claude/skills/autosound-tuning is a folder, not a link; re-link it to TCC's copy."
+    asked = []
+
+    def supersede_capture(project_dir, wrong, right):
+        asked.append(wrong)
+        raise process_writer.Refused(sentence)
+
+    monkeypatch.setattr(process_writer, "supersede_capture", supersede_capture)
+    refused, not_asked = title_fixes.supersede_each(tmp_path, [("a", "A"), ("b", "B"), ("c", "C")])
+
+    assert asked == ["a"], "behind a refused answer the next is not asked"
+    assert refused == [("a", "A", sentence)]
+    assert not_asked == [("b", "B"), ("c", "C")]
+    assert title_fixes.supersede(tmp_path, "a", "A") == (False, sentence)
+
+
 def test_the_import_form_fills_found_names_and_leaves_them_unticked(tmp_path):
     """«Нове ім'я після пошуку і ідентифікації збіжності попадає в колонку "нове ім'я" … галочку
     треба поставити користувачу свідомо, бо це автоматичний підбір» (the Arbiter, 2026-09-23)."""

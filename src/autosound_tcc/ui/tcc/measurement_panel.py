@@ -320,10 +320,12 @@ class _LedgerWriteWorker(QThread):
                     process_writer.start_capture(
                         self._project_dir, str(self._version), [], origin=self._origin,
                         plan=True)
-                except process_writer.Busy:
-                    # Another write held the project (#171) — no answer about the plan. Retried
-                    # without `--plan`, the round would open WITHOUT the method's list, the busy
-                    # sentence standing as the gate's reason; refused whole, below, instead.
+                except (process_writer.Busy, process_writer.Refused):
+                    # Another write held the project (#171), or the project's copy of the method
+                    # is one TCC will not run (#169) — no answer about the plan either way. Retried
+                    # without `--plan`, the round would open WITHOUT the method's list (or be
+                    # refused alike), the sentence standing as the gate's reason; refused whole,
+                    # below, instead.
                     raise
                 except process_writer.ProcessWriterError as exc:
                     result["unplanned"] = self._why(exc)

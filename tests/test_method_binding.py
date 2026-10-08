@@ -5,8 +5,9 @@ and `vendor_loader.link_skill_into` leaves an existing link alone whatever it po
 link is trusted when it is a copy TCC knows, or one approved once on this machine — HUB-050's reason is
 where a copy came from, not what it looks like. What is tested here, on real folders: the table of
 states, the «is a link» rule where a parent folder is itself a link, the contract number read without
-importing the file, approving, and moving an entry aside to re-link TCC's copy. Nothing calls the module
-yet (Tasks 5, 7, 9, 10, 11 wire it in).
+importing the file, approving, and moving an entry aside to re-link TCC's copy. Every `process.py` call
+runs the copy it binds (`method_cli.spawn`, tested in `test_process_writer.py`); Tasks 7, 9, 10 and 11
+wire in the rest.
 
 The copies of the method are the vendored tree copied under the session's temp folder, with the one
 file a test needs changed — `vendor/` itself is never touched.
