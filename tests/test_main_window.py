@@ -2190,6 +2190,26 @@ def test_a_decision_that_was_never_written_down_reaches_the_strip(tmp_path, monk
     assert i18n.t("recordTargetCurve") in said[0]
 
 
+def test_a_journal_that_could_not_be_read_is_not_said_as_nothing_stale(tmp_path):
+    """The group review, M5: a journal held by another program reads as no events, and the strip
+    said nothing — «nothing stale», when what went stale is unknown (SCR-014's "never silently").
+    A stale answer is still said as it was."""
+    from autosound_tcc.state import process_view
+
+    notes = []
+    host = SimpleNamespace(_status_strip=SimpleNamespace(
+        notify=lambda text, **k: notes.append((text, k.get("level")))))
+    journal = tmp_path / "process" / "journal.jsonl"
+
+    MainWindow._notify_stale(host, process_view.JournalUnread(journal))
+    MainWindow._notify_stale(host, {})
+    MainWindow._notify_stale(host, {"w-L": {"what": "driver replaced", "at": "1"},
+                                    "w-R": {"field": "gain", "at": "2"}})
+
+    assert notes == [(i18n.t("staleUnread").format(path=journal), "warn"),
+                     (i18n.t("staleStrip").format(n=2, codes="w-L, w-R", what="gain"), "warn")]
+
+
 def test_the_line_goes_away_once_the_record_exists(tmp_path, monkeypatch):
     """A warning that outlives its cause teaches people to ignore the strip."""
     _app()

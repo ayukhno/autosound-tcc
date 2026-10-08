@@ -369,6 +369,17 @@ def config_changes(project_dir: Optional[Path] = None) -> tuple[dict, ...]:
 _STALE: dict = {}
 
 
+class JournalUnread(dict):
+    """`stale_channels`' answer from a journal that has bytes and gave no events (the group review,
+    M5): the method reads a file it cannot open as empty (#134, R53) — an antivirus or a sync tool
+    holding it, on Windows — so what went stale is unknown, not «nothing». Empty, as `{}` is, for
+    every reader that only asks which channels; `path` is the journal, for the window to name."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self.path = path
+
+
 def _stamp(path: Path) -> tuple:
     """`(path, st_mtime_ns, st_size)`, what a memo here is keyed by (#172); `(path, None, None)`
     for a file that is not there."""
@@ -409,7 +420,8 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
     the GUI thread, and the journal only grows. The method it was read with is in the key too: the
     reading is the method's, and an update reads the method again (`vendor_loader.reload_loaded`).
     An answer read while a file could not be opened is not kept (the review of Task 20, M1): the
-    method reads such a file as empty, and a hold or a permission lifted moves no stamp.
+    method reads such a file as empty, and a hold or a permission lifted moves no stamp. A journal
+    with bytes that gave no events answers `JournalUnread`, so that is said, not «nothing» (M5).
     """
     process = _process_module()
     if process is None:
@@ -423,10 +435,12 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
     if held is not None and held[0] == key:
         return copy.deepcopy(held[1])
     stale, events_seen, read_empty = _stale_in(root, process)
-    # Kept when the journal gave events, or has no bytes to give any; and when nothing the answer
-    # used came back empty. A journal with bytes and no events may be one the method could not
-    # open — it reads such a file as none — and «nothing stale» from it must not outlive the hold.
-    if (events_seen or not journal[2]) and not read_empty:
+    # A journal with bytes and no events may be one the method could not open — it reads such a
+    # file as none — so its answer is «unknown», never kept, and «nothing stale» from it must not
+    # outlive the hold. Otherwise kept, unless something else the answer used came back empty.
+    if not events_seen and journal[2]:
+        return JournalUnread(journal_file(root))
+    if not read_empty:
         _STALE[str(root)] = (key, stale)
     return copy.deepcopy(stale)
 

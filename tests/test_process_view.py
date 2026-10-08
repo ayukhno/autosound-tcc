@@ -543,9 +543,23 @@ def test_a_journal_the_method_could_not_open_is_not_remembered(project, process,
     _record_change(project, process, "remeasure: [w-L]")
     hold = _held(monkeypatch, vendor_loader.load_process(), "journal.jsonl")
 
-    assert process_view.stale_channels(project) == {}  # what the method reads a held journal as
+    unread = process_view.stale_channels(project)
+    assert unread == {}  # what the method reads a held journal as
+    # …and not «nothing stale» (the group review, M5): what went stale is unknown, and says so.
+    assert isinstance(unread, process_view.JournalUnread), type(unread)
+    assert unread.path == process_view.journal_file(project)
     hold["on"] = False
-    assert set(process_view.stale_channels(project)) == {"w-L"}
+    again = process_view.stale_channels(project)
+    assert set(again) == {"w-L"} and not isinstance(again, process_view.JournalUnread)
+
+
+def test_an_empty_journal_is_nothing_stale_not_an_unread_one(project, process):
+    """No bytes is no events, truly: only a journal that HAS bytes and gave none is unread (M5)."""
+    journal = process_view.journal_file(project)
+    journal.write_bytes(b"")
+
+    answer = process_view.stale_channels(project)
+    assert answer == {} and not isinstance(answer, process_view.JournalUnread)
 
 
 def test_a_project_json_the_method_could_not_open_is_not_remembered(project, process, monkeypatch):

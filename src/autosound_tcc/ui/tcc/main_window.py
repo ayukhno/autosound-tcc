@@ -4245,18 +4245,15 @@ class MainWindow(QMainWindow):
     def _notify_stale(self, stale: dict) -> None:
         """Say it in the strip too. A tuner who has not opened the plan still has to learn that the
         car changed under their measurements — §8's rule, and the reason SCR-014 says "never
-        silently"."""
+        silently". A journal that could not be read is not «nothing stale» either (M5)."""
+        if isinstance(stale, process_view.JournalUnread):
+            self._status_strip.notify(i18n.t("staleUnread").format(path=stale.path), level="warn")
         if not stale:
             return
         newest = max(stale.values(), key=lambda change: str(change.get("at") or ""))
-        self._status_strip.notify(
-            i18n.t("staleStrip").format(
-                n=len(stale),
-                codes=", ".join(sorted(stale)),
-                what=newest.get("what") or newest.get("field") or "config change",
-            ),
-            level="warn",
-        )
+        self._status_strip.notify(i18n.t("staleStrip").format(
+            n=len(stale), codes=", ".join(sorted(stale)),
+            what=newest.get("what") or newest.get("field") or "config change"), level="warn")
 
     def _refresh_capture_task(self, state: dict) -> None:
         """Derive the capture checklist from (phase x glossary x version) — SCR-004/SCR-008.

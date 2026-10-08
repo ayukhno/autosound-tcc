@@ -305,6 +305,8 @@ answers the first five questions anybody would ask.",
         "projectRenderFailed": "Could not draw the project from disk — the last good view is still "
                                "on screen. {error}",
         "staleStrip": "{what} — {n} channel(s) need re-measuring: {codes}",
+        # A journal with bytes that gave no events: what went stale is unknown, not «nothing» (M5).
+        "staleUnread": "Could not read the journal ({path}) — which channels a config change made stale is unknown until it can be read.",
         "missingRecord": "Not written down: {what} — {why}.",
         "criticSaved": "Text saved to {path}",
         # The reviewer's answer to a plain question (tcc#116). «ASK» is the mode's own name, as the
@@ -1610,6 +1612,7 @@ Choose sweeps (sw) above to read this.",
         "projectRenderFailed": "Не вдалося намалювати проєкт із диска — на екрані лишився "
                                "останній робочий вигляд. {error}",
         "staleStrip": "{what} — перезняти каналів: {n} ({codes})",
+        "staleUnread": "Не вдалося прочитати журнал ({path}) — які канали застаріли після зміни конфігурації, невідомо, доки його не прочитано.",
         "missingRecord": "Не записано: {what} — {why}.",
         "criticSaved": "Текст збережено у {path}",
         "askBubble": "ASK · {model}",
@@ -2849,6 +2852,8 @@ Choose sweeps (sw) above to read this.",
         "projectRenderFailed": 'Nie udało się narysować projektu z dysku — na ekranie został ostatni działający widok. '
                                '{error}',
         "staleStrip": '{what} — do ponownego zmierzenia kanałów: {n} ({codes})',
+        # #170: the English until the Advisor.
+        "staleUnread": "Could not read the journal ({path}) — which channels a config change made stale is unknown until it can be read.",
         "missingRecord": 'Nie zapisano: {what} — {why}.',
         "criticSaved": 'Tekst zapisano w {path}',
         "askBubble": "ASK · {model}",
@@ -4148,6 +4153,8 @@ Choose sweeps (sw) above to read this.",
         "projectRenderFailed": 'Das Projekt ließ sich nicht von der Platte zeichnen — auf dem Bildschirm steht noch die '
                                'letzte funktionierende Ansicht. {error}',
         "staleStrip": '{what} — {n} Kanal/Kanäle müssen neu gemessen werden: {codes}',
+        # #170: the English until the Advisor.
+        "staleUnread": "Could not read the journal ({path}) — which channels a config change made stale is unknown until it can be read.",
         "missingRecord": 'Nicht festgehalten: {what} — {why}.',
         "criticSaved": 'Text gespeichert in {path}',
         "askBubble": "ASK · {model}",
