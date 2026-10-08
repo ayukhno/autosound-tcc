@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import capture_import, config, curve_groups, delay_bank, protective
+from autosound_tcc.core import app_log, capture_import, config, curve_groups, delay_bank, protective
 from autosound_tcc.state import process_view
 from autosound_tcc.core.allpass import AllpassError
 from autosound_tcc.core.rew_bridge import RewBridge
@@ -116,6 +116,13 @@ def _title_facts(title: str) -> tuple[Optional[str], Optional[str]]:
     if method is None and _is_rta(title):
         method = _RTA_SUFFIX.strip("()")
     return version, method
+
+
+def _absent(exc: BaseException) -> bool:
+    """Whether a read was refused because REW holds no measurement under the title: the method's
+    own `KeyError("No measurement titled …")`, read by its wording as `_held_twice` reads its."""
+    return isinstance(exc, KeyError) and str(exc.args[0] if exc.args else "").startswith(
+        "No measurement titled")
 
 
 def _held_twice(exc: BaseException) -> bool:
@@ -400,7 +407,7 @@ class _CurveWorker(QThread):
                     # spectrum under it — what the sum's strip is drawn from — is corrected.
                     traces.append(
                         Trace(title, x, np.asarray(samples, dtype=float),
-                              **self._spectrum(mid, legs), **facts)
+                              **self._spectrum(mid, legs, title), **facts)
                     )
                 else:
                     # Both halves, from the one call that returns both. Keeping only the one being
@@ -429,7 +436,15 @@ class _CurveWorker(QThread):
                 if _held_twice(exc):
                     twice.append(title)
                     continue
-                problems.append(f"{title}: {type(exc).__name__}")
+                # Its message too, and its traceback to the log (M76): a TypeError out of the method
+                # (F16-3) came to the window as a bare class name. A title REW does not hold is a
+                # fact the picker greys out, not a failure: one line, no traceback.
+                if _absent(exc):
+                    app_log.logger().info("curve window: REW holds no %s", title)
+                else:
+                    app_log.logger().warning("curve window: %s could not be read", title,
+                                             exc_info=True)
+                problems.append(f"{title}: {type(exc).__name__}: {exc}")
                 missing.append(title)
         if twice:
             self.heldTwice.emit(twice)
@@ -441,7 +456,7 @@ class _CurveWorker(QThread):
             return
         self.done.emit(traces)
 
-    def _spectrum(self, mid, legs=None) -> dict:
+    def _spectrum(self, mid, legs=None, title: str = "") -> dict:
         """The frequency-domain half of an impulse capture, for the sum's strip under the plot.
 
         One extra REW call per measurement, taken every time rather than when Σ happens to be on:
@@ -457,6 +472,9 @@ class _CurveWorker(QThread):
         try:
             freqs, mag, phase = self._bridge.frequency_response(mid, smoothing=self._smoothing)
         except Exception:  # noqa: BLE001 — see docstring; the impulse is the payload here
+            # Logged, so a strip with no data has a trace of why (M76).
+            app_log.logger().warning("curve window: no spectrum for %s; its impulse is drawn "
+                                     "without one", title or mid, exc_info=True)
             return {}
         if freqs is None or mag is None:
             return {}

@@ -757,22 +757,31 @@ def test_the_terminal_session_is_told_the_copy_the_project_is_bound_to(
             f'&& set "{method_binding.SKILL_ROOT_ENV}={root}" && "claude"'), recorded[0]
 
 
-def test_a_copy_tcc_will_not_run_opens_no_terminal(recorded, monkeypatch, tmp_path):
+def test_a_copy_tcc_will_not_run_opens_no_terminal(recorded, monkeypatch, tmp_path, caplog):
     """R-i: G5 refuses a copy TCC cannot trust, and the terminal's session would load it from the
     project's link as surely as an in-app one. A folder at the entry — inside the project,
     travelling with it — opens no terminal, and the error carries the binding's own sentence: the
-    window puts `str(exc)` of a `TerminalLaunchError` on its status line."""
+    window puts `str(exc)` of a `TerminalLaunchError` on its status line — and the log, once (#169
+    review m6), since a strip line does not stay."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
     monkeypatch.setattr(terminal_launcher.sys, "platform", "linux")
     project = tmp_path / "car"
     _entry(project).mkdir(parents=True)
     binding = method_binding.for_project(project)
     assert binding.state == "refused" and binding.reason, binding
 
-    with pytest.raises(TerminalLaunchError) as refused:
-        launch(project, "claude", env=_PICK_ENV)
+    monkeypatch.setattr(app_log.logger(), "propagate", True)  # caplog listens on the root
+    with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+        with pytest.raises(TerminalLaunchError) as refused:
+            launch(project, "claude", env=_PICK_ENV)
 
     assert str(refused.value) == binding.reason
     assert recorded == [], "no terminal was opened"
+    said = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert said == [f"refused: no terminal session on {project}: {binding.reason}"], said
 
 
 def test_a_cli_that_runs_no_session_is_not_held_to_the_projects_copy(recorded, monkeypatch,

@@ -454,6 +454,8 @@ def launch(
         try:
             binding.require()
         except method_binding.MethodRefused as exc:
+            # Into the log too (#169 review m6): the strip line that says it does not stay.
+            app_log.logger().warning("refused: no terminal session on %s: %s", project_dir, exc)
             raise TerminalLaunchError(str(exc)) from exc
         env = {**(env or {}), **binding.session_env()}
 

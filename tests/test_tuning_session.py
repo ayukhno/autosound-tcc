@@ -867,11 +867,18 @@ def test_a_session_is_built_where_tccs_own_copy_cannot_be_looked_up(tmp_path, mo
     assert sdk_client == [], "no client was built"
 
 
-def test_a_refused_binding_ends_the_start_with_its_sentence(tmp_path, sdk_client):
+def test_a_refused_binding_ends_the_start_with_its_sentence(tmp_path, sdk_client, monkeypatch,
+                                                            caplog):
     """A project whose copy TCC will not run — a real folder at the entry: a copy inside the project
     travels with it, from a backup or a clone (HUB-050) — is not a session to start. `start` raises
     the binding's own sentence before anything is built; constructing the session never refuses,
-    because the window builds one only to read the registry (`main_window._launch_session`)."""
+    because the window builds one only to read the registry (`main_window._launch_session`). The
+    refusal is in the log as well, once, as a refused write's is (#169 review m6): the bubble that
+    shows it goes with the chat."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
     project = tmp_path / "car"
     _entry(project).mkdir(parents=True)
     binding = method_binding.for_project(project)
@@ -879,10 +886,14 @@ def test_a_refused_binding_ends_the_start_with_its_sentence(tmp_path, sdk_client
 
     session = TuningSession(project_dir=project)
 
-    with pytest.raises(method_binding.MethodRefused) as refused:
-        _start(session)
+    monkeypatch.setattr(app_log.logger(), "propagate", True)  # caplog listens on the root
+    with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+        with pytest.raises(method_binding.MethodRefused) as refused:
+            _start(session)
     assert str(refused.value) == binding.reason
     assert sdk_client == [], "no client was built"
+    said = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert said == [f"refused: the session on {project} did not start: {binding.reason}"], said
 
 
 def test_a_project_with_no_link_loads_tccs_own_copy_as_before(

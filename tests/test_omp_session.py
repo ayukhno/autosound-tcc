@@ -636,11 +636,16 @@ def _omp_spawns(monkeypatch) -> list:
     return spawned
 
 
-def test_a_folder_where_the_link_should_be_is_refused_and_starts_no_omp(tmp_path, monkeypatch):
+def test_a_folder_where_the_link_should_be_is_refused_and_starts_no_omp(tmp_path, monkeypatch,
+                                                                       caplog):
     """This was «the skill linked, nothing to say», on an empty `autosound-tuning` folder — and omp
     loaded that folder as the method. A folder at the entry is inside the project and travels with
     it, from a backup, a customer or a clone (#169, HUB-050): the start refuses it with the
-    binding's own sentence, and no omp is spawned."""
+    binding's own sentence, and no omp is spawned. Said in the log too, once (#169 review m6)."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
     link = tmp_path / ".claude" / "skills"
     link.mkdir(parents=True)
     (link / "autosound-tuning").mkdir()
@@ -648,11 +653,15 @@ def test_a_folder_where_the_link_should_be_is_refused_and_starts_no_omp(tmp_path
     binding = method_binding.for_project(tmp_path)
     assert binding.state == "refused" and "a folder, not a link" in binding.reason, binding
 
-    with pytest.raises(method_binding.MethodRefused) as refused:
-        asyncio.run(_first_turn(_session(tmp_path)))
+    monkeypatch.setattr(app_log.logger(), "propagate", True)  # caplog listens on the root
+    with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+        with pytest.raises(method_binding.MethodRefused) as refused:
+            asyncio.run(_first_turn(_session(tmp_path)))
 
     assert str(refused.value) == binding.reason
     assert spawned == [], "no omp was started"
+    said = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert said == [f"refused: the omp session on {tmp_path} did not start: {binding.reason}"], said
 
 
 def test_a_copy_tcc_does_not_know_is_refused_and_starts_no_omp(tmp_path, monkeypatch, other_copy,

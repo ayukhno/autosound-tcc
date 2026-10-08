@@ -520,6 +520,75 @@ def test_one_curve_rew_cannot_produce_does_not_take_the_other_off_the_screen():
     assert [t.name for t in got[-1]] == ["w-L_01 (sw)"]
 
 
+def test_a_curve_rew_cannot_produce_is_said_with_its_message_and_logged_with_its_traceback(
+        monkeypatch, caplog):
+    """M76 (#170 review m7): the worker kept only the class of what a reader raised —
+    «w-R_01 (rta): TypeError» — and logged nothing, so the TypeError F16-3 now lets out of the
+    method came to the window as a bare class name, its message and traceback gone. The message
+    stays on what the window says, and the traceback goes to the log."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
+    _app()
+
+    class _Broken(_FakeBridge):
+        def impulse_response(self, mid):
+            raise TypeError("frequency_response() got an unexpected keyword argument 'smoothing'")
+
+    worker = _CurveWorker(_Broken(), ["w-R_01 (sw)"], "impulse")
+    said: list = []
+    worker.failed.connect(said.append)
+    monkeypatch.setattr(app_log.logger(), "propagate", True)  # caplog listens on the root
+    with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+        worker.run()
+
+    assert said == ["w-R_01 (sw): TypeError: frequency_response() got an unexpected keyword "
+                    "argument 'smoothing'"], said
+    [record] = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert record.exc_info and record.exc_info[0] is TypeError and "w-R_01 (sw)" in record.getMessage()
+
+    class _Absent(_FakeBridge):  # a title REW does not hold: a fact, said without a traceback
+        def by_name(self, name, exact: bool = True):
+            raise KeyError(f"No measurement titled {name!r} (REW holds 3)")
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=app_log.LOGGER_NAME):
+        _CurveWorker(_Absent(), ["m-L_01 (sw)"], "fr").run()
+    assert [(r.levelno, r.exc_info) for r in caplog.records
+            if "m-L_01 (sw)" in r.getMessage()] == [(logging.INFO, None)]
+
+
+def test_a_spectrum_rew_cannot_give_is_logged_and_the_impulse_still_plots(monkeypatch, caplog):
+    """`_spectrum` has its own `try` so the impulse plots without the sum's inputs — and returned
+    `{}` with nothing logged, so a strip with no data had no trace of why (M76)."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
+    _app()
+
+    class _NoSpectrum(_FrBridge):
+        def by_name(self, name, exact: bool = True):
+            return "7", {"timeOfIRStartSeconds": 0.00518}  # REW's id, not the title
+
+        def frequency_response(self, mid, smoothing=None):
+            raise RuntimeError("HTTP Error 500: Internal Server Error")
+
+    worker = _CurveWorker(_NoSpectrum(), ["w-L_01 (sw)"], "impulse")
+    got: list = []
+    worker.done.connect(got.append)
+    monkeypatch.setattr(app_log.logger(), "propagate", True)  # caplog listens on the root
+    with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
+        worker.run()
+
+    trace = got[-1][0]
+    assert len(trace.x) == 200 and trace.freqs_hz is None, "the impulse is drawn without it"
+    [record] = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert record.exc_info and record.exc_info[0] is RuntimeError, "with its traceback"
+    assert "w-L_01 (sw)" in record.getMessage()
+
+
 def test_the_impulse_opens_on_the_arrival_not_on_three_seconds_of_room():
     """A REW impulse spans −995 ms to +1735 ms. Auto-ranged, the two millimetres the argument is
     about are a vertical line."""

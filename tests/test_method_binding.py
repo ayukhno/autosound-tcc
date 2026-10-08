@@ -16,6 +16,7 @@ the shared ones (`tests/_method_copies.py`).
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -24,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import config, method_binding, vendor_loader
+from autosound_tcc.core import app_log, config, method_binding, vendor_loader
 
 from tests._method_copies import copy_of_the_method, entry as _entry, same_path as _same_path
 
@@ -632,16 +633,30 @@ def test_an_entry_tcc_cannot_read_is_refused_and_never_raises(project, request):
     assert str(entry) in binding.reason
 
 
-def test_for_project_answers_even_when_the_search_itself_fails(project, monkeypatch):
+def _heard(monkeypatch, caplog, level=logging.INFO):
+    """caplog on TCC's own logger: after `app_log.setup()` it does not propagate to the root,
+    where caplog listens, so it is made to for the test."""
+    monkeypatch.setattr(app_log.logger(), "propagate", True)
+    return caplog.at_level(level, logger=app_log.LOGGER_NAME)
+
+
+def test_for_project_answers_even_when_the_search_itself_fails(project, monkeypatch, caplog):
+    """…and the crash it answered for is in the log with its traceback (#169 review m1): the
+    sentence on the row is all the person sees, and it may be TCC's own fault — a settings value
+    of the wrong type, a home folder that cannot be found."""
     def cannot(*_a, **_k):
         raise RuntimeError("the home folder cannot be determined")
 
     monkeypatch.setattr(vendor_loader, "skill_dir", cannot)
 
-    binding = method_binding.for_project(project)
+    with _heard(monkeypatch, caplog):
+        binding = method_binding.for_project(project)
 
     assert (binding.state, binding.can_approve) == ("refused", False)
     assert str(_entry(project)) in binding.reason
+    [record] = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert record.exc_info and record.exc_info[0] is RuntimeError, "the traceback is in the log"
+    assert str(_entry(project)) in record.getMessage()
 
 
 # ---- approving on this machine ----------------------------------------------------------------
@@ -660,6 +675,36 @@ def test_approving_stores_the_copys_realpath_and_binds_it(project, tmp_path, oth
     assert (approved.state, approved.skill_dir) == ("approved", Path(os.path.realpath(other_copy)))
     assert config.approved_methods() == (os.path.realpath(other_copy),)
     assert method_binding.for_project(project).state == "approved", "and it stays approved"
+
+
+def test_approving_and_re_linking_each_leave_one_line_in_the_log(project, other_copy, monkeypatch,
+                                                                 caplog):
+    """#169 review m2: approving a copy is a trust decision, and a re-link moves the project's
+    entry; each lived only on a dialog row, which the next press replaces and closing the dialog
+    takes away. One INFO line each: the copy approved for which entry, and where the entry went —
+    said when it moved, so a link that then cannot be made leaves it said."""
+    entry = _link(_entry(project), other_copy)
+
+    with _heard(monkeypatch, caplog):
+        method_binding.approve(method_binding.for_project(project))
+        approved = [r.getMessage() for r in caplog.records if r.getMessage().startswith("method:")]
+        caplog.clear()
+        method_binding.relink(method_binding.for_project(project))
+        relinked = [r.getMessage() for r in caplog.records if r.getMessage().startswith("method:")]
+
+    assert approved == [f"method: approved {os.path.realpath(other_copy)} on this machine, "
+                        f"for {entry}"], approved
+    [stamp] = os.listdir(project / ".tcc" / "method-aside")
+    moved = project / ".tcc" / "method-aside" / stamp / vendor_loader.SKILL_NAME
+    assert relinked == [f"method: moved {entry} to {moved}"], relinked
+
+
+def test_a_re_link_with_nothing_to_move_says_it_linked(project, monkeypatch, caplog):
+    with _heard(monkeypatch, caplog):
+        method_binding.relink(method_binding.for_project(project))
+
+    said = [r.getMessage() for r in caplog.records if r.getMessage().startswith("method:")]
+    assert said == [f"method: linked TCC's copy at {_entry(project)}"], said
 
 
 def test_only_an_approvable_binding_can_be_approved(project, tmp_path):

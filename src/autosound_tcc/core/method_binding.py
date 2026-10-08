@@ -48,7 +48,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
-from autosound_tcc.core import config, vendor_loader
+from autosound_tcc.core import app_log, config, vendor_loader
 
 #: The newest contract this TCC drives. 0 in this build: no released copy carries a number yet
 #: (v3.1.1's `contract.py` has none), so a copy that names any number was written for a newer TCC.
@@ -124,6 +124,9 @@ def for_project(project_dir: Union[str, os.PathLike]) -> Binding:
     try:
         return _bind(project_dir, entry)
     except Exception as exc:  # noqa: BLE001 — the promise is an answer, and a crash is not one
+        # The traceback to the log: the row's sentence is all the person sees, and the crash may be
+        # TCC's own — a settings value of the wrong type, a home folder that cannot be found.
+        app_log.logger().exception("method: could not check %s, so it is refused", entry)
         return _refused(project_dir, entry, f"TCC could not check {entry} "
                                             f"({type(exc).__name__}: {exc}); re-link it to TCC's copy.")
 
@@ -431,6 +434,8 @@ def approve(binding: Binding) -> Binding:
         raise MethodRefused(f"TCC could not keep the approval of {target} for {binding.entry}: its "
                             f"settings on this machine did not store it; approve it again once they "
                             f"can be written.")
+    # A trust decision: in the log, where a dialog row does not stay (#169 review m2).
+    app_log.logger().info("method: approved %s on this machine, for %s", target, binding.entry)
     return for_project(binding.project_dir)
 
 
@@ -461,6 +466,8 @@ def relink(binding: Binding) -> Binding:
             if _present(entry):
                 moved = _aside_folder(project_dir) / entry.name
                 os.rename(entry, moved)
+                # Said when it moved, so a link that then cannot be made leaves it said (m2).
+                app_log.logger().info("method: moved %s to %s", entry, moved)
         except OSError as exc:
             raise MethodRefused(f"TCC could not move {entry} out of the way ({_why(exc)}); move it out "
                                 f"of {entry.parent} yourself, then re-link it to TCC's copy.") from exc
@@ -471,6 +478,8 @@ def relink(binding: Binding) -> Binding:
                                 f"back.")
         raise MethodRefused(f"No link to TCC's own copy could be made at {entry}; make that link by "
                             f"hand.")
+    if moved is None:
+        app_log.logger().info("method: linked TCC's copy at %s", entry)
     return for_project(project_dir)
 
 

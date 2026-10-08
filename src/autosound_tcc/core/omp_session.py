@@ -914,7 +914,13 @@ class OmpSession:
         if not is_available():
             raise OmpNotInstalledError("omp is not on PATH — install it: brew install can1357/tap/omp")
         binding = method_binding.for_project(self.project_dir)
-        binding.require()
+        try:
+            binding.require()
+        except method_binding.MethodRefused as exc:
+            # Into the log too, as a refused write is (#169 review m6): the bubble goes with the chat.
+            app_log.logger().warning("refused: the omp session on %s did not start: %s",
+                                     self.project_dir, exc)
+            raise
         # One binding for all three: what omp's shell is told, what the gate reads, what loads.
         self._method_env = binding.session_env()
         self._read_roots = _read_roots_for(self.project_dir, binding)

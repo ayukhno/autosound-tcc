@@ -451,8 +451,14 @@ class TuningSession:
         start as a failed bubble.
         """
         binding = method_binding.for_project(self.project_dir)
-        binding.require()
-        options = self._options(binding)
+        try:
+            binding.require()
+            options = self._options(binding)
+        except method_binding.MethodRefused as exc:
+            # Into the log too, as a refused write is (#169 review m6): the bubble goes with the chat.
+            app_log.logger().warning("refused: the session on %s did not start: %s",
+                                     self.project_dir, exc)
+            raise
         # What the gate lets the session read follows what the session loads: one answer for both.
         self._read_roots = _read_roots_for(self.project_dir, binding)
         # omp reads the project's own `.claude/skills` and has no plugin flag, so TCC's link is
