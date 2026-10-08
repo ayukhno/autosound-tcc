@@ -73,6 +73,12 @@ def _seeder():
         return None
 
 
+#: What v3.1.2's seed reads beside `project.json`, by the names its `project_seed` gives them
+#: (`PROFILE_FILE`, `PROSE_FILES`). Contract 1 does not list those names, so a release may rename
+#: either: the preview's memory then keys on these, and says so (`_seed_reads`, G1).
+_SEED_READS_V312 = {"PROFILE_FILE": "dsp_profile.json", "PROSE_FILES": ("autosound_context.md",)}
+
+
 #: The method's seats, in its order, when the skill cannot be loaded (the dialog must still open).
 _SEATS_FALLBACK = ("driver", "passenger", "both", "all", "rear_left", "rear_right")
 
@@ -196,6 +202,8 @@ class NewProjectDialog(QDialog):
         self._seed_note_timer.timeout.connect(self._refresh_seed_note_now)
         #: The last preview: what its seed read, and what it answered (`_would_travel`, #172).
         self._preview_memo: Optional[tuple] = None
+        #: The seeder's names `_seed_reads` last had to stand in for, said once (G1).
+        self._seed_names_said: Optional[tuple[str, ...]] = None
         # Set by _on_create() instead when "run via" picks a terminal CLI rather than the in-app
         # chat -- main_window._open_new_project_dialog() branches on whichever ended up non-None.
         self.open_terminal_cli: Optional[str] = None
@@ -507,14 +515,17 @@ class NewProjectDialog(QDialog):
                 # Inside too: it reads what the seed wrote, which nobody has checked (tcc#123).
                 answer = report, _fs_carried(target)
             except Exception:      # noqa: BLE001 — a preview must never take the dialog down
+                # …and must leave a trace (the group review, M4): a method bug in `seed()` for
+                # this source was invisible until Create hit it.
+                app_log.logger().warning("the seed preview for %s raised", source, exc_info=True)
                 return None, None
         if key is not None and report is not None and report.ok:
             self._preview_memo = (key, answer)
         return answer
 
-    def _preview_key(self, seeder, source: Path) -> Optional[tuple]:
-        """Everything the preview's seed reads, as it is now; None when the seeder does not name
-        the files it reads, for then no answer is safe to reuse.
+    def _preview_key(self, seeder, source: Path) -> tuple:
+        """Everything the preview's seed reads, as it is now — the files by the seeder's own
+        names, or v3.1.2's where it lacks one (`_seed_reads`), so the memory never goes off unseen.
 
         From the dialog: every argument `_would_travel` hands `seed()`, as the fields hold it --
         vendor and model rather than the `copy_profile` they decide, and the profile choice with
@@ -537,24 +548,45 @@ class NewProjectDialog(QDialog):
           the import record, and the validator has no rule for `paths`;
         * today's date, and what `project_repo.init` finds (`report.repo`, `.git` in `written`).
         """
-        try:
-            names = ("project.json", seeder.PROFILE_FILE, *seeder.PROSE_FILES)
-            files = []
-            for name in names:
-                path = Path(source) / name
-                try:
-                    stat = path.stat()
-                except (OSError, ValueError):  # not there, not ours to read, not a path at all
-                    files.append((str(path), None, None))
-                else:
-                    files.append((str(path), stat.st_mtime_ns, stat.st_size))
-        except (AttributeError, TypeError):  # a seeder that does not name them: no memory
-            return None
+        files = []
+        for name in ("project.json", *self._seed_reads(seeder)):
+            path = Path(source) / name
+            try:
+                stat = path.stat()
+            except (OSError, ValueError):  # not there, not ours to read, not a path at all
+                files.append((str(path), None, None))
+            else:
+                files.append((str(path), stat.st_mtime_ns, stat.st_size))
         return (seeder, str(source), tuple(files),
                 self._seed_findings.isChecked(), self._seed_fs.isChecked(),
                 self._vendor_edit.text().strip(), self._model_edit.text().strip(),
                 self._profile_combo.currentData(), self._seat_combo.currentData(),
                 i18n.t("npSeedNote"))
+
+    def _seed_reads(self, seeder) -> tuple[str, ...]:
+        """The files the seed reads besides `project.json`, by the seeder's own names (G1).
+
+        `PROFILE_FILE` and `PROSE_FILES` are outside contract 1, and a seeder that lacked one made
+        the key None: the memory switched off without a word, and every redraw was a whole seed on
+        the GUI thread again, the freeze #172 removed. A name the seeder lacks, or holds as no
+        name, is v3.1.2's instead, with one WARNING naming it — a release that reads another file
+        is then answered from memory when that file changes, and the log says why."""
+        profile = getattr(seeder, "PROFILE_FILE", None)
+        prose = getattr(seeder, "PROSE_FILES", None)
+        missing = []
+        if not isinstance(profile, str):
+            missing.append("PROFILE_FILE")
+            profile = _SEED_READS_V312["PROFILE_FILE"]
+        if not (isinstance(prose, (tuple, list)) and all(isinstance(name, str) for name in prose)):
+            missing.append("PROSE_FILES")
+            prose = _SEED_READS_V312["PROSE_FILES"]
+        if missing and tuple(missing) != self._seed_names_said:
+            self._seed_names_said = tuple(missing)
+            app_log.logger().warning(
+                "the method's project_seed names no %s; the seed preview is remembered under "
+                "TCC's copy of v3.1.2's names instead (%s)", " or ".join(missing),
+                ", ".join(f"{name}={_SEED_READS_V312[name]!r}" for name in missing))
+        return (profile, *prose)
 
     def _refresh_seed_note(self, *_args) -> None:
         """Ask for a redraw — on a short delay, because drawing this note runs a whole seed.

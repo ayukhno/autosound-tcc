@@ -477,6 +477,51 @@ def test_a_second_identical_preview_runs_no_seed(tmp_path, monkeypatch):
     assert seeded == 1, "the source and the DSP fields set before the pause were one preview"
 
 
+def test_a_seeder_that_names_none_of_the_files_it_reads_is_remembered_all_the_same(
+        tmp_path, monkeypatch, app_log_warnings):
+    """The group review, G1: the memory is keyed on the seeder's `PROFILE_FILE` and `PROSE_FILES`,
+    which contract 1 does not list. A release that renamed either made the key None, and the memo
+    switched itself off without a word — every redraw a whole seed on the GUI thread again, the
+    freeze #172 removed. The key falls back to TCC's copy of v3.1.2's names, and says so, once."""
+    monkeypatch.delattr(_StubSeeder, "PROFILE_FILE")
+    monkeypatch.delattr(_StubSeeder, "PROSE_FILES")
+    source = _source_project(tmp_path)
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), _Report(4))
+    dlg = _dialog_on(source, seeder, monkeypatch)
+    seeded = len(_seeds_of(seeder, source))
+
+    key = dlg._preview_key(seeder, source)
+    dlg._refresh_seed_note_now()
+
+    assert key is not None
+    keyed = {path for path, _mtime, _size in key[2]}
+    assert {str(source / "dsp_profile.json"), str(source / "autosound_context.md")} <= keyed, keyed
+    assert len(_seeds_of(seeder, source)) == seeded, "remembered: no second seed"
+    said = [record.getMessage() for record in app_log_warnings]
+    named = [line for line in said if "PROFILE_FILE" in line and "PROSE_FILES" in line]
+    assert len(named) == 1, said
+
+
+def test_a_preview_whose_seed_raised_leaves_a_trace(tmp_path, monkeypatch, app_log_warnings):
+    """The group review, M4: `except Exception: return None, None` wrote nothing, and the note just
+    left out its «Travels» line — a method bug in `seed()` for this source was invisible until
+    Create hit it. The preview still never takes the dialog down; the log has the traceback."""
+    source = _source_project(tmp_path)
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), _Report(4))
+
+    def raises(*_args, **_kwargs):
+        raise KeyError("channels")
+
+    seeder.seed = raises
+    dlg = _dialog_on(source, seeder, monkeypatch)
+
+    traced = [record for record in app_log_warnings
+              if record.exc_info and record.exc_info[0] is KeyError]
+    assert traced and str(source) in traced[0].getMessage(), \
+        [record.getMessage() for record in app_log_warnings]
+    assert npd.i18n.t("npSeedTravels").split("{")[0] not in dlg._seed_summary.text()
+
+
 @pytest.mark.parametrize("answer", ["refused", "none"])
 def test_an_answer_that_is_not_ok_is_asked_again(tmp_path, monkeypatch, answer):
     """Only an ok answer is remembered (review of #172, M-1). A refusal can be passing -- an
