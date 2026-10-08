@@ -9,12 +9,14 @@ property of a measurement.
 from __future__ import annotations
 
 import json
+import os
+import pathlib
 from datetime import datetime
 
 import pytest
 
 from autosound_tcc.core import capture_import as ci
-from autosound_tcc.core import vendor_loader
+from autosound_tcc.core import own_store, vendor_loader
 
 from tests import _rew_fakes
 
@@ -249,6 +251,81 @@ def test_a_corrupt_store_reads_as_nothing_imported(tmp_path):
     (tmp_path / ".tcc" / ci.FILENAME).write_text("{ not json", encoding="utf-8")
 
     assert ci.load_imported(tmp_path) == {}, "the worst that follows is rows shown twice"
+
+
+def test_a_broken_store_is_set_aside_and_said_and_the_write_starts_a_fresh_one(tmp_path,
+                                                                                app_log_told):
+    """#173. A hand edit that left a trailing comma read as "nothing imported", and the next
+    import wrote that back with only its own rows in it: every earlier round, every «Take it as
+    it is» answer and every re-take gone, and nothing said. Now the broken file is set aside with
+    its bytes, the window is told once, and the write starts a fresh store."""
+    rows = ci.candidates(_rew(*_LIVE), tmp_path)
+    path = ci.store_path(tmp_path)
+    path.parent.mkdir()
+    broken = (b'{\n  "schema": 1,\n  "measurements": {\n'
+              b'    "0a1b2c3d": {"title": "w-R_01 (sw)", "round": "cap_001", "as_is": true},\n'
+              b'  },\n}\n')
+    path.write_bytes(broken)
+
+    assert ci.record_imported(rows, round_id="cap_002", project_dir=tmp_path) == 3
+
+    aside = list(path.parent.glob(f"{ci.FILENAME}.corrupt-*"))
+    assert len(aside) == 1, f"exactly one copy set aside: {aside}"
+    assert aside[0].read_bytes() == broken, "holding the original bytes"
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert set(saved["measurements"]) == {"4f81d739", "c716f1e4", "7868f377"}, (
+        "the new store holds only what this write took")
+    assert len(app_log_told) == 1 and str(path) in app_log_told[0], app_log_told
+
+
+@pytest.mark.parametrize("write", ["record_imported", "record_retakes"])
+def test_a_write_reads_the_store_once(tmp_path, monkeypatch, write):
+    """Both halves a write puts back — the imports and the re-takes — come from one reading of the
+    file (#173). Read twice, they could come from two states of it: another window's write landing
+    between the two reads would have its re-takes kept and its imports dropped, or the reverse."""
+    rows = ci.candidates(_rew(*_LIVE), tmp_path)
+    ci.record_imported(rows[:1], project_dir=tmp_path)
+    ci.record_retakes(rows[1:2], project_dir=tmp_path)
+    path = ci.store_path(tmp_path)
+    reads = []
+    for name in ("read_text", "read_bytes"):
+        def spy(self, *args, _real=getattr(pathlib.Path, name), **kwargs):
+            if self == path:
+                reads.append(self)
+            return _real(self, *args, **kwargs)
+
+        monkeypatch.setattr(pathlib.Path, name, spy)
+
+    assert getattr(ci, write)(rows[2:], project_dir=tmp_path) == 1
+
+    assert len(reads) == 1, f"{write} read the store {len(reads)} times"
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
+                    reason="POSIX permissions, and root reads a file whatever its mode")
+@pytest.mark.parametrize("write", ["record_imported", "record_retakes"])
+def test_a_store_that_cannot_be_opened_is_refused_by_a_write_and_left_as_it_was(
+        tmp_path, app_log_told, write):
+    """There and not readable is not "nothing imported" (#173, R-l). The old reader answered `{}`
+    for it, and the next write renamed a fresh store over it — a rename needs the folder, not the
+    file. Now a write refuses; the readers still answer "nothing imported", because the dialog
+    must open."""
+    rows = ci.candidates(_rew(*_LIVE), tmp_path)
+    ci.record_imported(rows[:1], round_id="cap_001", project_dir=tmp_path)
+    path = ci.store_path(tmp_path)
+    before = path.read_bytes()
+    path.chmod(0)
+    try:
+        assert ci.load_imported(tmp_path) == {}
+        with pytest.raises(OSError) as refused:
+            getattr(ci, write)(rows[1:], project_dir=tmp_path)
+    finally:
+        path.chmod(0o600)
+
+    assert path.read_bytes() == before, "never written over"
+    assert refused.type is own_store.StoreUnreadable, "refused as the store's own failure"
+    assert not list(path.parent.glob("*.corrupt-*")), "and not set aside: its bytes may be fine"
+    assert len(app_log_told) == 1 and str(path) in app_log_told[0], "said once, not per read"
 
 
 def test_the_title_written_down_can_be_the_one_the_rename_gave(tmp_path):

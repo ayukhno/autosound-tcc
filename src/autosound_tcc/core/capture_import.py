@@ -37,15 +37,13 @@ from __future__ import annotations
 import difflib
 
 import json
-import os
 import re
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional, Sequence
 
-from autosound_tcc.core import app_log, config, vendor_loader
+from autosound_tcc.core import app_log, config, own_store, vendor_loader
 
 #: The store's own schema, in its own file. Not `tcc-project.json`: that one is settings a person
 #: chose, this is a log of what happened, and a reader of either should not have to skip the other.
@@ -123,38 +121,40 @@ def load_imported(project_dir: Optional[Path] = None) -> dict[str, dict]:
     """`uuid -> {title, round, when, date[, as_is]}`, or `{}` — `as_is` once a capture the check
     called unusable was taken anyway (tcc#21).
 
-    A missing file is the normal state of a project nobody has imported into yet, and a corrupt one
-    degrades to "nothing imported" rather than taking the dialog down: the worst that follows is a
-    list showing rows the tuner has seen before, which they can read.
+    A missing file is the normal state of a project nobody has imported into yet. A broken one is
+    set aside with its bytes and said, and one that cannot be opened is said and left where it is
+    (`own_store`, #173); for a reader both still degrade to "nothing imported" rather than taking
+    the dialog down: the worst that follows is a list showing rows the tuner has seen before,
+    which they can read. A write must not do the same — see `record_imported`.
     """
-    return _section(project_dir, "measurements")
+    return _section(_read_store(project_dir), "measurements")
 
 
-def _section(project_dir: Optional[Path], name: str) -> dict[str, dict]:
-    """One `uuid -> entry` map of the store, `{}` when the file or the map is missing or broken."""
+def _read_store(project_dir: Optional[Path]) -> dict[str, Any]:
+    """The whole store for a reader: `{}` when it is not there, was broken, or cannot be opened.
+
+    Never raises (R-l): `own_store` has already said what was wrong. The writers read through
+    `own_store.read_json` themselves, so that a store they cannot read is never written over.
+    """
     try:
-        raw = json.loads(store_path(project_dir).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        return own_store.read_json(store_path(project_dir))
+    except own_store.StoreUnreadable:
         return {}
-    entries = raw.get(name) if isinstance(raw, dict) else None
+
+
+def _section(store: dict[str, Any], name: str) -> dict[str, dict]:
+    """One `uuid -> entry` map of the store, `{}` when the map is missing or not a map."""
+    entries = store.get(name)
     return {str(k): v for k, v in entries.items() if isinstance(v, dict)} if isinstance(entries, dict) else {}
 
 
 def _write_store(measurements: dict, retake: dict, project_dir: Optional[Path]) -> None:
-    """The whole store, atomically — see `record_imported` for why."""
-    directory = config.tcc_dir(project_dir)
+    """The whole store, through a temp file and on the disk before it takes the name
+    (`own_store.write_json`) — see `record_imported` for why."""
     data: dict[str, Any] = {"schema": SCHEMA, "measurements": measurements}
     if retake:
         data["retake"] = retake
-    directory.mkdir(parents=True, exist_ok=True)
-    handle, tmp = tempfile.mkstemp(dir=str(directory), prefix=".imported-", suffix=".tmp")
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False, indent=2)
-        os.replace(tmp, store_path(project_dir))
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    own_store.write_json(store_path(project_dir), data)
 
 
 def retakes(project_dir: Optional[Path] = None) -> dict[str, str]:
@@ -166,12 +166,17 @@ def retakes(project_dir: Optional[Path] = None) -> dict[str, str]:
     re-take waits for a new sweep rather than offering that one for import (finding 147).
     """
     return {uuid: str(entry.get("title") or "") for uuid, entry in
-            _section(project_dir, "retake").items()}
+            _section(_read_store(project_dir), "retake").items()}
 
 
 def record_retakes(rows: Iterable["Candidate"], project_dir: Optional[Path] = None) -> int:
-    """Remember these captures as left for a re-take. Returns how many were added."""
-    left = _section(project_dir, "retake")
+    """Remember these captures as left for a re-take. Returns how many were added.
+
+    Read once, and the way `record_imported` reads: a store that cannot be read raises
+    `StoreUnreadable` here rather than come back empty and be written over (#173, R-l).
+    """
+    store = own_store.read_json(store_path(project_dir))
+    left = _section(store, "retake")
     stamp = datetime.now().replace(microsecond=0).isoformat()
     added = 0
     for row in rows:
@@ -179,7 +184,7 @@ def record_retakes(rows: Iterable["Candidate"], project_dir: Optional[Path] = No
             left[row.uuid] = {"title": row.title, "when": stamp}
             added += 1
     if added:
-        _write_store(load_imported(project_dir), left, project_dir)
+        _write_store(_section(store, "measurements"), left, project_dir)
     return added
 
 
@@ -226,9 +231,16 @@ def record_imported(rows: Iterable["Candidate"], round_id: str = "",
     Atomic, like every other writer in `.tcc/`: this runs at the end of a capture round, and a
     half-written store would read as "nothing was imported" and put the whole round back on the
     checklist.
+
+    Read once, through `own_store.read_json` itself rather than `load_imported`: both halves put
+    back come from one state of the file, and a store that is there and cannot be read raises
+    `StoreUnreadable` out of here instead of coming back as `{}` — which, written back with this
+    round in it, was every earlier round, «Take it as it is» answer and re-take gone (#173, R-l).
+    A broken store has been set aside, bytes and all, by the time this writes a fresh one.
     """
-    measurements = dict(load_imported(project_dir))
-    left = _section(project_dir, "retake")
+    store = own_store.read_json(store_path(project_dir))
+    measurements = _section(store, "measurements")
+    left = _section(store, "retake")
     stamp = datetime.now().replace(microsecond=0).isoformat()
     written = 0
     for row in rows:
