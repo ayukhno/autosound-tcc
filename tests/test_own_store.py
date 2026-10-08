@@ -140,21 +140,36 @@ def test_a_store_made_unreadable_again_is_said_again(store, app_log_told):
     assert len(app_log_told) == 3, app_log_told
 
 
-def test_an_aside_name_another_process_holds_is_never_taken(store, monkeypatch):
+def test_two_processes_setting_one_store_aside_in_one_second_keep_both_copies(store,
+                                                                              monkeypatch):
     """Naming was look-then-rename: the window and the CLI setting one store aside in the same
     second could both find a name free, and on POSIX the second rename replaced the first copy
-    (the review of Task 17, Minor 3). The name is reserved now, so one another process holds is
-    passed over even when a look would have missed it."""
+    (the review of Task 17, Minor 3). Here the other process sets its copy aside the moment
+    before this one moves — by the same rule: exclusive creation, `-2` on a taken name — and
+    both copies are kept."""
     monkeypatch.setattr(own_store, "_stamp", lambda: "20261008-153012")
-    held = store.parent / "store.json.corrupt-20261008-153012"
-    held.write_bytes(b"{ the other process's copy")
-    monkeypatch.setattr(own_store.os.path, "lexists", lambda _path: False)  # the look missed it
+    names = [store.parent / "store.json.corrupt-20261008-153012",
+             store.parent / "store.json.corrupt-20261008-153012-2"]
     store.write_bytes(b"{ ours")
+
+    def the_other_process_first(real):
+        def move(src, dst, *args, **kwargs):
+            for name in names:
+                try:
+                    with open(name, "xb") as theirs:
+                        theirs.write(b"{ theirs")
+                    break
+                except FileExistsError:
+                    continue
+            return real(src, dst, *args, **kwargs)
+        return move
+
+    for verb in ("rename", "replace"):
+        monkeypatch.setattr(own_store.os, verb, the_other_process_first(getattr(os, verb)))
 
     assert own_store.read_json(store) == {}
 
-    assert held.read_bytes() == b"{ the other process's copy"
-    assert (store.parent / "store.json.corrupt-20261008-153012-2").read_bytes() == b"{ ours"
+    assert sorted(p.read_bytes() for p in store.parent.iterdir()) == [b"{ ours", b"{ theirs"]
 
 
 def test_a_broken_store_that_cannot_be_moved_is_refused_and_leaves_no_name_behind(
