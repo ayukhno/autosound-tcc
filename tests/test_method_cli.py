@@ -25,6 +25,8 @@ from autosound_tcc.core import (
     method_cli, process_writer, profile_writer, project_lock, project_repo, vendor_loader,
 )
 
+from tests._method_copies import entry as _entry, linked_and_approved as _linked_and_approved
+
 
 @pytest.fixture
 def method_copy(tmp_path, monkeypatch):
@@ -247,34 +249,6 @@ def test_only_process_py_is_held_to_the_flags_in_its_text(tmp_path, method_copy,
 # `intake.py set-car` through `spawn` now (N9).
 
 
-def _entry(project: Path) -> Path:
-    return project / ".claude" / "skills" / vendor_loader.SKILL_NAME
-
-
-@pytest.fixture(scope="session")
-def second_copy(tmp_path_factory) -> Path:
-    """A second copy of the method: the vendored tree copied to `<tmp>/skills/autosound-tuning`, the
-    layout of its own repository. One per session — it is 8 MB — while each test links it and
-    approves it on its own settings store. `vendor/` itself is never touched."""
-    if not vendor_loader._looks_like_the_skill(vendor_loader._SUBMODULE_DIR):
-        pytest.skip("skill submodule not checked out")
-    skill = tmp_path_factory.mktemp("second-method") / "skills" / vendor_loader.SKILL_NAME
-    shutil.copytree(vendor_loader._SUBMODULE_DIR, skill,
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    return skill
-
-
-def _linked_and_approved(project: Path, skill: Path) -> method_binding.Binding:
-    """`project`'s entry linked to `skill`, and the link approved on this machine: the real
-    `method_binding.approve`, on the settings store each test is given its own of — as
-    `test_process_writer.py`'s second copy is."""
-    _entry(project).parent.mkdir(parents=True)
-    _entry(project).symlink_to(skill, target_is_directory=True)
-    binding = method_binding.approve(method_binding.for_project(project))
-    assert binding.state == method_binding.APPROVED, binding.reason
-    return binding
-
-
 class _Answered:
     """A child that has already answered `out` and exited 0: what `_Launches` hands back instead of
     starting one."""
@@ -388,15 +362,13 @@ LAUNCHERS = [
 
 @pytest.mark.parametrize("launch, script, named", LAUNCHERS)
 def test_every_other_launcher_runs_the_copy_the_project_is_bound_to(
-        monkeypatch, second_copy, launch, script, named):
+        monkeypatch, own_copy_is_the_submodule, other_copy, launch, script, named):
     """The issue's first, for the six that are not `process.py`: the current project linked to a
     copy approved on this machine has the script of THAT copy started, and the child is told which
     copy it runs (`AUTOSOUND_SKILL_ROOT`) — not TCC's own, whatever the project linked."""
-    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
-    monkeypatch.delenv(method_binding.SKILL_ROOT_ENV, raising=False)
     launches = _Launches(monkeypatch)
     project = config.project_dir()
-    binding = _linked_and_approved(project, second_copy)
+    binding = _linked_and_approved(project, other_copy)
 
     assert launch(project, launches) is None
 

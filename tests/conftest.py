@@ -28,6 +28,17 @@ import traceback  # noqa: E402
 import pytest  # noqa: E402
 from PySide6.QtCore import QSettings  # noqa: E402
 
+# The copies of the method and the env reset the #169 tests share (`tests/_method_copies.py`),
+# registered here and only here: a session fixture imported into several test modules is a fixture
+# of each and runs once per module, so an 8 MB copy would be made once per module, not per worker.
+from tests._method_copies import (  # noqa: E402, F401
+    bare_copy,
+    git_only_copy,
+    newer_copy,
+    other_copy,
+    own_copy_is_the_submodule,
+)
+
 
 @pytest.fixture(autouse=True)
 def _an_exception_in_a_qt_slot_fails_the_test():

@@ -10,7 +10,8 @@ runs the copy it binds (`method_cli.spawn`, tested in `test_process_writer.py`);
 wire in the rest.
 
 The copies of the method are the vendored tree copied under the session's temp folder, with the one
-file a test needs changed — `vendor/` itself is never touched.
+file a test needs changed — `vendor/` itself is never touched. They, `_entry` and `_same_path` are
+the shared ones (`tests/_method_copies.py`).
 """
 
 from __future__ import annotations
@@ -25,7 +26,9 @@ import pytest
 
 from autosound_tcc.core import config, method_binding, vendor_loader
 
-#: TCC's own copy in a checkout. Every second copy below is made from it.
+from tests._method_copies import entry as _entry, same_path as _same_path
+
+#: TCC's own copy in a checkout. Every copy of the method is made from it.
 _SKILL = vendor_loader._SUBMODULE_DIR
 
 pytestmark = pytest.mark.skipif(
@@ -42,10 +45,6 @@ _windows_only = pytest.mark.skipif(sys.platform != "win32", reason="a junction i
 LINKS = ["symlink", pytest.param("junction", marks=_windows_only)]
 
 
-def _entry(project: Path) -> Path:
-    return project / ".claude" / "skills" / vendor_loader.SKILL_NAME
-
-
 def _link(entry: Path, target: Path, kind: str = "symlink") -> Path:
     entry.parent.mkdir(parents=True, exist_ok=True)
     if kind == "junction":
@@ -57,58 +56,16 @@ def _link(entry: Path, target: Path, kind: str = "symlink") -> Path:
     return entry
 
 
-def _same_path(a, b) -> bool:
-    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
-
-
 def _is_a_link(path: Path) -> bool:
     """A symlink or a junction, by the rule the module uses — `os.path.islink` misses a junction."""
     return os.path.normcase(os.path.realpath(path)) != os.path.normcase(
         os.path.join(os.path.realpath(path.parent), path.name))
 
 
-def _copy_of_the_method(root: Path, *, contract_line: str = "") -> Path:
-    """The vendored skill folder at `root/skills/autosound-tuning`, the layout of its own repository."""
-    skill = root / "skills" / vendor_loader.SKILL_NAME
-    shutil.copytree(_SKILL, skill, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    if contract_line:
-        contract = skill / "rew_tool" / "contract.py"
-        contract.write_text(contract.read_text(encoding="utf-8") + f"\n{contract_line}\n",
-                            encoding="utf-8")
-    return skill
-
-
-@pytest.fixture(scope="session")
-def other_copy(tmp_path_factory) -> Path:
-    """A second copy of the method in a repository of its own: the manifest beside `skills/`."""
-    root = tmp_path_factory.mktemp("other-method") / "autosound-tuning-skill"
-    skill = _copy_of_the_method(root)
-    (root / ".claude-plugin").mkdir()
-    shutil.copy2(_SKILL.parents[1] / ".claude-plugin" / "plugin.json",
-                 root / ".claude-plugin" / "plugin.json")
-    return skill
-
-
-@pytest.fixture(scope="session")
-def bare_copy(tmp_path_factory) -> Path:
-    """A copy with no manifest and no `.git` above it: a skill folder unpacked on its own."""
-    return _copy_of_the_method(tmp_path_factory.mktemp("bare-method"))
-
-
-@pytest.fixture(scope="session")
-def newer_copy(tmp_path_factory) -> Path:
-    """A copy whose `contract.py` speaks a contract this TCC does not. No released copy carries a
-    number yet (v3.1.1's `contract.py` has none), so the one file is changed by hand (Ruling 3)."""
-    return _copy_of_the_method(tmp_path_factory.mktemp("newer-method"),
-                               contract_line="CONTRACT_VERSION = 1")
-
-
 @pytest.fixture(autouse=True)
-def _tcc_runs_its_submodule(monkeypatch):
-    """TCC's own copy is the submodule here, whatever the developer's shell points the override at.
-    `HOME` is the test's `tmp_path` (conftest), so the personal and plugin installs are the test's."""
-    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
-    assert vendor_loader.skill_dir() == _SKILL
+def _tcc_runs_its_submodule(own_copy_is_the_submodule):
+    """TCC's own copy is the submodule in every test here (`own_copy_is_the_submodule`). `HOME` is
+    the test's `tmp_path` (conftest), so the personal and plugin installs are the test's."""
 
 
 @pytest.fixture

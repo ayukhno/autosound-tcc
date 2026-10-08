@@ -191,6 +191,11 @@ def _read_roots_for(project_dir: Path,
     The copy is resolved through symlinks, so this grants its real location rather than a link to
     it; `shell_gate._is_within` resolves what is read, so a path that merely *looks* like it is
     under a root doesn't slip through.
+
+    Never raises: `TuningSession.__init__` asks it, and the window builds a session only to read
+    the registry, unguarded. Where TCC's own copy cannot even be looked up — `~nosuchuser` in
+    `AUTOSOUND_SKILL_DIR` raises RuntimeError there — the project alone is the answer, and the
+    binding, refused for the same reason, is what a start says.
     """
     if binding is None:
         binding = method_binding.for_project(project_dir)
@@ -199,7 +204,7 @@ def _read_roots_for(project_dir: Path,
         copy = binding.skill_dir or method_binding.own_copy()  # None exactly when refused
         if os.path.isdir(copy):
             roots.append(Path(os.path.realpath(copy)))
-    except OSError:
+    except Exception:  # noqa: BLE001 — the promise is an answer, and a crash is not one
         pass
     return tuple(roots)
 
@@ -207,21 +212,24 @@ def _read_roots_for(project_dir: Path,
 def _plugin_root(binding: method_binding.Binding) -> Path:
     """The repository the SDK loads the bound copy from, as a plugin (`--plugin-dir`).
 
-    `MethodRefused` for a refused copy, with the binding's own sentence, and for a copy in no
-    repository: a skill folder unpacked on its own has no `.claude-plugin/plugin.json` for the CLI
-    to load, and `str(None)` handed over as its path started a session with no method at all.
+    `MethodRefused` for a refused copy, with the binding's own sentence, and for a copy whose
+    repository holds no `.claude-plugin/plugin.json`: one in no repository at all, which handed
+    `str(None)` over as the path, and one whose repository `plugin_root()` found by a `.git` alone —
+    dotfiles kept under git, an old clone. The CLI loads no method from either, so the session
+    would have run with none.
     """
     skill = binding.require()
     root = binding.plugin_root()
-    if root is None:
-        remedy = (f"install the method from its repository, or point {vendor_loader.SKILL_DIR_ENV} "
-                  f"at a checkout of it" if binding.state == method_binding.SAME else
-                  f"re-link {binding.entry} to TCC's copy, or to a copy in a repository of its own")
-        raise method_binding.MethodRefused(
-            f"The session loads the method as a plugin, and this method copy has no plugin "
-            f"manifest: {skill} has no .claude-plugin/plugin.json or .git in its folder or the "
-            f"three above it; {remedy}.")
-    return root
+    if root is not None and os.path.isfile(root / ".claude-plugin" / "plugin.json"):
+        return root
+    where = (f"{skill} is in no repository (no .claude-plugin/plugin.json or .git in its folder or "
+             f"the three above it)" if root is None else
+             f"{root}, the repository {skill} is in, has no .claude-plugin/plugin.json")
+    remedy = (f"install the method from its repository, or point {vendor_loader.SKILL_DIR_ENV} "
+              f"at a checkout of it" if binding.state == method_binding.SAME else
+              f"re-link {binding.entry} to TCC's copy, or to a copy in a repository of its own")
+    raise method_binding.MethodRefused(f"The session loads the method as a plugin, and this method "
+                                       f"copy has no plugin manifest: {where}; {remedy}.")
 
 
 class TuningSession:

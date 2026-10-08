@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import shutil
 import subprocess
 import threading
 import time
@@ -19,6 +18,8 @@ import pytest
 from autosound_tcc.core import method_binding, method_cli, process_writer, project_lock, vendor_loader
 
 from tests import _intake
+from tests._method_copies import copy_of_the_method, entry as _entry
+from tests._method_copies import linked_and_approved as _linked_and_approved
 
 
 def test_concurrent_writes_do_not_corrupt_the_process_state(tmp_path):
@@ -348,30 +349,10 @@ def test_a_round_can_be_opened_from_the_methods_plan(tmp_path, monkeypatch):
 # with another. A write now runs the copy `method_binding` binds the project to, and is told which.
 
 
-def _entry(project: Path) -> Path:
-    return project / ".claude" / "skills" / vendor_loader.SKILL_NAME
-
-
-@pytest.fixture
-def own_copy_is_the_submodule(monkeypatch):
-    """TCC's own copy is the vendored one, whatever the developer's shell points the override at,
-    and the child hears of a copy only from TCC — not from a variable left in that shell."""
-    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
-    monkeypatch.delenv(method_binding.SKILL_ROOT_ENV, raising=False)
-    if not vendor_loader._looks_like_the_skill(vendor_loader._SUBMODULE_DIR):
-        pytest.skip("skill submodule not checked out")
-    assert vendor_loader.skill_dir() == vendor_loader._SUBMODULE_DIR
-
-
 def _method_copy(root: Path, change) -> Path:
-    """The vendored method copied to `root/skills/autosound-tuning`, the layout of its own repository,
-    with its `process.py`'s text passed through `change`. `vendor/` itself is never touched."""
-    skill = root / "skills" / vendor_loader.SKILL_NAME
-    shutil.copytree(vendor_loader._SUBMODULE_DIR, skill,
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    script = skill / "rew_tool" / "state" / "process.py"
-    script.write_text(change(script.read_text(encoding="utf-8")), encoding="utf-8")
-    return skill
+    """A copy of the method of the test's own (`copy_of_the_method`), its `process.py`'s text passed
+    through `change`. `vendor/` itself is never touched."""
+    return copy_of_the_method(root, changes={"rew_tool/state/process.py": change})
 
 
 def _second_copy(root: Path, marker: Path) -> Path:
@@ -386,16 +367,6 @@ def _second_copy(root: Path, marker: Path) -> Path:
         return text.replace(guard, guard + marked)
 
     return _method_copy(root, mark)
-
-
-def _linked_and_approved(project: Path, skill: Path) -> method_binding.Binding:
-    """`project`'s entry linked to `skill`, and the link approved on this machine: the real
-    `method_binding.approve`, on the settings store each test is given its own of."""
-    _entry(project).parent.mkdir(parents=True)
-    _entry(project).symlink_to(skill, target_is_directory=True)
-    binding = method_binding.approve(method_binding.for_project(project))
-    assert binding.state == "approved", binding.reason
-    return binding
 
 
 def test_a_write_runs_the_copy_the_project_is_bound_to(tmp_path, own_copy_is_the_submodule):
