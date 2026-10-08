@@ -315,6 +315,11 @@ class _CheckRow(QWidget):
             button = QPushButton(action.label)
             button.setProperty("class", "reason-btn")
             button.setCursor(Qt.CursorShape.PointingHandCursor)
+            # Never the dialog's default (R-aq): in a QDialog a push button is auto-default, so
+            # Enter pressed the one with focus — the one beside a press, which disables its own.
+            # A repair, approving a copy of the method among them, is a deliberate press.
+            button.setAutoDefault(False)
+            button.setDefault(False)
             button.clicked.connect(lambda _checked=False, action=action: self._run(action))
             head.addWidget(button)
             self._buttons.append(button)
@@ -494,8 +499,13 @@ class DiagnosticsDialog(QDialog):
         #: record of the ask is the message in the transcript, and this only decides whether the
         #: row says "still here, asked N minutes ago".
         self._asked: dict[str, float] = {}
-        #: A fix's receipt, said above the verdict the next time a report is drawn (`_on_fixed`).
+        #: A fix's receipt (`_on_fixed`), said above the verdict of the report it lands on for as
+        #: long as that report is on screen — through every redraw of it — until a newer report, a
+        #: Re-check or the next fix. `_receipt_on` is that report, None while the receipt waits
+        #: for one begun after `_receipt_after` (`ContractReport.started`).
         self._receipt = ""
+        self._receipt_on: Optional[ContractReport] = None
+        self._receipt_after = 0.0
         self.setModal(False)
         self.setMinimumSize(560, 420)
         self.setProperty("class", "fb-card")
@@ -1605,7 +1615,10 @@ class DiagnosticsDialog(QDialog):
 
     def set_report(self, report: Optional[ContractReport]) -> None:
         """`None` means a check is running — the panel says so rather than showing stale data as
-        if it were current."""
+        if it were current. A newer report than the one a fix's receipt was said with ends the
+        receipt: it has had its turn, and the new verdict is its own."""
+        if report is not None and self._receipt_on is not None and report is not self._receipt_on:
+            self._receipt, self._receipt_on = "", None
         self._report = report
         self._refresh_btn.setEnabled(report is not None)
         self._render()
@@ -1633,21 +1646,34 @@ class DiagnosticsDialog(QDialog):
         """Re-render so the row that was fixed says so itself, rather than only a banner claiming
         it. A panel whose contents disagree with its own message is a panel nobody believes.
 
-        The receipt goes above the verdict (`_say`). Over a check that could not run, the check is
-        asked for again first, and the receipt waits for its answer (#169): the fix may be what it
-        lacked — a project on a copy TCC refuses fails the check with the binding's sentence, and
-        that sentence would stand over a row that says the copy is approved now."""
+        The receipt goes above the verdict (`_say`), and stays there through every redraw of its
+        report: the window draws each report again when agy's reading follows it, so a receipt
+        said once was gone before anyone read it — and after a re-link, whose row goes, it is the
+        one place that says where the old entry went (fix round 1 of #169, I1).
+
+        Over a check that could not run, the check is asked for again first, and the receipt waits
+        for its answer (#169): the fix may be what it lacked — a project on a copy TCC refuses
+        fails the check with the binding's sentence, and that sentence would stand over a row that
+        says the copy is approved now. It waits for a check BEGUN after the fix: the window shows
+        its last report while a check runs and queues a Re-check behind it, and the running
+        check's report, coming first, is the old state."""
         self._receipt = i18n.t("diagFixDone").format(what=message)
         if self._report is not None and not self._report.available:
+            self._receipt_on, self._receipt_after = None, time.monotonic()
             self.set_report(None)
             self.refreshRequested.emit()
             return
+        self._receipt_on = self._report
         self._render()
 
     def _say(self, verdict: str) -> None:
-        """The verdict, under the receipt of a fix made since the last report was drawn."""
-        if self._receipt:
-            verdict, self._receipt = f"{self._receipt}\n{verdict}", ""
+        """The verdict, under the receipt of a fix when this is its report: the one on screen when
+        it was made, or the first one begun after it when it asked for the check again."""
+        if (self._receipt and self._receipt_on is None
+                and self._report.started >= self._receipt_after):
+            self._receipt_on = self._report
+        if self._receipt and self._receipt_on is self._report:
+            verdict = f"{self._receipt}\n{verdict}"
         self._verdict.setText(verdict)
 
     def _on_refresh(self) -> None:
@@ -1658,7 +1684,10 @@ class DiagnosticsDialog(QDialog):
         Installation tabs are marked unread rather than read here: they ask GitHub, the skill's
         `status` and eight subprocesses, and if the person is looking at another tab that cost
         belongs at the moment they open it, not now.
+
+        A fix's receipt ends here: what the person asked for now is a fresh look.
         """
+        self._receipt, self._receipt_on = "", None
         self.set_report(None)
         self.refreshRequested.emit()
         self._install_read = False

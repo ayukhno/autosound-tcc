@@ -2663,10 +2663,14 @@ def project(own_copy_is_the_submodule):
     return config.project_dir()
 
 
-def _method_rows(dialog) -> list:
+def _check_rows(dialog, check_id: str) -> list:
     from autosound_tcc.ui.tcc.diagnostics_panel import _CheckRow
 
-    return [row for row in dialog.findChildren(_CheckRow) if row.check.id == "method"]
+    return [row for row in dialog.findChildren(_CheckRow) if row.check.id == check_id]
+
+
+def _method_rows(dialog) -> list:
+    return _check_rows(dialog, "method")
 
 
 def _said(widget) -> str:
@@ -2681,18 +2685,28 @@ def _press(row, label: str) -> None:
     next(button for button in row.findChildren(QPushButton) if button.text() == label).click()
 
 
+def _deliver(dialog, report) -> None:
+    """A report as the window delivers one: the check's `result`, then agy's reading, which follows
+    every check the window runs (`workers._ContractWorker`), and its redraw (`signInRead` →
+    `own_checks_changed`)."""
+    dialog.set_report(report)
+    dialog.own_checks_changed()
+
+
 def _as_the_window_checks(project):
     """The panel on the report the window gets for `project` from `contract_check.run` — which,
     for a copy TCC refuses, starts nothing and answers the binding's sentence as its error — and
-    the window's Re-check: asked again, a report comes back (hand-built; the project's files are
-    not these tests' business). Answers the dialog and the list of times it asked."""
+    the window's Re-check: «Checking…», then a report comes back (hand-built; the project's files
+    are not these tests' business), delivered as the window delivers it. Answers the dialog and the
+    list of times it asked."""
     _app()
     dialog = DiagnosticsDialog()
     asked: list = []
-    dialog.refreshRequested.connect(lambda: (asked.append(1), dialog.set_report(_report())))
+    dialog.refreshRequested.connect(
+        lambda: (asked.append(1), dialog.set_report(None), _deliver(dialog, _report())))
     report = contract_check.run(project)
     assert not report.available, "a refused copy: the check could not run"
-    dialog.set_report(report)
+    _deliver(dialog, report)
     return dialog, asked
 
 
@@ -2828,3 +2842,94 @@ def test_a_fix_that_fails_says_why_on_its_row_and_the_row_stays(project, other_c
     assert i18n.t("selfActionFailed").format(why=sentence) in _said(row)
     assert all(button.isEnabled() for button in row.findChildren(QPushButton))
     assert (asked, dialog._verdict.text()) == ([], verdict), "no receipt, no re-check"
+
+
+def test_a_receipt_stays_through_its_reports_redraws_until_a_newer_report_or_a_re_check(
+        tmp_path, monkeypatch):
+    """Fix round 1 of #169's row, I1. The receipt was said once and dropped, and the window draws
+    every report it delivers again — agy's reading follows each check — so it was gone before
+    anyone read it. It stays with the report it was said with, through every redraw of that one
+    (the reading, the window handing the same report back as the panel opens again), and goes
+    with a newer report, a Re-check, or the next fix."""
+    from autosound_tcc.core import model_choices, model_overrides
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(model_choices, "_CLI_CACHE", {})
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: False)
+    receipt = i18n.t("diagFixDone").format(what=i18n.t("selfAliasFixed").format(n=1))
+    _app()
+    dialog = DiagnosticsDialog()
+
+    def fixed_over(shown):
+        model_overrides.set_alias("agy:gemini-3.1-pro-high", "sdk:claude-opus-5", "gone")
+        _deliver(dialog, shown)
+        _press(_check_rows(dialog, "aliases")[0], i18n.t("selfAliasFix"))
+
+    shown = _report()
+    fixed_over(shown)
+    dialog.own_checks_changed()  # agy's reading
+    dialog.set_report(shown)  # the same report, handed back as the panel is opened again
+    assert receipt in dialog._verdict.text(), "through every redraw of its report"
+
+    _deliver(dialog, _report())
+    assert receipt not in dialog._verdict.text(), "a newer report says its own verdict"
+
+    shown = _report()
+    fixed_over(shown)
+    assert receipt in dialog._verdict.text()
+    dialog._refresh_btn.click()
+    dialog.set_report(shown)  # the same report again: only the Re-check can have ended it
+    assert receipt not in dialog._verdict.text(), "a Re-check ends it"
+
+
+def test_a_fix_pressed_while_a_check_runs_lands_its_receipt_on_the_check_after_it(project,
+                                                                                  other_copy):
+    """I1's second half. The window shows its last report while a check runs, and a Re-check
+    asked for meanwhile waits for that check (`main_window._open_diagnostics`,
+    `_start_contract_check`). Its report comes first, begun before the fix — the old state, here
+    the refusal — and the receipt is not spent on it: it lands on the report of the check after."""
+    linked(project, other_copy)
+    _app()
+    dialog = DiagnosticsDialog()
+    asked: list = []
+    dialog.refreshRequested.connect(lambda: asked.append(1))  # one runs: the window queues it
+    _deliver(dialog, contract_check.run(project))  # the last report, shown as the panel opens
+    running = contract_check.run(project)  # the check running as the fix is pressed
+    copy = os.path.realpath(other_copy)
+    receipt = i18n.t("diagFixDone").format(what=i18n.t("selfMethodApproveDone").format(path=copy))
+
+    _press(_method_rows(dialog)[0], i18n.t("selfMethodApprove"))
+    dialog.set_report(running)
+
+    assert asked == [1]
+    assert receipt not in dialog._verdict.text(), "not on a check begun before the fix"
+    assert i18n.t("diagUnavailable") in dialog._verdict.text(), "that one is the old refusal"
+    dialog.own_checks_changed()
+    assert receipt not in dialog._verdict.text()
+
+    dialog.set_report(None)  # the queued check starts
+    _deliver(dialog, _report())
+
+    assert receipt in dialog._verdict.text()
+    [row] = _method_rows(dialog)
+    assert i18n.t("selfMethodApproved") in _said(row)
+
+
+def test_a_fix_button_is_never_the_dialogs_default(project, other_copy):
+    """Ruling R-aq: a QPushButton in a QDialog is auto-default, so Enter presses the one that has
+    focus — and a press disables its button, which hands focus to the one beside it. Approve and
+    re-link decide which copy of the method TCC runs: a deliberate press, never a stray Enter."""
+    from PySide6.QtCore import Qt
+
+    link = linked(project, other_copy)
+    dialog, asked = _as_the_window_checks(project)
+    [row] = _method_rows(dialog)
+    buttons = row.findChildren(QPushButton)
+
+    for button in buttons:
+        for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            QTest.keyClick(button, key)
+
+    assert config.approved_methods() == () and same_path(link, other_copy), "Enter pressed nothing"
+    assert asked == []
+    assert [(b.autoDefault(), b.isDefault()) for b in buttons] == [(False, False)] * 2

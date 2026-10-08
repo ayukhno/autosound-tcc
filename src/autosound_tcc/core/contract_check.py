@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -64,6 +64,11 @@ class ContractReport:
     #: The phase −1 gate: intake left everything phase 0 needs (`contract.py`'s own `complete`,
     #: what `--gate` exits on). False when the method does not say -- not a green gate.
     complete: bool = False
+    #: When the check this report answers began, on `time.monotonic()`: what tells a check begun
+    #: before something from one begun after it. A fix's receipt in the diagnostics lands only on
+    #: a report begun after the fix (#169) — the check that was running when it was pressed
+    #: reports the old state. A report built by hand is begun when it is built.
+    started: float = field(default_factory=time.monotonic, compare=False)
 
     @property
     def available(self) -> bool:
@@ -187,6 +192,7 @@ def run(
             error=message,
             checked_at=checked_at,
             duration_s=time.monotonic() - started,
+            started=started,
         )
 
     args = ["check", str(project_dir), "--json"]
@@ -250,7 +256,8 @@ def run(
         tail = "\n".join((proc.stderr or "").strip().splitlines()[-6:])
         return failed(tail or f"contract.py produced no report (exit {proc.returncode})")
 
-    return report_from_json(report, project_dir, checked_at, time.monotonic() - started)
+    return replace(report_from_json(report, project_dir, checked_at, time.monotonic() - started),
+                   started=started)
 
 
 def report_from_json(report: Any, project_dir, checked_at: str, duration_s: float) -> ContractReport:
