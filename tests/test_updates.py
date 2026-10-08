@@ -647,6 +647,52 @@ def test_a_method_that_names_no_newer_contract_installs_as_today(monkeypatch, tm
         ["status"], ["keep-local"], ["clone", "--tag", tag], ["libs"]]
 
 
+def _tag_with_contract_entry(origin, tag: str, mode: str, obj: str) -> None:
+    """A release `tag` whose `rew_tool/contract.py` is a tree entry of `mode` naming `obj` — a
+    symbolic link (120000, `obj` a blob of the link's text) or a gitlink (160000, `obj` a commit) —
+    made with git's plumbing, so no link has to be made on the disk."""
+    path = "skills/autosound-tuning/rew_tool/contract.py"
+    _git_in("update-index", "--add", "--cacheinfo", f"{mode},{obj},{path}", cwd=origin)
+    _git_in("commit", "-q", "-m", tag, cwd=origin)
+    _git_in("tag", "-a", tag, "-m", tag, cwd=origin)
+
+
+@pytest.mark.parametrize("entry, named", [("symlink", "a symbolic link"),
+                                          ("gitlink", "a gitlink")])
+def test_a_contract_that_is_no_file_in_the_tag_refuses_as_one_this_tcc_cannot_read(
+        monkeypatch, tmp_path, entry, named):
+    """M71, M72 (#170): `ls-tree` listed `rew_tool/contract.py`, and `show` then read whatever the
+    entry was. A symbolic link read as its own text — no number — and the release installed, while
+    the binding, on disk, would follow the link to the file it names (here on contract 2). A
+    gitlink did not show, and refused as `read_failed` — «try again», the button on — every time.
+    Only a file (git mode 100644 or 100755) is read now; any other entry refuses as a contract this
+    TCC cannot read, before anything of the tag runs."""
+    clone, log, temp = _skill_repos(monkeypatch, tmp_path)
+    origin = tmp_path / "origin"
+    if entry == "symlink":
+        real = origin / "skills" / "autosound-tuning" / "rew_tool" / "contract_v2.py"
+        real.parent.mkdir(parents=True, exist_ok=True)
+        real.write_text("CONTRACT_VERSION = 2\n", encoding="utf-8")
+        _git_in("add", "-A", cwd=origin)
+        text = tmp_path / "link-text"
+        text.write_text("contract_v2.py", encoding="utf-8")
+        _tag_with_contract_entry(origin, "v3.0.12", "120000",
+                                 _git_in("hash-object", "-w", str(text), cwd=origin))
+    else:
+        _tag_with_contract_entry(origin, "v3.0.12", "160000",
+                                 _git_in("rev-parse", "HEAD", cwd=origin))
+    head = _git_in("rev-parse", "HEAD", cwd=clone)
+
+    found = updates.local_changes("v3.0.12")
+    done = updates.apply_skill("v3.0.12", keep_local=True)
+
+    for answer in (found, done):
+        assert (answer.ok, answer.reason) == (False, "newer_contract"), answer
+        assert answer.detail.startswith("v3.0.12: rew_tool/contract.py: " + named), answer.detail
+    assert _runs(log) == [] and list(temp.iterdir()) == []
+    assert _git_in("rev-parse", "HEAD", cwd=clone) == head
+
+
 @pytest.mark.parametrize("breaks", ["ls-tree", "show"])
 def test_a_contract_git_could_not_read_refuses_until_it_is_tried_again(monkeypatch, tmp_path,
                                                                        breaks):

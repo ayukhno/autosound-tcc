@@ -756,6 +756,11 @@ _UPKEEP_FILES = ("scripts/upkeep.py", "rew_tool/gates/side_effect.py", "rew_tool
 #: Where a release names the CLI contract it speaks (`CONTRACT_VERSION`, #170), read from the tag
 #: before any of it is taken out.
 _CONTRACT_FILE = "rew_tool/contract.py"
+#: The git modes of a file, the one kind of entry `contract.py` is read from (M71, M72); what the
+#: others are called when one stands there instead.
+_FILE_MODES = ("100644", "100755")
+_NOT_A_FILE = {"120000": "a symbolic link", "160000": "a gitlink (a submodule)",
+               "040000": "a folder"}
 
 #: A fetch of one release over a network that may be a phone: `upkeep.py`'s own fetch allows 300 s.
 _FETCH_TIMEOUT = 300.0
@@ -876,13 +881,24 @@ def _tag_contract(repo: Path, tag: str) -> tuple[Optional[method_binding.Contrac
     tells the two apart: it lists the path, or answers nothing for a tree without it, or fails.
     `cat-file -e` and `show` fail alike for a path that is not there and for a read that broke,
     and only their messages differ — in the language git speaks here. `--full-tree`, so the path
-    is the tag's own whatever folder git runs in."""
+    is the tag's own whatever folder git runs in.
+
+    Only a file is read (M71, M72): `ls-tree`'s mode is 100644 or 100755. A symbolic link would
+    read as its own text — no number — while the binding follows it on disk to the file it names;
+    a gitlink does not show at all, and would refuse as `read_failed` on every try. Either, and any
+    other entry, is a contract this TCC cannot read: `unreadable`, so `newer_contract`."""
     path = f"{_SKILL_IN_REPO}/{_CONTRACT_FILE}"
     listed, said = _git("ls-tree", "--full-tree", f"refs/tags/{tag}", "--", path, cwd=repo)
     if not listed:
         return None, said or "git ls-tree failed"
-    if not any(line.partition("\t")[2] == path for line in said.splitlines()):
+    entries = [line for line in said.splitlines() if line.partition("\t")[2] == path]
+    if not entries:
         return method_binding.contract_of(None), ""
+    mode = entries[0].split(None, 1)[0]
+    if mode not in _FILE_MODES:
+        kind = _NOT_A_FILE.get(mode, "an entry")
+        return method_binding.Contract(
+            True, unreadable=f"{kind} in the tag, not a file (git mode {mode})"), ""
     blob, why = _git_show(repo, f"refs/tags/{tag}:{path}")
     if blob is None:
         return None, why
