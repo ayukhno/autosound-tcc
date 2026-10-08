@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import app_log, child
+from autosound_tcc.core import app_log, child, method_binding
 
 # Agent CLIs we know how to launch, in the order we'd suggest them. The value is the executable
 # name to look for on PATH; `agy` is Antigravity's Gemini CLI, which the tuning skill's own critic
@@ -36,7 +36,8 @@ KNOWN_CLIS: tuple[tuple[str, str], ...] = (
 
 
 class TerminalLaunchError(RuntimeError):
-    """No terminal emulator could be driven on this platform."""
+    """No terminal could be opened on the CLI — or none may be: the project's copy of the method is
+    one TCC will not run (#169). The text is what the person reads."""
 
 
 def available_clis() -> list[tuple[str, str]]:
@@ -126,7 +127,7 @@ def _cmd_command(line: str) -> str:
     One thing it still does to the line: `%NAME%` is replaced when NAME is a defined variable,
     inside quotes too — and wt does the same first on its branch. A cmd command line has no
     reliable escape for it, so it is accepted: no value TCC writes here (a model id, the critic's
-    path, a hint) is expected to hold one (review of finding 148, M8).
+    path, the method's folder, a hint) is expected to hold one (review of finding 148, M8).
     """
     return f'cmd /s /k "{line}"'
 
@@ -343,9 +344,9 @@ def _launch_windows(
 ) -> None:
     inner = _win_setting(env) + _win_cli_invocation(cli, hint, model, extra)
     if shutil.which("wt"):
-        # Plain case stays exactly the original bare-argv shape; a hint, a model or the
-        # reviewer's route needs one line, which only cmd /k can run — handed over as a string
-        # wt and then cmd read back exactly (`_wt_command`, finding 148).
+        # Plain case stays exactly the original bare-argv shape; a hint, a model, the reviewer's
+        # route or the method's copy needs one line, which only cmd /k can run — handed over as a
+        # string wt and then cmd read back exactly (`_wt_command`, finding 148).
         if hint or model or extra or env:
             subprocess.Popen(_wt_command(inner, str(project_dir)), close_fds=True)
         else:
@@ -404,6 +405,8 @@ def launch(
     model: Optional[str] = None,
     extra: tuple[str, ...] = (),
     env: Optional[dict] = None,
+    *,
+    method: bool = True,
 ) -> str:
     """Open a terminal in `project_dir` running `cli`. Returns the CLI that was launched.
 
@@ -423,9 +426,16 @@ def launch(
     (`critic.session_env`, hub #236): no terminal TCC drives passes on TCC's own environment, and
     without them a session's own run of the method went to the API on a stored key.
 
-    Raises `TerminalLaunchError` if no agent CLI is installed or no terminal can be driven — the
-    caller is expected to turn that into a message, since "nothing happened" after clicking a
-    button is the worst possible outcome here.
+    `method` — the CLI runs a tuning session, which loads the method from the project's own link
+    (`claude` reads the project's `.claude/skills`, omp its overlay's `includeSkills`). So it runs
+    the copy the project is bound to (#169), the one its writers run: a copy TCC will not run opens
+    no terminal, and a trusted one is named in the line (`AUTOSOUND_SKILL_ROOT`, after `env`).
+    False for a CLI that runs no session — `omp setup` configures the machine, not the car.
+
+    Raises `TerminalLaunchError` if no agent CLI is installed, no terminal can be driven, or the
+    project's copy is refused (with the binding's own sentence) — the caller is expected to turn
+    that into a message, since "nothing happened" after clicking a button is the worst possible
+    outcome here.
     """
     cli = cli or default_cli()
     if not cli:
@@ -439,6 +449,13 @@ def launch(
     project_dir = Path(project_dir)
     if not project_dir.is_dir():
         raise TerminalLaunchError(f"{project_dir} is not a directory")
+    if method:
+        binding = method_binding.for_project(project_dir)
+        try:
+            binding.require()
+        except method_binding.MethodRefused as exc:
+            raise TerminalLaunchError(str(exc)) from exc
+        env = {**(env or {}), **binding.session_env()}
 
     # Dispatch on `sys.platform` alone. `os.name` would work too, but two seams means a test can
     # patch one and not the other -- and patching `os.name` silently switches `pathlib` to Windows

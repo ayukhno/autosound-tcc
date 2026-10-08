@@ -215,6 +215,9 @@ def test_pressing_it_opens_omp_setup_in_a_terminal(catalogue, monkeypatch):
     assert len(calls) == 1
     _dir, kw = calls[0]
     assert kw["cli"] == "omp" and kw["extra"] == ("setup",)
+    # It runs no tuning session, so the project's copy of the method is not asked of it (#169):
+    # a copy refused there, or a home folder with no project in it, is no reason to refuse it.
+    assert kw.get("method") is False
     assert dialog._status.text() == i18n.t("configureModelsSetupOpened")
 
 

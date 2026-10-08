@@ -50,7 +50,8 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from autosound_tcc.core import openers
-from autosound_tcc.core import app_log, child, config, critic, model_choices, signal_bus, vendor_loader
+from autosound_tcc.core import (app_log, child, config, critic, method_binding, model_choices,
+                                signal_bus, vendor_loader)
 from autosound_tcc.core.agent_events import (
     AgentEvent,
     Notice,
@@ -373,6 +374,13 @@ class OmpSession:
         self.gate = gate
         # Tools the Arbiter ticked "don't ask again" on, per project.
         self.always_allowed = always_allowed or frozenset()
+        # What the gate lets omp read unasked: taken here and again by `start`, from the binding
+        # it runs, as on the SDK side. A frame only reads it: looked up per bash permission it cost
+        # up to ~0.8 ms each time, on the loop that reads omp's frames (M50, #169).
+        self._read_roots = _read_roots_for(self.project_dir)
+        # Which copy of the method omp's shell runs (`AUTOSOUND_SKILL_ROOT`), from the same
+        # binding (#169): the copy the project's writers run. Set by `start`.
+        self._method_env: dict[str, str] = {}
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._events: asyncio.Queue[Optional[AgentEvent]] = asyncio.Queue()
         self._reader: Optional[asyncio.Task] = None
@@ -582,7 +590,7 @@ class OmpSession:
             # `never` asks about nothing, and is never silent about what `auto` would have asked
             # (tcc#115) — the same line as on the Agent SDK side.
             if (self.gate == GATE_NEVER and tool == "bash"
-                    and bash_is_dangerous(command, _read_roots_for(self.project_dir))):
+                    and bash_is_dangerous(command, self._read_roots)):
                 await self._events.put(Unasked(command))
             return
         effect = self.effect_of(command)
@@ -624,8 +632,7 @@ class OmpSession:
             # so on omp a delete passed silently while the menu told the Arbiter `auto` still asks
             # about what cannot be undone (review of tcc#115). The SDK adapter's narrow check, shared.
             command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
-            return not (tool == "bash"
-                        and bash_is_dangerous(command, _read_roots_for(self.project_dir)))
+            return not (tool == "bash" and bash_is_dangerous(command, self._read_roots))
         if tool in _ALWAYS_GATED_TOOLS:
             return False
         if tool.startswith("mcp__tcc"):
@@ -634,7 +641,7 @@ class OmpSession:
             return True
         if tool == "bash":
             command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
-            if bash_is_read_only(command, _read_roots_for(self.project_dir)):
+            if bash_is_read_only(command, self._read_roots):
                 return True
             # `foreign`: the skill writing its own namespace is the skill doing its job, and asking
             # about it teaches the Arbiter to click through the ones that matter.
@@ -896,10 +903,23 @@ class OmpSession:
     # ---- lifecycle ----------------------------------------------------------
 
     async def start(self, prompt: Optional[str] = None) -> AsyncIterator[AgentEvent]:
+        """Spawn omp and run the opening turn, yielding `agent_events` for the caller to render.
+
+        omp loads the method from the project's own link (`includeSkills`), so the session runs
+        the copy the project is bound to (#169) — the one its writers run, named to omp's shell
+        in `AUTOSOUND_SKILL_ROOT`. A copy TCC will not run ends the start here with
+        `MethodRefused` and the binding's sentence, before anything is linked or spawned;
+        `AgentWorker` shows a failed start as a failed bubble.
+        """
         if not is_available():
             raise OmpNotInstalledError("omp is not on PATH — install it: brew install can1357/tap/omp")
+        binding = method_binding.for_project(self.project_dir)
+        binding.require()
+        # One binding for all three: what omp's shell is told, what the gate reads, what loads.
+        self._method_env = binding.session_env()
+        self._read_roots = _read_roots_for(self.project_dir, binding)
         # Before the process starts: omp scans for skills at startup, so a link created later in
-        # the turn would not be seen until the next session.
+        # the turn would not be seen until the next session. An existing entry is left alone.
         vendor_loader.link_skill_into(self.project_dir)
         await self._start_process()
         self._send(
@@ -959,8 +979,11 @@ class OmpSession:
             limit=FRAME_LIMIT_BYTES,
             # omp shells out to the skill, whose scripts are in a git submodule; without this its
             # children drop `__pycache__` into a repo TCC does not own (see vendor_loader).
-            # And the reviewer the Arbiter picked, for a direct call (findings 17, 21; `#45`).
-            env=vendor_loader.child_env(**critic.session_env(self.project_dir),
+            # And the reviewer the Arbiter picked, for a direct call (findings 17, 21; `#45`), and
+            # which copy of the method omp runs, the one its writers run (#169) — merged as the
+            # SDK route merges them, the binding last.
+            env=vendor_loader.child_env(**{**critic.session_env(self.project_dir),
+                                           **self._method_env},
                                         OMP_MCP_TIMEOUT_MS=str(OMP_TOOL_TIMEOUT_MS)),
             # Its stdin is the pipe we drive it through, so `quiet()` would be wrong here; this is
             # the other half — no console window on Windows (see core/child.py).

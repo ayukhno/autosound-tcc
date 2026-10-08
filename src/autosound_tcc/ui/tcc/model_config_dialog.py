@@ -213,7 +213,8 @@ class ModelConfigDialog(QDialog):
         """
         self._status.setVisible(True)
         try:
-            terminal_launcher.launch(self._launch_dir(), cli="omp", extra=("setup",))
+            # No tuning session runs in it, so no project's copy of the method is asked of it (#169).
+            terminal_launcher.launch(self._launch_dir(), cli="omp", extra=("setup",), method=False)
         except terminal_launcher.TerminalLaunchError as exc:
             self._status.setText(str(exc))
             return

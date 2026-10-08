@@ -18,8 +18,13 @@ import pytest
 
 from autosound_tcc.core.agent_events import Question, TextDelta, ToolCall, TurnEnd
 from autosound_tcc.core.mcp_server import ConfirmRequest
+from autosound_tcc.core import method_binding
 from autosound_tcc.core import omp_session as omp_session_module
 from autosound_tcc.core.omp_session import OmpSession
+from autosound_tcc.core.tuning_session import _read_roots_for
+
+from tests._method_copies import entry as _entry, same_path as _same_path
+from tests._method_copies import linked_and_approved as _linked_and_approved
 
 
 class RecordingBridge:
@@ -617,13 +622,81 @@ def test_a_project_with_no_skill_is_called_out_before_the_turn(tmp_path):
     assert warning is not None and ".claude/skills/autosound-tuning" in warning
 
 
-def test_a_project_with_the_skill_linked_says_nothing(tmp_path):
+def _omp_spawns(monkeypatch) -> list:
+    """omp as far as `start` reaches it: on PATH, and each spawn's keywords kept and refused with
+    OSError — nothing is started."""
+    spawned: list = []
+
+    async def fake_spawn(*argv, **kwargs):
+        spawned.append(kwargs)
+        raise OSError("not starting omp in a test")
+
+    monkeypatch.setattr(omp_session_module, "is_available", lambda: True)
+    monkeypatch.setattr(omp_session_module.asyncio, "create_subprocess_exec", fake_spawn)
+    return spawned
+
+
+def test_a_folder_where_the_link_should_be_is_refused_and_starts_no_omp(tmp_path, monkeypatch):
+    """This was «the skill linked, nothing to say», on an empty `autosound-tuning` folder — and omp
+    loaded that folder as the method. A folder at the entry is inside the project and travels with
+    it, from a backup, a customer or a clone (#169, HUB-050): the start refuses it with the
+    binding's own sentence, and no omp is spawned."""
     link = tmp_path / ".claude" / "skills"
     link.mkdir(parents=True)
     (link / "autosound-tuning").mkdir()
-    session = _session(tmp_path)
+    spawned = _omp_spawns(monkeypatch)
+    binding = method_binding.for_project(tmp_path)
+    assert binding.state == "refused" and "a folder, not a link" in binding.reason, binding
 
-    assert session.skill_warning() is None
+    with pytest.raises(method_binding.MethodRefused) as refused:
+        asyncio.run(_first_turn(_session(tmp_path)))
+
+    assert str(refused.value) == binding.reason
+    assert spawned == [], "no omp was started"
+
+
+def test_a_copy_tcc_does_not_know_is_refused_and_starts_no_omp(tmp_path, monkeypatch, other_copy,
+                                                              own_copy_is_the_submodule):
+    """A link to a copy outside the project that nobody approved on this machine: the writers
+    refuse it (`method_cli.spawn`), and so does the session that would advise from it — with the
+    binding's sentence, which says to approve it or to re-link TCC's copy."""
+    project = tmp_path / "car"
+    _entry(project).parent.mkdir(parents=True)
+    _entry(project).symlink_to(other_copy, target_is_directory=True)
+    binding = method_binding.for_project(project)
+    assert binding.state == "refused" and binding.can_approve, binding
+    spawned = _omp_spawns(monkeypatch)
+
+    with pytest.raises(method_binding.MethodRefused) as refused:
+        asyncio.run(_first_turn(OmpSession(project_dir=project)))
+
+    assert str(refused.value) == binding.reason
+    assert spawned == [], "no omp was started"
+
+
+def test_omp_runs_the_copy_the_project_is_bound_to(tmp_path, monkeypatch, other_copy,
+                                                   own_copy_is_the_submodule):
+    """#169, N4: omp loaded the project's link (`includeSkills`) while it was spawned with TCC's
+    environment, so its shell ran the method's scripts unaware of the copy it had loaded. The spawn
+    names the bound copy in `AUTOSOUND_SKILL_ROOT`, beside the reviewer's variables, and the gate
+    reads the roots of the binding `start` took — not of the one the session was built with."""
+    monkeypatch.setattr(omp_session_module.critic, "session_env",
+                        lambda project_dir: {"AUTOSOUND_CRITIC_MODEL": "m"})
+    project = tmp_path / "car"
+    session = OmpSession(project_dir=project)  # no link yet: TCC's own copy
+    binding = _linked_and_approved(project, other_copy)
+    spawned = _omp_spawns(monkeypatch)
+
+    with pytest.raises(OSError, match="not starting omp"):
+        asyncio.run(_first_turn(session))
+
+    [spawn] = spawned
+    assert spawn["env"][method_binding.SKILL_ROOT_ENV] == str(binding.skill_dir)
+    assert _same_path(binding.skill_dir, other_copy)
+    assert spawn["env"]["AUTOSOUND_CRITIC_MODEL"] == "m"
+    assert session._read_roots == _read_roots_for(project, binding)
+    assert _same_path(session._read_roots[-1], other_copy), "the bound copy is read unasked"
+    assert session.skill_warning() is None, "the link is there: nothing to warn about"
 
 
 def test_a_google_model_with_no_key_is_flagged_before_the_turn(tmp_path, monkeypatch):
@@ -803,6 +876,26 @@ def test_omp_reads_the_roots_the_binding_gives_not_wherever_the_link_points(tmp_
 
     assert len(session.bridge.requests) == 1, "asked, not let through as a read"
     assert session.sent[0]["value"] == "Deny"
+
+
+def test_a_bash_frame_reads_the_roots_the_session_holds_not_the_disk(tmp_path, monkeypatch):
+    """M50 (#169): `_read_roots_for` costs ~57–825 µs, and the gate asked it for every bash
+    permission frame, on the loop that reads omp's frames. The roots are taken when the session is
+    built and again by `start`, from the binding it runs, as on the SDK side; a frame only reads
+    them — under each gate that looks at a command."""
+    session = _session(tmp_path)
+    asked: list = []
+    monkeypatch.setattr(omp_session_module, "_read_roots_for",
+                        lambda *args: asked.append(args) or (tmp_path,))
+
+    for n, gate in enumerate((omp_session_module.GATE_WRITES, omp_session_module.GATE_AUTO,
+                              omp_session_module.GATE_NEVER)):
+        session.gate = gate
+        asyncio.run(session._gate({**PERMISSION_FRAME, "id": f"f{n}",
+                                   "title": "Allow tool: bash\nCommand: ls -la"}))
+
+    assert [frame["value"] for frame in session.sent] == ["Approve"] * 3
+    assert asked == [], "no frame looked the roots up again"
 
 
 def test_a_remembered_tool_stops_asking_without_turning_the_gate_off(tmp_path):

@@ -8,12 +8,15 @@ path the user chose is the realistic failure, not whether Terminal.app opens.
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 
 import pytest
 
-from autosound_tcc.core import terminal_launcher
+from autosound_tcc.core import method_binding, terminal_launcher
 from autosound_tcc.core.terminal_launcher import TerminalLaunchError, launch
+
+from tests._method_copies import entry as _entry, linked_and_approved as _linked_and_approved
 
 
 @pytest.fixture
@@ -91,6 +94,23 @@ def _as_cmd_runs_it(command: str) -> str:
     return rest
 
 
+def _posix_root() -> str:
+    """The copy of the method a session's line names (#169), as `env` sets it: TCC's own, which a
+    project with no link of its own runs — every `tmp_path` here is one."""
+    return f"{method_binding.SKILL_ROOT_ENV}={shlex.quote(str(method_binding.own_copy()))}"
+
+
+def _win_root() -> str:
+    """The same copy as cmd sets it, before the CLI."""
+    return f'set "{method_binding.SKILL_ROOT_ENV}={method_binding.own_copy()}" && '
+
+
+def _in_applescript(line: str) -> str:
+    """`line` as the AppleScript carries it (`_applescript_literal`, tested on its own below): a
+    Windows path's backslashes doubled, for the macOS tests that run on the Windows shard too."""
+    return terminal_launcher._applescript_literal(line)[1:-1]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="AppleScript: the command this builds exists only on macOS")
 def test_macos_builds_an_applescript_that_cds_then_runs_the_cli(recorded, monkeypatch, tmp_path):
     monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
@@ -100,7 +120,7 @@ def test_macos_builds_an_applescript_that_cds_then_runs_the_cli(recorded, monkey
     script = recorded[0][2]
     assert recorded[0][0] == "osascript"
     assert f"cd {tmp_path}" in script
-    assert "exec claude" in script
+    assert _in_applescript(f"exec env {_posix_root()} claude") in script
 
 
 @pytest.mark.skipif(
@@ -127,8 +147,9 @@ def test_windows_prefers_windows_terminal(recorded, monkeypatch, tmp_path):
 
     launch(tmp_path, "claude")
 
-    assert recorded[0][:2] == ["wt", "-d"]
-    assert recorded[0][-1] == "claude"
+    folder, tab = _as_wt_starts_it(recorded[0])
+    assert folder == str(tmp_path)
+    assert _as_cmd_runs_it(tab) == _win_root() + '"claude"'
 
 
 def test_windows_falls_back_to_cmd_when_wt_is_missing(recorded, monkeypatch, tmp_path):
@@ -139,7 +160,7 @@ def test_windows_falls_back_to_cmd_when_wt_is_missing(recorded, monkeypatch, tmp
 
     launch(tmp_path, "claude")
 
-    assert _as_cmd_runs_it(recorded[0]) == '"claude"', recorded[0]
+    assert _as_cmd_runs_it(recorded[0]) == _win_root() + '"claude"', recorded[0]
     # The folder is NOT in the line: `cmd` splits on `&` before it looks at quotes, so a path
     # travelling as text is a path that breaks on an ordinary folder name (HUB-053).
     assert recorded.kwargs["cwd"] == str(tmp_path)
@@ -210,7 +231,8 @@ def test_macos_hint_is_passed_as_the_clis_own_argument(recorded, monkeypatch, tm
 
     script = recorded[0][2]
     assert "echo" not in script
-    assert "exec gemini 'onboarding a Helix DSP Ultra S'" in script
+    assert _in_applescript(f"exec env {_posix_root()} gemini 'onboarding a Helix DSP Ultra S'") \
+        in script
 
 
 def test_macos_model_comes_before_the_hint(recorded, monkeypatch, tmp_path):
@@ -219,7 +241,8 @@ def test_macos_model_comes_before_the_hint(recorded, monkeypatch, tmp_path):
     launch(tmp_path, "claude", hint="onboarding a Musway M6V4", model="opus")
 
     script = recorded[0][2]
-    assert "exec claude --model opus 'onboarding a Musway M6V4'" in script
+    assert _in_applescript(
+        f"exec env {_posix_root()} claude --model opus 'onboarding a Musway M6V4'") in script
 
 
 def test_macos_model_without_a_hint(recorded, monkeypatch, tmp_path):
@@ -228,7 +251,7 @@ def test_macos_model_without_a_hint(recorded, monkeypatch, tmp_path):
     launch(tmp_path, "gemini", model="gemini-2.5-pro")
 
     script = recorded[0][2]
-    assert "exec gemini --model gemini-2.5-pro" in script
+    assert _in_applescript(f"exec env {_posix_root()} gemini --model gemini-2.5-pro") in script
 
 
 def test_macos_without_a_hint_is_unchanged(recorded, monkeypatch, tmp_path):
@@ -238,7 +261,7 @@ def test_macos_without_a_hint_is_unchanged(recorded, monkeypatch, tmp_path):
     launch(tmp_path, "claude")
 
     script = recorded[0][2]
-    assert "exec claude" in script
+    assert _in_applescript(f"exec env {_posix_root()} claude") + '"' in script, "the line ends there"
     assert "echo" not in script
 
 
@@ -249,23 +272,26 @@ def test_windows_terminal_hint_is_passed_as_the_clis_own_argument(recorded, monk
 
     folder, tab = _as_wt_starts_it(recorded[0])
     assert folder == str(tmp_path)
-    assert _as_cmd_runs_it(tab) == '"codex" "onboarding a Musway M6V4"'
+    assert _as_cmd_runs_it(tab) == _win_root() + '"codex" "onboarding a Musway M6V4"'
 
 
 def test_windows_terminal_without_a_hint_is_unchanged(recorded, monkeypatch, tmp_path):
+    """The bare argv. Only a CLI that runs no session still gets it (`method=False`): a session's
+    line names the method's copy, which takes cmd /k to set (#169)."""
     monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
 
-    launch(tmp_path, "claude")
+    launch(tmp_path, "claude", method=False)
 
     assert recorded[0] == ["wt", "-d", str(tmp_path), "claude"]
 
 
 def test_windows_model_alone_still_switches_to_cmd_k(recorded, monkeypatch, tmp_path):
     """A model with no hint still needs the cmd /k wrapper -- only the truly bare case stays a
-    plain argv element."""
+    plain argv element. With no method's copy in the line (`method=False`), the model alone is
+    what asks for it."""
     monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
 
-    launch(tmp_path, "claude", model="opus")
+    launch(tmp_path, "claude", model="opus", method=False)
 
     assert _as_cmd_runs_it(_as_wt_starts_it(recorded[0])[1]) == '"claude" --model "opus"'
 
@@ -521,7 +547,8 @@ def test_macos_terminal_session_gets_the_reviewers_model_and_route(recorded, mon
     launch(tmp_path, "claude", env=_PICK_ENV)
 
     script = recorded[0][2]
-    assert "exec env AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high AUTOSOUND_CRITIC_VIA=cli claude" in script
+    assert _in_applescript("exec env AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high "
+                           f"AUTOSOUND_CRITIC_VIA=cli {_posix_root()} claude") in script
 
 
 def test_windows_terminal_session_gets_the_reviewers_model_and_route(recorded, monkeypatch, tmp_path):
@@ -534,7 +561,7 @@ def test_windows_terminal_session_gets_the_reviewers_model_and_route(recorded, m
     assert folder == str(tmp_path)
     assert _as_cmd_runs_it(tab) == (
         'set "AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high" && '
-        'set "AUTOSOUND_CRITIC_VIA=cli" && "claude"'), recorded[0]
+        'set "AUTOSOUND_CRITIC_VIA=cli" && ' + _win_root() + '"claude"'), recorded[0]
 
 
 def test_windows_console_session_gets_them_too(recorded, monkeypatch, tmp_path):
@@ -553,8 +580,8 @@ def test_linux_terminal_session_gets_them_too(recorded, monkeypatch, tmp_path):
 
     launch(tmp_path, "claude", env=_PICK_ENV)
 
-    assert "exec env AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high AUTOSOUND_CRITIC_VIA=cli claude" \
-        in " ".join(recorded[0])
+    assert ("exec env AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high AUTOSOUND_CRITIC_VIA=cli "
+            f"{_posix_root()} claude") in " ".join(recorded[0])
 
 
 #: A CLI path a person really has: a space, an `&` and an apostrophe (night review of #134, M10).
@@ -611,17 +638,22 @@ def test_a_value_that_needs_quoting_is_set_whole_on_windows(recorded, monkeypatc
 
 
 def test_no_env_keeps_every_line_as_it_was(recorded, monkeypatch, tmp_path):
+    """For a CLI that runs no session (`method=False`): a session's line always names the method's
+    copy (#169)."""
     monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
 
-    launch(tmp_path, "claude", env={})
+    launch(tmp_path, "claude", env={}, method=False)
 
     assert recorded[0] == ["wt", "-d", str(tmp_path), "claude"]
 
 
 # --- the line reaches cmd as it was written (finding 148) -----------------------------------------
 
-_LINE = ('set "AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high" && set "AUTOSOUND_CRITIC_VIA=cli" && '
-         '"claude" --model "opus" "tune the car"')
+
+def _line() -> str:
+    """A session's whole line: the reviewer's pick, the method's copy, then the CLI."""
+    return ('set "AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high" && set "AUTOSOUND_CRITIC_VIA=cli" && '
+            f'{_win_root()}"claude" --model "opus" "tune the car"')
 
 
 def test_cmd_is_handed_the_line_verbatim(recorded, monkeypatch, tmp_path):
@@ -635,8 +667,8 @@ def test_cmd_is_handed_the_line_verbatim(recorded, monkeypatch, tmp_path):
 
     launch(tmp_path, "claude", hint="tune the car", model="opus", env=_PICK_ENV)
 
-    assert recorded[0] == f'cmd /s /k "{_LINE}"'
-    assert _as_cmd_runs_it(recorded[0]) == _LINE
+    assert recorded[0] == f'cmd /s /k "{_line()}"'
+    assert _as_cmd_runs_it(recorded[0]) == _line()
     assert recorded.kwargs["cwd"] == str(tmp_path)
 
 
@@ -649,10 +681,10 @@ def test_windows_terminal_hands_cmd_the_same_line(recorded, monkeypatch, tmp_pat
 
     launch(folder, "claude", hint="tune the car", model="opus", env=_PICK_ENV)
 
-    escaped = _LINE.replace('"', '\\"')
+    escaped = _line().replace('"', '\\"')
     assert recorded[0] == f'wt -d "{folder}" cmd /s /k "{escaped}"'
-    assert _as_wt_starts_it(recorded[0]) == (str(folder), f'cmd /s /k "{_LINE}"')
-    assert _as_cmd_runs_it(_as_wt_starts_it(recorded[0])[1]) == _LINE
+    assert _as_wt_starts_it(recorded[0]) == (str(folder), f'cmd /s /k "{_line()}"')
+    assert _as_cmd_runs_it(_as_wt_starts_it(recorded[0])[1]) == _line()
 
 
 def test_a_semicolon_is_not_taken_by_windows_terminal_for_its_own(recorded, monkeypatch, tmp_path):
@@ -664,7 +696,7 @@ def test_a_semicolon_is_not_taken_by_windows_terminal_for_its_own(recorded, monk
 
     assert "\\;" in recorded[0]
     assert _as_cmd_runs_it(_as_wt_starts_it(recorded[0])[1]) == \
-        '"claude" "sub first; then the doors"'
+        _win_root() + '"claude" "sub first; then the doors"'
 
 
 @pytest.mark.parametrize("wt", [True, False])
@@ -685,13 +717,74 @@ def test_the_plain_terminal_hands_cmd_the_line_verbatim_too(recorded, monkeypatc
 def test_a_semicolon_in_the_project_folder_does_not_split_the_bare_wt_line(recorded, monkeypatch,
                                                                          tmp_path):
     """Review of finding 148, M10: the bare `wt -d <folder> <cli>` never went through
-    `_wt_command`, so a folder named with a `;` still started a second wt command."""
+    `_wt_command`, so a folder named with a `;` still started a second wt command. Bare is a CLI
+    that runs no session now (`method=False`); a session's line goes through `_wt_command`."""
     import subprocess
 
     monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
     folder = tmp_path / "Golf; Passat"
     folder.mkdir()
 
-    launch(folder, "claude")
+    launch(folder, "claude", method=False)
 
     assert _as_wt_starts_it(subprocess.list2cmdline(recorded[0])) == (str(folder), "claude")
+
+
+# --- the copy of the method the terminal's session runs (#169, N4) --------------------------------
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_the_terminal_session_is_told_the_copy_the_project_is_bound_to(
+        recorded, monkeypatch, tmp_path, other_copy, own_copy_is_the_submodule, platform):
+    """The terminal's own session loads the project's link — `claude` reads the project's
+    `.claude/skills`, omp its overlay's `includeSkills` — and its line carried the reviewer's
+    variables alone, so the session's shell ran the method's scripts unaware of the copy it had
+    loaded. The line names the bound copy after the reviewer's pick, as the in-app routes do."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", platform)
+    project = tmp_path / "car"
+    root = str(_linked_and_approved(project, other_copy).skill_dir)
+
+    launch(project, "claude", env=_PICK_ENV)
+
+    if platform == "linux":
+        words = shlex.split(recorded[0][-1])
+        assert words[words.index("env") + 1:][:4] == [
+            *(f"{key}={value}" for key, value in _PICK_ENV.items()),
+            f"{method_binding.SKILL_ROOT_ENV}={root}", "claude"]
+    else:
+        assert _as_cmd_runs_it(_as_wt_starts_it(recorded[0])[1]) == (
+            'set "AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high" && set "AUTOSOUND_CRITIC_VIA=cli" '
+            f'&& set "{method_binding.SKILL_ROOT_ENV}={root}" && "claude"'), recorded[0]
+
+
+def test_a_copy_tcc_will_not_run_opens_no_terminal(recorded, monkeypatch, tmp_path):
+    """R-i: G5 refuses a copy TCC cannot trust, and the terminal's session would load it from the
+    project's link as surely as an in-app one. A folder at the entry — inside the project,
+    travelling with it — opens no terminal, and the error carries the binding's own sentence: the
+    window puts `str(exc)` of a `TerminalLaunchError` on its status line."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "linux")
+    project = tmp_path / "car"
+    _entry(project).mkdir(parents=True)
+    binding = method_binding.for_project(project)
+    assert binding.state == "refused" and binding.reason, binding
+
+    with pytest.raises(TerminalLaunchError) as refused:
+        launch(project, "claude", env=_PICK_ENV)
+
+    assert str(refused.value) == binding.reason
+    assert recorded == [], "no terminal was opened"
+
+
+def test_a_cli_that_runs_no_session_is_not_held_to_the_projects_copy(recorded, monkeypatch,
+                                                                       tmp_path):
+    """`omp setup` configures the machine, not the car (`model_config_dialog`). It opens in the
+    project folder when there is one, and a copy refused there is no reason to refuse it — nor is
+    a copy anything its line has to name."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "linux")
+    project = tmp_path / "car"
+    _entry(project).mkdir(parents=True)
+
+    assert launch(project, "omp", extra=("setup",), method=False) == "omp"
+
+    assert shlex.split(recorded[0][-1])[-2:] == ["omp", "setup"]
+    assert method_binding.SKILL_ROOT_ENV not in recorded[0][-1]
