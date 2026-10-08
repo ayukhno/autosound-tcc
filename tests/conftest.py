@@ -351,6 +351,31 @@ def _no_live_rew():
             os.environ["REW_API_URL"] = before
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _no_github_through_the_method():
+    """`AUTOSOUND_NO_GH=1` for the whole session: the method's own switch that keeps its
+    `project_repo` off GitHub (`_gh` answers as if there were no `gh`). TCC's code does not read it.
+
+    The new-project dialog previews a copy by running the method's real `seed()` into a temporary
+    folder, and a seed's last act is `project_repo.init` (#172). With no git identity -- and a test
+    usually has none, HOME being its own folder -- that starts `gh api user` to find one, which
+    goes to GitHub with any token it finds, for up to 30 s; `contract.py check` asks
+    `gh auth status` the same way. The variable, as with `REW_API_URL` above, because the method
+    reads it in this process and in each child TCC starts for it (`vendor_loader.child_env` copies
+    the environment), and for the whole session because fixtures of a wider scope are set up before
+    any test's own.
+    """
+    before = os.environ.get("AUTOSOUND_NO_GH")
+    os.environ["AUTOSOUND_NO_GH"] = "1"
+    try:
+        yield
+    finally:
+        if before is None:
+            os.environ.pop("AUTOSOUND_NO_GH", None)
+        else:
+            os.environ["AUTOSOUND_NO_GH"] = before
+
+
 @pytest.fixture(autouse=True)
 def _quiet_windows_left_behind(monkeypatch):
     """TODO F-053: a window a test leaves alive stops acting once its test is over — its timers,

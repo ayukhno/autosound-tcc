@@ -303,6 +303,33 @@ def test_the_suite_cannot_reach_this_machines_rew_through_the_capture_check():
     assert vendor_loader.load_verify()._api.BASE_URL == "http://127.0.0.1:1"
 
 
+def test_the_suite_cannot_reach_github_through_the_methods_repository(monkeypatch):
+    """#172: the new-project dialog previews a copy with the method's real `seed()`, whose last act
+    is `project_repo.init` -- and where git has no identity, as in most tests (HOME is the test's
+    own folder), that starts `gh api user` to find one, which goes to GitHub with any token it
+    finds. The method's own switch, `AUTOSOUND_NO_GH=1`, is set for the whole session in
+    `conftest`. Checked with a `gh` that is there and a child that only says it was asked, so a
+    missing switch shows as a child started, not as nothing on a machine without `gh`."""
+    import importlib
+    import subprocess
+
+    from autosound_tcc.core import vendor_loader
+
+    if not vendor_loader.is_available():
+        pytest.skip("the vendored skill is not checked out")
+    vendor_loader.load_project_seed()  # puts `rew_tool/` on `sys.path`, where its seed imports from
+    repo = importlib.import_module("project_repo")
+    assert Path(repo.__file__).resolve().parent == vendor_loader.rew_tool_dir().resolve(), \
+        repo.__file__
+    asked: list = []
+    monkeypatch.setattr(repo.shutil, "which", lambda name, *_a, **_k: f"/usr/bin/{name}")
+    monkeypatch.setattr(repo.subprocess, "run", lambda argv, **_kw: asked.append(argv)
+                        or subprocess.CompletedProcess(argv, 0, "", ""))
+
+    assert repo.gh_state() == "absent"
+    assert asked == [], "the method started `gh` -- the switch in conftest is gone"
+
+
 def test_a_finished_test_s_window_leaves_no_worker_running():
     """tcc#140's flaky reviewer tests, traced (fix round 2 of tcc#21): a window's catalogue read was
     still running when its test's patches came off, and in the NEXT test's setup it read the

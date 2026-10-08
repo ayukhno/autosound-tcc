@@ -188,11 +188,14 @@ class NewProjectDialog(QDialog):
         #: `_prefill_dsp` writes into the DSP fields, and those fields redraw the note -- without
         #: this the two would call each other. Set while prefilling, cleared after.
         self._prefilling = False
-        #: Drawing the seed note runs a real seed; the fields that ask for it fire per character.
-        #: See `_refresh_seed_note`. Single-shot and restarted, so a run of keystrokes is one run.
+        #: Drawing the seed note runs a real seed, and everything that asks for one comes through
+        #: this timer (#172). See `_refresh_seed_note`. Single-shot and restarted, so a run of
+        #: keystrokes, ticks and picks is one run.
         self._seed_note_timer = QTimer(self)
         self._seed_note_timer.setSingleShot(True)
         self._seed_note_timer.timeout.connect(self._refresh_seed_note_now)
+        #: The last preview: what its seed read, and what it answered (`_would_travel`, #172).
+        self._preview_memo: Optional[tuple] = None
         # Set by _on_create() instead when "run via" picks a terminal CLI rather than the in-app
         # chat -- main_window._open_new_project_dialog() branches on whichever ended up non-None.
         self.open_terminal_cli: Optional[str] = None
@@ -279,7 +282,7 @@ class NewProjectDialog(QDialog):
         self._seed_findings = QCheckBox(i18n.t("npSeedFindings"))
         # The tick changes what travels, so it changes the numbers under it: the flag used to be
         # offered blind -- "and what was measured there" with no count of what "what" is (#48).
-        self._seed_findings.toggled.connect(self._refresh_seed_note_now)
+        self._seed_findings.toggled.connect(self._refresh_seed_note)
         layout.addWidget(self._seed_findings)
 
         # ON by default, the other way round from the findings: the drivers' Fs are the same
@@ -287,7 +290,7 @@ class NewProjectDialog(QDialog):
         # подвиг» (the Arbiter, hub #185; tcc#93). Unticked, this build measures its own.
         self._seed_fs = QCheckBox(i18n.t("npSeedFs"))
         self._seed_fs.setChecked(True)
-        self._seed_fs.toggled.connect(self._refresh_seed_note_now)
+        self._seed_fs.toggled.connect(self._refresh_seed_note)
         layout.addWidget(self._seed_fs)
 
         # The seat never travels: another seat is why a copy exists (hub #193, SKL-048). So it
@@ -300,7 +303,7 @@ class NewProjectDialog(QDialog):
         for seat in _seats():
             self._seat_combo.addItem(_seat_label(seat), seat)
         self._seat_combo.currentIndexChanged.connect(self._sync_create_enabled)
-        self._seat_combo.currentIndexChanged.connect(self._refresh_seed_note_now)
+        self._seat_combo.currentIndexChanged.connect(self._refresh_seed_note)
         layout.addWidget(self._seat_combo)
         self._seat_source = QLabel("")
         self._seat_source.setWordWrap(True)
@@ -314,7 +317,7 @@ class NewProjectDialog(QDialog):
             self._profile_combo.addItem(f"{vendor} — {name}", (vendor, name))
         self._profile_combo.addItem(i18n.t("npAddNew"), None)
         self._profile_combo.currentIndexChanged.connect(self._on_profile_selected)
-        self._profile_combo.currentIndexChanged.connect(self._refresh_seed_note_now)
+        self._profile_combo.currentIndexChanged.connect(self._refresh_seed_note)
         layout.addWidget(self._profile_combo)
 
         self._vendor_edit = QLineEdit()
@@ -447,11 +450,11 @@ class NewProjectDialog(QDialog):
             self._set_seed_note("\n".join(lines), warn=True)
             return
         self._prefill_dsp(source)
-        # At once, not on the typing delay: picking a folder is one deliberate act, and the note
-        # is the answer to it. `_prefill_dsp` writes into the DSP fields on the way here, so the
-        # debounced path has already been armed by their `textChanged` — this settles it now and
-        # the timer's later firing is a harmless repeat of the same draw.
-        self._refresh_seed_note_now()
+        # On the pause, as everything else that draws the note (#172). It was drawn at once, for
+        # picking a folder is one deliberate act -- but the field fires per character, typed or
+        # pasted, and each draw is a whole seed. `_prefill_dsp` has armed the same timer through
+        # the DSP fields, so the folder and the DSP it filled in are one preview, not two.
+        self._refresh_seed_note()
 
     def _would_travel(self, source: Path):
         """What the seeder WOULD carry — asked of the seeder rather than predicted.
@@ -470,10 +473,20 @@ class NewProjectDialog(QDialog):
 
         Returns `(report, fs)`: `fs` is how many drivers' Fs landed, read off the preview's own
         `project.json` before the folder goes, because the report has no count for them (tcc#93).
+
+        The last answer is remembered (#172). The seed's last act is `project_repo.init`: six to
+        eight git children, and `gh api user` for up to 30 s where git has no identity -- all on
+        the GUI thread. So a question asked again is answered from memory: a box ticked and
+        unticked inside one pause, the same folder picked twice, a redraw nothing changed.
+        `_preview_key` says what counts as the same question. A preview that raised is not kept.
         """
         seeder = _seeder()
         if seeder is None:
             return None, None
+        key = self._preview_key(seeder, source)
+        if key is not None and self._preview_memo is not None and self._preview_memo[0] == key:
+            return self._preview_memo[1]
+        self._preview_memo = None
         with tempfile.TemporaryDirectory(prefix="tcc-seed-preview-") as tmp:
             target = Path(tmp) / "preview"
             target.mkdir()
@@ -489,28 +502,69 @@ class NewProjectDialog(QDialog):
                     seat=self._seat_combo.currentData(),
                 )
                 # Inside too: it reads what the seed wrote, which nobody has checked (tcc#123).
-                return report, _fs_carried(target)
+                answer = report, _fs_carried(target)
             except Exception:      # noqa: BLE001 — a preview must never take the dialog down
                 return None, None
+        if key is not None:
+            self._preview_memo = (key, answer)
+        return answer
+
+    def _preview_key(self, seeder, source: Path) -> Optional[tuple]:
+        """Everything the preview's seed reads, as it is now; None when the seeder does not name
+        the files it reads, for then no answer is safe to reuse.
+
+        From the dialog: every argument `_would_travel` hands `seed()`, as the fields hold it --
+        vendor and model rather than the `copy_profile` they decide, and the profile choice with
+        them. From the source folder: each file the seed reads -- `project.json`, the DSP profile,
+        the prose -- by path, modification time and size, so a save from the source's own window,
+        a file put there or taken away, is a new question. And the seeder itself: an update reads
+        the method again while the dialog is open (#126).
+
+        Left out, because they cannot change what the note draws -- whether the seed is ok, its
+        counts, the Fs: the source's `process/` record and whether its `measurements_repo` path
+        exists (both only shape the import record, which the method's validator takes as it
+        comes), today's date, and what `project_repo.init` finds.
+        """
+        try:
+            names = ("project.json", seeder.PROFILE_FILE, *seeder.PROSE_FILES)
+            files = []
+            for name in names:
+                path = Path(source) / name
+                try:
+                    stat = path.stat()
+                except (OSError, ValueError):  # not there, not ours to read, not a path at all
+                    files.append((str(path), None, None))
+                else:
+                    files.append((str(path), stat.st_mtime_ns, stat.st_size))
+        except (AttributeError, TypeError):  # a seeder that does not name them: no memory
+            return None
+        return (seeder, str(source), tuple(files),
+                self._seed_findings.isChecked(), self._seed_fs.isChecked(),
+                self._vendor_edit.text().strip(), self._model_edit.text().strip(),
+                self._profile_combo.currentData(), self._seat_combo.currentData(),
+                i18n.t("npSeedNote"))
 
     def _refresh_seed_note(self, *_args) -> None:
         """Ask for a redraw — on a short delay, because drawing this note runs a whole seed.
 
-        Two of the four things wired to this are `textChanged` on a line edit, so it fires per
-        CHARACTER. And `_would_travel` is not a lookup: it creates a temporary directory, runs the
-        real seeder into it (read the source project, validate it against the schema, write a new
-        `project.json`, a `.gitignore`, copy the DSP profile and the prose), reads the report and
-        deletes the lot — on the GUI thread. Typing "Audiotec-Fischer" did that seventeen times,
-        and the dialog resized under the cursor after each one.
+        Every trigger comes here (#172): the source field and the vendor and model fields are
+        `textChanged`, so they fire per CHARACTER, and the two ticks, the seat and the profile
+        come with them. And `_would_travel` is not a lookup: it creates a temporary directory, runs
+        the real seeder into it (read the source project, validate it against the schema, write a
+        new `project.json`, a `.gitignore`, copy the DSP profile and the prose, make it a git
+        repository), reads the report and deletes the lot — on the GUI thread. Typing
+        "Audiotec-Fischer" did that seventeen times, and the dialog resized under the cursor after
+        each one; the source field and the ticks still drew at once until #172.
 
         A quarter of a second is below the threshold where the note feels laggy and above any
-        typing rhythm, so what runs is one seed per pause rather than one per keystroke.
+        typing rhythm, so what runs is one seed per pause rather than one per keystroke — and
+        none, when the pause ends on a question already answered (`_would_travel`).
         """
         self._seed_note_timer.start(_SEED_NOTE_DELAY_MS)
 
     def _refresh_seed_note_now(self) -> None:
-        """Redraw the note. Called again whenever the DSP choice changes, because the DSP is what
-        decides how much of the source travels."""
+        """Redraw the note: what the timer runs once the pause is over. Asked for again whenever
+        the DSP choice changes, because the DSP is what decides how much of the source travels."""
         if self._prefilling or self._seed_describes is None:
             return
         # The DSP fields are built after this label, and `_on_seed_mode` can fire in between.
@@ -666,11 +720,17 @@ class NewProjectDialog(QDialog):
             self._seed_edit.setText(chosen)
 
     def done(self, result: int) -> None:  # Qt override: accept and reject both end here
-        """Closing lets go of whatever a source held (a package's temporary folder, later)."""
+        """Closing lets go of whatever a source held (a package's temporary folder, later), and
+        of a preview still waiting for its pause: it would seed for nobody, from a source just let
+        go of (#172)."""
+        self._seed_note_timer.stop()
         self._picker.release()
         super().done(result)
 
     def _on_create(self) -> None:
+        # Create answers for the fields as they are now; a preview still waiting for its pause
+        # would draw over the refusal below (#172).
+        self._seed_note_timer.stop()
         source = self._seed_source()  # what the picker holds for the text as it is now
         problem = self._seed_problem()
         if problem is not None or (source is None and self._seed_combo.currentData() == "copy"):

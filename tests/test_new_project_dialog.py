@@ -224,6 +224,9 @@ class _StubSeeder:
     the method's own selftest; what belongs here is what TCC does with the answer."""
 
     PROFILE_FILE = "dsp_profile.json"
+    #: The method's names for the files a seed reads besides `project.json`: the preview's memory
+    #: is keyed on them (#172).
+    PROSE_FILES = ("autosound_context.md",)
 
     def __init__(self, describe, report):
         self._describe, self._report = describe, report
@@ -255,6 +258,42 @@ class _Report:
         self.problem = None
 
 
+def _settled(dlg):
+    """The note as it stands once the pause is over: what the timer does, done now (#172)."""
+    if dlg._seed_note_timer.isActive():
+        dlg._seed_note_timer.stop()
+        dlg._refresh_seed_note_now()
+    return dlg
+
+
+def _after_the_pause(dlg) -> None:
+    """Let the note's timer run out as it does when typing stops: for real, through the event loop,
+    and bounded, so a timer that never fires fails here instead of holding the run."""
+    import time
+
+    from PySide6.QtTest import QTest
+
+    assert dlg._seed_note_timer.isActive(), "nothing is waiting for the pause"
+    deadline = time.monotonic() + 5.0
+    while dlg._seed_note_timer.isActive():
+        assert time.monotonic() < deadline, "the pause never ended"
+        QTest.qWait(10)
+
+
+def _past_the_pause() -> None:
+    """The event loop run for longer than the pause: whatever was waiting on it has fired."""
+    from PySide6.QtTest import QTest
+
+    QTest.qWait(npd._SEED_NOTE_DELAY_MS + 150)
+
+
+def _seeds_of(seeder, source) -> list:
+    """The flags of each seed asked for `source`. Counted by folder, because a pause runs the event
+    loop, and a dialog an earlier test left alive may draw its own note in it -- through this
+    test's seeder, which `_seeder` now answers for every dialog."""
+    return [kwargs for src, _into, kwargs in seeder.seeded_into if src == str(source)]
+
+
 def _dialog_on(source, seeder, monkeypatch, vendor="Musway", model="M6V4"):
     monkeypatch.setattr(npd, "_seeder", lambda: seeder)
     _app()
@@ -262,7 +301,7 @@ def _dialog_on(source, seeder, monkeypatch, vendor="Musway", model="M6V4"):
     dlg._vendor_edit.setText(vendor)
     dlg._model_edit.setText(model)
     dlg._seed_edit.setText(str(source))
-    return dlg
+    return _settled(dlg)
 
 
 def test_the_note_says_what_would_travel_not_what_the_source_holds(tmp_path, monkeypatch):
@@ -299,6 +338,7 @@ def test_the_findings_tick_stops_being_offered_blind(tmp_path, monkeypatch):
 
     dlg = _dialog_on(source, seeder, monkeypatch)
     dlg._seed_findings.setChecked(True)
+    _settled(dlg)
 
     said = dlg._seed_summary.text()
     assert "18" in said and "3" in said, "how many flaws and how many questions"
@@ -380,6 +420,121 @@ def test_typing_a_dsp_name_does_not_run_a_seed_per_character(monkeypatch, tmp_pa
 
     dlg._refresh_seed_note_now()                   # what the timer would do when typing stops
     assert len(seeder.seeded_into) == before + 1, "one seed per pause, not per keystroke"
+
+
+def _source_project(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "project.json").write_text('{"schema_version": 3}', encoding="utf-8")
+    return source
+
+
+def test_a_second_identical_preview_runs_no_seed(tmp_path, monkeypatch):
+    """#172: the preview's seed ends in `project_repo.init` -- six to eight git children, and `gh
+    api user` for up to 30 s where git has no identity -- on the GUI thread. Asked again with
+    nothing it reads changed, the note is drawn from the answer it already has."""
+    source = _source_project(tmp_path)
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), _Report(4))
+    dlg = _dialog_on(source, seeder, monkeypatch)
+    drawn, seeded = dlg._seed_summary.text(), len(_seeds_of(seeder, source))
+
+    dlg._refresh_seed_note_now()
+
+    assert len(_seeds_of(seeder, source)) == seeded, "nothing it reads changed: no second seed"
+    assert dlg._seed_summary.text() == drawn, "and the same answer is drawn"
+    assert seeded == 1, "the source and the DSP fields set before the pause were one preview"
+
+
+def test_a_changed_tick_runs_one_seed_after_the_pause(tmp_path, monkeypatch):
+    """What is remembered is the answer for what the seed read: tick the findings and the next
+    preview is a seed again -- one, once the pause is over, as for typing (#172)."""
+    source = _source_project(tmp_path)
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), _Report(4, flaws=2))
+    dlg = _dialog_on(source, seeder, monkeypatch)
+    seeded = len(_seeds_of(seeder, source))
+
+    dlg._seed_findings.setChecked(True)
+    assert len(_seeds_of(seeder, source)) == seeded, "the tick waits for the pause"
+    _after_the_pause(dlg)
+
+    seeds = _seeds_of(seeder, source)
+    assert len(seeds) == seeded + 1, "one seed for the changed tick"
+    assert seeds[-1]["include_findings"] is True, "asked with the tick as it is now"
+    assert npd.i18n.t("npSeedFindingsEvidence") in dlg._seed_summary.text()
+
+
+def test_five_quick_edits_of_the_seed_source_run_one_seed_after_the_pause(tmp_path, monkeypatch):
+    """The source field fires per character too, typed or pasted, and it drew the note at once:
+    the last five keystrokes of a path were five seeds on the GUI thread (#172)."""
+    source = _source_project(tmp_path)
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), _Report(4))
+    monkeypatch.setattr(npd, "_seeder", lambda: seeder)
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+
+    typed = str(source)
+    for end in range(len(typed) - 4, len(typed) + 1):
+        dlg._seed_edit.setText(typed[:end])
+
+    assert seeder.seeded_into == [], "none before the pause"
+    _after_the_pause(dlg)
+    mine = [src for src, _into, _kw in seeder.seeded_into if src.startswith(str(tmp_path))]
+    assert mine == [typed], "one seed after it, of the path as the last edit left it"
+
+
+@pytest.mark.parametrize("name", ["project.json", "dsp_profile.json", "autosound_context.md"])
+def test_a_file_the_seed_reads_changed_on_disk_is_seeded_again(tmp_path, monkeypatch, name):
+    """The answer is remembered under each file the seed reads, by its time and its size (#172): a
+    source saved from its own window while this dialog is open is a new question, and so is a file
+    that grew by a byte with its time put back."""
+    source = _source_project(tmp_path)
+    path = source / name
+    if not path.exists():
+        path.write_text("{}", encoding="utf-8")
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), _Report(4))
+    dlg = _dialog_on(source, seeder, monkeypatch)
+    seeded = len(_seeds_of(seeder, source))
+    dlg._refresh_seed_note_now()
+    assert len(_seeds_of(seeder, source)) == seeded, "unchanged: remembered"
+
+    was = path.stat()
+    os.utime(path, ns=(was.st_atime_ns, was.st_mtime_ns + 10**9))
+    dlg._refresh_seed_note_now()
+    assert len(_seeds_of(seeder, source)) == seeded + 1, "the same bytes at a later time: asked again"
+
+    was = path.stat()
+    path.write_bytes(path.read_bytes() + b" ")
+    os.utime(path, ns=(was.st_atime_ns, was.st_mtime_ns))
+    dlg._refresh_seed_note_now()
+    assert len(_seeds_of(seeder, source)) == seeded + 2, "a byte more at the same time: asked again"
+
+
+def test_a_preview_still_waiting_is_dropped_by_create_and_by_closing(tmp_path, monkeypatch):
+    """What the pause holds is a seed for the fields as they were a moment ago. A refused Copy says
+    why in the same place, and the preview drawn after it covered the sentence; a closed dialog has
+    nobody to draw for, and the source it would seed has just been let go of (#172)."""
+    taken = tmp_path / "taken"
+    taken.mkdir()
+    (taken / "project.json").write_text('{"schema_version": 3}', encoding="utf-8")
+    refused = _Report(2)
+    refused.ok = False
+    source = _passat(tmp_path)
+    seeder = _StubSeeder(_Described("VW Passat B8", "Helix DSP Ultra S", 2), refused)
+    dlg = _dialog_on(source, seeder, monkeypatch)
+    dlg._folder_edit.setText(str(taken))
+
+    dlg._model_edit.setText("M7")              # a preview asked for...
+    dlg._on_create()                           # ...and Copy pressed inside the pause
+    refusal = npd.i18n.t("npSeedTargetTaken").format(folder="taken")
+    assert dlg._seed_summary.text() == refusal
+    _past_the_pause()
+    assert dlg._seed_summary.text() == refusal, "the refusal is the last word"
+
+    seeded = len(_seeds_of(seeder, source))
+    dlg._model_edit.setText("M8")
+    dlg.reject()
+    _past_the_pause()
+    assert len(_seeds_of(seeder, source)) == seeded, "a closed dialog seeds for nobody"
 
 
 def _passat(tmp_path, seat=None):
@@ -495,10 +650,10 @@ def test_the_note_counts_the_fs_the_box_carries(tmp_path, monkeypatch):
     dlg = npd.NewProjectDialog(seed_first=True)
     dlg._seed_edit.setText(str(_passat_with_fs(tmp_path)))
     counted = npd.i18n.t("npSeedTravelsFs").format(fs=7)
-    assert counted in dlg._seed_summary.text()
+    assert counted in _settled(dlg)._seed_summary.text()
 
     dlg._seed_fs.setChecked(False)
-    assert counted not in dlg._seed_summary.text(), "unticked, nothing of it is promised"
+    assert counted not in _settled(dlg)._seed_summary.text(), "unticked, nothing of it is promised"
 
 
 def test_what_travels_is_said_on_one_line_the_fs_its_last_part(tmp_path, monkeypatch):
@@ -529,7 +684,8 @@ def test_the_fs_tick_reaches_both_seed_calls(tmp_path, monkeypatch):
     dlg = _dialog_on(_passat(tmp_path), seeder, monkeypatch)
     dlg._folder_edit.setText(str(tmp_path / "new"))
     seeder.seeded_into.clear()
-    dlg._seed_fs.setChecked(False)          # redraws the note: the preview call
+    dlg._seed_fs.setChecked(False)
+    _settled(dlg)                           # the note redrawn after the pause: the preview call
     dlg._on_create()
     flags = [kwargs.get("include_fs") for _src, _dst, kwargs in seeder.seeded_into]
     assert len(flags) >= 2 and set(flags) == {False}, flags
