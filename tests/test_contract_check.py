@@ -244,14 +244,17 @@ def test_checks_begun_inside_one_step_of_the_clock_are_still_ordered(tmp_path, m
     the fix (`ContractReport.started`), and a clock cannot say «after» inside one of its steps:
     CPython 3.12's `time.monotonic()` on Windows moves in 15.625 ms, so a check that was running
     and the fix pressed after it often read the same time. A count can — every stamp is later than
-    the one before it, from either thread, whatever the clock does."""
-    import time
+    the one before it, from either thread, whatever the clock does.
+
+    Only the checker's clock stands still (M69): one frozen for the whole process would leave any
+    deadline loop on this path — `project_lock` polls `time.monotonic()` — waiting for ever."""
+    from types import SimpleNamespace
 
     from tests._method_copies import entry
 
     project = tmp_path / "car"
     entry(project).mkdir(parents=True)  # a copy TCC refuses: the check answers with no child
-    monkeypatch.setattr(time, "monotonic", lambda: 1000.0)  # a clock that does not move
+    monkeypatch.setattr(contract_check, "time", SimpleNamespace(monotonic=lambda: 1000.0))
 
     first = contract_check.run(project)
     second = contract_check.run(project)

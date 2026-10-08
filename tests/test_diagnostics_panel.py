@@ -12,6 +12,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -2980,8 +2981,10 @@ def test_a_fix_pressed_while_a_check_runs_lands_its_receipt_on_the_check_after_i
     the refusal — and the receipt is not spent on it: it lands on the report of the check after.
 
     On a clock that does not move from the running check's start to the press (N1): CPython 3.12's
-    `time.monotonic()` on Windows moves in 15.625 ms steps, and the two used to tie there."""
-    monkeypatch.setattr(time, "monotonic", lambda: 1000.0)
+    `time.monotonic()` on Windows moves in 15.625 ms steps, and the two used to tie there. The
+    checker's clock alone (M69): one frozen for the whole process would leave any deadline loop
+    behind the press — `project_lock` polls `time.monotonic()` — waiting for ever."""
+    monkeypatch.setattr(contract_check, "time", SimpleNamespace(monotonic=lambda: 1000.0))
     linked(project, other_copy)
     _app()
     dialog = DiagnosticsDialog()
