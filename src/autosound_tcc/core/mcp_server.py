@@ -1226,16 +1226,23 @@ def build_server(
 
     @tool()
     async def write_rew_filters(measurement: str, filters: list[dict]) -> str:
-        """Write a filter set into REW's own model for `measurement` (by name). Needs confirmation.
+        """Write filters into REW's own model for `measurement` (by name). Needs confirmation.
 
         This touches REW, never the DSP: it is the equivalent of the Arbiter typing the filters
         into REW's EQ window by hand, so they can see the predicted result before deciding.
 
         Each entry: `index` (1-based slot), `type` (`PK`/`LS`/`HS`/`None`/...), `enabled`, and for
-        a peaking filter `frequency`, `q`, and **`gaindB`**. The gain key really is `gaindB` --
-        REW accepts an entry using `gain` with a 200 and stores the filter at 0 dB, so a cut
-        written that way silently does nothing. Replaces the whole set, so send every slot you
-        want kept; clear one with `{"index": N, "type": "None", "enabled": true}`.
+        a peaking filter `frequency`, `q`, and **`gaindB`**. The gain key really is `gaindB`: REW
+        stores a filter sent with `gain` at 0 dB, so the method refuses a `gain` key, and any other
+        key REW does not take, before anything is sent. A write changes only the slots it names:
+        REW keeps every other slot as it was, so leaving a slot out does not clear it. Clear one
+        with `{"index": N, "type": "None", "enabled": true}`.
+
+        `applied: false` with a `reason` is the Arbiter's no, or no answer: nothing was sent. An
+        `error` says what failed, and it may say REW holds the write or part of it: REW confirmed
+        the write and the method could not read it back, or REW kept only part of it (a slot past
+        the equaliser's slot count, a value clamped to its range). So before telling the Arbiter
+        that nothing changed, read the filters back (the method's `rew_api.get_filters`).
         """
         allowed = await _confirm(
             ConfirmRequest(
@@ -1250,7 +1257,7 @@ def build_server(
         try:
             rew_api = vendor_loader.load_rew_api()
         except vendor_loader.VendorNotInitializedError as exc:
-            return json.dumps({"applied": False, "error": str(exc)})
+            return json.dumps({"applied": False, "error": str(exc)}, ensure_ascii=False)
 
         # The lookup and the write each wait on REW, up to 5 s a request: off the loop, as every
         # other tool's blocking work (#176). What failed is the answer, not a tool error.
@@ -1262,13 +1269,14 @@ def build_server(
                     # REW holds none by that title, or several: the method's own words, which
                     # `str()` would put in quotes. A KeyError from the write is not about a title,
                     # so it is not caught here.
-                    return json.dumps({"applied": False, "error": exc.args[0]})
+                    return json.dumps({"applied": False, "error": exc.args[0]}, ensure_ascii=False)
                 rew_api.set_filters(mid, filters)
             except (OSError, ValueError) as exc:
                 # REW down or answering an error (`URLError`, `HTTPError`); an answer that cannot
                 # be read, or a write REW did not keep or the method would not send (`ValueError`).
-                return json.dumps({"applied": False, "error": f"REW: {exc}"})
-            return json.dumps({"applied": True, "measurement": measurement, "count": len(filters)})
+                return json.dumps({"applied": False, "error": f"REW: {exc}"}, ensure_ascii=False)
+            return json.dumps({"applied": True, "measurement": measurement, "count": len(filters)},
+                              ensure_ascii=False)
 
         return await _in_thread(_write)
 

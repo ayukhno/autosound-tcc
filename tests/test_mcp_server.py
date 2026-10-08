@@ -16,6 +16,7 @@ from concurrent.futures import Future
 from pathlib import Path
 
 import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 
 from autosound_tcc.core import mcp_server, own_store
 from autosound_tcc.core.mcp_server import (
@@ -490,11 +491,11 @@ def test_rew_write_is_denied_before_any_rew_call(tmp_path, monkeypatch):
 _A_CUT = {"index": 1, "type": "PK", "enabled": True, "frequency": 1000.0, "gaindB": -3.0, "q": 2.0}
 
 
-def _write_rew_filters(tmp_path) -> dict:
-    """`write_rew_filters` of `_A_CUT` to `w-L_10 (sw)`, the Arbiter saying yes: its answer."""
+def _write_rew_filters(tmp_path, filters=(_A_CUT,)) -> dict:
+    """`write_rew_filters` of `filters` to `w-L_10 (sw)`, the Arbiter saying yes: its answer."""
     mcp, _, _ = _server(tmp_path, RecordingBridge(allow=True))
     return json.loads(_text(asyncio.run(mcp.call_tool(
-        "write_rew_filters", {"measurement": "w-L_10 (sw)", "filters": [_A_CUT]}))))
+        "write_rew_filters", {"measurement": "w-L_10 (sw)", "filters": list(filters)}))))
 
 
 def test_rew_down_is_said_and_nothing_is_applied(tmp_path):
@@ -564,6 +565,109 @@ def test_rew_is_asked_and_written_off_the_servers_loop(tmp_path, monkeypatch):
     assert {step: thread.name for step, thread in ran_on.items()} == {
         "lookup": mcp_server._CALL_THREAD, "write": mcp_server._CALL_THREAD}, ran_on
     assert loop_thread not in ran_on.values()
+
+
+def test_the_methods_refusal_of_a_gain_key_reaches_the_agent_as_not_applied(tmp_path, monkeypatch):
+    """#176 F4: TCC does not check `gain` itself; the method does (K-1). REW stores a filter sent
+    with `gain` at 0 dB, so the method's `set_filters` refuses the key before anything is sent, and
+    the refusal is `applied: false` with its words after `REW: `, not a tool error. The real
+    `set_filters`, after the real lookup over a list REW could answer."""
+    rew_api = mcp_server.vendor_loader.load_rew_api()
+    monkeypatch.setattr(rew_api, "get_measurements", lambda: {"1": {"title": "w-L_10 (sw)"}})
+    a_gain_cut = {"index": 1, "type": "PK", "enabled": True, "frequency": 1000.0, "gain": -3.0,
+                  "q": 2.0}
+    with pytest.raises(ValueError) as refused:  # before any request: REW is down here anyway
+        rew_api.set_filters("1", [a_gain_cut])
+
+    answer = _write_rew_filters(tmp_path, filters=[a_gain_cut])
+
+    assert answer == {"applied": False, "error": f"REW: {refused.value}"}
+    assert answer["error"].startswith(
+        "REW: filter 1 (slot 1): `gain` is not a key REW knows"), answer
+
+
+def test_a_key_error_out_of_the_write_stays_a_tool_error(tmp_path, monkeypatch, app_log_errors):
+    """#176 F4: only the lookup's `KeyError` is a title REW does not hold once. One out of
+    `set_filters` is not -- the method raises none there -- so it is not answered as one: it stays
+    a tool error, with its traceback in the log. A single `try` round the lookup and the write
+    would answer it as `{"applied": false, "error": "index"}`."""
+    rew_api = mcp_server.vendor_loader.load_rew_api()
+    monkeypatch.setattr(rew_api, "get_measurements", lambda: {"1": {"title": "w-L_10 (sw)"}})
+    bug = KeyError("index")
+
+    def write(mid, filters):
+        raise bug
+
+    monkeypatch.setattr(rew_api, "set_filters", write)
+
+    with pytest.raises(ToolError) as raised:
+        _write_rew_filters(tmp_path)
+
+    assert raised.value.__cause__ is bug
+    assert [(record.getMessage(), record.exc_info[1]) for record in app_log_errors] == [
+        ("tool write_rew_filters raised", bug)]
+
+
+def test_the_rew_writes_description_says_what_rew_keeps_and_what_not_applied_means(tmp_path):
+    """Ruling R-by on #176 F4: FastMCP hands the agent this docstring as the tool's description,
+    and it steered writes wrongly for the method of v3.1.2. It said a write replaces the whole set,
+    where REW keeps every slot a write does not name, so a slot left out to clear it stays. It said
+    a `gain` cut silently does nothing, where the method refuses the key before anything is sent.
+    And it said nothing of `applied: false`, whose `error` may say REW holds the write."""
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    tools = asyncio.run(mcp.list_tools())
+    said = " ".join(next(tool for tool in tools if tool.name == "write_rew_filters")
+                    .description.split())
+
+    assert "Replaces the whole set" not in said and "silently does nothing" not in said, said
+    assert "REW keeps every other slot as it was" in said, said
+    assert "the method refuses a `gain` key" in said, said
+    assert "REW holds the write or part of it" in said and "read the filters back" in said, said
+
+
+#: A title in the Arbiter's own script.
+_CYRILLIC_TITLE = "сабвуфер_10 (sw)"
+
+
+def _held_twice(rew_api, monkeypatch):
+    held = {"1": {"title": _CYRILLIC_TITLE}, "2": {"title": _CYRILLIC_TITLE}}
+    monkeypatch.setattr(rew_api, "get_measurements", lambda: held)
+
+
+def _rew_address_mistyped(rew_api, monkeypatch):
+    monkeypatch.setenv("REW_API_URL", "localhost:4735")  # refused before anything is sent
+    monkeypatch.setattr(rew_api, "BASE_URL", "localhost:4735")
+
+
+def _skill_too_old(rew_api, monkeypatch):
+    monkeypatch.setattr(mcp_server.vendor_loader, "is_available", lambda: False)
+    monkeypatch.setattr(mcp_server.vendor_loader, "older_skill_found", lambda: Path("/skills/2.x"))
+
+
+def _written(rew_api, monkeypatch):
+    monkeypatch.setattr(rew_api, "get_measurements", lambda: {"1": {"title": _CYRILLIC_TITLE}})
+    monkeypatch.setattr(rew_api, "set_filters", lambda mid, filters: {"message": "Filters set"})
+
+
+@pytest.mark.parametrize("arrange, shown", [
+    (_held_twice, "→"),  # the method's words for a title held twice
+    (_rew_address_mistyped, "—"),  # and for a REW_API_URL that is no address
+    (_skill_too_old, "—"),  # the loader's, for a 2.x skill
+    (_written, _CYRILLIC_TITLE),
+], ids=["held twice", "address mistyped", "skill too old", "written"])
+def test_an_answer_carries_its_words_as_written(tmp_path, monkeypatch, arrange, shown):
+    """Ruling R-by on #176 F4: what an answer says reaches the agent as written -- the method's
+    "→" and "—", a title in Cyrillic -- not as `\\u2192` escapes: `ensure_ascii=False`, as the
+    process tools answer (`_record`, `_close`). The server is built first: the build loads the
+    method, which `_skill_too_old` takes away."""
+    mcp, _, _ = _server(tmp_path, RecordingBridge(allow=True))
+    arrange(mcp_server.vendor_loader.load_rew_api(), monkeypatch)
+
+    raw = _text(asyncio.run(mcp.call_tool(
+        "write_rew_filters", {"measurement": _CYRILLIC_TITLE, "filters": [_A_CUT]})))
+
+    assert shown in raw, raw
+    assert json.loads(raw)["applied"] is (arrange is _written)
 
 
 def test_report_phase_reads_the_phase_back_and_refreshes(tmp_path):
