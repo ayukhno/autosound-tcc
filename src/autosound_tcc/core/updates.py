@@ -1426,7 +1426,8 @@ def check_tcc_tag(tag: str) -> tuple[bool, str, str, str]:
 
     The commit comes back so the install script can hold uv to it (`tcc_install_script`): uv
     resolves the tag's NAME only after the person quits TCC. A verified tag whose commit git then
-    cannot name is refused — fail closed, never "verified, but unpinned".
+    cannot name is refused — fail closed, never "verified, but unpinned" — and as
+    `commit_not_checked`, not `bad_signature`, when git did not run to name it (O1).
     """
     early = _verdict_by_name(tag, TCC_SIGNED_FROM, channel_key)
     if early is not None:
@@ -1445,6 +1446,10 @@ def check_tcc_tag(tag: str) -> tuple[bool, str, str, str]:
         if not ok:
             return False, line, why, ""
         named, sha = _git("rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}", cwd=repo)
+    if isinstance(sha, _DidNotRun):
+        # A good signature, and git did not run to name its commit: nothing to pin the install
+        # to, and nothing wrong with the release — not `bad_signature` (the re-review, O1).
+        return False, f"{tag}: {sha}", "commit_not_checked", ""
     if not named or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha):
         return False, f"{tag}: git names no commit for the verified tag ({sha})", "bad_signature", ""
     return True, line, "", sha

@@ -2400,3 +2400,35 @@ def test_a_verify_tag_that_did_not_run_is_not_a_bad_signature(monkeypatch, tmp_p
     assert (ok, reason) == (False, "not_checked"), (reason, line)
     assert line.startswith("v3.0.64: ") and type(failure).__name__ in line, line
     assert _reason(reason, line) == f"{i18n.t('updWhy_not_checked')}: {line}"
+
+
+@pytest.mark.parametrize("failure", [
+    subprocess.TimeoutExpired(["git", "rev-parse"], 12),
+    FileNotFoundError(2, "No such file or directory", "git"),
+    PermissionError(13, "Permission denied", "git"),
+])
+def test_a_rev_parse_that_did_not_run_after_a_good_signature_is_not_a_bad_signature(
+        monkeypatch, failure):
+    """The re-review, O1 — M3's class in the line it did not touch: after a good verify, a
+    `rev-parse` that did not run read «git names no commit for the verified tag (TimeoutExpired
+    …)» and was refused as `bad_signature`. Nothing is wrong with the release; which commit it
+    names could not be checked, said with why, and another try may. Still refused: nothing to pin."""
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc.diagnostics_panel import _reason
+
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+
+    def runs(argv, **kwargs):
+        if "rev-parse" in argv:
+            raise failure
+        said = 'Good "git" signature for ayukhno with ED25519 key SHA256:x' \
+            if "verify-tag" in argv else ""
+        return subprocess.CompletedProcess(argv, 0, stdout=said, stderr="")
+
+    monkeypatch.setattr(updates.child, "run_bounded", runs)
+
+    ok, line, why, sha = updates.check_tcc_tag("v0.1.46")
+
+    assert (ok, why, sha) == (False, "commit_not_checked", ""), (why, line)
+    assert line.startswith("v0.1.46: ") and type(failure).__name__ in line, line
+    assert _reason(why, line) == f"{i18n.t('updWhy_commit_not_checked')}: {line}"
