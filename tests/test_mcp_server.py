@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import sys
 import threading
@@ -16,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import mcp_server
+from autosound_tcc.core import mcp_server, own_store
 from autosound_tcc.core.mcp_server import (
     ConfirmRequest,
     HeadlessBridge,
@@ -724,7 +725,7 @@ def test_a_lone_surrogate_in_the_user_s_config_is_written_escaped(tmp_path, monk
 def test_a_stop_survives_an_advertisement_it_cannot_withdraw(tmp_path, monkeypatch):
     """`stop()` runs on the way out: whatever withdrawing raises is logged there, not let through
     into the window's close."""
-    def broken(project_dir):
+    def broken(project_dir, port=None, token=None):
         raise ValueError("not this time")
 
     monkeypatch.setattr(mcp_server, "forget_mcp_config", broken)
@@ -2945,3 +2946,125 @@ def test_an_mcp_json_of_the_wrong_shape_neither_raises_nor_stops_the_server(
     assert any(str(path) in r.getMessage() for r in app_log_warnings)
     if "other" in text:
         assert data["other"] == 1
+
+
+# ---- F16-6 (#173): `.mcp.json` read the store's way, and withdrawn by its own instance only ----
+
+
+def test_one_instance_s_stop_leaves_another_instance_s_advertisement(tmp_path, monkeypatch):
+    """Two TCCs on one project folder share the one `"tcc"` key. B's start wrote over A's entry,
+    and A's quit then took B's out: a CLI started in the folder afterwards found no server while B
+    was still serving one. A's stop takes out only the entry that names its own port and token."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = tmp_path / ".mcp.json"
+    a = TccMcpServer(project_dir=tmp_path, preferred_port=8930)
+    b = TccMcpServer(project_dir=tmp_path, preferred_port=8950)
+    try:
+        a.start()
+        b.start()
+        assert a.port != b.port and a.config_error == b.config_error == ""
+
+        a.stop()
+
+        entry = json.loads(path.read_text(encoding="utf-8"))["mcpServers"].get("tcc")
+        assert entry is not None, "A's quit took B's advertisement with it"
+        assert entry["url"] == b.url and entry["headers"]["X-TCC-Token"] == b.token
+    finally:
+        a.stop()
+        b.stop()
+
+    assert "tcc" not in json.loads(path.read_text(encoding="utf-8"))["mcpServers"], (
+        "and B's own stop takes it")
+
+
+@pytest.mark.parametrize("port, token", [(8766, "tok"), (8765, "not-tok")],
+                         ids=["another-port", "another-token"])
+def test_a_withdrawal_takes_only_the_entry_that_names_its_port_and_token(tmp_path, monkeypatch,
+                                                                         port, token):
+    """Both halves are compared, the token too: a server that stops gives its port back before it
+    withdraws its entry, and the next TCC can take that port and write its own entry in between."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = write_mcp_config(tmp_path, 8765, "tok")
+
+    mcp_server.forget_mcp_config(tmp_path, port=port, token=token)
+    assert "tcc" in json.loads(path.read_text(encoding="utf-8"))["mcpServers"], (
+        "another instance's entry stays")
+
+    mcp_server.forget_mcp_config(tmp_path, port=8765, token="tok")
+    assert "tcc" not in json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
+
+
+def test_a_damaged_mcp_json_is_kept_under_tcc_with_the_user_s_servers_and_said(
+        tmp_path, monkeypatch, app_log_told):
+    """A `.mcp.json` that did not parse was read as empty and replaced with TCC's entry alone: the
+    user's other servers gone, and nothing said. Now it goes the store's way — set aside with its
+    bytes and said — into `.tcc/`, not beside it (ruling 9): the copy carries the old
+    `X-TCC-Token`, git ignores `.tcc/` whole, and it ignores `.mcp.json` only by that exact name."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = tmp_path / ".mcp.json"
+    damaged = (b'{"mcpServers": {\n'
+               b'  "theirs": {"type": "http", "url": "http://x/mcp"},\n'
+               b'  "tcc": {"type": "http", "headers": {"X-TCC-Token": "old"}},\n'
+               b'}}\n')  # the trailing comma of a hand edit
+    path.write_bytes(damaged)
+
+    write_mcp_config(tmp_path, 8765, "tok")
+
+    kept = list((tmp_path / ".tcc").glob(".mcp.json.corrupt-*"))
+    assert len(kept) == 1, kept
+    assert kept[0].read_bytes() == damaged, "the original bytes, the user's servers among them"
+    assert not list(tmp_path.glob(".mcp.json.corrupt-*")), "nothing beside it, where git takes it"
+    assert len(app_log_told) == 1, app_log_told
+    assert str(path) in app_log_told[0] and str(kept[0]) in app_log_told[0], app_log_told
+    servers = json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
+    assert set(servers) == {"tcc"} and servers["tcc"]["headers"]["X-TCC-Token"] == "tok"
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
+                    reason="POSIX permissions, and root reads a file whatever its mode")
+def test_an_mcp_json_that_cannot_be_read_is_not_written_over(tmp_path, monkeypatch,
+                                                             app_log_told):
+    """There and not readable is not empty (W-8's review, F-098). The old read answered `{}` for
+    any OSError, and the write renamed a file holding TCC's entry alone over the user's — every
+    other server they had configured for the project gone. Now the write refuses, as the store's
+    own failure: `start()` keeps it as the advertisement's error, and the server stays up. The
+    withdrawal leaves it alone too, and says nothing more."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = tmp_path / ".mcp.json"
+    path.write_text(json.dumps({"mcpServers": {"theirs": {"type": "http", "url": "http://x/mcp"}}}),
+                    encoding="utf-8")
+    before = path.read_bytes()
+    path.chmod(0)
+    try:
+        with pytest.raises(OSError) as refused:
+            write_mcp_config(tmp_path, 8765, "tok")
+        mcp_server.forget_mcp_config(tmp_path, port=8765, token="tok")
+    finally:
+        path.chmod(0o600)
+
+    assert path.read_bytes() == before, "never written over"
+    assert refused.type is own_store.StoreUnreadable, "refused as the store's own failure"
+    assert not list(tmp_path.glob(".mcp*.tmp")) and not list(tmp_path.rglob("*.corrupt-*")), (
+        "not set aside, and no temp file left: its bytes may be fine")
+    assert len(app_log_told) == 1 and str(path) in app_log_told[0], "said once, not per read"
+
+
+def test_an_mcp_json_that_cannot_be_opened_is_refused_on_every_platform(tmp_path, monkeypatch,
+                                                                        app_log_told):
+    """The chmod test above cannot run on Windows. A folder where the file should be is refused
+    everywhere — `IsADirectoryError` on POSIX, `PermissionError` on Windows. The old write failed
+    here as well, but on its rename and having said nothing: the type tells the two apart."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = tmp_path / ".mcp.json"
+    path.mkdir()
+    (path / "inside").write_text("kept", encoding="utf-8")
+
+    with pytest.raises(OSError) as refused:
+        write_mcp_config(tmp_path, 8765, "tok")
+    assert refused.type is own_store.StoreUnreadable, "refused as the store's own failure"
+    mcp_server.forget_mcp_config(tmp_path, port=8765, token="tok")
+
+    assert (path / "inside").read_text(encoding="utf-8") == "kept", "never written over"
+    assert not list(tmp_path.glob(".mcp*.tmp")) and not list(tmp_path.rglob("*.corrupt-*")), (
+        "not set aside, and no temp file left beside it")
+    assert len(app_log_told) == 1 and str(path) in app_log_told[0], "said once, not per read"

@@ -7,9 +7,9 @@ else the file held was gone, and nothing said so (#173, F5). Here the three are 
 
 * **absent** — `{}`, silently: a project nobody has opened has no settings yet;
 * **broken** (bad JSON, bad UTF-8, or JSON that is not an object; a byte-order mark is not
-  broken) — the file is moved to `<name>.corrupt-<YYYYMMDD-HHMMSS>` beside it, the person is told,
-  and `{}` comes back. The next write starts a fresh file, and the original bytes are still there
-  for whoever wants them;
+  broken) — the file is moved to `<name>.corrupt-<YYYYMMDD-HHMMSS>` beside it (or into the folder
+  its owner names, `aside_dir`), the person is told, and `{}` comes back. The next write starts a
+  fresh file, and the original bytes are still there for whoever wants them;
 * **there but unreadable** (any other `OSError`: no permission, a folder where the file should
   be, a broken file that could not be moved) — the person is told and `StoreUnreadable` is
   raised. Nothing is moved and nothing may be written: the bytes may be perfectly good. A plain
@@ -53,7 +53,8 @@ _said_lock = threading.Lock()
 
 
 def read_json(path: Path, *,
-              misshapen: Optional[Callable[[dict[str, Any]], str]] = None) -> dict[str, Any]:
+              misshapen: Optional[Callable[[dict[str, Any]], str]] = None,
+              aside_dir: Optional[Path] = None) -> dict[str, Any]:
     """The store's object — `{}` when it is not there, or was broken and has been set aside.
 
     Raises `StoreUnreadable` when the file is there and cannot be read (see the module's header).
@@ -62,6 +63,11 @@ def read_json(path: Path, *,
     owner can read, or "" when it is. An object it refuses goes the broken way — set aside with
     its bytes, and said with that reason: `sessions.json` holding `"phases": []` was valid JSON
     and an object, and the registry's code tripped over it on every read (#173).
+
+    `aside_dir`, when given, is where a broken store's copy goes instead of beside it, the folder
+    made when it is not there (R-k). For a store whose own folder travels and whose bytes must
+    not: `.mcp.json` sits in the project folder, which git ignores it in by that exact name only,
+    and its copy carries the session's token — so it goes into `.tcc/`, ignored whole (ruling 9).
     """
     path = Path(path)
     try:
@@ -77,12 +83,12 @@ def read_json(path: Path, *,
         # there is not broken (the review of Task 17).
         data = json.loads(raw.decode("utf-8-sig"))
     except ValueError as exc:  # a JSON error and a UTF-8 error are both ValueErrors
-        return _set_aside(path, _why(exc))
+        return _set_aside(path, _why(exc), aside_dir)
     if not isinstance(data, dict):
-        return _set_aside(path, "valid JSON, but not an object")
+        return _set_aside(path, "valid JSON, but not an object", aside_dir)
     wrong = misshapen(data) if misshapen is not None else ""
     if wrong:
-        return _set_aside(path, f"valid JSON, but {wrong}")
+        return _set_aside(path, f"valid JSON, but {wrong}", aside_dir)
     _forget(path)
     return data
 
@@ -108,11 +114,12 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
         raise
 
 
-def _set_aside(path: Path, why: str) -> dict[str, Any]:
-    """Move a broken store out of the way, keeping its bytes, and say so. `{}` once it is moved."""
+def _set_aside(path: Path, why: str, aside_dir: Optional[Path] = None) -> dict[str, Any]:
+    """Move a broken store out of the way — beside it, or into `aside_dir` — keeping its bytes,
+    and say so. `{}` once it is moved."""
     aside: Optional[Path] = None
     try:
-        aside = _reserve_aside(path)
+        aside = _reserve_aside(path, aside_dir)
         os.replace(path, aside)
     except OSError as exc:
         if aside is not None:
@@ -124,24 +131,30 @@ def _set_aside(path: Path, why: str) -> dict[str, Any]:
                    f"({_why(exc)}); TCC will not write over it")
         _say_once(path, message)
         raise StoreUnreadable(message) from exc
-    app_log.report(f"{path} could not be read ({why}); it is kept as {aside.name}, "
+    # Beside the store, its name is where it is; anywhere else, only its whole path says that.
+    kept = aside.name if aside_dir is None else str(aside)
+    app_log.report(f"{path} could not be read ({why}); it is kept as {kept}, "
                    "and the next save starts it afresh")
     return {}
 
 
-def _reserve_aside(path: Path) -> Path:
-    """`<name>.corrupt-<YYYYMMDD-HHMMSS>` beside the store, then `-2`, `-3` …: reserved, not looked
-    up.
+def _reserve_aside(path: Path, aside_dir: Optional[Path] = None) -> Path:
+    """`<name>.corrupt-<YYYYMMDD-HHMMSS>` beside the store — or in `aside_dir`, made when it is not
+    there — then `-2`, `-3` …: reserved, not looked up.
 
     The stamp is to the second, and on POSIX a rename onto a taken name replaces the copy already
     there without a word. Created exclusively (`"x"`: `O_CREAT | O_EXCL`), the name is this
     process's alone: the window and the CLI setting one store aside in the same second cannot
     both take it (the review of Task 17). The empty file is what `os.replace` then puts the
     broken store over."""
+    folder = path.parent
+    if aside_dir is not None:
+        folder = Path(aside_dir)
+        folder.mkdir(parents=True, exist_ok=True)
     stem = f"{path.name}.corrupt-{_stamp()}"
     n = 1
     while True:
-        aside = path.with_name(stem if n == 1 else f"{stem}-{n}")
+        aside = folder / (stem if n == 1 else f"{stem}-{n}")
         try:
             aside.open("xb").close()
         except FileExistsError:

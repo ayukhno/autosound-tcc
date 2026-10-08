@@ -222,3 +222,38 @@ def test_a_store_its_owner_calls_misshapen_is_set_aside_like_a_broken_one(store,
     assert len(app_log_told) == 1 and '"phases" is not an object' in app_log_told[0], app_log_told
     store.write_bytes(b'{"phases": {}}')
     assert own_store.read_json(store, misshapen=misshapen) == {"phases": {}}
+
+
+def test_a_broken_store_is_set_aside_into_the_folder_it_is_given(store, tmp_path, app_log_told):
+    """R-k: `aside_dir` puts the copy there instead of beside the store, and makes the folder when
+    it is not there yet. `.mcp.json` needs it (ruling 9): git ignores that file by its exact name,
+    so a `.mcp.json.corrupt-…` beside it would travel with the project, carrying the old token —
+    `.tcc/` is ignored whole. The sentence names the copy's whole path: its name alone would send
+    the person to look beside the store."""
+    elsewhere = tmp_path / "elsewhere" / "deeper"
+    store.write_bytes(b"{ broken")
+
+    assert own_store.read_json(store, aside_dir=elsewhere) == {}
+
+    assert _left(store) == [], "nothing beside the store: neither the copy nor a reserved name"
+    kept = list(elsewhere.iterdir())
+    assert len(kept) == 1 and _ASIDE.fullmatch(kept[0].name), kept
+    assert kept[0].read_bytes() == b"{ broken", "the original bytes are kept"
+    assert len(app_log_told) == 1, app_log_told
+    assert str(store) in app_log_told[0] and str(kept[0]) in app_log_told[0], app_log_told
+
+
+def test_a_store_whose_aside_folder_cannot_be_made_is_refused_and_left_where_it_is(
+        store, tmp_path, app_log_told):
+    """A broken file is only safe to start afresh once it is out of the way. A file where the
+    aside folder should be is a move that cannot happen: the unreadable case — said, refused,
+    and never written over."""
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file, where the folder should be", encoding="utf-8")
+    store.write_bytes(b"{ broken")
+
+    with pytest.raises(own_store.StoreUnreadable):
+        own_store.read_json(store, aside_dir=blocked)
+
+    assert _left(store) == ["store.json"] and store.read_bytes() == b"{ broken"
+    assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told

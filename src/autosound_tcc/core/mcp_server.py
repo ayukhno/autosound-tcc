@@ -76,6 +76,7 @@ from autosound_tcc.core import (
     config,
     critic,
     model_choices,
+    own_store,
     process_writer,
     profile_writer,
     project_settings,
@@ -1652,27 +1653,76 @@ def _config_body(data: dict) -> str:
     return body
 
 
-def forget_mcp_config(project_dir: Path) -> None:
+def _url(port: int) -> str:
+    """Where a server on `port` answers: what the window hands its session, and what `.mcp.json`
+    advertises."""
+    return f"http://127.0.0.1:{port}/mcp"
+
+
+def _read_config(project_dir: Path) -> dict:
+    """`.mcp.json` the way TCC's own stores are read (#173, F16-6), by the write and the
+    withdrawal alike. Absent is `{}`. Broken — bad JSON, bad UTF-8, not an object — is set aside
+    with its bytes and said, then `{}`: it used to read as `{}` with nothing kept, and the write
+    put TCC's entry alone in its place, the user's other servers gone. There and unreadable raises
+    `own_store.StoreUnreadable`, said; nothing may be written over it.
+
+    The copy goes into `.tcc/`, not beside the file (ruling 9): it carries the old `X-TCC-Token`,
+    and git ignores `.tcc/` whole but `.mcp.json` by that exact name only (`_IGNORE_LINES`), so a
+    `.mcp.json.corrupt-…` beside it would travel with the project."""
+    return own_store.read_json(config.mcp_config_path(project_dir),
+                               aside_dir=config.tcc_dir(Path(project_dir)))
+
+
+def _names_this_instance(entry: Any, port: Optional[int], token: Optional[str]) -> bool:
+    """Whether TCC's entry in `.mcp.json` names this `port` and this `token` — each one given is
+    compared. Neither given: any entry of TCC's, which is what a withdrawal always took."""
+    if port is None and token is None:
+        return True
+    if not isinstance(entry, dict):
+        return False
+    if port is not None and entry.get("url") != _url(port):
+        return False
+    if token is not None:
+        headers = entry.get("headers")
+        # By the header's name in any case, as `_TokenGuard` hears it.
+        sent = ({name.lower(): value for name, value in headers.items()}
+                if isinstance(headers, dict) else {})
+        if sent.get(_TOKEN_HEADER) != token:
+            return False
+    return True
+
+
+def forget_mcp_config(project_dir: Path, port: Optional[int] = None,
+                      token: Optional[str] = None) -> None:
     """Take TCC's entry back out of `.mcp.json` when the server goes down.
 
     The file is an advertisement for something LISTENING. Left behind, it names a port nothing
     answers on — so a CLI started in this folder tomorrow connects to nothing, or to whatever took
     that port in the meantime, and neither failure says what it is (SKL-028).
 
+    **Only this instance's**, given its `port` and `token` — which is how `stop()` calls it. Two
+    TCCs on one project folder share the one `"tcc"` key: B's start writes over A's entry, and A's
+    quit then took B's out, so a CLI started there found no server while B was serving one (#173,
+    F16-6). An entry naming another port or another token is another instance's, and stays.
+    Given the folder alone, it takes whatever entry of TCC's is there, as it always did. Both are
+    compared, the token too: a server that stops gives its port back before it gets here, and the
+    next TCC can take that port and write its own entry in between.
+
     Same rule as writing it: the file is the user's, so only our own key is removed and everything
-    else is left exactly as it was. Never raises — this runs on the way out, where an exception
-    has nowhere to go and the window is already closing.
+    else is left exactly as it was. Read the same way too (`_read_config`): one that cannot be read
+    is left alone, and one that is broken goes into `.tcc/` with its bytes. Never raises — this
+    runs on the way out, where an exception has nowhere to go and the window is already closing.
     """
     path = config.mcp_config_path(project_dir)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return
-    if not isinstance(data, dict):
-        return  # not a config TCC could have written its entry into (F16-5)
+        data = _read_config(project_dir)
+    except own_store.StoreUnreadable:
+        return  # said by the store, and not written over
     servers = data.get("mcpServers")
     if not isinstance(servers, dict) or SERVER_NAME not in servers:
         return
+    if not _names_this_instance(servers[SERVER_NAME], port, token):
+        return  # another instance's advertisement, for a server that may well be up
     servers.pop(SERVER_NAME)
     try:
         _write_atomically(path, _config_body(data))
@@ -1684,7 +1734,11 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
     """Advertise this server in the project's `.mcp.json` so any CLI launched there finds it.
 
     Merges rather than overwrites: the file is the user's, and clobbering it would silently
-    disconnect whatever other MCP servers they had configured for this project.
+    disconnect whatever other MCP servers they had configured for this project. So it is read the
+    store's way (`_read_config`): a file that is there and cannot be read raises
+    `own_store.StoreUnreadable` and is never written over — `start()` keeps that as `config_error`,
+    with the server up — and a broken one is set aside into `.tcc/` and said before a fresh file
+    takes its place (#173, F16-6).
 
     **Retried, and the read-only bit is cleared** before the last try. On Windows a file marked
     read-only refuses `open(..., "w")` with the same `PermissionError` a transient lock gives, and
@@ -1694,15 +1748,7 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
     """
     path = config.mcp_config_path(project_dir)
     _teach_git_to_ignore(Path(project_dir))
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        data = {}
-    # A file of the wrong shape must not take the server down: only OSError is caught around this
-    # in `start()` (F16-5). It is rewritten with TCC's entry, as an unparseable one already is.
-    if not isinstance(data, dict):
-        app_log.logger().warning("%s is not a JSON object; written anew with TCC's entry", path)
-        data = {}
+    data = _read_config(project_dir)
     servers = data.get("mcpServers")
     if not isinstance(servers, dict):
         if servers is not None:
@@ -1710,7 +1756,7 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
         servers = data["mcpServers"] = {}
     servers[SERVER_NAME] = {
         "type": "http",
-        "url": f"http://127.0.0.1:{port}/mcp",
+        "url": _url(port),
         "headers": {"X-TCC-Token": token},
     }
     body = _config_body(data)
@@ -1851,7 +1897,7 @@ class TccMcpServer:
 
     @property
     def url(self) -> Optional[str]:
-        return f"http://127.0.0.1:{self.port}/mcp" if self.port else None
+        return _url(self.port) if self.port else None
 
     def start(self, write_config: bool = True) -> int:
         """Bind a port, start serving on a background thread, and return the port."""
@@ -1967,9 +2013,11 @@ class TccMcpServer:
             self._thread.join(timeout=timeout)
         self._thread = None
         self._server = None
-        # The advertisement goes down with the thing it advertises. Guarded: this runs on the way
-        # out, and a raise here skipped the rest of the window's close (the branch review).
+        # The advertisement goes down with the thing it advertises — this one's only: another TCC
+        # on the same folder may have advertised itself over it since (F16-6). Guarded: this runs
+        # on the way out, and a raise here skipped the rest of the window's close (the branch
+        # review).
         try:
-            forget_mcp_config(self.project_dir)
+            forget_mcp_config(self.project_dir, port=self.port, token=self.token)
         except Exception:  # noqa: BLE001 — logged; the close goes on
             app_log.logger().exception("the MCP advertisement could not be withdrawn")
