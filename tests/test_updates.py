@@ -1058,6 +1058,31 @@ def test_the_update_command_pins_the_release_it_is_offering(monkeypatch):
         assert "@v0.1.11" in updates.tcc_install_script(pid=4242, tag="v0.1.11", platform=platform)
 
 
+def _version_unreadable():
+    # One of the two ways `app_version` could raise (review of tcc#174, Minor 4): a pyproject
+    # beside the package that is not UTF-8. The other is a `vcs_info` that is not a dict.
+    raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+
+@pytest.mark.parametrize("read, tag", [
+    (lambda: "1.1.2", "v1.1.2"),
+    (lambda: "10.0.0", "v10.0.0"),
+    (lambda: "", ""),
+    (lambda: "1.2.0rc1", ""),
+    (lambda: "1.1.2+local", ""),
+    (_version_unreadable, ""),
+], ids=["1.1.2", "10.0.0", "cannot-be-told", "1.2.0rc1", "1.1.2+local", "reader-raises"])
+def test_the_running_tag_names_a_release_or_nothing_and_never_raises(read, tag, monkeypatch):
+    """What every install hint pins its command to (tcc#174, R-bh): `v<version>` for a release,
+    "" — the ref-less form — for anything `_release_key` does not accept. And "" when the version
+    cannot even be read: all four hints are said on a failure path, and the window's is printed
+    from inside `except ImportError`, where a traceback is exactly what the hint is there to
+    replace."""
+    monkeypatch.setattr(install_report, "app_version", read)
+
+    assert updates.running_tcc_tag() == tag
+
+
 def test_a_source_checkout_is_told_to_use_git(monkeypatch):
     """Running from a clone has no `direct_url.json` and no business calling `uv`."""
     monkeypatch.setattr(install_report, "install_source", lambda: ("", ""))

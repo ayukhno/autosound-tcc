@@ -253,9 +253,10 @@ can work in the window one day and the terminal the next and find everything whe
 
 ## Updating and removing
 
-To update, open the diagnostics window, go to **Updates** and press **Update TCC** and **Update the
-method**. Or run the install line again as this README has it on GitHub: that copy names the newest
-release. Nothing is asked twice, and the sign-ins already there are kept.
+To update, open **☰ Menu** → **Diagnostics and updates…**, tab **Updates**, and press
+**Update TCC** and **Update the method**. Or run the one-line installer again: it fetches the
+newest version of everything, asks nothing twice and keeps the sign-ins. If you installed by hand,
+run the `uv tool install` line as this README has it on GitHub; it names the newest release.
 
 To remove, on macOS:
 

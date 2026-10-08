@@ -70,7 +70,8 @@ tree that gets tagged — version included. A red suite rolls the bump back and 
 "The version" is two files, not one: `pyproject.toml` and `uv.lock`, which records the project's
 own version as well. Missing the second is how v0.1.25 came to be tagged on a tree whose lock said
 0.1.24 — found by this script's own clean-tree gate on the next run, which is the good way to find
-it and still one file too many to keep a single fact in.
+it and still one file too many to keep a single fact in. And a third since tcc#174: the tag
+README's install line names, which the suite holds to the version, so `bump` moves it too.
 
 Everything up to and including the local tag is reversible. The single irreversible act is the
 last line of the script, on its own, by name.
@@ -321,15 +322,37 @@ def current_version(root: Path) -> str:
     return found.group(1) if found else ""
 
 
+#: The tag README's install line names (tcc#174): `…/autosound-tcc@v1.1.2'`. That line is what a
+#: person who installs by hand pastes, so it names the release it installs, and
+#: `tests/test_readme.py` holds it to pyproject's version.
+README_TAG = re.compile(r"(git\+https://github\.com/ayukhno/autosound-tcc@v)([^'\"\s]+)")
+
+
 def bump(root: Path, version: str) -> str:
-    """`pyproject.toml`'s version, and the old value so a failed suite can put it back."""
+    """`pyproject.toml`'s version and the tag README's install line names, and the old version so
+    a failed suite can put both back.
+
+    README moves with the version because the suite checks the two agree: a bump that left it
+    behind failed its own suite and rolled every release outside the wave path back (tcc#174). A
+    tree with no README has nothing to move. One that has a README but not exactly one tagged
+    install line is a refusal, said before anything is written.
+    """
     path = root / "pyproject.toml"
     text = path.read_text(encoding="utf-8")
     found = re.search(r'^version = "([^"]+)"', text, re.M)
     if not found:
         raise Stop("pyproject.toml has no `version = \"...\"` line")
+    readme = root / "README.md"
+    words = readme.read_text(encoding="utf-8") if readme.is_file() else None
+    if words is not None:
+        words, named = README_TAG.subn(lambda tag: tag.group(1) + version, words)
+        if named != 1:
+            raise Stop(f"README.md should carry one install line naming a tag "
+                       f"(`…/autosound-tcc@vX.Y.Z`) for the bump to move, and carries {named}")
     was = found.group(1)
     path.write_text(text[:found.start(1)] + version + text[found.end(1):], encoding="utf-8")
+    if words is not None:
+        readme.write_text(words, encoding="utf-8")
     return was
 
 
@@ -662,8 +685,9 @@ def ship(root: Path, release: bool, test_command=None,
                    "and nothing was committed")
 
     files = ["pyproject.toml", "CHANGELOG.md"]
-    if tracked(root, "uv.lock"):
-        files.append("uv.lock")
+    for name in ("uv.lock", "README.md"):
+        if tracked(root, name):
+            files.append(name)
     run(["git", "add", *files], root)
     run(["git", "commit", "-m", f"{plan.tag}: paired with method {plan.method_sha[:12]}"], root)
     say(f"  committed {plan.tag}")

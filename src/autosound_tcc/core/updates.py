@@ -115,9 +115,16 @@ def running_tcc_tag() -> str:
     `_release_key`'s rule (a `1.1.3.dev0` build, or one that cannot be told) has no tag to name,
     and gets the ref-less form: the fallback that form is kept for. `install_report.app_version`
     reads it without Qt, so this works on the light install too.
+
+    Never raises. Every hint is said on a failure path — the window's from inside
+    `except ImportError` — and a traceback there is what the hint exists to replace. A version
+    that cannot be read answers what one that cannot be told does: "".
     """
-    tag = f"v{install_report.app_version()}"
-    return tag if _release_key(tag) is not None else ""
+    try:
+        tag = f"v{install_report.app_version()}"
+        return tag if _release_key(tag) is not None else ""
+    except Exception:  # noqa: BLE001 — "" is this function's answer for any version it cannot read
+        return ""
 
 
 #: What the update window says, for a caller that passes no words of its own. The panel passes the

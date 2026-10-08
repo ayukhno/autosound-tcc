@@ -84,6 +84,15 @@ name = "fixture"
 version = "{version}"
 '''
 
+#: TCC's README carries an install line that names the release it installs (tcc#174), so the
+#: fixture carries one too, and every path through ship meets it the way the real tree would.
+README = (
+    "# fixture\n\n```sh\n"
+    "uv tool install --python 3.12 "
+    "'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc@{tag}'\n"
+    "```\n"
+)
+
 METHOD_SHA = "a" * 40
 
 #: The carrier's verdict words, copied here so the fixture can run without the hub — and pinned to
@@ -169,6 +178,7 @@ def repo(tmp_path, monkeypatch, signing_keys):
         CHANGELOG.format(tag="v0.1.25", sha=METHOD_SHA), encoding="utf-8")
     (work / "uv.lock").write_text(
         'name = "fixture"\nversion = "0.1.24"\n', encoding="utf-8")
+    (work / "README.md").write_text(README.format(tag="v0.1.24"), encoding="utf-8")
     git(work, "add", "-A")
     git(work, "commit", "--quiet", "-m", "start")
     git(work, "tag", "v0.1.24")
@@ -249,9 +259,12 @@ def test_a_red_suite_rolls_the_bump_back_and_leaves_nothing(repo):
 @pytest.mark.parametrize("break_it, expect", [
     ("changelog", "top entry"),
     ("paired", "Paired with method"),
+    ("readme", "README.md should carry one install line"),
 ])
 def test_every_refusal_happens_before_anything_is_written(repo, break_it, expect):
-    """Each INVENTORY gate, and the same assertion after each: the tree is untouched.
+    """Each INVENTORY gate, and the same assertion after each: the tree is untouched. And the
+    bump's own refusal (tcc#174): a README whose install line names no tag gives it nothing to
+    move, and it says so before writing the version either.
 
     A dirty tree used to be the third case here. It is the carrier's now, and the case that
     replaced it is `test_a_channel_refusal_stops_ship_before_anything_is_written` below.
@@ -267,6 +280,11 @@ def test_every_refusal_happens_before_anything_is_written(repo, break_it, expect
                 "Paired with method `" + METHOD_SHA + "`.", "no pairing line here"),
             encoding="utf-8")
         git(repo, "commit", "--quiet", "-am", "no pairing")
+        git(repo, "push", "--quiet", "origin", "main")
+    elif break_it == "readme":
+        (repo / "README.md").write_text(
+            README.format(tag="v0.1.24").replace("@v0.1.24", ""), encoding="utf-8")
+        git(repo, "commit", "--quiet", "-am", "an install line that names no tag")
         git(repo, "push", "--quiet", "origin", "main")
 
     with pytest.raises(ship_mod.Stop) as stop:
@@ -806,6 +824,18 @@ def test_the_lock_file_moves_with_the_version_and_lands_in_the_release_commit(re
     assert git(repo, "status", "--porcelain") == "", "nothing left over for the next run to trip on"
     changed = git(repo, "show", "--name-only", "--format=", "v0.1.25").split()
     assert "uv.lock" in changed, f"the lock did not travel with the release commit: {changed}"
+
+
+def test_the_readme_install_line_moves_with_the_version_and_lands_in_the_release_commit(repo):
+    """tcc#174: README's install line names the release it installs, and `tests/test_readme.py`
+    holds it to pyproject's version. Outside the wave path ship bumps the version itself, and a
+    bump that left README behind failed its own suite there and rolled every such release back."""
+    _run(repo)
+
+    assert "autosound-tcc@v0.1.25'" in (repo / "README.md").read_text(encoding="utf-8")
+    assert git(repo, "status", "--porcelain") == "", "nothing left over for the next run to trip on"
+    changed = git(repo, "show", "--name-only", "--format=", "v0.1.25").split()
+    assert "README.md" in changed, f"README did not travel with the release commit: {changed}"
 
 
 def test_a_red_suite_puts_the_lock_back_too(repo):
