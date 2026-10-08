@@ -827,7 +827,7 @@ def test_no_pytest_caller_carries_its_own_distribution_flags():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
-    for relative in ("Makefile", ".github/workflows/ci.yml"):
+    for relative in ("Makefile", ".github/workflows/ci.yml", ".github/workflows/method-newest.yml"):
         text = (root / relative).read_text(encoding="utf-8")
         for line in text.splitlines():
             if "pytest" not in line or line.lstrip().startswith("#"):
@@ -900,6 +900,90 @@ def test_every_platform_that_runs_the_suite_on_a_pull_request_is_sharded():
     assert {name.strip() for name in matrix.group(1).split(",")} == \
         {"ubuntu-latest", "windows-latest", "macos-latest"}
     assert "  macos:" not in text, "macOS runs as shards now; a second whole-suite job would be a copy"
+
+
+# --- method-newest.yml: the suite against the method tag the app offers (#170, G5 S2) ------
+#
+# The update press can install a method newer than the pin (`updates.newest_tag()`), so a method
+# release that breaks TCC breaks it on a user's machine before any TCC release says so. This
+# workflow runs the suite against that tag every night. Read as text, like `ci.yml` above.
+
+METHOD_NEWEST = ROOT / ".github" / "workflows" / "method-newest.yml"
+
+
+def _workflow_code(text: str) -> list[str]:
+    """The lines a runner reads: comments out, so a header explaining a rule cannot trip it."""
+    return [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+
+
+def _workflow_jobs(text: str) -> dict[str, str]:
+    """Each job's block by its id, cut the way the `ci.yml` tests above cut theirs."""
+    jobs = text.split("\njobs:\n", 1)[1]
+    return dict(re.findall(r"^  ([a-z][a-z0-9-]*):\n((?:(?:    .*|\s*)\n)*)", jobs + "\n", re.M))
+
+
+def test_method_newest_runs_nightly_and_by_hand_and_never_on_a_push():
+    """Ruling 2. The hub's release preflight counts every workflow run on `push` for the release
+    sha, so a `push` trigger here would make the method's NEWEST tag a condition of TCC's own
+    release, and a `pull_request` one would put a method TCC does not pin in front of every wave.
+
+    The `on:` block is read as text: PyYAML would hand its key back as the boolean True."""
+    text = METHOD_NEWEST.read_text(encoding="utf-8")
+    on = re.search(r"^on:\n((?:(?:[ #].*)?\n)*)", text, re.M)
+    assert on, "no block-form `on:` — a one-line trigger list would slip past this read"
+
+    triggers = re.findall(r"^  ([a-z_]+):", on.group(1), re.M)
+    assert sorted(triggers) == ["schedule", "workflow_dispatch"], triggers
+    assert re.search(r"^    - cron: ", on.group(1), re.M), "a schedule with no cron never runs"
+
+
+def test_method_newest_tests_the_tag_the_app_offers_and_names_it():
+    """The tag is `updates.newest_tag()` — what the update press offers — asked ONCE, by a first
+    job, and handed on: a second way of asking would be a second answer. GitHub evaluates
+    `run-name` before any job runs, so the suite job's name carries the tag instead, and the run
+    summary says it. A red run can be the method's (the suite runs its selftests too), and a red
+    that does not say which method it ran is a red nobody can act on."""
+    text = METHOD_NEWEST.read_text(encoding="utf-8")
+    jobs = _workflow_jobs(text)
+    pick, suite = jobs.get("pick", ""), jobs.get("suite", "")
+
+    # Where the value comes from, not just the name: the refusal message quotes the call too.
+    assert re.search(r"^ +tag=\$\(uv run ", pick, re.M), "the shell's tag is what Python printed"
+    assert re.search(r"^ *tag = updates\.newest_tag\(\)$", pick, re.M), \
+        "the tag must be the one the app offers"
+    assert '"tag=$tag" >> "$GITHUB_OUTPUT"' in pick, "and that tag is the one handed on"
+    assert re.search(r"^    outputs:\n      tag: \$\{\{ steps\.[a-z-]+\.outputs\.tag \}\}$",
+                     pick, re.M), "the pick job's tag is a job output"
+    assert re.search(r"^    needs: pick$", suite, re.M)
+    assert re.search(r"^    name: .*\$\{\{ needs\.pick\.outputs\.tag \}\}", suite, re.M), \
+        "the run title cannot carry the tag, so the job name must"
+    assert "TAG: ${{ needs.pick.outputs.tag }}" in suite, "the tag reaches the shell through env"
+    assert re.search(r'git .*checkout .*"\$TAG"', suite), "the submodule is moved to the tag"
+    assert "GITHUB_STEP_SUMMARY" in suite, "the run summary names the tag"
+    assert not re.search(r"\bv3\.\d", "\n".join(_workflow_code(text))), \
+        "a tag written into the file is a second pin, not the newest"
+
+
+def test_method_newest_goes_red_for_real_on_the_locked_environment():
+    """No `continue-on-error`: a nightly that cannot go red is one nobody reads, and the point is
+    to see a breaking method release within a day. Every `uv run` is `--locked`: the suite runs
+    what `uv.lock` records, not whatever resolves that night. One macOS job, the suite whole: the
+    Linux whole-suite run aborts about half the time (HUB-049, `ci.yml`). The skill folder is
+    absolute, because conftest moves HOME into `tmp_path`."""
+    text = METHOD_NEWEST.read_text(encoding="utf-8")
+    code = _workflow_code(text)
+
+    assert not [line for line in code if "continue-on-error" in line]
+    runs = [line.strip() for line in code if "uv run" in line]
+    assert len(runs) >= 2, "the pick and the suite both run through uv"
+    assert all("--locked" in line for line in runs), runs
+
+    suite = _workflow_jobs(text).get("suite", "")
+    assert re.search(r"^    runs-on: macos-", suite, re.M)
+    assert re.search(r"^        with:\n          submodules: true$", suite, re.M)
+    assert ("AUTOSOUND_SKILL_DIR: ${{ github.workspace }}"
+            "/vendor/autosound-tuning-skill/skills/autosound-tuning") in suite
+    assert re.search(r"uv run --locked --extra dev .*python -m pytest tests/ ", suite)
 
 
 # --- the pin the repo RECORDS vs the method actually checked out ---------------------------

@@ -1,0 +1,112 @@
+# TCC's suite against the method's NEWEST tag, not the one TCC pins (#170, G5 S2).
+#
+# The update press can install a method newer than the pin on a user's machine —
+# `updates.newest_tag()` is the tag the app offers — so a method release that breaks TCC breaks it
+# in the field before any TCC release says so. This runs the suite against exactly that tag every
+# night, so such a release shows within a day.
+#
+# NOT a release gate, and the triggers are what keep it that way (ruling 2): the hub's release
+# preflight reads every run on `push` for the release sha (`ci_state` in its
+# `scripts/release-preflight.py`), so a push trigger here would make the method's newest tag a
+# condition of TCC's own release. A schedule and a button, nothing else; `tests/test_ship.py`
+# fails on any other trigger.
+#
+# A red run can be the METHOD's: the suite runs the skill's own selftests too. So the run says
+# which tag it ran — in the suite job's name and in the run summary. Not in the run title: GitHub
+# evaluates `run-name` before any job has picked a tag.
+name: method-newest
+
+on:
+  schedule:
+    # Off the hour: GitHub delays, and under load drops, the runs scheduled as an hour turns.
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The app's own question, asked once and handed on. A second way of asking here (a glob, an API
+  # call) would be a second answer, and the run would test a tag no user is offered.
+  pick:
+    name: the method tag the app offers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.newest.outputs.tag }}
+    steps:
+      # No submodule, and no token left in the clone: the app asks GitHub anonymously, so this does.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # The light install is enough: `core/updates.py` imports no Qt. No tag stops the run here,
+      # with git's own words, rather than reaching the suite as an empty name.
+      - id: newest
+        run: |
+          tag=$(uv run --locked --python 3.12 python -c '
+          import sys
+          from autosound_tcc.core import updates
+          tag = updates.newest_tag()
+          if not tag:
+              sys.exit("updates.newest_tag() named no tag: " + (updates.last_probe_error() or "no answer"))
+          print(tag)
+          ')
+          # One word shaped like a release tag, before it reaches an output, a job name and git.
+          if [[ ! "$tag" =~ ^v3\.[0-9A-Za-z._-]+$ ]]; then
+            echo "::error title=no method tag::updates.newest_tag() answered '$tag'"
+            exit 1
+          fi
+          echo "the app offers the method at $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  suite:
+    # The tag in the name: the one place a run shows it before anybody opens a log.
+    name: suite against method ${{ needs.pick.outputs.tag }}
+    needs: pick
+    # macOS, the suite whole in one job. Linux aborts a whole-suite run about half the time
+    # (HUB-049, `ci.yml`), and a nightly red for that would be read as the method's.
+    runs-on: macos-latest
+    # The Linux whole-suite job's bound in `ci.yml`. No whole-suite macOS run has been timed on CI
+    # yet; the first run says how much of this it uses.
+    timeout-minutes: 45
+    steps:
+      # At the pin first, the way `ci.yml` checks out; the next step moves the submodule.
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # The checkout moves, the gitlink TCC records does not, so the summary can say how this run
+      # stands to the pin. The tag goes through `env`, like every outside value in `ci.yml`.
+      - name: the method at ${{ needs.pick.outputs.tag }}
+        env:
+          TAG: ${{ needs.pick.outputs.tag }}
+        run: |
+          pinned=$(git rev-parse HEAD:vendor/autosound-tuning-skill)
+          cd vendor/autosound-tuning-skill
+          # The submodule is a depth-1 clone of the pinned commit; the tag comes the same way.
+          git fetch --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+          git -c advice.detachedHead=false checkout --detach "$TAG"
+          commit=$(git rev-parse HEAD)
+          {
+            echo "### TCC's suite against the method at \`$TAG\`"
+            echo
+            echo "- \`$TAG\` is what \`updates.newest_tag()\` answered: the tag the update press offers"
+            echo "- its commit \`${commit:0:12}\`; TCC pins \`${pinned:0:12}\`"
+            if [ "$commit" = "$pinned" ]; then
+              echo "- the pin IS the newest tag: this run repeats what \`ci.yml\` checks"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      # The Windows whole-suite command in `ci.yml` (serial, `-q`, no cache: the runner keeps
+      # nothing) plus `--locked`. The skill folder absolute: conftest moves HOME into `tmp_path`,
+      # and `vendor_loader` takes this variable before anything else.
+      - name: TCC's suite
+        env:
+          AUTOSOUND_SKILL_DIR: ${{ github.workspace }}/vendor/autosound-tuning-skill/skills/autosound-tuning
+        run: uv run --locked --extra dev --python 3.12 python -m pytest tests/ -q -p no:cacheprovider
