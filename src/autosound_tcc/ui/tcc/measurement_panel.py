@@ -306,6 +306,16 @@ class _LedgerWriteWorker(QThread):
         return lines[-1] if lines else f"{type(exc).__name__}: {exc}"
 
     @staticmethod
+    def _stops(exc: Exception) -> bool:
+        """Whether an answer is the same for every write still to come, so the rest are not asked
+        (M29): busy behind another write (#171) — each busy write waits `LOCK_WAIT_S` here, off the
+        GUI thread — or the project's copy refused (#169). Not a flag the copy does not know
+        (`UnknownFlag`): that refuses only the writes sending it — `--source` goes with a channel
+        this window filled in, and a channel a person answered sends none."""
+        return (isinstance(exc, (process_writer.Busy, process_writer.Refused))
+                and not isinstance(exc, process_writer.UnknownFlag))
+
+    @staticmethod
     def _retries_without_plan(exc: Exception) -> bool:
         """Whether a refused `capture-start --plan` is the answer «no list», so the round is opened
         again without `--plan`; if not, the refusal propagates and the pass is refused whole.
@@ -326,7 +336,10 @@ class _LedgerWriteWorker(QThread):
     def run(self) -> None:
         result: dict = {"round_id": self._round_id, "opened": "", "recorded": [],
                         "refused": [], "prot_done": [], "prot_refused": [], "prot_lost": [],
-                        "unplanned": ""}
+                        "unplanned": "",
+                        # A busy or refused answer (`_stops`): its words, and what was then left
+                        # unrecorded — the write it answered and every one after it, unasked.
+                        "stopped": "", "not_recorded": [], "prot_not_recorded": []}
         if not self._round_id:
             try:
                 # The METHOD's list, not this window's (the Arbiter's round rule, SKL-054, tcc#77):
@@ -357,13 +370,20 @@ class _LedgerWriteWorker(QThread):
                 result["refused"].append(self._why(exc))
                 self.done.emit(result)
                 return
-        for title in self._titles:
+        for index, title in enumerate(self._titles):
             try:
                 process_writer.record_capture(self._project_dir, title)
                 result["recorded"].append(title)
             except Exception as exc:  # noqa: BLE001
+                if self._stops(exc):
+                    result["stopped"] = self._why(exc)
+                    result["not_recorded"] = self._titles[index:]
+                    break
                 result["refused"].append(self._why(exc))
         for channel, legs in sorted(self._protective.items()):
+            if result["stopped"]:
+                result["prot_not_recorded"].append(channel)
+                continue
             try:
                 process_writer.set_protective(
                     self._project_dir, channel, legs,
@@ -371,6 +391,10 @@ class _LedgerWriteWorker(QThread):
                 )
                 result["prot_done"].append(channel)
             except Exception as exc:  # noqa: BLE001
+                if self._stops(exc):
+                    result["stopped"] = self._why(exc)
+                    result["prot_not_recorded"].append(channel)
+                    continue
                 result["prot_refused"].append(
                     i18n.t("capImportProtRefused").format(channel=channel, why=self._why(exc)))
         # Read back before saying "recorded" (TODO F-049). A writer that returned is not a round
@@ -1500,6 +1524,14 @@ class MeasurementPanel(QWidget):
             self._add_status("capImportProtSaved", channels=", ".join(result["prot_done"]))
         for sentence in result.get("prot_refused") or []:
             self._add_status("capImportProtRefusedLine", line=sentence)
+        if result.get("stopped"):
+            # Once, naming everything left unrecorded (M29): the same answer per title and per
+            # channel said nothing more than the first.
+            titles = ", ".join(result.get("not_recorded") or [])
+            channels = ", ".join(result.get("prot_not_recorded") or [])
+            key = ("capRoundStoppedBoth" if titles and channels else
+                   "capRoundStopped" if titles else "capRoundStoppedProt")
+            self._add_status(key, titles=titles, channels=channels, why=result["stopped"])
         if result.get("prot_lost"):
             # Written, reported fine, and not in the round: TCC's defect, not a refusal and not the
             # tuner's (TODO F-049).

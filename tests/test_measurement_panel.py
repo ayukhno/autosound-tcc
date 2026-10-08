@@ -1721,6 +1721,131 @@ def test_a_copy_older_than_both_plan_and_origin_is_refused_whole_and_opens_no_un
     assert seen["recorded"] == [], "nothing recorded without a round"
 
 
+_BUSY = "busy: another write to this project is still running — nothing was written, try again"
+_REFUSED = ("/car/.claude/skills/autosound-tuning is a folder, not a link, and a copy inside the "
+            "project cannot be trusted; re-link it to TCC's copy.")
+
+
+def _stopping_ledger(monkeypatch, answer: str, *, at: str):
+    """`_ledger_calls`, with a busy or refused answer (#171, #169) for the write of `at` — a title
+    or a channel — and an ordinary one for every other."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+
+    calls = _ledger_calls(monkeypatch)
+    stop = process_writer.Busy(_BUSY) if answer == "busy" else process_writer.Refused(_REFUSED)
+
+    def record(d, title):
+        calls.append(("taken", title))
+        if title == at:
+            raise stop
+
+    def protect(d, channel, legs, source="user"):
+        calls.append(("protective", channel, legs, source))
+        if channel == at:
+            raise stop
+
+    monkeypatch.setattr(mp.process_writer, "record_capture", record)
+    monkeypatch.setattr(mp.process_writer, "set_protective", protect)
+    return calls, str(stop)
+
+
+@pytest.mark.parametrize("answer", ["busy", "refused"])
+def test_after_a_busy_or_refused_write_the_ledger_asks_nothing_more_and_says_what_it_did_not_record(
+        tmp_path, monkeypatch, answer):
+    """M29: on an open round each title and each channel was asked on its own, so a busy answer —
+    which waits `LOCK_WAIT_S`, a minute, off the GUI thread — was waited for once per title and per
+    channel, and a refused binding put the same sentence on the status line once for each. Every
+    write after one of them gets the same answer, as `title_fixes.supersede_each` already knows:
+    nothing more is asked, and what was not recorded is named once, with the answer."""
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls, why = _stopping_ledger(monkeypatch, answer, at="w-R_6 (sw)")
+    worker = _LedgerWriteWorker(
+        project_dir=tmp_path, round_id="r1", version=6, expected=[],
+        titles=["w-L_6 (sw)", "w-R_6 (sw)", "m-L_6 (sw)"], protective={"w-L": "OFF", "w-R": "OFF"},
+    )
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert calls == [("taken", "w-L_6 (sw)"), ("taken", "w-R_6 (sw)")], "nothing asked after it"
+    assert seen["recorded"] == ["w-L_6 (sw)"]
+    assert (seen["refused"], seen["prot_refused"], seen["prot_done"]) == ([], [], [])
+    assert (seen["stopped"], seen["not_recorded"], seen["prot_not_recorded"]) == (
+        why, ["w-R_6 (sw)", "m-L_6 (sw)"], ["w-L", "w-R"])
+
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._set_status("capImportDone", n=1)  # the import's lead, as it stands when the ledger answers
+    panel._on_ledger_written(seen)
+    said = panel._status_label.text()
+    assert i18n.t("capRoundStoppedBoth").format(
+        titles="w-R_6 (sw), m-L_6 (sw)", channels="w-L, w-R", why=why) in said, said
+    assert said.count(why) == 1, said
+
+
+def test_a_busy_answer_for_a_channel_leaves_the_channels_after_it_unasked(tmp_path, monkeypatch):
+    """The same for the protective record: the channel answered busy and the ones after it are
+    named once, under their own line; the captures, all recorded, are not."""
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls, why = _stopping_ledger(monkeypatch, "busy", at="m-L")
+    worker = _LedgerWriteWorker(
+        project_dir=tmp_path, round_id="r1", version=6, expected=[], titles=["w-L_6 (sw)"],
+        protective={"m-L": "OFF", "m-R": "OFF", "w-L": "OFF"},
+    )
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert calls == [("taken", "w-L_6 (sw)"), ("protective", "m-L", "OFF", "user")]
+    assert (seen["recorded"], seen["not_recorded"], seen["prot_not_recorded"]) == (
+        ["w-L_6 (sw)"], [], ["m-L", "m-R", "w-L"])
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._set_status("capImportDone", n=1)  # the import's lead, as it stands when the ledger answers
+    panel._on_ledger_written(seen)
+    assert i18n.t("capRoundStoppedProt").format(
+        channels="m-L, m-R, w-L", why=why) in panel._status_label.text()
+
+
+def test_a_flag_one_channel_sends_stops_no_other_channel(tmp_path, monkeypatch):
+    """Not every refusal says the same about the writes to come: a copy that does not know
+    `--source` (`UnknownFlag`) refuses only the channel this window filled in, which sends it —
+    a channel a person answered sends none, and is recorded (the `Refused` docstring)."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+
+    def protect(d, channel, legs, source="user"):
+        calls.append(("protective", channel, legs, source))
+        if source != "user":
+            raise process_writer.UnknownFlag("--source")
+
+    monkeypatch.setattr(mp.process_writer, "set_protective", protect)
+    worker = _LedgerWriteWorker(
+        project_dir=tmp_path, round_id="r1", version=6, expected=[], titles=[],
+        protective={"w-L": "OFF", "w-R": "OFF"}, auto={"w-L"},
+    )
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert [c[1] for c in calls if c[0] == "protective"] == ["w-L", "w-R"]
+    assert seen["stopped"] == "" and seen["prot_not_recorded"] == []
+    assert seen["prot_done"] + seen["prot_lost"] == ["w-R"], "written; the read-back is not this test's"
+    assert len(seen["prot_refused"]) == 1 and "--source" in seen["prot_refused"][0]
+
+
 def test_the_columns_scroll_sideways_on_tcc_s_own_bar(monkeypatch):
     """VM-10 (the Windows VM): under the measurement grid, whose «GROUP (RTA)» column did not fit,
     a native grey bar with «‹ ›» arrows. The columns scroll on their own both ways on purpose (the
