@@ -831,6 +831,48 @@ def test_a_signature_that_is_simply_wrong_stays_a_bad_signature(monkeypatch, tmp
     assert (ok, reason) == (False, "bad_signature") and "no principal matched" in line
 
 
+@pytest.mark.parametrize("said", [
+    # a helper's words that carry the bare `-Y` of git's sentence
+    "error: this signing helper does not verify: -Y find-principals",
+    # the head of getopt's sentence, from somebody else
+    "error: unknown option: -Y find-principals",
+    # the config key git names, said by a helper rather than by git
+    "hint: this helper signs for git with gpg.format=ssh; it does not verify",
+])
+def test_a_text_that_merely_carries_a_word_of_git_s_sentences_stays_a_bad_signature(
+        monkeypatch, tmp_path, said):
+    """T-35 (#174). The classifier matched tokens — a bare `-Y`, `unknown option`, `gpg.format` —
+    so words like a signing helper's refusal read as a machine too old to check, and the row sent
+    the person to update an OpenSSH or a git that was fine. Only git's own sentences say that."""
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
+        (False, said) if "verify-tag" in args else (True, "git version 2.51.0")))
+
+    ok, line, reason = updates._verify_tag(tmp_path, "v3.0.64")
+
+    assert (ok, reason) == (False, "bad_signature"), line
+    assert line == f"v3.0.64: {said}", "in git's words, naming the tag"
+
+
+def test_the_signature_is_checked_by_ssh_keygen_whatever_program_git_is_set_to(monkeypatch,
+                                                                               tmp_path):
+    """T-35 (#174). git checks an SSH signature with `gpg.ssh.program`, and a person who signs
+    their own commits through a helper (1Password's) has it set to that helper: through it a good
+    release was refused. The check pins git's own default on the command line, before the
+    subcommand, where it outranks every config file."""
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+    asked = []
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
+        asked.append(args) or (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x')))
+
+    ok, line, _why = updates._verify_tag(tmp_path, "v3.0.64")
+
+    assert ok, line
+    verify = next(args for args in asked if "verify-tag" in args)
+    options = verify[:verify.index("verify-tag")]
+    assert ("-c", "gpg.ssh.program=ssh-keygen") in zip(options, options[1:]), verify
+
+
 def test_tcc_s_own_signature_line_reaches_the_row_when_upkeep_gives_none(monkeypatch, tmp_path):
     """HUB-032 asks for a VISIBLE line. The developer's switch and a release from before signing
     were said only in the log; the row showed upkeep's line or nothing."""
@@ -1508,6 +1550,25 @@ def test_a_tcc_tag_before_signing_passes_with_a_line_saying_so(monkeypatch, tmp_
     assert ready.script is not None, ready
     assert ready.signature == ("v0.1.44 predates signed tags (they start at v0.1.45): installed "
                                "without a signature check")
+    assert _left_in(temp) == ["autosound-tcc"]
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_a_signing_helper_in_the_person_s_git_config_does_not_refuse_a_good_release(monkeypatch,
+                                                                                    tmp_path):
+    """T-35 (#174), with real git: the person's own config points `gpg.ssh.program` at a helper
+    that cannot check a signature — here one that is not there at all — and the release signed by
+    the constant's key still verifies, because the check runs ssh-keygen."""
+    temp = _tcc_origin(monkeypatch, tmp_path)
+    own = tmp_path / "the-person-s-gitconfig"
+    _git_in("config", "--file", str(own), "gpg.ssh.program", str(tmp_path / "signing-helper"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(own))
+    _offering(monkeypatch, "v0.1.45")
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None and ready.reason == "", ready
+    assert ready.signature == "v0.1.45: signature good (author)"
     assert _left_in(temp) == ["autosound-tcc"]
 
 

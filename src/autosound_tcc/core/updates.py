@@ -772,19 +772,25 @@ _NOT_A_FILE = {"120000": "a symbolic link", "160000": "a gitlink (a submodule)",
 _FETCH_TIMEOUT = 300.0
 
 
-#: What a git that CANNOT check an SSH signature says, as install.sh v3.0.64 `verify_tag` matches
-#: it (`*gpg.format*|*"unknown option"*|*"-Y"*`, "this git may be too old"): a git before 2.34 does
-#: not know `gpg.format=ssh`, an ssh-keygen without `-Y` answers "unknown option", and git itself
-#: names `ssh-keygen -Y` when it is missing. Plus no ssh-keygen at all — "cannot run" on macOS and
-#: Linux, "cannot spawn" in Git for Windows. Not a bad signature — a machine that cannot look —
-#: and on the VM, with an older git, it read as a forged release.
-_CANNOT_CHECK = ("gpg.format", "unknown option", "-Y", "cannot run ssh-keygen",
-                 "cannot spawn ssh-keygen")
+#: What a git that CANNOT check an SSH signature says — whole sentences of its answer, never one
+#: word of them (T-35, #174): a bare `-Y` matched a signing helper's words, and a good release's
+#: refusal was called an old OpenSSH. A git before 2.34 does not know `gpg.format=ssh`
+#: ("unsupported value for gpg.format: ssh"). From 2.34 git says itself when ssh-keygen predates
+#: 8.2p1, naming `ssh-keygen -Y find-principals/verify` — matched on that command, which git's
+#: translations keep; an ssh-keygen with no `-Y` at all answers "unknown option -- Y". Plus no
+#: ssh-keygen at all — "cannot run" on macOS and Linux, "cannot spawn" in Git for Windows. Not a
+#: bad signature — a machine that cannot look — and on the VM, with an older git, it read as a
+#: forged release. install.sh v3.0.64 `verify_tag` matches the words
+#: (`*gpg.format*|*"unknown option"*|*"-Y"*`, "this git may be too old"); this is narrower.
+_GIT_CANNOT = "unsupported value for gpg.format"
+_CANNOT_CHECK = (_GIT_CANNOT, "unknown option -- Y", "ssh-keygen -Y find-principals/verify",
+                 "cannot run ssh-keygen", "cannot spawn ssh-keygen")
 
 #: Of those, the ones that are OpenSSH's and not git's (tcc#123): git reads `gpg.format`, and
 #: `ssh-keygen` does the checking — missing, or older than `-Y` (git names 8.2p1). «Update git»
 #: sent somebody whose git was fine to update it, and the old ssh-keygen stayed.
-_OPENSSH_CANNOT = ("unknown option", "-Y", "cannot run ssh-keygen", "cannot spawn ssh-keygen")
+_OPENSSH_CANNOT = ("unknown option -- Y", "ssh-keygen -Y find-principals/verify",
+                   "cannot run ssh-keygen", "cannot spawn ssh-keygen")
 
 
 def _release_key(name: str) -> Optional[tuple[int, ...]]:
@@ -841,15 +847,18 @@ def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM,
     with tempfile.TemporaryDirectory(prefix="autosound_signers_") as tmp:
         signers = Path(tmp) / "allowed_signers"
         signers.write_text(allowed_signers_line(principal, signing_key) + "\n", encoding="utf-8")
+        # `gpg.ssh.program` pinned to git's own default (T-35, #174): somebody who signs through a
+        # helper (1Password's) has it set to that helper, and through it a good release was
+        # refused. On the command line it outranks every config file.
         ok, said = _git("-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={signers}",
-                        "verify-tag", tag, cwd=repo)
+                        "-c", "gpg.ssh.program=ssh-keygen", "verify-tag", tag, cwd=repo)
     if ok and 'Good "git" signature' in said:
         return True, f"{tag}: signature good ({principal})", ""
     last = (said.splitlines() or ["git verify-tag failed"])[-1]
     if any(mark in said for mark in _CANNOT_CHECK):
         _known, version = _git("--version")
-        # git's own word first: a git before 2.34 says `gpg.format`, and nothing of OpenSSH.
-        openssh = "gpg.format" not in said and any(mark in said for mark in _OPENSSH_CANNOT)
+        # git's own word first: a git before 2.34 says so of `gpg.format`, and nothing of OpenSSH.
+        openssh = _GIT_CANNOT not in said and any(mark in said for mark in _OPENSSH_CANNOT)
         return (False, f"{version or 'git'}: {last}",
                 "openssh_too_old" if openssh else "git_too_old")
     return False, f"{tag}: {last}", "bad_signature"
