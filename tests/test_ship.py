@@ -964,6 +964,18 @@ def test_method_newest_tests_the_tag_the_app_offers_and_names_it():
         "a tag written into the file is a second pin, not the newest"
 
 
+def test_method_newest_moves_the_submodule_before_the_suite_runs():
+    """M80: the checkout of the tag and the suite are two steps of one job, and their order is the
+    point. Swapped, the suite runs the PINNED method under the newest tag's name — a green that
+    says nothing about the tag. Read as the runner reads the job: comments out, top to bottom."""
+    suite = _workflow_code(_workflow_jobs(METHOD_NEWEST.read_text(encoding="utf-8"))["suite"])
+    moved = [at for at, line in enumerate(suite) if re.search(r'git .*checkout .*"\$TAG"', line)]
+    ran = [at for at, line in enumerate(suite) if "python -m pytest tests/" in line]
+
+    assert moved and ran, f"the move at {moved}, the suite at {ran}"
+    assert max(moved) < min(ran), "the suite runs before the submodule is on the tag"
+
+
 def test_method_newest_goes_red_for_real_on_the_locked_environment():
     """No `continue-on-error`: a nightly that cannot go red is one nobody reads, and the point is
     to see a breaking method release within a day. Every `uv run` is `--locked`: the suite runs

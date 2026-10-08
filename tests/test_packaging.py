@@ -34,6 +34,8 @@ LIGHT_MODULES = (
     "autosound_tcc.core.project_settings",
     "autosound_tcc.core.contract_check",
     "autosound_tcc.core.method_binding",
+    # The nightly's pick job (`method-newest.yml`) imports it on the light install (M81).
+    "autosound_tcc.core.updates",
 )
 
 #: Blocked as a group: shiboken6 is PySide6's own runtime, and numpy arrives with pyqtgraph.
