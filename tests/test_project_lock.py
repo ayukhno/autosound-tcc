@@ -195,12 +195,11 @@ def test_a_project_reached_through_a_link_waits_on_the_same_thread_lock(tmp_path
         assert _waits_on_the_thread_lock(alias / "car"), "the link took a lock of its own"
 
 
-@pytest.mark.xfail(sys.platform == "darwin", strict=True, raises=AssertionError,
-                   reason="macOS keeps the typed case in `Path.resolve()`, so `_thread_lock` keys "
-                          "CAR and Car apart (the flock still makes them wait there)")
 def test_a_project_spelled_in_another_case_waits_on_the_same_thread_lock(tmp_path):
-    """The same on a disk that ignores case — Windows' NTFS, where `resolve()` answers the case on
-    disk. A disk that tells CAR from Car has two folders there, and two projects."""
+    """The same on a disk that ignores case: CAR and Car are one folder, so one lock. `resolve()`
+    keeps the case it is given on macOS, so the lock is the folder's own — its device and inode —
+    and not its spelling (R-bb). A disk that tells CAR from Car has two folders there, and two
+    projects."""
     real = tmp_path / "Car"
     real.mkdir()
     if not os.path.isdir(tmp_path / "CAR"):
@@ -208,6 +207,32 @@ def test_a_project_spelled_in_another_case_waits_on_the_same_thread_lock(tmp_pat
 
     with _held_by_another_thread(project_lock._thread_lock(real)):
         assert _waits_on_the_thread_lock(tmp_path / "CAR"), "CAR took a lock of its own"
+
+
+def test_a_disk_that_numbers_every_folder_zero_keys_the_lock_by_the_resolved_path(tmp_path,
+                                                                                monkeypatch):
+    """R-bb's fallback, as `method_binding._inside` has it (M24): a disk that numbers every folder
+    0 — a network share, a FUSE mount — has no identity to compare, and keyed by it every folder
+    there would be one project, each write waiting on every other. There the resolved path is the
+    key: two spellings of one folder still share a lock, two folders do not."""
+    real_stat, asked = os.stat, []
+
+    def stat(path):
+        asked.append(path)
+        return SimpleNamespace(st_dev=real_stat(path).st_dev, st_ino=0)
+
+    monkeypatch.setattr(project_lock, "os", SimpleNamespace(stat=stat))
+    real = tmp_path / "real" / "car"
+    real.mkdir(parents=True)
+    (tmp_path / "other").mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(tmp_path / "real", target_is_directory=True)
+
+    lock = project_lock._thread_lock(real)
+
+    assert asked, "the folder's identity was never asked"
+    assert project_lock._thread_lock(alias / "car") is lock, "one folder by two spellings, two locks"
+    assert project_lock._thread_lock(tmp_path / "other") is not lock, "two folders, one lock"
 
 
 @posix_only

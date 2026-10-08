@@ -26,6 +26,7 @@ Qt-free. No other module imports `fcntl` or holds the writer lock.
 
 from __future__ import annotations
 
+import os
 import re
 import threading
 import time
@@ -51,7 +52,9 @@ _POLL_S = 0.05
 _WRITE_LOCK = ("rew_tool", "write_lock.py")
 _PROTOCOL_1 = re.compile(r"^PROTOCOL\s*=\s*1[ \t]*(?:#.*)?$", re.MULTILINE)
 
-_THREAD_LOCKS: dict[Path, threading.Lock] = {}
+#: One per project folder: by its identity, `(st_dev, st_ino)`, or by its resolved path where it has
+#: none (`_folder`).
+_THREAD_LOCKS: dict[tuple[int, int] | Path, threading.Lock] = {}
 _THREAD_LOCKS_GUARD = threading.Lock()
 
 
@@ -80,9 +83,9 @@ def lock_file(project_dir: Path | str) -> Path:
 
 
 def _thread_lock(project_dir: Path | str) -> threading.Lock:
-    """This process's lock for one project: one per resolved path, so two spellings of a project
+    """This process's lock for one project: one per project folder, so two spellings of a project
     share it and two projects never wait on each other."""
-    key = Path(project_dir).resolve()
+    key = _folder(project_dir)
     with _THREAD_LOCKS_GUARD:
         lock = _THREAD_LOCKS.get(key)
         if lock is None:
@@ -93,6 +96,24 @@ def _thread_lock(project_dir: Path | str) -> threading.Lock:
 def _left(deadline: float) -> float:
     """Seconds until `deadline`: never negative, and never more than a lock wait accepts."""
     return min(max(0.0, deadline - time.monotonic()), threading.TIMEOUT_MAX)
+
+
+def _folder(project_dir: Path | str) -> tuple[int, int] | Path:
+    """Which folder `project_dir` is (R-bb): the device and inode of its resolved path, one answer
+    for every spelling that reaches it — a link, a mapped parent, another case on a disk that
+    ignores case. The resolved path alone is not that: `resolve()` keeps the case it is given on
+    macOS, so `CAR` and `Car` were two locks for one folder. Where there is no flock (Windows) the
+    thread lock is the whole lock, and two locks for one folder are two writes at once.
+
+    The resolved path where there is no identity to read: a folder not made yet, one that cannot be
+    read, or a disk that numbers every folder 0 (a network share, a FUSE mount), where by number
+    every folder on it would be one project (`method_binding._inside`, M24)."""
+    resolved = Path(project_dir).resolve()
+    try:
+        info = os.stat(resolved)
+    except OSError:
+        return resolved
+    return (info.st_dev, info.st_ino) if info.st_ino else resolved
 
 
 @contextmanager
