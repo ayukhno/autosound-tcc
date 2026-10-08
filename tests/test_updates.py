@@ -873,11 +873,16 @@ def test_the_signature_is_checked_by_ssh_keygen_whatever_program_git_is_set_to(m
     assert ("-c", "gpg.ssh.program=ssh-keygen") in zip(options, options[1:]), verify
 
 
-def test_verify_tag_runs_git_in_the_c_locale_over_the_machine_s_own(monkeypatch, tmp_path):
-    """R-bd (#174). `_CANNOT_CHECK` reads git's sentences, and git ships translations — Ukrainian
-    among them, the language this app's people write. The verify-tag child gets `LC_ALL=C` over
-    whatever the machine set, and keeps `_NO_PROMPTING` as it is."""
-    monkeypatch.setenv("LC_ALL", "uk_UA.UTF-8")
+def test_verify_tag_asks_git_for_english_messages_and_nothing_else_of_the_locale(monkeypatch,
+                                                                                 tmp_path):
+    """R-bd, R-bf (#174). `_CANNOT_CHECK` reads git's sentences, and git ships translations —
+    Ukrainian among them, the language this app's people write. The verify-tag child gets
+    `LC_MESSAGES=C`, and loses `LC_ALL`, which would override it, and `LANGUAGE`, which gettext
+    reads before the locale. The rest of the locale stays the machine's, so a non-ASCII temp path
+    is passed as before; `_NO_PROMPTING` is kept."""
+    for name, value in (("LC_ALL", "uk_UA.UTF-8"), ("LANGUAGE", "uk"),
+                        ("LC_MESSAGES", "uk_UA.UTF-8"), ("LC_CTYPE", "uk_UA.UTF-8")):
+        monkeypatch.setenv(name, value)
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
     seen = []
 
@@ -892,11 +897,15 @@ def test_verify_tag_runs_git_in_the_c_locale_over_the_machine_s_own(monkeypatch,
 
     assert ok, line
     env = next(env for argv, env in seen if "verify-tag" in argv)
-    assert env.get("LC_ALL") == "C", env.get("LC_ALL")
+    locale = {name: env[name] for name in ("LC_MESSAGES", "LC_ALL", "LANGUAGE", "LC_CTYPE")
+              if name in env}
+    assert locale == {"LC_MESSAGES": "C", "LC_CTYPE": "uk_UA.UTF-8"}, locale
     assert {key: env.get(key) for key in updates._NO_PROMPTING} == updates._NO_PROMPTING
 
     updates._git("--version")
-    assert seen[-1][1].get("LC_ALL") == "uk_UA.UTF-8", "that call alone: any other keeps its own"
+    other = seen[-1][1]
+    assert (other.get("LC_ALL"), other.get("LANGUAGE")) == ("uk_UA.UTF-8", "uk"), \
+        "that call alone: any other keeps the machine's own"
 
 
 def test_tcc_s_own_signature_line_reaches_the_row_when_upkeep_gives_none(monkeypatch, tmp_path):

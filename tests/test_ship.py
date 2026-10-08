@@ -1250,13 +1250,15 @@ def test_the_release_tag_is_signed_and_verifies_against_allowed_signers(repo):
         f"ship's own check of the tag went unsaid: {lines}"
 
 
-def test_ship_checks_its_tag_with_ssh_keygen_and_in_the_c_locale(tmp_path, monkeypatch):
-    """R-bc, R-bd (#174): ship's check of the tag it made, held to the updater's
+def test_ship_checks_its_tag_with_ssh_keygen_and_english_messages(tmp_path, monkeypatch):
+    """R-bc, R-bd, R-bf (#174): ship's check of the tag it made, held to the updater's
     (`core/updates._verify_tag`). `gpg.ssh.program` pinned, so a signing helper in this machine's
-    git config is not what verifies; `LC_ALL=C` over the machine's own, so the reason a Stop
-    quotes is git's English sentence."""
+    git config is not what verifies; `LC_MESSAGES=C`, with `LC_ALL` and `LANGUAGE` gone, so the
+    reason a Stop quotes is git's English sentence, and the rest of the locale is the machine's."""
     (tmp_path / ship_mod.SIGNERS).write_text("author ssh-ed25519 AAAA\n", encoding="utf-8")
-    monkeypatch.setenv("LC_ALL", "uk_UA.UTF-8")
+    for name, value in (("LC_ALL", "uk_UA.UTF-8"), ("LANGUAGE", "uk"),
+                        ("LC_MESSAGES", "uk_UA.UTF-8"), ("LC_CTYPE", "uk_UA.UTF-8")):
+        monkeypatch.setenv(name, value)
     seen = []
 
     def run_spy(argv, **kw):
@@ -1271,8 +1273,10 @@ def test_ship_checks_its_tag_with_ssh_keygen_and_in_the_c_locale(tmp_path, monke
     assert good.startswith('Good "git" signature for author'), good
     argv, env = next((argv, env) for argv, env in seen if "verify-tag" in argv)
     options = argv[1:argv.index("verify-tag")]
-    pinned = ("-c", "gpg.ssh.program=ssh-keygen") in zip(options, options[1:])
-    assert (pinned, env.get("LC_ALL")) == (True, "C"), argv
+    assert ("-c", "gpg.ssh.program=ssh-keygen") in zip(options, options[1:]), argv
+    locale = {name: env[name] for name in ("LC_MESSAGES", "LC_ALL", "LANGUAGE", "LC_CTYPE")
+              if name in env}
+    assert locale == {"LC_MESSAGES": "C", "LC_CTYPE": "uk_UA.UTF-8"}, locale
 
 
 def test_a_tag_that_does_not_verify_is_deleted_and_nothing_is_pushed(repo, signing_keys):
