@@ -867,16 +867,18 @@ def test_every_uv_run_in_a_workflow_runs_what_the_lock_records():
 
     A `--no-project` line is exempt, and that is uv's rule, not a gap: with no project there is no
     lock for `--locked` to hold the run to — `ci.yml`'s shard splitter is stdlib only and runs
-    without the project on purpose."""
+    without the project on purpose. The check is a substring test on the line: a `--locked` after
+    the command, an argument to the program rather than to uv, would pass it too."""
     workflows = ROOT / ".github" / "workflows"
     runs = [(path.name, line.strip())
             for path in sorted(workflows.iterdir()) if path.suffix in (".yml", ".yaml")
             for line in path.read_text(encoding="utf-8").splitlines()
             if "uv run" in line and not line.lstrip().startswith("#")]
+    held = [(name, line) for name, line in runs if "--no-project" not in line]
 
-    assert runs, f"no `uv run` in any workflow under {workflows}: a scan of nothing passes"
-    unlocked = [(name, line) for name, line in runs
-                if "--locked" not in line and "--no-project" not in line]
+    assert held, (f"no `uv run` held to `--locked` in any workflow under {workflows}: a scan of "
+                  f"nothing, or of exempt lines only, passes ({len(runs)} found)")
+    unlocked = [(name, line) for name, line in held if "--locked" not in line]
     assert unlocked == [], unlocked
 
 
@@ -1250,15 +1252,13 @@ def test_the_release_tag_is_signed_and_verifies_against_allowed_signers(repo):
         f"ship's own check of the tag went unsaid: {lines}"
 
 
-def test_ship_checks_its_tag_with_ssh_keygen_and_english_messages(tmp_path, monkeypatch):
-    """R-bc, R-bd, R-bf (#174): ship's check of the tag it made, held to the updater's
+def test_ship_checks_its_tag_with_ssh_keygen_and_english_messages(tmp_path, monkeypatch,
+                                                                   ukrainian_parent):
+    """R-bc, R-bd, R-bf, R-bg (#174): ship's check of the tag it made, held to the updater's
     (`core/updates._verify_tag`). `gpg.ssh.program` pinned, so a signing helper in this machine's
     git config is not what verifies; `LC_MESSAGES=C`, with `LC_ALL` and `LANGUAGE` gone, so the
-    reason a Stop quotes is git's English sentence, and the rest of the locale is the machine's."""
+    reason a Stop quotes is git's English sentence, and the charset is the one the machine ran."""
     (tmp_path / ship_mod.SIGNERS).write_text("author ssh-ed25519 AAAA\n", encoding="utf-8")
-    for name, value in (("LC_ALL", "uk_UA.UTF-8"), ("LANGUAGE", "uk"),
-                        ("LC_MESSAGES", "uk_UA.UTF-8"), ("LC_CTYPE", "uk_UA.UTF-8")):
-        monkeypatch.setenv(name, value)
     seen = []
 
     def run_spy(argv, **kw):

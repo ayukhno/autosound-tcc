@@ -49,7 +49,8 @@ from typing import Optional
 
 from autosound_tcc.core import child, config, install_report, method_binding, vendor_loader
 from autosound_tcc.core.signed_tags import (SKIP_VERIFY_VAR, TCC_SIGNED_FROM, TCC_SIGNING_KEY,
-                                            TCC_SIGNING_PRINCIPAL, allowed_signers_line)
+                                            TCC_SIGNING_PRINCIPAL, VERIFY_PROGRAM,
+                                            allowed_signers_line, verify_env)
 
 #: Where each half comes from. The installer's own constants, kept identical on purpose: an update
 #: that pulled from a different place than the install did would be a second source of truth.
@@ -357,24 +358,14 @@ class Status:
 #: is what it is supposed to be when offline anyway.
 _NO_PROMPTING = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never", "GIT_ASKPASS": ""}
 
-#: git's messages in English whatever the machine speaks, for the one call whose answer is read by
-#: its words: `verify-tag` (`_CANNOT_CHECK`). git ships translations — Ukrainian among them, the
-#: language this app's people write (R-bd, #174). The message language only (R-bf): `LC_ALL` would
-#: override `LC_MESSAGES` and gettext reads `LANGUAGE` before the locale, so both are removed (a
-#: None in `_git`'s `extra_env`), and the charset stays the machine's — a non-ASCII temp path, a
-#: Cyrillic Windows user name, is passed as before. That call alone; `_NO_PROMPTING` is every
-#: call's.
-_C_MESSAGES = {"LC_MESSAGES": "C", "LC_ALL": None, "LANGUAGE": None}
-
-
 _log = logging.getLogger("autosound_tcc")
 
 
 def _git(*args: str, cwd: Optional[Path] = None, timeout: float = _ASK_TIMEOUT,
-         extra_env: Optional[dict[str, Optional[str]]] = None) -> tuple[bool, str]:
+         base_env: Optional[dict[str, str]] = None) -> tuple[bool, str]:
     """Run git, return `(ok, output)`. Never raises — a failed probe is an answer, not a crash.
-    `extra_env` is laid over the environment for this call alone, a None removing that variable
-    (`_C_MESSAGES`).
+    `base_env` is the environment git starts from, this process's own when None (`verify-tag`
+    passes `signed_tags.verify_env`'s); `_NO_PROMPTING` is laid over it either way.
 
     Bounded with the tree killed (`child.run_bounded`): git runs https as a child of its own,
     `git-remote-https`, on git's stderr, and `subprocess.run` killed git alone at the timeout and
@@ -384,8 +375,7 @@ def _git(*args: str, cwd: Optional[Path] = None, timeout: float = _ASK_TIMEOUT,
             ["git", *args], text=True, timeout=timeout,
             encoding="utf-8",
             errors="replace",
-            env={name: value for name, value in
-                 {**os.environ, **_NO_PROMPTING, **(extra_env or {})}.items() if value is not None},
+            env={**(os.environ if base_env is None else base_env), **_NO_PROMPTING},
             # Plain `quiet()`. This used to merge in a console of its own, on the theory that
             # `ls-remote` spawns `git-remote-https` and a grandchild with no console allocates
             # one. Watched on the machine that has the problem (2026-09-11), it does not: across
@@ -790,21 +780,20 @@ _FETCH_TIMEOUT = 300.0
 #: refusal was called an old OpenSSH. A git before 2.34 does not know `gpg.format=ssh`
 #: ("unsupported value for gpg.format: ssh"). From 2.34 git says itself when ssh-keygen predates
 #: 8.2p1, naming `ssh-keygen -Y find-principals/verify` — matched on that command, which git's
-#: translations keep, though the check asks git for English messages anyway (`_C_MESSAGES`); an
+#: translations keep, though the check asks git for English messages anyway (`verify_env`); an
 #: ssh-keygen with no `-Y` at all answers "unknown option -- Y". Plus no ssh-keygen at all —
 #: "cannot run" on macOS and Linux, "cannot spawn" in Git for Windows. Not a bad signature — a
 #: machine that cannot look — and on the VM, with an older git, it read as a forged release.
 #: install.sh v3.0.64 `verify_tag` matches the words (`*gpg.format*|*"unknown option"*|*"-Y"*`,
 #: "this git may be too old"); this is narrower.
+#:
+#: Each sentence is written once: git's own, and the ones that are OpenSSH's (tcc#123) — git reads
+#: `gpg.format`, and `ssh-keygen` does the checking, missing or older than `-Y` (git names 8.2p1).
+#: «Update git» sent somebody whose git was fine to update it, and the old ssh-keygen stayed.
 _GIT_CANNOT = "unsupported value for gpg.format"
-_CANNOT_CHECK = (_GIT_CANNOT, "unknown option -- Y", "ssh-keygen -Y find-principals/verify",
-                 "cannot run ssh-keygen", "cannot spawn ssh-keygen")
-
-#: Of those, the ones that are OpenSSH's and not git's (tcc#123): git reads `gpg.format`, and
-#: `ssh-keygen` does the checking — missing, or older than `-Y` (git names 8.2p1). «Update git»
-#: sent somebody whose git was fine to update it, and the old ssh-keygen stayed.
 _OPENSSH_CANNOT = ("unknown option -- Y", "ssh-keygen -Y find-principals/verify",
                    "cannot run ssh-keygen", "cannot spawn ssh-keygen")
+_CANNOT_CHECK = (_GIT_CANNOT, *_OPENSSH_CANNOT)
 
 
 def _release_key(name: str) -> Optional[tuple[int, ...]]:
@@ -861,13 +850,13 @@ def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM,
     with tempfile.TemporaryDirectory(prefix="autosound_signers_") as tmp:
         signers = Path(tmp) / "allowed_signers"
         signers.write_text(allowed_signers_line(principal, signing_key) + "\n", encoding="utf-8")
-        # `gpg.ssh.program` pinned to git's own default (T-35, #174): somebody who signs through a
-        # helper (1Password's) has it set to that helper, and through it a good release was
-        # refused. On the command line it outranks every config file. And git's messages in
-        # English (`_C_MESSAGES`, R-bd, R-bf): `_CANNOT_CHECK` reads git's English sentences.
+        # The recipe ship's own check runs too (`signed_tags`, #174): `gpg.ssh.program` pinned
+        # (`VERIFY_PROGRAM`, T-35), so a signing helper in the person's git config does not do
+        # the verifying, and git's messages in English with the charset kept (`verify_env`),
+        # because `_CANNOT_CHECK` reads git's English sentences.
         ok, said = _git("-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={signers}",
-                        "-c", "gpg.ssh.program=ssh-keygen", "verify-tag", tag, cwd=repo,
-                        extra_env=_C_MESSAGES)
+                        *VERIFY_PROGRAM, "verify-tag", tag, cwd=repo,
+                        base_env=verify_env(os.environ))
     if ok and 'Good "git" signature' in said:
         return True, f"{tag}: signature good ({principal})", ""
     last = (said.splitlines() or ["git verify-tag failed"])[-1]

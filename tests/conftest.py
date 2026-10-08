@@ -689,3 +689,20 @@ def app_ground():
         theme._CURRENT = was[3]
         if i18n.current_language() != was[4]:
             i18n.set_language(was[4])
+
+
+@pytest.fixture(params=["uk_UA.UTF-8", None, "C"],
+                ids=["LC_CTYPE set", "no LC_CTYPE, no LANG", "LC_CTYPE=C"])
+def ukrainian_parent(request, monkeypatch):
+    """A parent process in Ukrainian through `LC_ALL`, `LANGUAGE` and `LC_MESSAGES`, with one of
+    three charsets beside it (R-bg, #174): its own `LC_CTYPE`; none at all, no `LC_CTYPE` and no
+    `LANG`; or `LC_CTYPE=C`, which `LC_ALL` outranks. Each way the parent runs `uk_UA.UTF-8`, and
+    a `git verify-tag` child (`core/signed_tags.verify_env`) must keep that charset."""
+    for name, value in (("LC_ALL", "uk_UA.UTF-8"), ("LANGUAGE", "uk"),
+                        ("LC_MESSAGES", "uk_UA.UTF-8")):
+        monkeypatch.setenv(name, value)
+    if request.param is None:
+        monkeypatch.delenv("LC_CTYPE", raising=False)
+        monkeypatch.delenv("LANG", raising=False)
+    else:
+        monkeypatch.setenv("LC_CTYPE", request.param)

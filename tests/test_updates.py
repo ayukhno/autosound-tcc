@@ -808,7 +808,7 @@ def test_a_git_too_old_to_check_is_not_called_a_bad_signature(monkeypatch, tmp_p
     monkeypatch.setattr(updates, "_run_upkeep", lambda argv, timeout: ran.append(argv))
     monkeypatch.setattr(updates, "_git_blob", lambda repo, spec: pytest.fail("nothing extracted"))
 
-    def fake_git(*args, cwd=None, timeout=None, extra_env=None):
+    def fake_git(*args, cwd=None, timeout=None, base_env=None):
         if "verify-tag" in args:
             return False, said
         if args == ("--version",):
@@ -827,7 +827,7 @@ def test_a_git_too_old_to_check_is_not_called_a_bad_signature(monkeypatch, tmp_p
 def test_a_signature_that_is_simply_wrong_stays_a_bad_signature(monkeypatch, tmp_path):
     _an_installed_clone(monkeypatch, tmp_path)
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
-    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, extra_env=None: (
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, base_env=None: (
         (False, 'Could not verify signature.\nerror: no principal matched') if "verify-tag" in args
         else (True, "")))
 
@@ -850,7 +850,7 @@ def test_a_text_that_merely_carries_a_word_of_git_s_sentences_stays_a_bad_signat
     so words like a signing helper's refusal read as a machine too old to check, and the row sent
     the person to update an OpenSSH or a git that was fine. Only git's own sentences say that."""
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
-    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, extra_env=None: (
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, base_env=None: (
         (False, said) if "verify-tag" in args else (True, "git version 2.51.0")))
 
     ok, line, reason = updates._verify_tag(tmp_path, "v3.0.64")
@@ -867,7 +867,7 @@ def test_the_signature_is_checked_by_ssh_keygen_whatever_program_git_is_set_to(m
     subcommand, where it outranks every config file."""
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
     asked = []
-    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, extra_env=None: (
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, base_env=None: (
         asked.append(args) or (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x')))
 
     ok, line, _why = updates._verify_tag(tmp_path, "v3.0.64")
@@ -878,16 +878,13 @@ def test_the_signature_is_checked_by_ssh_keygen_whatever_program_git_is_set_to(m
     assert ("-c", "gpg.ssh.program=ssh-keygen") in zip(options, options[1:]), verify
 
 
-def test_verify_tag_asks_git_for_english_messages_and_nothing_else_of_the_locale(monkeypatch,
-                                                                                 tmp_path):
-    """R-bd, R-bf (#174). `_CANNOT_CHECK` reads git's sentences, and git ships translations —
+def test_verify_tag_asks_git_for_english_messages_and_nothing_else_of_the_locale(
+        monkeypatch, tmp_path, ukrainian_parent):
+    """R-bd, R-bf, R-bg (#174). `_CANNOT_CHECK` reads git's sentences, and git ships translations —
     Ukrainian among them, the language this app's people write. The verify-tag child gets
     `LC_MESSAGES=C`, and loses `LC_ALL`, which would override it, and `LANGUAGE`, which gettext
-    reads before the locale. The rest of the locale stays the machine's, so a non-ASCII temp path
-    is passed as before; `_NO_PROMPTING` is kept."""
-    for name, value in (("LC_ALL", "uk_UA.UTF-8"), ("LANGUAGE", "uk"),
-                        ("LC_MESSAGES", "uk_UA.UTF-8"), ("LC_CTYPE", "uk_UA.UTF-8")):
-        monkeypatch.setenv(name, value)
+    reads before the locale. The charset stays the parent's — `LC_ALL`'s, which outranked its
+    `LC_CTYPE` — so a non-ASCII temp path is passed as before; `_NO_PROMPTING` is kept."""
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
     seen = []
 
@@ -1632,6 +1629,30 @@ def test_a_signing_helper_in_the_person_s_git_config_does_not_refuse_a_good_rele
 
 
 @pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_a_good_tcc_tag_verifies_under_a_temp_folder_named_in_cyrillic(monkeypatch, tmp_path):
+    """Review of #174, Minor 5, with real git: the temp folder sits under a user name in Cyrillic,
+    as on a Ukrainian Windows machine, so the bare repository and the signers file git hands
+    ssh-keygen live there. With git's messages asked in English and the charset kept
+    (`signed_tags.verify_env`), the path passes as it is, and a good tag verifies as good."""
+    _tcc_origin(monkeypatch, tmp_path)
+    temp = tmp_path / "Олександр" / "Тимчасові"
+    temp.mkdir(parents=True)
+    monkeypatch.setattr(updates.tempfile, "tempdir", str(temp))
+    _offering(monkeypatch, "v0.1.45")
+    real_git, asked = updates._git, []
+    monkeypatch.setattr(updates, "_git", lambda *args, **kw: (
+        asked.append(args) or real_git(*args, **kw)))
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None and ready.reason == "", ready
+    assert ready.signature == "v0.1.45: signature good (author)"
+    verify = next(args for args in asked if "verify-tag" in args)
+    assert any(str(temp) in arg for arg in verify), "the signers file was the Cyrillic folder's"
+    assert _left_in(temp) == ["autosound-tcc"], "the bare repository and the signers file are gone"
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
 def test_the_developer_switch_skips_tcc_s_check_and_says_so(monkeypatch, tmp_path):
     _tcc_origin(monkeypatch, tmp_path)
     _offering(monkeypatch, "v0.1.46")
@@ -1680,7 +1701,7 @@ def test_a_git_too_old_to_check_tcc_s_tag_installs_nothing(monkeypatch, tmp_path
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
     _offering(monkeypatch, "v0.1.45")
 
-    def fake_git(*args, cwd=None, timeout=None, extra_env=None):
+    def fake_git(*args, cwd=None, timeout=None, base_env=None):
         if "verify-tag" in args:
             return False, said
         if args == ("--version",):
@@ -1777,7 +1798,7 @@ def test_a_beta_candidate_of_tcc_is_ordered_on_its_channel_not_refused_as_no_rel
     checked like a release — not refused for not being named vX.Y.Z."""
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
     fetched = []
-    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, extra_env=None: (
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, base_env=None: (
         fetched.append(args) or ((True, "c" * 40) if "rev-parse" in args else
                                  (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x'))))
 

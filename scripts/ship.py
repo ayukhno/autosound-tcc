@@ -507,17 +507,16 @@ def verify_signed_tag(root: Path, tag: str) -> str:
         raise Stop(f"{tag} was signed, but there is no {SIGNERS} in this tree to verify it "
                    f"against. {drop_tag(root, tag)}: TCC's updater refuses a release tag that "
                    f"does not verify (tcc#102). Put {SIGNERS} back at the repository root")
-    # Held to the updater's own check (`core/updates._verify_tag`, R-bc, R-bd and R-bf, #174):
-    # `gpg.ssh.program` pinned, so a signing helper in this machine's git config is not what
-    # verifies, and git's messages in English, so the reason quoted below is git's English
-    # sentence. The message language only: `LC_ALL` would override `LC_MESSAGES` and gettext reads
-    # `LANGUAGE` before the locale, so both go; the charset stays this machine's.
-    english = {name: value for name, value in os.environ.items()
-               if name not in ("LC_ALL", "LANGUAGE")}
+    # The updater's own recipe, one copy (`core/signed_tags`, #174), imported the way
+    # `method_sha` imports its reader: `gpg.ssh.program` pinned, so a signing helper in this
+    # machine's git config is not what verifies, and git's messages in English with the charset
+    # kept, so the reason quoted below is git's English sentence.
+    sys.path.insert(0, str(Path(root) / "src"))
+    from autosound_tcc.core import signed_tags
     done = subprocess.run(["git", "-c", f"gpg.ssh.allowedSignersFile={signers}",
-                           "-c", "gpg.ssh.program=ssh-keygen", "verify-tag", tag],
+                           *signed_tags.VERIFY_PROGRAM, "verify-tag", tag],
                           cwd=str(root), capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", env={**english, "LC_MESSAGES": "C"})
+                          errors="replace", env=signed_tags.verify_env(os.environ))
     said = [line.strip() for line in f"{done.stderr}\n{done.stdout}".splitlines() if line.strip()]
     good = next((line for line in said if line.startswith('Good "git" signature')), "")
     if done.returncode == 0 and good:
