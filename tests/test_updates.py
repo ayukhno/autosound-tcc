@@ -1275,6 +1275,20 @@ def test_stable_still_asks_for_releases_only(monkeypatch):
     assert calls[-1] == ("ls-remote", "--tags", updates.TCC_REPO, "v*", "v*^{}")
 
 
+def test_the_newest_tcc_tag_is_ranked_over_release_shaped_names_only(monkeypatch):
+    """F10a (#174). `v*` lists every name that starts with a v, and `_version_key` ranked them
+    all: `v1.2.0-wip` outranked `v1.1.1`, and the press, which takes a release name only, refused
+    it as a bad signature. A name the press refuses is never the newest, on either channel."""
+    _git_answers(monkeypatch, {"ls-remote": (True, "\n".join([
+        f"{_HERE}\trefs/tags/v1.1.1",
+        f"{_THERE}\trefs/tags/v1.2.0-wip",
+        f"{'c' * 40}\trefs/tags/v1.1.1.1",
+    ]))})
+
+    assert updates.newest_tcc_tag() == "v1.1.1"
+    assert updates.newest_tcc_tag(updates.BETA) == "v1.1.1"
+
+
 _RC1, _RC2, _REL = "1" * 40, "2" * 40, "3" * 40
 
 

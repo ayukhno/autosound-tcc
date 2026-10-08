@@ -65,7 +65,8 @@ SKILL_TAG_GLOB = "v3.*"
 #: `main` since, finished or not. The panel showed a version and looked like it was following
 #: releases, but that number came out of `pyproject.toml` at that commit — it looked like a tag
 #: and was not one. `v*` rather than a major-pinned glob because TCC's own line is still `v0.x`
-#: and a major bump should not silently stop updates; `_version_key` does the ordering.
+#: and a major bump should not silently stop updates; `_release_key` does the ordering, over
+#: release names only (`newest_tcc_tag`).
 TCC_TAG_GLOB = "v*"
 
 #: The beta channel's own tags (hub RELEASE-CHANNEL.md §11.1). The first letter keeps them out of
@@ -496,7 +497,8 @@ def _newest_tag_in(repo: str, *globs: str, key=_version_key) -> tuple[str, str]:
 
     Several globs are one `ls-remote`, each with its own peel pattern, for the same reason. `key`
     orders the names and drops the ones it answers None for — the beta channel passes
-    `channel_key`; stable keeps `_version_key`, which drops nothing.
+    `channel_key`, TCC's stable `_release_key`; the method's `newest_tag` keeps `_version_key`,
+    which drops nothing.
     """
     global _last_probe_error
     patterns = [pattern for glob in globs for pattern in (glob, f"{glob}^{{}}")]
@@ -534,10 +536,14 @@ def newest_tag() -> str:
 
 
 def newest_tcc_tag(channel: str = STABLE) -> str:
-    """The newest tag of TCC itself on `channel` — a release, or on beta possibly a candidate — or ""."""
+    """The newest tag of TCC itself on `channel` — a release, or on beta possibly a candidate —
+    or "".
+
+    Ranked over the names the press takes and nothing else (F10a, #174): `v*` lists a `v1.2.0-wip`
+    too, `_version_key` put it above `v1.1.1`, and the press refused it as a bad signature."""
     if channel == BETA:
         return _newest_tag_in(TCC_REPO, TCC_TAG_GLOB, TCC_BETA_GLOB, key=channel_key)[0]
-    return _newest_tag_in(TCC_REPO, TCC_TAG_GLOB)[0]
+    return _newest_tag_in(TCC_REPO, TCC_TAG_GLOB, key=_release_key)[0]
 
 
 def _skill_repo_dir() -> Optional[Path]:
