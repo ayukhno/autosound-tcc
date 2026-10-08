@@ -1251,11 +1251,26 @@ def build_server(
             rew_api = vendor_loader.load_rew_api()
         except vendor_loader.VendorNotInitializedError as exc:
             return json.dumps({"applied": False, "error": str(exc)})
-        mid = rew_api.find_measurement_id(measurement)
-        if mid is None:
-            return json.dumps({"applied": False, "error": f"no REW measurement named {measurement!r}"})
-        rew_api.set_filters(mid, filters)
-        return json.dumps({"applied": True, "measurement": measurement, "count": len(filters)})
+
+        # The lookup and the write each wait on REW, up to 5 s a request: off the loop, as every
+        # other tool's blocking work (#176). What failed is the answer, not a tool error.
+        def _write() -> str:
+            try:
+                try:
+                    mid = rew_api.find_measurement_id(measurement)
+                except KeyError as exc:
+                    # REW holds none by that title, or several: the method's own words, which
+                    # `str()` would put in quotes. A KeyError from the write is not about a title,
+                    # so it is not caught here.
+                    return json.dumps({"applied": False, "error": exc.args[0]})
+                rew_api.set_filters(mid, filters)
+            except (OSError, ValueError) as exc:
+                # REW down or answering an error (`URLError`, `HTTPError`); an answer that cannot
+                # be read, or a write REW did not keep or the method would not send (`ValueError`).
+                return json.dumps({"applied": False, "error": f"REW: {exc}"})
+            return json.dumps({"applied": True, "measurement": measurement, "count": len(filters)})
+
+        return await _in_thread(_write)
 
     @tool()
     async def copy_helix_eq(text: str, note: str = "") -> str:

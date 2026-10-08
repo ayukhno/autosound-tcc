@@ -486,6 +486,86 @@ def test_rew_write_is_denied_before_any_rew_call(tmp_path, monkeypatch):
     assert called == []
 
 
+#: One peaking cut, keyed as REW takes it.
+_A_CUT = {"index": 1, "type": "PK", "enabled": True, "frequency": 1000.0, "gaindB": -3.0, "q": 2.0}
+
+
+def _write_rew_filters(tmp_path) -> dict:
+    """`write_rew_filters` of `_A_CUT` to `w-L_10 (sw)`, the Arbiter saying yes: its answer."""
+    mcp, _, _ = _server(tmp_path, RecordingBridge(allow=True))
+    return json.loads(_text(asyncio.run(mcp.call_tool(
+        "write_rew_filters", {"measurement": "w-L_10 (sw)", "filters": [_A_CUT]}))))
+
+
+def test_rew_down_is_said_and_nothing_is_applied(tmp_path):
+    """#176 F4: with REW down, the lookup's own request raised out of `write_rew_filters` and the
+    session got a tool error. It answers `applied: false`, with REW's words after `REW: `. REW is
+    down here for real: the suite points the method at a port nothing listens on (`_no_live_rew`
+    in tests/conftest.py), and the real lookup asks it."""
+    with pytest.raises(OSError) as down:  # what the method raises for REW down: a URLError
+        mcp_server.vendor_loader.load_rew_api().get_measurements()
+
+    answer = _write_rew_filters(tmp_path)
+
+    assert answer == {"applied": False, "error": f"REW: {down.value}"}
+
+
+@pytest.mark.parametrize("held, said", [
+    ({"1": {"title": "w-R_10 (sw)"}}, "No measurement titled 'w-L_10 (sw)'"),
+    ({"1": {"title": "w-L_10 (sw)"}, "2": {"title": "w-L_10 (sw)"}},
+     "Ambiguous: 2 measurements titled 'w-L_10 (sw)'"),
+], ids=["none", "several"])
+def test_a_title_rew_does_not_hold_once_is_said_in_the_methods_words(tmp_path, monkeypatch,
+                                                                     held, said):
+    """#176 F4: `find_measurement_id` never answers None. It raises a `KeyError` when REW holds no
+    measurement by the title and when it holds several, so `if mid is None` was dead and the
+    `KeyError` left the tool as an error. The answer has REW down's shape, with the method's own
+    words: `exc.args[0]`, since `str()` of a `KeyError` puts them in quotes. Nothing is written.
+    The real lookup, over a list REW could answer."""
+    rew_api = mcp_server.vendor_loader.load_rew_api()
+    monkeypatch.setattr(rew_api, "get_measurements", lambda: held)
+    written: list = []
+    monkeypatch.setattr(rew_api, "set_filters", lambda mid, filters: written.append(mid))
+    with pytest.raises(KeyError) as refused:
+        rew_api.find_measurement_id("w-L_10 (sw)", held)
+
+    answer = _write_rew_filters(tmp_path)
+
+    assert answer == {"applied": False, "error": refused.value.args[0]}
+    assert answer["error"].startswith(said), answer
+    assert written == []
+
+
+def test_rew_is_asked_and_written_off_the_servers_loop(tmp_path, monkeypatch):
+    """#176 F4: the lookup and the write each wait on REW, up to 5 s a request, and both ran on the
+    server's loop thread, so every other MCP call waited behind them. They run on a call thread of
+    their own (`_in_thread`), as every other tool's blocking work does."""
+    rew_api = mcp_server.vendor_loader.load_rew_api()
+    ran_on: dict = {}
+    written: list = []
+
+    def listed():
+        ran_on["lookup"] = threading.current_thread()
+        return {"7": {"title": "w-L_10 (sw)"}}
+
+    def write(mid, filters):
+        ran_on["write"] = threading.current_thread()
+        written.append((mid, filters))
+        return {"message": "Filters set"}
+
+    monkeypatch.setattr(rew_api, "get_measurements", listed)
+    monkeypatch.setattr(rew_api, "set_filters", write)
+    loop_thread = threading.current_thread()  # where `asyncio.run` runs the server's loop
+
+    answer = _write_rew_filters(tmp_path)
+
+    assert answer == {"applied": True, "measurement": "w-L_10 (sw)", "count": 1}
+    assert written == [("7", [_A_CUT])]
+    assert {step: thread.name for step, thread in ran_on.items()} == {
+        "lookup": mcp_server._CALL_THREAD, "write": mcp_server._CALL_THREAD}, ran_on
+    assert loop_thread not in ran_on.values()
+
+
 def test_report_phase_reads_the_phase_back_and_refreshes(tmp_path):
     """It is a signal, not a writer (D-6): the answer comes from the skill's file, and the GUI is
     told to re-read disk."""
