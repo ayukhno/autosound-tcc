@@ -328,6 +328,30 @@ def test_a_store_that_cannot_be_opened_is_refused_by_a_write_and_left_as_it_was(
     assert len(app_log_told) == 1 and str(path) in app_log_told[0], "said once, not per read"
 
 
+@pytest.mark.parametrize("write", ["record_imported", "record_retakes"])
+def test_a_store_that_cannot_be_opened_is_refused_on_every_platform(tmp_path, app_log_told,
+                                                                    write):
+    """The chmod test above cannot run on Windows (the review of Task 18, Minor 3). A folder where
+    the store should be is refused everywhere — `IsADirectoryError` on POSIX, `PermissionError`
+    on Windows — so the readers' "nothing imported" and the writes' refusal are pinned there too.
+    The old write failed here as well, but on its rename, and having said nothing: the type is
+    what tells the store's refusal from that."""
+    rows = ci.candidates(_rew(*_LIVE), tmp_path)
+    path = ci.store_path(tmp_path)
+    path.mkdir(parents=True)
+    (path / "inside").write_text("kept", encoding="utf-8")
+
+    assert ci.load_imported(tmp_path) == {}
+    with pytest.raises(OSError) as refused:
+        getattr(ci, write)(rows, project_dir=tmp_path)
+
+    assert refused.type is own_store.StoreUnreadable, "refused as the store's own failure"
+    assert (path / "inside").read_text(encoding="utf-8") == "kept", "never written over"
+    assert [p.name for p in path.parent.iterdir()] == [ci.FILENAME], (
+        "not set aside, and no temp file left beside it")
+    assert len(app_log_told) == 1 and str(path) in app_log_told[0], "said once, not per read"
+
+
 def test_the_title_written_down_can_be_the_one_the_rename_gave(tmp_path):
     """Step 2 renames on Apply; what the store must remember is what the measurement is called
     AFTER that — without this module knowing anything about renaming."""

@@ -151,13 +151,17 @@ def test_a_registry_shaped_wrong_inside_is_set_aside_not_an_error(tmp_path, app_
     assert len(app_log_told) == 1 and str(registry.path) in app_log_told[0], app_log_told
 
 
-@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
-                    reason="POSIX permissions, and root reads a file whatever its mode")
-@pytest.mark.parametrize("write", [
+#: Each of the registry's writes, for the refusal tests below.
+_EACH_WRITE = pytest.mark.parametrize("write", [
     lambda registry: registry.sync_phase("3"),
     lambda registry: registry.bind_session("2", "sess-new"),
     lambda registry: registry.close_phase("2"),
 ], ids=["sync_phase", "bind_session", "close_phase"])
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
+                    reason="POSIX permissions, and root reads a file whatever its mode")
+@_EACH_WRITE
 def test_a_registry_that_cannot_be_opened_reads_as_empty_and_is_never_written_over(
         tmp_path, app_log_told, write):
     """There and not readable is not "no sessions" (#173, R-l). The old reader answered an empty
@@ -179,4 +183,28 @@ def test_a_registry_that_cannot_be_opened_reads_as_empty_and_is_never_written_ov
     assert registry.path.read_bytes() == before, "never written over"
     assert refused.type is StoreUnreadable, "refused as the store's own failure, an OSError"
     assert not list(tmp_path.glob("*.corrupt-*")), "and not set aside: its bytes may be fine"
+    assert len(app_log_told) == 1 and str(registry.path) in app_log_told[0], "said once"
+
+
+@_EACH_WRITE
+def test_a_registry_that_cannot_be_opened_is_refused_on_every_platform(tmp_path, app_log_told,
+                                                                       write):
+    """The chmod test above cannot run on Windows (the review of Task 18, Minor 3). A folder where
+    the file should be is refused everywhere — `IsADirectoryError` on POSIX, `PermissionError` on
+    Windows — so the reads' empty registry and the writes' refusal are pinned there too. The old
+    write failed here as well, but on its rename, having said nothing and leaving its
+    `sessions.json.tmp` behind: the type is what tells the store's refusal from that."""
+    tcc = tmp_path / ".tcc"
+    registry = SessionRegistry(tcc)
+    registry.path.mkdir(parents=True)
+    (registry.path / "inside").write_text("kept", encoding="utf-8")
+
+    assert registry.resumable_session() is None
+    with pytest.raises(OSError) as refused:
+        write(registry)
+
+    assert refused.type is StoreUnreadable, "refused as the store's own failure, an OSError"
+    assert (registry.path / "inside").read_text(encoding="utf-8") == "kept", "never written over"
+    assert [p.name for p in tcc.iterdir()] == ["sessions.json"], (
+        "not set aside, and no temp file left beside it")
     assert len(app_log_told) == 1 and str(registry.path) in app_log_told[0], "said once"
