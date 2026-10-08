@@ -42,8 +42,10 @@ def test_process_writer_raises_and_catches_the_same_classes():
     assert process_writer.ProcessWriterError is method_cli.ProcessWriterError
     assert process_writer.Busy is method_cli.Busy
     assert process_writer.Refused is method_cli.Refused
+    assert process_writer.UnknownFlag is method_cli.UnknownFlag
     assert issubclass(method_cli.Refused, method_cli.ProcessWriterError)
     assert not issubclass(method_cli.Refused, method_cli.Busy)
+    assert issubclass(method_cli.UnknownFlag, method_cli.Refused)
 
 
 def test_a_child_past_its_timeout_is_cut_and_answered_timed_out_not_busy(tmp_path, method_copy):
@@ -170,20 +172,21 @@ def _a_child_that_answers(monkeypatch) -> list:
 
 def test_a_flag_the_copy_does_not_know_leaves_one_warning_and_is_named_without_its_value(
         tmp_path, method_copy, monkeypatch, app_log_warnings):
-    """A flag refusal is a `Refused`, and the log hears it as it hears a refused binding: once, in
-    the busy line's form. The flag is named as the copy would have to know it — `--review=<path>`
-    is `--review`, cut at the `=`."""
+    """A flag refusal is an `UnknownFlag`, a `Refused`, and the log hears it as it hears a refused
+    binding: once, in the busy line's form. The flag is named, and carried, as the copy would have
+    to know it — `--review=<path>` is `--review`, cut at the `=`."""
     _without(method_copy, "--review")
     _no_child(monkeypatch)
     car = tmp_path / "car"
     car.mkdir()
     app_log_warnings.clear()
 
-    with pytest.raises(method_cli.Refused) as refused:
+    with pytest.raises(method_cli.UnknownFlag) as refused:
         process_writer.record_reviewer(car, "gemini", "flash", review="critiques/2.3.md")
 
     sentence = ("this project's method does not know --review; update it, or re-link the project "
                 "to TCC's copy")
+    assert refused.value.flag == "--review"
     assert str(refused.value) == sentence
     said = [record.getMessage() for record in app_log_warnings]
     assert said == [f"refused: `reviewer` on {car} was not run: {sentence}"], said
@@ -191,8 +194,8 @@ def test_a_flag_the_copy_does_not_know_leaves_one_warning_and_is_named_without_i
 
 def test_the_bound_process_py_is_read_once_until_it_changes(tmp_path, method_copy, monkeypatch):
     """What a copy's `process.py` knows is read from its text once per path, mtime and size — every
-    write asks, and the file is 240 KB — and read again once it changes: an update in place is seen
-    on the next call, which is what «update it» promises."""
+    call that sends a flag asks, and the file is 240 KB — and read again once it changes: an update
+    in place is seen on the next call, which is what «update it» promises."""
     real_read_text = Path.read_text
     reads = []
 

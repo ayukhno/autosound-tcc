@@ -79,11 +79,12 @@ LANDED_IN = {
 
 
 #: `method_cli`'s, under the names every caller already catches — the same classes, not copies, so
-#: an `except process_writer.ProcessWriterError` (or `.Busy`, `.Refused`) catches what `method_cli`
-#: raises.
+#: an `except process_writer.ProcessWriterError` (or `.Busy`, `.Refused`, `.UnknownFlag`) catches
+#: what `method_cli` raises.
 ProcessWriterError = method_cli.ProcessWriterError
 Busy = method_cli.Busy
 Refused = method_cli.Refused
+UnknownFlag = method_cli.UnknownFlag
 
 
 def script_path() -> Path:

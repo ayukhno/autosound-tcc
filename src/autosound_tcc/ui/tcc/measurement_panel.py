@@ -305,6 +305,24 @@ class _LedgerWriteWorker(QThread):
         lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
         return lines[-1] if lines else f"{type(exc).__name__}: {exc}"
 
+    @staticmethod
+    def _retries_without_plan(exc: Exception) -> bool:
+        """Whether a refused `capture-start --plan` is the answer «no list», so the round is opened
+        again without `--plan`; if not, the refusal propagates and the pass is refused whole.
+
+        «No list»: the method's own refusal (no glossary, no phase, a phase that measures nothing),
+        and a copy older than `--plan` (v3.0.62) — `UnknownFlag` naming it (#169, N19) — which
+        opens the round once the flag is left off.
+
+        Propagates: another write held the project (`Busy`, #171); the project's copy is one TCC
+        will not run (a refused binding, `Refused`, #169); the copy does not know ANOTHER flag of
+        the call (`--origin`), which the retry sends again. None of them says anything about the
+        plan. Retried without `--plan`, the round would open WITHOUT the list there was to be had,
+        or be refused alike — the sentence standing as the gate's reason why there was none."""
+        if isinstance(exc, process_writer.UnknownFlag):
+            return exc.flag == "--plan"
+        return not isinstance(exc, (process_writer.Busy, process_writer.Refused))
+
     def run(self) -> None:
         result: dict = {"round_id": self._round_id, "opened": "", "recorded": [],
                         "refused": [], "prot_done": [], "prot_refused": [], "prot_lost": [],
@@ -313,21 +331,18 @@ class _LedgerWriteWorker(QThread):
             try:
                 # The METHOD's list, not this window's (the Arbiter's round rule, SKL-054, tcc#77):
                 # `--plan` derives what the phase measures at this series. Where it cannot — no
-                # glossary, no phase, a phase that measures nothing — the pass still gets a round,
-                # with no list: Protection needs one (2026-09-06), and what came in is recorded
-                # as unplanned rather than against a list TCC made up.
+                # glossary, no phase, a phase that measures nothing, a copy of the method older
+                # than `--plan` — the pass still gets a round, with no list: Protection needs one
+                # (2026-09-06), and what came in is recorded as unplanned rather than against a
+                # list TCC made up. Which refusals say «no list», and which propagate to be refused
+                # whole below: `_retries_without_plan`.
                 try:
                     process_writer.start_capture(
                         self._project_dir, str(self._version), [], origin=self._origin,
                         plan=True)
-                except (process_writer.Busy, process_writer.Refused):
-                    # Another write held the project (#171), or the project's copy of the method
-                    # is one TCC will not run (#169) — no answer about the plan either way. Retried
-                    # without `--plan`, the round would open WITHOUT the method's list (or be
-                    # refused alike), the sentence standing as the gate's reason; refused whole,
-                    # below, instead.
-                    raise
                 except process_writer.ProcessWriterError as exc:
+                    if not self._retries_without_plan(exc):
+                        raise
                     result["unplanned"] = self._why(exc)
                     process_writer.start_capture(
                         self._project_dir, str(self._version), [], origin=self._origin)

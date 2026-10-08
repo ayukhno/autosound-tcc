@@ -1590,6 +1590,81 @@ def test_a_refused_copy_of_the_method_is_not_read_as_cannot_plan(tmp_path, monke
     assert not [c for c in calls if c[0] == "taken"], "nothing recorded without a round"
 
 
+def test_a_copy_older_than_plan_still_opens_the_pass_without_the_list_and_says_why(
+        tmp_path, monkeypatch):
+    """#169 N19: a project bound to a copy of the method older than `--plan` (v3.0.62) is refused
+    the flag before that copy starts — `UnknownFlag`, naming it. That IS an answer about the plan:
+    this copy gives no list. So it goes as every «cannot plan» goes, and the copy opens the round
+    once the flag is left off: Protection needs one (2026-09-06), what came in is recorded as
+    unplanned, and the sentence stands on the status line."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+
+    def _start(d, v, e, step="", origin="", plan=False, **_kw):
+        calls.append(("start", v, tuple(e), origin, plan))
+        if plan:
+            raise process_writer.UnknownFlag("--plan")
+
+    monkeypatch.setattr(mp.process_writer, "start_capture", _start)
+    worker = _LedgerWriteWorker(
+        project_dir=tmp_path, round_id="", version=6,
+        expected=["w-L_6 (sw)"], titles=["w-L_6 (sw)"], protective={"w-L": "OFF"},
+    )
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert [c for c in calls if c[0] == "start"] == [("start", "6", (), "", True),
+                                                      ("start", "6", (), "", False)]
+    assert seen["opened"] == "cap_003"
+    assert seen["unplanned"] == str(process_writer.UnknownFlag("--plan"))
+    assert seen["refused"] == []
+    assert ("taken", "w-L_6 (sw)") in calls
+    assert ("protective", "w-L", "OFF", "user") in calls
+
+
+def test_a_copy_that_does_not_know_another_flag_of_the_pass_is_refused_whole(
+        tmp_path, monkeypatch):
+    """Only `--plan` is left off for a copy that does not know it. Any other flag of the call —
+    `--origin`, for measurements taken in another project — the retry would send again, to be
+    refused alike, with the sentence standing as the reason the method gave no list. Refused whole,
+    as a refused binding is: one `start_capture`, and the sentence where a refusal goes."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+    unknown = process_writer.UnknownFlag("--origin")
+
+    def _start(d, v, e, step="", origin="", plan=False, **_kw):
+        calls.append(("start", v, tuple(e), origin, plan))
+        raise unknown
+
+    monkeypatch.setattr(mp.process_writer, "start_capture", _start)
+    worker = _LedgerWriteWorker(
+        project_dir=tmp_path, round_id="", version=49,
+        expected=["m-L p1_49 (sw)"], titles=["m-L p1_49 (sw)"], protective={},
+        origin="passat-b8-2026:49",
+    )
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert [c for c in calls if c[0] == "start"] == [
+        ("start", "49", (), "passat-b8-2026:49", True)]
+    assert seen["refused"] == [str(unknown)]
+    assert seen["unplanned"] == ""
+    assert seen["opened"] == ""
+    assert not [c for c in calls if c[0] == "taken"], "nothing recorded without a round"
+
+
 def test_the_columns_scroll_sideways_on_tcc_s_own_bar(monkeypatch):
     """VM-10 (the Windows VM): under the measurement grid, whose «GROUP (RTA)» column did not fit,
     a native grey bar with «‹ ›» arrows. The columns scroll on their own both ways on purpose (the

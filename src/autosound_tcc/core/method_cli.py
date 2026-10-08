@@ -17,7 +17,8 @@ whole tree is killed at the timeout, and the wait for its pipes after that is bo
 Which copy of the method runs, and in what environment, is `_resolve`'s alone: the copy the
 project is bound to (`method_binding`), or `Refused` with the binding's sentence and nothing
 started. Nor is that copy's `process.py` started with a flag its text does not hold: its parser
-takes one it does not know for data (N19), so that is `Refused` too, before the lock. Qt-free.
+takes one it does not know for data (N19), so that is `UnknownFlag`, a `Refused` too, before the
+lock. Qt-free.
 """
 
 from __future__ import annotations
@@ -48,7 +49,8 @@ PROCESS_SCRIPT = "state/process.py"
 _FLAG = re.compile(r"--[a-z][a-z0-9-]*")
 
 #: path -> (st_mtime_ns, st_size, the flags its text holds): one entry per `process.py`, read again
-#: when it changes. Every write asks, and the file is 240 KB.
+#: when it changes. Every call that sends a flag asks — a write, or a read such as `handoff --json`
+#: — and the file is 240 KB.
 _FLAGS_CACHE: dict[str, tuple[int, int, frozenset[str]]] = {}
 
 
@@ -70,16 +72,29 @@ class Busy(ProcessWriterError):
 
 
 class Refused(ProcessWriterError):
-    """The project's copy of the method is not one TCC will run (`method_binding`), or its
-    `process.py` does not know a flag this call sends (#169, N19), so nothing was started: no lock
-    taken, no child. Carries the sentence that says what to do about it — the binding's verbatim,
-    naming the entry, or one naming the flag.
+    """The project's copy of the method is not one TCC will run (`method_binding`), so nothing was
+    started: no lock taken, no child. Carries the binding's sentence verbatim — it names the entry
+    and what to do about it. `UnknownFlag` is a `Refused` too: a copy TCC does run, which does not
+    know a flag of this call.
 
     Unlike `Busy`, the same call will NOT work in a moment: it is refused alike until the copy is
-    approved, updated or re-linked — for a refused binding, every call to this project is. So a
-    caller that stops after `Busy` stops after this too, rather than ask the rest only to be
-    refused the same way.
+    approved, updated or re-linked. For a refused binding every call to this project is, so a caller
+    that stops after `Busy` stops after this too, rather than ask the rest only to be refused the
+    same way. Not so for an `UnknownFlag`: it refuses the calls that send its flag, and the same
+    call without the flag may go through — a round opened without `--plan` (`measurement_panel`).
     """
+
+
+class UnknownFlag(Refused):
+    """The project's copy of the method does not know a flag this call sends to its `process.py`
+    (#169, N19), so nothing was started. `flag` is that flag, cut at its `=`, and the sentence names
+    it. A `Refused`, so a caller that shows a refusal shows this one; a caller that can do without
+    the flag catches it by name and asks again without it."""
+
+    def __init__(self, flag: str) -> None:
+        super().__init__(f"this project's method does not know {flag}; update it, or re-link the "
+                         "project to TCC's copy")
+        self.flag = flag
 
 
 def _resolve(project_dir: Path, script_rel: str) -> tuple[Path, dict[str, str]]:
@@ -116,7 +131,7 @@ def _flags_known_to(script: Path) -> frozenset[str]:
 
 
 def _refuse_a_flag_it_does_not_know(script: Path, args: Sequence[str]) -> None:
-    """`Refused`, naming the first flag in `args` that `script` — the bound copy's `process.py` —
+    """`UnknownFlag` for the first flag in `args` that `script` — the bound copy's `process.py` —
     does not hold in its text (#169, N19). A flag is cut at its `=`: `--review=<x>` is `--review`.
 
     `process.py` parses its flags by hand and takes one it does not know for data: an older copy
@@ -134,8 +149,7 @@ def _refuse_a_flag_it_does_not_know(script: Path, args: Sequence[str]) -> None:
         raise ProcessWriterError(str(exc)) from None
     for flag in flags:
         if flag not in known:
-            raise Refused(f"this project's method does not know {flag}; update it, or re-link the "
-                          "project to TCC's copy")
+            raise UnknownFlag(flag)
 
 
 def _named(script: Path, args: Sequence[str], project_dir: Path) -> str:
@@ -164,7 +178,8 @@ def spawn(
 
     A project whose copy TCC will not run answers `Refused`, with the binding's sentence, before
     the lock and before any child — a read as much as a write — and says so in the log once. So
-    does a `process.py` call with a flag that copy's text does not hold, the flag named (N19).
+    does a `process.py` call with a flag that copy's text does not hold: `UnknownFlag`, naming the
+    flag (N19).
 
     `lock` holds the project's writer lock around the child, and `lock_wait_s` is how long to wait
     for it — by default `GUI_LOCK_WAIT_S` on the main thread and `LOCK_WAIT_S` on any other, read

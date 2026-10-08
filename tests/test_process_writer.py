@@ -488,13 +488,19 @@ def test_the_copy_with_no_project_is_the_one_a_project_with_no_entry_runs(tmp_pa
 # refused before the copy is started instead.
 
 
+@pytest.mark.parametrize("rewrite", [
+    pytest.param("", id="taken-out"),
+    # The text still holds `--origin` as a substring, so a substring test would pass the copy.
+    pytest.param("--origin-x", id="only-inside-a-longer-flag"),
+])
 def test_a_flag_the_bound_copy_does_not_know_is_refused_before_anything_starts(
-        tmp_path, monkeypatch, own_copy_is_the_submodule):
+        tmp_path, monkeypatch, own_copy_is_the_submodule, rewrite):
     """The issue's: a project bound to an approved copy that predates `--origin` — the vendored
-    method with every `--origin` taken out of its `process.py` — is refused `start_capture(…,
-    origin=…)` with a sentence that names the flag, before the lock and before any child. Started,
-    that copy opens the round with `--origin` and its value as two more expected titles."""
-    older = _method_copy(tmp_path / "older-method", lambda text: text.replace("--origin", ""))
+    method with every `--origin` in its `process.py` taken out, or rewritten into a longer flag
+    (`--origin-x`) — is refused `start_capture(…, origin=…)` with `UnknownFlag` naming the flag,
+    before the lock and before any child. Known is a whole word in the copy's text, not a piece of
+    one. Started, that copy opens the round with `--origin` and its value as two more titles."""
+    older = _method_copy(tmp_path / "older-method", lambda text: text.replace("--origin", rewrite))
     project = tmp_path / "car"
     _linked_and_approved(project, older)
     started, locked = [], []
@@ -503,9 +509,10 @@ def test_a_flag_the_bound_copy_does_not_know_is_refused_before_anything_starts(
     monkeypatch.setattr(project_lock, "hold",
                         lambda *a, **_k: locked.append(a) or contextlib.nullcontext())
 
-    with pytest.raises(process_writer.Refused) as refused:
+    with pytest.raises(process_writer.UnknownFlag) as refused:
         process_writer.start_capture(project, "49", ["m-L p1_49 (sw)"], origin="import")
 
+    assert refused.value.flag == "--origin"
     assert str(refused.value) == ("this project's method does not know --origin; update it, or "
                                   "re-link the project to TCC's copy")
     assert (started, locked) == ([], []), "nothing started and no lock taken"
