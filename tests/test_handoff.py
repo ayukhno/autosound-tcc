@@ -14,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
-from autosound_tcc.core import config, handoff, method_cli  # noqa: E402
+from autosound_tcc.core import config, handoff, method_binding, method_cli, vendor_loader  # noqa: E402
 from autosound_tcc.state import process_view  # noqa: E402
 
 
@@ -47,6 +47,24 @@ def test_the_methods_answer_is_read_as_it_prints_it(tmp_path, monkeypatch):
 def test_an_older_method_is_said_as_such(tmp_path, monkeypatch):
     _the_method_answers(monkeypatch, 2, err="process.py: error: unrecognized arguments: --json")
     assert handoff.check(tmp_path) is None
+
+
+def test_a_refused_copy_of_the_method_is_said_with_its_sentence_not_as_too_old(tmp_path):
+    """#169: a project whose copy of the method TCC will not run — here a real folder at its entry,
+    a copy that travels with the project — is refused before any child, so `check` has no answer,
+    as for a method too old for `handoff --json`. Said as «update the method», that is the wrong
+    fix: the binding's sentence (re-link it, or approve it) is the one, and `refusal` answers it. A
+    project the binding does not refuse has none, so a method too old is still said as such."""
+    car = tmp_path / "car"
+    (car / ".claude" / "skills" / vendor_loader.SKILL_NAME).mkdir(parents=True)
+    binding = method_binding.for_project(car)
+    assert binding.state == "refused", binding
+
+    assert handoff.check(car) is None
+    assert handoff.refusal(car) == binding.reason
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert handoff.refusal(plain) is None
 
 
 def test_a_handoff_waits_for_no_lock_and_makes_no_process_folder(tmp_path):
@@ -121,7 +139,11 @@ def test_a_ready_handoff_opens_the_next_session_with_its_first_message(tmp_path,
     assert QApplication.clipboard().text() == "продовжуй"
 
 
-def test_a_refused_handoff_shows_what_is_missing(tmp_path, monkeypatch):
+def test_a_refused_handoff_shows_what_fixes_it(tmp_path, monkeypatch):
+    """The method's refusal shows what is missing, item by item. A copy of the method TCC will not
+    run (#169) has no answer to show, and «update the method» fixes nothing there: the window says
+    the binding's sentence instead. One window for both, as the ratchet asks."""
+    check = handoff.check
     window = _window(tmp_path, monkeypatch)
     monkeypatch.setattr(handoff, "check", lambda p: {
         "ok": False, "missing": ["a step left todo: s3"], "phase": "1", "resume": "", "next_message": ""})
@@ -132,6 +154,14 @@ def test_a_refused_handoff_shows_what_is_missing(tmp_path, monkeypatch):
     window._on_handoff()
     assert shown and "a step left todo: s3" in shown[0]
     assert opened == []
+
+    monkeypatch.setattr(handoff, "check", check)  # the real one, on a project the binding refuses
+    (tmp_path / ".claude" / "skills" / vendor_loader.SKILL_NAME).mkdir(parents=True)
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **k: said.append((text, k)))
+    window._on_handoff()
+    assert said == [(method_binding.for_project(tmp_path).reason, {"level": "warn"})], said
+    assert len(shown) == 1, "no box: there was no answer to show"
 
 
 # ---- the method's warnings (#126; S-084, hub #227) -----------------------------------------------

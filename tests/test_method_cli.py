@@ -8,13 +8,16 @@ that takes none is `test_handoff.py`'s, a write that takes it is `test_title_fix
 
 from __future__ import annotations
 
+import logging
 import shutil
 import threading
 import time
 
 import pytest
 
-from autosound_tcc.core import method_cli, process_writer, project_lock, vendor_loader
+from autosound_tcc.core import (
+    app_log, method_binding, method_cli, process_writer, project_lock, vendor_loader,
+)
 
 
 @pytest.fixture
@@ -92,3 +95,47 @@ def test_the_lock_wait_a_caller_names_is_the_one_spent(tmp_path, monkeypatch):
 
     assert [type(exc) for exc in answered] == [method_cli.Busy], answered
     assert time.monotonic() - started < 2.0
+
+
+@pytest.fixture
+def app_log_warnings():
+    """What TCC's own logger was warned about, heard on that logger itself (the idiom of
+    `test_mcp_server.py`): after `app_log.setup()` it does not propagate, so caplog on the root
+    would hear nothing."""
+    records: list[logging.LogRecord] = []
+
+    class _Keep(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    log = app_log.logger()
+    handler = _Keep(level=logging.WARNING)
+    level = log.level
+    log.addHandler(handler)
+    if level == logging.NOTSET or level > logging.WARNING:
+        log.setLevel(logging.WARNING)
+    try:
+        yield records
+    finally:
+        log.removeHandler(handler)
+        log.setLevel(level)
+
+
+def test_a_refused_binding_leaves_one_warning_naming_the_command_and_the_sentence(
+        tmp_path, app_log_warnings):
+    """A write the project's binding refuses may have nobody left to see it, as a busy one may:
+    `close_session` at quit posts to a closing window's strip, and `mcp_server` drops
+    `record_reviewer`'s error on purpose. So the log says it — once, in the busy line's form, with
+    the command, the project and the binding's sentence."""
+    car = tmp_path / "car"
+    (car / ".claude" / "skills" / vendor_loader.SKILL_NAME).mkdir(parents=True)
+    reason = method_binding.for_project(car).reason
+    app_log_warnings.clear()
+
+    with pytest.raises(method_cli.Refused):
+        process_writer.close_session(car)
+
+    said = [record.getMessage() for record in app_log_warnings]
+    assert len(said) == 1, said
+    assert app_log_warnings[0].levelno == logging.WARNING
+    assert said[0] == f"refused: `session-close` on {car} was not run: {reason}", said[0]

@@ -3866,7 +3866,7 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
         if answer is None:
-            self._status_strip.notify(i18n.t("hoTooOld"), level="warn")
+            self._status_strip.notify(handoff.refusal(project) or i18n.t("hoTooOld"), level="warn")
             return
         box = QMessageBox(self)
         box.setWindowTitle(i18n.t("hoTitle"))

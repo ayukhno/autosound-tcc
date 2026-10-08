@@ -86,8 +86,9 @@ def _resolve(project_dir: Path, script_rel: str) -> tuple[Path, dict[str, str]]:
 
 
 def _named(script: Path, args: Sequence[str], project_dir: Path) -> str:
-    """What the busy line calls the run: its first argument that is not a path in the project —
-    for `process.py`, the command after its `<process-dir>`. The project is named beside it."""
+    """What the busy and refused lines call the run: its first argument that is not a path in the
+    project — for `process.py`, the command after its `<process-dir>`. The project is named beside
+    it."""
     words = [arg for arg in args if not Path(arg).is_relative_to(project_dir)]
     return words[0] if words else script.name
 
@@ -109,7 +110,7 @@ def spawn(
     knows which.
 
     A project whose copy TCC will not run answers `Refused`, with the binding's sentence, before
-    the lock and before any child — a read as much as a write.
+    the lock and before any child — a read as much as a write — and says so in the log once.
 
     `lock` holds the project's writer lock around the child, and `lock_wait_s` is how long to wait
     for it — by default `GUI_LOCK_WAIT_S` on the main thread and `LOCK_WAIT_S` on any other, read
@@ -119,7 +120,15 @@ def spawn(
     """
     project_dir = Path(project_dir)
     args = [str(arg) for arg in args]
-    script, env = _resolve(project_dir, script_rel)
+    try:
+        script, env = _resolve(project_dir, script_rel)
+    except Refused as exc:
+        # Into the log, as a busy answer goes and for the same reason: the caller may have nobody
+        # left to tell — `close_session` at quit posts to a closing window, and `mcp_server` drops
+        # `record_reviewer`'s error on purpose.
+        app_log.logger().warning("refused: `%s` on %s was not run: %s",
+                                 _named(Path(script_rel), args, project_dir), project_dir, exc)
+        raise
     if not script.is_file():
         raise ProcessWriterError(
             f"{script.name} not found at {script}. Run: git submodule update --init --recursive"

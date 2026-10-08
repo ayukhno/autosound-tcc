@@ -22,12 +22,13 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import app_log, process_writer
+from autosound_tcc.core import app_log, method_binding, process_writer
 
 
 def check(project_dir: Path) -> Optional[dict]:
     """The method's answer, or None when it cannot give one: a method older than `--json` (or
-    than `handoff`), or a call that did not get an answer — no script, a timeout."""
+    than `handoff`), a call that did not get an answer — no script, a timeout — or a copy of the
+    method TCC will not run (#169), which `refusal` tells apart."""
     try:
         code, out, _err = process_writer.handoff_json(Path(project_dir))
     except process_writer.ProcessWriterError as exc:
@@ -46,3 +47,18 @@ def check(project_dir: Path) -> Optional[dict]:
     # Absent from a method before v3.0.65, which did not say: none (#126).
     answer["warnings"] = [str(w) for w in answer.get("warnings") or []]
     return answer
+
+
+def refusal(project_dir: Path) -> Optional[str]:
+    """Why `check` had no answer, when the reason is the project's copy of the method: the binding's
+    sentence — re-link it, or approve it — the one `process_writer.Refused` carries. None when the
+    binding does not refuse: then the method is too old for `handoff --json`, or did not answer.
+
+    Without it a refused copy read as a method too old, and «update the method» is the wrong fix
+    where the link is what has to change. Asked of the binding again rather than carried out of
+    `check`, which keeps its one answer: the method's, or None."""
+    try:
+        method_binding.for_project(Path(project_dir)).require()
+    except method_binding.MethodRefused as exc:
+        return str(exc)
+    return None
