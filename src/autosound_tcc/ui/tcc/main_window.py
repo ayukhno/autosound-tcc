@@ -3654,7 +3654,7 @@ class MainWindow(QMainWindow):
         The flush on close writes directly (`_flush_own_state`), so nothing of a real close is lost."""
         if getattr(self, "_closing", False):
             return
-        project_settings.set_value(config.tcc_dir(), key, value)
+        project_settings.set_value_or_say(config.tcc_dir(), key, value)
 
     def _reload_project_files(self) -> None:
         """Re-read what the skill wrote and put it on screen."""
@@ -5852,7 +5852,7 @@ class MainWindow(QMainWindow):
             # An empty selection is the "nothing chosen yet" placeholder, not a choice to record —
             # writing it would turn "I have not picked a model" into "I picked no model".
             if value:
-                project_settings.set_value(tcc_dir, key, str(value))
+                project_settings.set_value_or_say(tcc_dir, key, str(value))
         # Window-level preferences (collapse states, font scale, capture order) live in QSettings,
         # which writes on its own schedule; a Save that returns before that happened is a Save that
         # did not.

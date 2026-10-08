@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from autosound_tcc.core import project_settings
+from autosound_tcc.core import own_store, project_settings
 
 
 def test_a_project_that_was_never_opened_has_no_preference(tmp_path):
@@ -98,8 +98,28 @@ def test_a_file_that_cannot_be_opened_is_refused_and_left_as_it_was(tmp_path, ap
         path.chmod(0o600)
 
     assert path.read_bytes() == before, "never written over"
-    from autosound_tcc.core.own_store import StoreUnreadable
-
-    assert refused.type is StoreUnreadable, "refused as the store's own failure, an OSError"
+    assert refused.type is own_store.StoreUnreadable, "the store's own refusal, an OSError"
     assert not list(tmp_path.glob("*.corrupt-*")), "and not set aside: its bytes may be fine"
     assert len(app_log_told) == 1 and str(path) in app_log_told[0], "said once, not per read"
+
+
+def test_the_window_s_writer_says_a_store_it_cannot_read_once_and_returns(tmp_path, app_log_told):
+    """The review of Task 17, Important 2: the window writes from slots and from `closeEvent`, and
+    `StoreUnreadable` raised there skipped the rest of the slot — or the whole orderly quit, on
+    every quit while the store stayed unreadable. `set_value_or_say` says it (once for this state
+    of the file) and returns; `set_value` still raises (R-l). A folder where the file should be
+    is refused on every platform, so this runs on Windows too."""
+    path = project_settings.path_for(tmp_path)
+    path.mkdir()
+    (path / "inside").write_text("kept", encoding="utf-8")
+
+    assert project_settings.set_value_or_say(tmp_path, "effort", "high") is False
+    assert project_settings.set_value_or_say(tmp_path, "critic", "sdk:claude-opus-5") is False
+
+    assert (path / "inside").read_text(encoding="utf-8") == "kept", "never written over"
+    assert len(app_log_told) == 1 and str(path) in app_log_told[0], app_log_told
+    with pytest.raises(own_store.StoreUnreadable):
+        project_settings.set_value(tmp_path, "effort", "high")
+    readable = tmp_path / "readable"
+    assert project_settings.set_value_or_say(readable, "effort", "high") is True
+    assert project_settings.get(readable, "effort") == "high"

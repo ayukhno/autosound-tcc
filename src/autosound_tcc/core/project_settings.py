@@ -73,3 +73,20 @@ def set_value(tcc_dir: Path, key: str, value: Any = None) -> None:
         data[key] = value
     data["schema_version"] = SCHEMA_VERSION
     own_store.write_json(target, data)
+
+
+def set_value_or_say(tcc_dir: Path, key: str, value: Any = None) -> bool:
+    """`set_value` for the window, which must not be stopped by its own settings file.
+
+    A store that is there and cannot be read has been said by `own_store` when it was read —
+    once for this state of the file — and here the write is skipped: True when written, False
+    when not. The window writes from slots and from `closeEvent`, and `StoreUnreadable` raised
+    there skipped the rest of the slot, or the whole orderly quit — the session's stop, the
+    workers, the agent's thread — on every quit while the file stayed unreadable (the review of
+    Task 17). `set_value` itself still raises (R-l): a caller outside the window decides.
+    """
+    try:
+        set_value(tcc_dir, key, value)
+    except own_store.StoreUnreadable:
+        return False
+    return True

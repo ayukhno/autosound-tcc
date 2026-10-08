@@ -7818,6 +7818,43 @@ def test_a_logged_error_with_no_log_file_is_said_without_a_path():
     assert str(Path("logs") / "tcc.log") in notes[1], "with a file, the file is still named"
 
 
+def _over_an_unreadable_settings_file():
+    """A window stand-in whose project's `tcc-project.json` is a folder: refused on every
+    platform, as a file nobody may open is."""
+    from autosound_tcc.core import project_settings
+
+    store = project_settings.path_for(config.tcc_dir())
+    store.mkdir(parents=True)
+    pick = SimpleNamespace(currentData=lambda: "sdk:claude-opus-5")
+    host = SimpleNamespace(_closing=False, _ai_main_combo=pick, _ai_critic_combo=pick,
+                           _ai_effort_combo=SimpleNamespace(currentData=lambda: "high"),
+                           _settings=SimpleNamespace(sync=lambda: None),
+                           _generator_choice=lambda: None)
+    return store, host
+
+
+def test_a_quit_over_an_unreadable_settings_file_says_it_and_carries_on(app_log_told):
+    """The review of Task 17, Important 2: `_flush_own_state` raised `StoreUnreadable` out of
+    `closeEvent`, before the session's stop, `stop_workers` and the agent's thread were handled
+    — on every quit while the file stayed unreadable, and with a session running that is tcc#73's
+    abort at quit."""
+    store, host = _over_an_unreadable_settings_file()
+
+    MainWindow._flush_own_state(host)
+
+    assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told
+
+
+def test_a_pick_saved_to_an_unreadable_settings_file_says_it_and_carries_on(app_log_told):
+    """The review of Task 17, Minor 1: a picker's slot wrote before it updated the window, and
+    the raise left the window half-updated. The window's writer says it and returns."""
+    store, host = _over_an_unreadable_settings_file()
+
+    MainWindow._set_project_setting(host, main_window._GATE_KEY, "foreign")
+
+    assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told
+
+
 def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):
     """F3c: the window held a server whose thread had died and handed its URL to the next session;
     it now says why the server is down, once, as it does for one that never started."""
