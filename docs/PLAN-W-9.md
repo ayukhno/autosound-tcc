@@ -17,7 +17,7 @@ same, approved or refused) and `core/method_cli.py` (today's `_spawn` and its lo
 in the file that owns the behaviour; no new layer, no threads (G9's helper is W-11's).
 
 **Tech Stack:** Python ≥3.11, PySide6 (Qt offscreen in tests), claude-agent-sdk 0.2.145, uvicorn 0.52.4, pytest;
-the method vendored at `vendor/autosound-tuning-skill` (v3.1.1, `e8dabf7`).
+the method vendored at `vendor/autosound-tuning-skill` (v3.1.1, `e8dabf7`; v3.1.2, `d9633fa`, since Task S2).
 
 **Spec:** `docs/PLAN-AUDIT-2026-10.md` §2 G3–G10 and G13, §4 (what each product needs from the other), §5.1–§5.4
 (the designs: three approaches each, «Balance» named in every issue the Arbiter OK'd on 2026-10-07);
@@ -37,7 +37,7 @@ the method vendored at `vendor/autosound-tuning-skill` (v3.1.1, `e8dabf7`).
 - Text measured in a test goes through `theme.drawn_width` (the Windows CI runner has no fonts).
 - An API key never on argv or in a log; no real API calls, no live REW, GitHub, `gh` or network in tests; git only
   on repositories made under `tmp_path`.
-- `vendor/autosound-tuning-skill/` is a submodule pinned at v3.1.1 and is never edited. A test that needs another
+- `vendor/autosound-tuning-skill/` is a submodule pinned at v3.1.2 (since Task S2) and is never edited. A test that needs another
   copy of the method builds one under `tmp_path` (a copy of the vendored tree, then the one file it changes).
 - `docs/TODO.md`, `docs/TEST-FINDINGS.md`, this plan and `CHANGELOG.md` are the controller's.
 - Commits in English (the hook refuses Cyrillic), the issue number in the subject, ending with
