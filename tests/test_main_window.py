@@ -2896,7 +2896,10 @@ def test_declining_the_replacement_writes_nothing(tmp_path, monkeypatch):
 
 def test_save_writes_tccs_own_settings_even_with_no_session(monkeypatch, tmp_path):
     """Save used to be nothing but the model handoff, so with no session running it did nothing at
-    all — no write, no message, no way to tell "saved" from "ignored" (user, 2026-08-07)."""
+    all — no write, no message, no way to tell "saved" from "ignored" (user, 2026-08-07).
+
+    And a Save whose writes did not land is not «on disk»: the failure's own line stays on the
+    strip — with no session, and with one that has nothing to save (the review of Task 17, N1)."""
     from autosound_tcc.core import project_settings
 
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
@@ -2911,6 +2914,21 @@ def test_save_writes_tccs_own_settings_even_with_no_session(monkeypatch, tmp_pat
     window._save_project_state()
 
     assert project_settings.get(config.tcc_dir(), "generator") == combo.itemData(pick)
+    store = project_settings.path_for(config.tcc_dir())
+    store.unlink()
+    store.mkdir()  # a folder in the file's place: no write lands
+    bubbles = len(window._dialog._bubbles)
+    window._save_project_state()
+    assert str(store) in window._status_strip.text(), window._status_strip.text()
+    worker = _HandoffWorker()
+    worker.spoke = False  # a session with nothing to save: its handoff is skipped
+    window._agent_worker = worker
+    try:
+        window._save_project_state()
+    finally:
+        window._agent_worker = None
+    assert str(store) in window._status_strip.text(), window._status_strip.text()
+    assert len(window._dialog._bubbles) == bubbles, "and the conversation is never told «on disk»"
 
 
 def test_save_does_not_record_a_model_nobody_picked(monkeypatch, tmp_path):
@@ -7843,6 +7861,23 @@ def test_a_quit_over_an_unreadable_settings_file_says_it_and_carries_on(app_log_
     MainWindow._flush_own_state(host)
 
     assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told
+
+
+def test_a_tool_allowed_into_an_unreadable_settings_file_is_not_said_to_be_allowed(app_log_told):
+    """The review of Task 17, N1: «Auto-allowed … asking about it is off for this project» came
+    after a write that did not land — the tool still asks, and the sentence was untrue."""
+    store, host = _over_an_unreadable_settings_file()
+    said, pushed = [], []
+    host._always_allowed = lambda: frozenset()
+    host._set_project_setting = lambda key, value: MainWindow._set_project_setting(host, key, value)
+    host._dialog = SimpleNamespace(_add_system_message=lambda text, *a, **k: said.append(text))
+    host._push_gate_to_session = lambda: pushed.append(True)
+
+    MainWindow._remember_always_allowed(host, "copy_helix_eq")
+
+    assert said == [], said
+    assert len(app_log_told) == 1 and str(store) in app_log_told[0], "the failure says itself"
+    assert pushed == [True], "the session still gets the gate the store holds"
 
 
 def test_a_pick_saved_to_an_unreadable_settings_file_says_it_and_carries_on(app_log_told):

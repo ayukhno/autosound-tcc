@@ -3647,14 +3647,14 @@ class MainWindow(QMainWindow):
         self._arm_project_watcher()
         self._project_reload.start()
 
-    def _set_project_setting(self, key: str, value) -> None:
+    def _set_project_setting(self, key: str, value) -> bool:
         """A choice made in this window, saved into its project's `.tcc/` — unless the window is on
         its way out (TODO F-053). A closing window has no business writing, and a window a test
         left behind resolved the NEXT test's folder through `config` and created `.tcc/` in it.
         The flush on close writes directly (`_flush_own_state`), so nothing of a real close is lost."""
         if getattr(self, "_closing", False):
-            return
-        project_settings.set_value_or_say(config.tcc_dir(), key, value)
+            return False
+        return project_settings.set_value_or_say(config.tcc_dir(), key, value)
 
     def _reload_project_files(self) -> None:
         """Re-read what the skill wrote and put it on screen."""
@@ -4913,7 +4913,7 @@ class MainWindow(QMainWindow):
     def _hand_off_then_restart(self, worker) -> None:
         self._hand_off(worker, "restart")
 
-    def _hand_off(self, worker, mode: str) -> None:
+    def _hand_off(self, worker, mode: str, wrote: bool = True) -> None:
         """Ask the running agent to write down where the project stands, then swap models.
 
         A conversation is disposable; the files are the record ("machine files win"). Everything
@@ -4933,8 +4933,7 @@ class MainWindow(QMainWindow):
                 self._start_quit_wait()
             return
         if _ended(worker) or not getattr(worker, "spoke", True):
-            self._skip_handoff(worker, mode)
-            return
+            return self._skip_handoff(worker, mode, wrote)  # `wrote`: the Save's own flush (N1)
         self._handoff_mode = mode
         # One handoff, three reasons, and the message has to say which: "before the model changes"
         # under a plain Save is TCC narrating something the Arbiter did not ask for.
@@ -4974,15 +4973,16 @@ class MainWindow(QMainWindow):
         self._quit_tick.start(1000)
         self._dialog.hold_queue_for_quit()
 
-    def _skip_handoff(self, worker, mode: str) -> None:
+    def _skip_handoff(self, worker, mode: str, wrote: bool = True) -> None:
         """A session with nothing to write down gets no save turn (tcc#56): one whose thread has
         ended — omp dying in its constructor (finding 54) — never reads it, and one whose model has
         not said a word — omp refusing the prompt for want of a key (finding 77) — has nothing to
         save. The handoff only waited behind «Зберігаю стан…». What the Arbiter asked for happens
         at once; a Save keeps a live session, the rest close it."""
         if mode == "save":
-            self._dialog._add_system_message(i18n.t("savedTccOnly"))
-            self._status_strip.notify(i18n.t("savedTccOnly"))
+            if wrote:  # a flush that wrote nothing has said so itself, and stays said (N1)
+                self._dialog._add_system_message(i18n.t("savedTccOnly"))
+                self._status_strip.notify(i18n.t("savedTccOnly"))
             if not _ended(worker):
                 return
         elif mode == "quit":
@@ -5320,8 +5320,8 @@ class MainWindow(QMainWindow):
         """One tick, one kind, and it survives the session -- Claude Code's own prompt works this
         way. Narrowing the gate deliberately is the opposite of learning to click through it."""
         allowed = set(self._always_allowed()) | {tool}
-        self._set_project_setting(_ALWAYS_KEY, ",".join(sorted(allowed)))
-        self._dialog._add_system_message(i18n.t("autoAllowed").format(tool=tool))
+        if self._set_project_setting(_ALWAYS_KEY, ",".join(sorted(allowed))):  # else: said (N1)
+            self._dialog._add_system_message(i18n.t("autoAllowed").format(tool=tool))
         self._push_gate_to_session()
 
     def _push_gate_to_session(self) -> None:
@@ -5835,15 +5835,15 @@ class MainWindow(QMainWindow):
             return
         self.close()
 
-    def _flush_own_state(self) -> str:
-        """Everything TCC itself decides, on disk now. Returns the label of what it wrote.
+    def _flush_own_state(self) -> bool:
+        """Everything TCC itself decides, on disk now. True when every write landed (N1).
 
         These are written as they change, so this is normally a no-op — which is exactly why it is
         worth doing on demand: "normally" is not "always", and a setting whose write is spread
         across a dozen handlers has a dozen chances to be the one that got missed. Re-asserting the
         pickers costs a file write and removes the whole class of question.
         """
-        tcc_dir = config.tcc_dir()
+        tcc_dir, wrote = config.tcc_dir(), True
         for key, value in (
             (_GENERATOR_KEY, self._ai_main_combo.currentData()),
             (_CRITIC_KEY, self._ai_critic_combo.currentData()),
@@ -5852,13 +5852,12 @@ class MainWindow(QMainWindow):
             # An empty selection is the "nothing chosen yet" placeholder, not a choice to record —
             # writing it would turn "I have not picked a model" into "I picked no model".
             if value:
-                project_settings.set_value_or_say(tcc_dir, key, str(value))
+                wrote = project_settings.set_value_or_say(tcc_dir, key, str(value)) and wrote
         # Window-level preferences (collapse states, font scale, capture order) live in QSettings,
         # which writes on its own schedule; a Save that returns before that happened is a Save that
         # did not.
         self._settings.sync()
-        choice = self._generator_choice()
-        return choice.label if choice else ""
+        return wrote
 
     def _save_project_state(self) -> None:
         """Save what TCC owns, then ask the model to save what it knows.
@@ -5868,15 +5867,16 @@ class MainWindow(QMainWindow):
         message, no way to tell the difference between "saved" and "ignored" — and with one running
         it only ever asked the model, never settling TCC's own choices.
         """
-        self._flush_own_state()
+        wrote = self._flush_own_state()
         worker = getattr(self, "_agent_worker", None)
         if worker is not None:
-            self._hand_off(worker, "save")
+            self._hand_off(worker, "save", wrote)
             return
-        # No session to ask, and that is not a failure: what TCC owns is now on disk, and saying so
-        # is the difference between a button that did nothing and one that had nothing more to do.
-        self._dialog._add_system_message(i18n.t("savedTccOnly"))
-        self._status_strip.notify(i18n.t("savedTccOnly"))
+        # No session to ask, and that is not a failure: when the flush wrote, saying so is the
+        # difference between a button that did nothing and one that had nothing more to do (N1).
+        if wrote:
+            self._dialog._add_system_message(i18n.t("savedTccOnly"))
+            self._status_strip.notify(i18n.t("savedTccOnly"))
 
     def _start_fresh_session(self) -> None:
         """Save, then start over with an empty context on the same project and model."""
