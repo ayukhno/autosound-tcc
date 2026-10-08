@@ -254,12 +254,15 @@ def test_a_method_too_old_for_a_command_says_so_instead_of_dumping_usage(project
     (lambda p: process_writer.enter_phase(p, "0"), "enter-phase", "2.8.0"),
     (lambda p: process_writer.listening_verdicts(p), "listening-verdicts", "3.0.29"),
     (lambda p: process_writer.start_capture(p, "v_001", ["m-L_0 (sw)"]), "capture-start", "3.0.0"),
+    (lambda p: process_writer.supersede_capture(p, "a", "b"), "capture-supersede", "3.0.60"),
+    (lambda p: process_writer.handoff_json(p), "handoff", "3.0.60"),
 ])
 def test_every_command_on_a_method_too_old_for_it_says_so(project, monkeypatch, call, command, since):
     """tcc#26 covered `session-close` only, and every other command could meet the same old method
     and hand the model the same usage dump. Each one now names itself and the method version that
-    has it."""
-    def _usage(project_dir, args, timeout_s=None):
+    has it — the two whose exit code is an answer too (Task 2 M4): without it a rename's status
+    line would carry the usage dump as its reason, tcc#26 again."""
+    def _usage(project_dir, args, timeout_s=None, **_kw):  # `handoff_json` passes `lock=False`
         return 2, "usage: process.py <process-dir> <command> [args]\n  show\n  plan [phase]", ""
 
     monkeypatch.setattr(process_writer, "_spawn", _usage)
