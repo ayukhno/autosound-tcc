@@ -202,7 +202,15 @@ def test_the_backup_runs_only_after_yes(tmp_path, monkeypatch):
     window._set_project_params(None)
     entry = tmp_path / ".claude" / "skills" / vendor_loader.SKILL_NAME
     entry.mkdir(parents=True)
-    _button(window, "Back up to GitHub (1/2)").click()
+    started = []
+    with monkeypatch.context() as guard:
+        # The press runs the real chain, and an entry that bound after all would start the real
+        # `project_repo.py status`, which asks `gh`. Only the method's runner is barred: the panel
+        # reads git through a bare `subprocess.run` (`project_view`).
+        guard.setattr(child, "run_bounded", lambda argv, **_kw: started.append(argv)
+                      or pytest.fail(f"a child started: {argv}"))
+        _button(window, "Back up to GitHub (1/2)").click()
+    assert started == [], "a child started"
     assert window._status_strip.text() == (
         f"Did not work: {method_binding.for_project(tmp_path).reason}")
     entry.rmdir()
