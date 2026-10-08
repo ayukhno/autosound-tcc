@@ -147,6 +147,24 @@ def test_a_report_made_before_a_window_exists_is_heard_when_one_registers(tmp_pa
     assert heard == ["first", "second", "third"], "and nothing is handed over twice"
 
 
+def test_reports_held_past_their_bound_lose_the_oldest_and_the_window_hears_the_latest(
+        tmp_path, monkeypatch):
+    """The group review, G7: what is held for a window that may never come -- the CLI half has no
+    sink -- is bounded at `_HELD_MAX`. Past it the oldest are dropped, and a window that registers
+    hears the latest, in order, once each."""
+    monkeypatch.setattr(app_log, "_log_path", tmp_path / "tcc.log")
+    monkeypatch.setattr(app_log, "_ui_sink", None)
+    monkeypatch.setattr(app_log, "_held", [])
+    heard = []
+    made = [f"report {n}" for n in range(app_log._HELD_MAX + 5)]
+
+    for message in made:
+        app_log.report(message)
+    app_log.set_ui_sink(lambda message, path: heard.append(message))
+
+    assert heard == made[-app_log._HELD_MAX:], heard
+
+
 def test_a_report_reaches_the_window_with_no_log_file_to_point_at(monkeypatch):
     """`setup()` leaves no log path when the log folder cannot be written, and the sink heard
     nothing then: the one machine whose log cannot hold the sentence was the one whose strip
