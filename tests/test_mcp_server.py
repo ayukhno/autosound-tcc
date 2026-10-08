@@ -10,6 +10,7 @@ import asyncio
 import json
 import re
 import sys
+import threading
 from concurrent.futures import Future
 from pathlib import Path
 
@@ -1261,6 +1262,68 @@ def test_a_critique_is_recorded_against_the_step_it_was_called_on(tmp_path, monk
     asyncio.run(mcp.call_tool("call_critic", {"package": "x", "step": "2.1"}))
 
     assert seen["step"] == "2.1"
+
+
+def _a_critique(critic):
+    """`critic.run` as it answers a review that ran, its text filed where the method files it."""
+    return lambda package, **kw: critic.CriticResult(
+        critic.MODE_API_OR_CLI, "looks fine", "gemini-3.1-pro-high", "critic", "", 1.0, "now",
+        review="process/reviews/20261008-120000-critic.md")
+
+
+def test_the_critiques_journal_write_runs_off_the_servers_loop(tmp_path, monkeypatch):
+    """Fable m2 on G5+G8: `call_critic` wrote the journal on the server's own loop thread, so
+    `spawn` waited the full `LOCK_WAIT_S` there for the project's lock — and behind a 120 s
+    `check_captures`, every MCP call stalled for up to a minute, then lost the write as busy. It
+    goes through `_in_thread`, as every other tool's write does: the loop stays free."""
+    from autosound_tcc.core import critic, process_writer
+
+    monkeypatch.setattr(critic, "run", _a_critique(critic))
+    ran_on: list = []
+    monkeypatch.setattr(process_writer, "record_reviewer",
+                        lambda project_dir, **kw: ran_on.append(threading.current_thread()) or "ok")
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    loop_thread = threading.current_thread()  # where `asyncio.run` runs the server's loop
+
+    asyncio.run(mcp.call_tool("call_critic", {"package": "x", "step": "2.1"}))
+
+    assert [thread.name for thread in ran_on] == [mcp_server._CALL_THREAD], \
+        f"the journal write ran on {ran_on}, not on a call thread of its own"
+    assert ran_on[0] is not loop_thread
+
+
+@pytest.mark.parametrize("dropped", ["the method's refusal", "too old", "busy", "refused"])
+def test_a_critique_the_journal_did_not_take_leaves_one_warning(tmp_path, monkeypatch,
+                                                                 app_log_warnings, dropped):
+    """Fable m2: a critique that ran must not fail over its own bookkeeping, so a journal write
+    that failed was dropped — with no word for a non-zero exit or a copy too old for the command,
+    the half `spawn` does not log (it says a busy, refused, cut or unstartable run). One WARNING
+    names the critique the journal lost — its file, its model, its step — and why; the critique
+    still reaches the session."""
+    from autosound_tcc.core import critic, process_writer
+
+    error = {
+        "the method's refusal": process_writer.ProcessWriterError("error: no step 2.9 in the plan"),
+        "too old": process_writer.TooOld("this project's method is older than `reviewer --review`"),
+        "busy": process_writer.Busy("busy: another write to this project is still running"),
+        "refused": process_writer.Refused("the project's copy of the method is not one TCC runs"),
+    }[dropped]
+
+    def record(project_dir, **kw):
+        raise error
+
+    monkeypatch.setattr(critic, "run", _a_critique(critic))
+    monkeypatch.setattr(process_writer, "record_reviewer", record)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    app_log_warnings.clear()
+
+    answer = json.loads(_text(asyncio.run(
+        mcp.call_tool("call_critic", {"package": "x", "step": "2.9"}))))
+
+    assert answer["critique"] == "looks fine", "the critique still reaches the session"
+    said = [record.getMessage() for record in app_log_warnings]
+    assert said == ["not recorded: the review process/reviews/20261008-120000-critic.md by "
+                    f"gemini-3.1-pro-high for step 2.9 is not in the journal: {error}"], said
 
 
 def test_the_whole_session_probe_can_be_asked_for(tmp_path, monkeypatch):

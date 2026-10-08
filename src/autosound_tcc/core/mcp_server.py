@@ -1430,7 +1430,10 @@ def build_server(
         # plain question there would read as the last critique (tcc#116). Its text is filed anyway.
         if role != critic.ASK and result.mode in (critic.MODE_API_OR_CLI, critic.MODE_CLIPBOARD):
             try:
-                process_writer.record_reviewer(
+                # Off the loop, as every other tool's write (Fable m2): on it, `spawn` waited the
+                # loop's own 60 s for the lock, and every MCP call stalled behind a long check.
+                await _in_thread(
+                    process_writer.record_reviewer,
                     project_dir,
                     vendor=_vendor_of(result.model),
                     model=result.model or "?",
@@ -1438,8 +1441,14 @@ def build_server(
                     review=result.review or "",
                     mode="clipboard" if result.mode == critic.MODE_CLIPBOARD else "api",
                 )
-            except process_writer.ProcessWriterError:
-                pass  # a critique that ran must not fail over its own bookkeeping
+            except process_writer.ProcessWriterError as exc:
+                # A critique that ran must not fail over its own bookkeeping — but the journal has
+                # lost it, and `spawn` says so only for a busy, refused, cut or unstartable run: a
+                # refusal of the method's own or a copy too old for the command said nothing.
+                app_log.logger().warning(
+                    "not recorded: the review %s by %s%s is not in the journal: %s",
+                    result.review or "(no text filed)", result.model or "?",
+                    f" for step {step}" if step else "", exc)
         bridge.show_critique(
             {
                 "mode": result.mode,
