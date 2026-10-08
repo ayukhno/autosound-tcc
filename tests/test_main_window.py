@@ -2988,7 +2988,10 @@ def test_declining_the_replacement_writes_nothing(tmp_path, monkeypatch):
 
 def test_save_writes_tccs_own_settings_even_with_no_session(monkeypatch, tmp_path):
     """Save used to be nothing but the model handoff, so with no session running it did nothing at
-    all — no write, no message, no way to tell "saved" from "ignored" (user, 2026-08-07).
+    all — no write, no message, no way to tell "saved" from "ignored" (user, 2026-08-07). A Save
+    that landed says «on disk», on the strip as a passing fact and in the conversation (the group
+    review, G2: only the stored value was asserted, and a flush answering None said «not saved»
+    on every good Save without a test going red).
 
     And a Save whose writes did not land is not «on disk», and it still answers: on the strip and
     in the conversation, with what kept it off the disk — with no session, and with one that has
@@ -3006,10 +3009,16 @@ def test_save_writes_tccs_own_settings_even_with_no_session(monkeypatch, tmp_pat
     pick = next(i for i in range(combo.count()) if combo.itemData(i))
     combo.setCurrentIndex(pick)
     project_settings.set_value(config.tcc_dir(), "generator", "")  # as if the write was missed
+    answered = len(window._dialog._bubbles)
 
     window._save_project_state()
 
     assert project_settings.get(config.tcc_dir(), "generator") == combo.itemData(pick)
+    on_disk = i18n.t("savedTccOnly")
+    assert window._status_strip.text() == on_disk, window._status_strip.text()
+    assert not window._status_strip.can_close(), "a passing fact, not a warning to close"
+    assert len(window._dialog._bubbles) == answered + 1
+    assert on_disk in " ".join(w.text() for w in window._dialog._bubbles[-1].findChildren(QLabel))
     store = project_settings.path_for(config.tcc_dir())
     store.unlink()
     store.mkdir()  # a folder in the file's place: no write lands
@@ -7943,13 +7952,11 @@ def test_a_logged_error_with_no_log_file_is_said_without_a_path():
     assert str(Path("logs") / "tcc.log") in notes[1], "with a file, the file is still named"
 
 
-def _over_an_unreadable_settings_file():
-    """A window stand-in whose project's `tcc-project.json` is a folder: refused on every
-    platform, as a file nobody may open is."""
+def _over_its_settings_file():
+    """A window stand-in over its project's `tcc-project.json`, which is not there yet."""
     from autosound_tcc.core import project_settings
 
     store = project_settings.path_for(config.tcc_dir())
-    store.mkdir(parents=True)
     pick = SimpleNamespace(currentData=lambda: "sdk:claude-opus-5")
     host = SimpleNamespace(_closing=False, _ai_main_combo=pick, _ai_critic_combo=pick,
                            _ai_effort_combo=SimpleNamespace(currentData=lambda: "high"),
@@ -7958,33 +7965,64 @@ def _over_an_unreadable_settings_file():
     return store, host
 
 
-def test_a_quit_over_an_unreadable_settings_file_says_it_and_carries_on(app_log_told):
+def _over_an_unreadable_settings_file():
+    """A window stand-in whose project's `tcc-project.json` is a folder: refused on every
+    platform, as a file nobody may open is."""
+    store, host = _over_its_settings_file()
+    store.mkdir(parents=True)
+    return store, host
+
+
+def test_a_quit_over_an_unreadable_settings_file_says_it_and_carries_on(app_log_told,
+                                                                        monkeypatch):
     """The review of Task 17, Important 2: `_flush_own_state` raised `StoreUnreadable` out of
     `closeEvent`, before the session's stop, `stop_workers` and the agent's thread were handled
     — on every quit while the file stayed unreadable, and with a session running that is tcc#73's
-    abort at quit."""
+    abort at quit. It answers False, the Save's «not saved», and the first key refused does not
+    stop the other two being tried (the group review, W5: `wrote and set_value_or_say(...)`
+    tried one and passed)."""
+    from autosound_tcc.core import project_settings
+
     store, host = _over_an_unreadable_settings_file()
+    tried, write = [], project_settings.set_value_or_say
+    monkeypatch.setattr(project_settings, "set_value_or_say",
+                        lambda tcc_dir, key, value=None: tried.append(key)
+                        or write(tcc_dir, key, value))
 
-    MainWindow._flush_own_state(host)
+    assert MainWindow._flush_own_state(host) is False
 
+    assert tried == [main_window._GENERATOR_KEY, main_window._CRITIC_KEY, main_window._EFFORT_KEY]
     assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told
 
 
-def test_a_tool_allowed_into_an_unreadable_settings_file_is_not_said_to_be_allowed(app_log_told):
-    """The review of Task 17, N1: «Auto-allowed … asking about it is off for this project» came
-    after a write that did not land — the tool still asks, and the sentence was untrue."""
-    store, host = _over_an_unreadable_settings_file()
+def test_a_tool_allowed_is_said_to_be_allowed_only_when_the_store_holds_it(app_log_told):
+    """A tick that lands is said, and the store holds the tool (the group review, G2: only the
+    failure side was tested, and a writer that dropped its answer left every tick unsaid). And the
+    review of Task 17, N1: «Auto-allowed … asking about it is off for this project» came after a
+    write that did not land — the tool still asks, and the sentence was untrue."""
+    from autosound_tcc.core import project_settings
+
+    store, host = _over_its_settings_file()
     said, pushed = [], []
-    host._always_allowed = lambda: frozenset()
+    host._project_setting = lambda key: MainWindow._project_setting(host, key)
+    host._always_allowed = lambda: MainWindow._always_allowed(host)
     host._set_project_setting = lambda key, value: MainWindow._set_project_setting(host, key, value)
     host._dialog = SimpleNamespace(_add_system_message=lambda text, *a, **k: said.append(text))
     host._push_gate_to_session = lambda: pushed.append(True)
+    allowed = i18n.t("autoAllowed").format(tool="copy_helix_eq")
 
     MainWindow._remember_always_allowed(host, "copy_helix_eq")
 
-    assert said == [], said
+    assert said == [allowed], said
+    assert project_settings.get(config.tcc_dir(), main_window._ALWAYS_KEY) == "copy_helix_eq"
+
+    store.unlink()
+    store.mkdir()  # a folder in the file's place: refused on every platform
+    MainWindow._remember_always_allowed(host, "copy_helix_xo")
+
+    assert said == [allowed], "a tick that did not land is not said"
     assert len(app_log_told) == 1 and str(store) in app_log_told[0], "the failure says itself"
-    assert pushed == [True], "the session still gets the gate the store holds"
+    assert pushed == [True, True], "the session still gets the gate the store holds"
 
 
 def test_a_pick_saved_to_an_unreadable_settings_file_says_it_and_carries_on(app_log_told):
