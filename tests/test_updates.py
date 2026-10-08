@@ -12,7 +12,7 @@ import sys
 
 import pytest
 
-from autosound_tcc.core import child, install_report, updates
+from autosound_tcc.core import child, install_report, method_binding, updates
 from tests import _hung_child
 
 
@@ -547,6 +547,89 @@ def test_a_target_tag_without_upkeep_is_the_installer_s_job(monkeypatch, tmp_pat
     assert list(temp.iterdir()) == []
     assert _git_in("rev-parse", "HEAD", cwd=clone) == head
     assert "a session's patch" in (clone / "a.txt").read_text()
+
+
+# ---- a method on a contract newer than this TCC (#170, G5 S2) ----------------------------------
+
+def _tag_with_contract(origin, tag: str, text) -> None:
+    """A release `tag` on top of origin's newest — `upkeep.py` included — whose
+    `rew_tool/contract.py` holds `text`, bytes written as they are."""
+    path = origin / "skills" / "autosound-tuning" / "rew_tool" / "contract.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text if isinstance(text, bytes) else text.encode("utf-8"))
+    _git_in("add", "-A", cwd=origin)
+    _git_in("commit", "-q", "-m", tag, cwd=origin)
+    _git_in("tag", "-a", tag, "-m", tag, cwd=origin)
+
+
+def test_a_method_on_a_newer_contract_is_refused_before_anything_of_it_runs(monkeypatch, tmp_path):
+    """#170: the skill names its CLI contract (`CONTRACT_VERSION` in `rew_tool/contract.py`), and
+    this TCC drives the contracts up to `method_binding.KNOWN_CONTRACT`. A release on a newer one
+    is refused at the press, the tag's signature checked first and nothing of it taken out: no
+    `status`, no `keep-local`, no `clone`. The session's patch and the clone's release stay as
+    they were, and both steps of the press say the same."""
+    clone, log, temp = _skill_repos(monkeypatch, tmp_path)
+    _tag_with_contract(tmp_path / "origin", "v3.0.12", "CONTRACT_VERSION = 2\n")
+    head = _git_in("rev-parse", "HEAD", cwd=clone)
+
+    found = updates.local_changes("v3.0.12")
+    done = updates.apply_skill("v3.0.12", keep_local=True)
+
+    assert (found.ok, found.reason) == (False, "newer_contract"), found
+    assert (done.ok, done.reason) == (False, "newer_contract"), done
+    assert found.detail == done.detail == (
+        f"v3.0.12: CONTRACT_VERSION 2 > {method_binding.KNOWN_CONTRACT}"), "the tag and the numbers"
+    assert done.patch == "" and done.sent is None, "nothing was kept"
+    assert _runs(log) == []
+    assert list(temp.iterdir()) == []
+    assert _git_in("rev-parse", "HEAD", cwd=clone) == head
+    assert "a session's patch" in (clone / "a.txt").read_text()
+
+    root = tmp_path / "taken-out"
+    root.mkdir()
+    got = updates._extract_upkeep(clone, "v3.0.12", root)
+    assert (got.script, got.reason) == (None, "newer_contract")
+    assert list(root.iterdir()) == [], "refused before the first file of the tag is copied out"
+
+
+@pytest.mark.parametrize("text", [
+    None,
+    '"""The CLI contract."""\nSCHEMA = 3\n',
+    f"CONTRACT_VERSION = {method_binding.KNOWN_CONTRACT}\n",
+    b"\x00\xff\xfe not python",
+], ids=["no contract.py", "no number", "the number this TCC drives", "bytes that do not read"])
+def test_a_method_that_names_no_newer_contract_installs_as_today(monkeypatch, tmp_path, text):
+    """No number is not a newer one: every release up to v3.1.1 names none — the older ones have no
+    `contract.py` at all — and they install as they always did. So does a release on the contract
+    this TCC drives."""
+    clone, log, _temp = _skill_repos(monkeypatch, tmp_path)
+    tag = "v3.0.11"  # upkeep.py, and no contract.py
+    if text is not None:
+        tag = "v3.0.12"
+        _tag_with_contract(tmp_path / "origin", tag, text)
+
+    found = updates.local_changes(tag)
+    done = updates.apply_skill(tag, keep_local=True)
+
+    assert found.ok and found.changed == ("a.txt",), found
+    assert done.ok and done.version == tag, done
+    assert [run["argv"][3:] for run in _runs(log)] == [
+        ["status"], ["keep-local"], ["clone", "--tag", tag], ["libs"]]
+
+
+@pytest.mark.parametrize("blob, number", [
+    (None, None),
+    (b"CONTRACT_VERSION = 2\n", 2),
+    (b"\xef\xbb\xbfCONTRACT_VERSION = 2\n", 2),
+    (b"# caf\xe9\nCONTRACT_VERSION = 2\n", 2),
+    (b"X = 1\r\nCONTRACT_VERSION = 2\r\n", 2),
+    (b"\x00\xff\xfe not python", None),
+], ids=["no file", "plain", "a BOM", "a byte that is not UTF-8", "CRLF", "not source"])
+def test_the_press_reads_the_tag_s_number_from_its_bytes(blob, number):
+    """`contract.py` as the tag holds it, decoded as UTF-8. A BOM — what an editor on Windows may
+    write — or a stray byte in a comment does not hide the number below it: read as «no number»,
+    a release on a newer contract would install. Bytes that are not source at all name none."""
+    assert updates._contract_in(blob) == number
 
 
 def test_a_release_whose_signature_does_not_check_out_runs_nothing(monkeypatch, tmp_path):

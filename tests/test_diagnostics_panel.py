@@ -1478,6 +1478,40 @@ def test_a_press_refused_as_a_move_back_leaves_the_button_off():
     assert button.isEnabled(), "a refusal that can change on its own is pressed again"
 
 
+def test_a_press_refused_for_a_newer_contract_says_update_tcc_first(monkeypatch):
+    """#170: the press's first step refuses a method on a contract newer than this TCC drives
+    (`updates.local_changes`), and the row says so in the reader's language, the tag and the
+    numbers beside it. Nothing is asked and nothing is kept: the keep-local question never comes,
+    `apply_skill` is never called. The second step's refusal reads the same."""
+    from autosound_tcc.core import updates
+
+    detail = "v3.0.7: CONTRACT_VERSION 2 > 0"
+    dialog, asked = _skill_offered(monkeypatch)
+    monkeypatch.setattr(updates, "local_changes", lambda tag="": updates.LocalChanges(
+        False, reason="newer_contract", detail=detail))
+    monkeypatch.setattr(dialog, "_ask_keep_local", lambda changed: pytest.fail("nothing to keep"))
+    label, _button = dialog._update_rows["skill"]
+    seen = {}
+    before = i18n.current_language()
+    try:
+        for lang in ("en", "uk"):
+            i18n.set_language(lang)
+            seen[lang] = i18n.t("updWhy_newer_contract")
+            said = i18n.t("updFailed").format(why=f"{seen[lang]}: {detail}")
+
+            dialog._update_skill()
+            _finish_skill_update(dialog)
+            assert label.text() == said
+
+            dialog._after_skill_update(updates.SkillUpdate(False, "newer_contract", detail))
+            assert label.text() == said
+    finally:
+        i18n.set_language(before)
+    assert seen["en"] == "this method is newer than this TCC — update TCC first"
+    assert seen["uk"] not in (seen["en"], "updWhy_newer_contract"), "written in Ukrainian"
+    assert asked == [], "apply_skill was never asked"
+
+
 def test_a_stale_update_tcc_press_says_ahead_and_installs_nothing(monkeypatch, tmp_path):
     """Review of finding 144, I1, at the row: a row gone stale was pressed — a candidate,
     `beta-v0.2.0-rc1` with 0.1.38 in its metadata, and the newest stable `v0.1.45`. No tag is

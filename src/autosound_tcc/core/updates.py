@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import child, config, install_report, vendor_loader
+from autosound_tcc.core import child, config, install_report, method_binding, vendor_loader
 from autosound_tcc.core.signed_tags import (SKIP_VERIFY_VAR, TCC_SIGNED_FROM, TCC_SIGNING_KEY,
                                             TCC_SIGNING_PRINCIPAL, allowed_signers_line)
 
@@ -753,6 +753,10 @@ _SKILL_IN_REPO = "skills/autosound-tuning"
 _UPKEEP_FILES = ("scripts/upkeep.py", "rew_tool/gates/side_effect.py", "rew_tool/console.py",
                  "requirements.txt")
 
+#: Where a release names the CLI contract it speaks (`CONTRACT_VERSION`, #170), read from the tag
+#: before any of it is taken out.
+_CONTRACT_FILE = "rew_tool/contract.py"
+
 #: A fetch of one release over a network that may be a phone: `upkeep.py`'s own fetch allows 300 s.
 _FETCH_TIMEOUT = 300.0
 
@@ -853,6 +857,17 @@ def _git_blob(repo: Path, spec: str) -> Optional[bytes]:
     return done.stdout if done.returncode == 0 else None
 
 
+def _contract_in(blob: Optional[bytes]) -> Optional[int]:
+    """The contract number a tag's `contract.py` names (`method_binding.contract_number`), or None:
+    no file — a release from before the number — or nothing in it that reads as one.
+
+    UTF-8, a BOM skipped and a byte that does not decode replaced: an editor's BOM, or a stray
+    byte in a comment, read as «no number» would let a release on a newer contract install."""
+    if blob is None:
+        return None
+    return method_binding.contract_number(blob.decode("utf-8-sig", errors="replace"))
+
+
 @dataclass(frozen=True)
 class Extracted:
     """The new tag's `upkeep.py`, taken out to run — or why there is none to run."""
@@ -877,6 +892,11 @@ def _extract_upkeep(repo: Path, tag: str, root: Path) -> Extracted:
     The fetch writes objects and `refs/tags/<tag>` into the clone and nothing else: the working
     tree, the index and HEAD are as they were, local changes included (skill #92's refspec, so
     `describe` can name the tag later).
+
+    **A release on a contract newer than this TCC drives is refused here** (`newer_contract`,
+    #170): its signature checked, nothing of it taken out, so `local_changes` and `apply_skill`
+    both stop before `status` or `keep-local` runs. A release that names no number installs as
+    it always did — every one up to v3.1.1 names none.
     """
     ok, said = _git("fetch", "--quiet", "--depth", "1", "origin",
                     f"+refs/tags/{tag}:refs/tags/{tag}", cwd=repo, timeout=_FETCH_TIMEOUT)
@@ -886,6 +906,13 @@ def _extract_upkeep(repo: Path, tag: str, root: Path) -> Extracted:
     _log.info("skill tag %s: %s", tag, line)
     if not signed:
         return Extracted(None, why, line)
+    number = _contract_in(_git_blob(repo, f"refs/tags/{tag}:{_SKILL_IN_REPO}/{_CONTRACT_FILE}"))
+    known = method_binding.KNOWN_CONTRACT
+    if number is not None and number > known:
+        _log.warning("skill tag %s: contract %s, newer than this TCC drives (%s) — not installed",
+                     tag, number, known)
+        return Extracted(None, "newer_contract", f"{tag}: CONTRACT_VERSION {number} > {known}",
+                         signature=line)
     for name in _UPKEEP_FILES:
         blob = _git_blob(repo, f"refs/tags/{tag}:{_SKILL_IN_REPO}/{name}")
         if blob is None:
