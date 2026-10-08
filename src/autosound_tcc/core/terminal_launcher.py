@@ -164,7 +164,7 @@ def run_line(line: str) -> None:
         app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
         log.info("terminal: %s via osascript", app)
         _yield_focus_to(app)
-        _osascript(_mac_script(app, line))
+        _osascript(_mac_script(app, line), app)
         return
     if sys.platform.startswith("win"):
         # `/k` keeps the window after the command ends — the whole point here.
@@ -305,23 +305,25 @@ def _mac_script(app: str, line: str) -> str:
 _OSASCRIPT_TIMEOUT_S = 30
 
 #: What the person reads when osascript does not answer in time: the likely cause, and where to
-#: answer it. English, as every sentence this module raises: `core/` does not import the ui.
+#: answer it. `{app}` is the app macOS asks about — Terminal or iTerm, whichever is driven. English,
+#: as every sentence this module raises: `core/` does not import the ui.
 _AUTOMATION_PROMPT = (
-    "macOS may be asking whether TCC may control Terminal — allow it in System Settings → "
+    "macOS may be asking whether TCC may control {app} — allow it in System Settings → "
     "Privacy & Security → Automation, then try again"
 )
 
 
-def _osascript(script: str) -> None:
+def _osascript(script: str, app: str) -> None:
     """Run it, and keep osascript's own words: «exit status 1» alone named no reason (finding 89).
 
     Bounded (#172): a cut is a `TerminalLaunchError` like every terminal that did not open, and it
-    names the Automation prompt — the likely reason osascript did not answer."""
+    names the Automation prompt — the likely reason osascript did not answer — for `app`, the
+    terminal `script` drives and so the one macOS asks about."""
     try:
         subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=_OSASCRIPT_TIMEOUT_S)
     except subprocess.TimeoutExpired as exc:
-        raise TerminalLaunchError(_AUTOMATION_PROMPT) from exc
+        raise TerminalLaunchError(_AUTOMATION_PROMPT.format(app=app)) from exc
     except subprocess.CalledProcessError as exc:
         said = (exc.stderr or "").strip()
         raise TerminalLaunchError(
@@ -350,7 +352,7 @@ def _launch_macos(
     command = _posix_command(project_dir, cli, hint, model, extra, env)
     app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
     _yield_focus_to(app)
-    _osascript(_mac_script(app, command))
+    _osascript(_mac_script(app, command), app)
 
 
 def _launch_windows(

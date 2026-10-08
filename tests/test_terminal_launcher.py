@@ -34,6 +34,11 @@ def recorded(monkeypatch):
     calls = _Calls()
 
     def record(argv, **kw):
+        # Every osascript call is bounded (#172): it runs on the GUI thread, and an unbounded one
+        # waits for as long as macOS's Automation prompt is up. Asserted here, so a new call that
+        # forgets the bound fails every macOS test that reaches it (the review of Task 20, M2).
+        if argv and argv[0] == "osascript":
+            assert kw.get("timeout") == 30, f"osascript without its 30 s bound: {kw}"
         calls.append(argv)
         calls.kwargs = kw
 
@@ -508,17 +513,20 @@ def test_osascript_is_given_a_time_bound(recorded, monkeypatch, tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="AppleScript exists only on macOS")
+@pytest.mark.parametrize("app, iterm", [("Terminal", False), ("iTerm", True)])
 @pytest.mark.parametrize("door", ["session", "line"])
 def test_an_osascript_that_does_not_answer_is_cut_and_names_the_automation_prompt(
-        monkeypatch, tmp_path, door):
+        monkeypatch, tmp_path, door, app, iterm):
     """#172: the cut is a `TerminalLaunchError` like every other terminal that did not open — the
     one thing each caller catches — and it says the likely cause and where it is answered, not
-    «timed out»."""
+    «timed out». It names the app macOS asks about: iTerm, when iTerm is the one driven (the
+    review of Task 20, M4)."""
     import subprocess
 
     monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
     monkeypatch.setattr(terminal_launcher.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(terminal_launcher, "_yield_focus_to", lambda app: None)
+    monkeypatch.setattr(terminal_launcher.Path, "exists", lambda self: iterm)
 
     def never_answers(argv, **kw):
         raise subprocess.TimeoutExpired(argv, kw.get("timeout"))
@@ -530,7 +538,7 @@ def test_an_osascript_that_does_not_answer_is_cut_and_names_the_automation_promp
         else:
             terminal_launcher.run_line("echo hi")
     assert str(cut.value) == (
-        "macOS may be asking whether TCC may control Terminal — allow it in System Settings → "
+        f"macOS may be asking whether TCC may control {app} — allow it in System Settings → "
         "Privacy & Security → Automation, then try again")
 
 
