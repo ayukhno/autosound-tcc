@@ -103,6 +103,25 @@ def test_a_file_that_cannot_be_opened_is_refused_and_left_as_it_was(tmp_path, ap
     assert len(app_log_told) == 1 and str(path) in app_log_told[0], "said once, not per read"
 
 
+def test_a_settings_file_that_cannot_be_opened_is_refused_on_every_platform(tmp_path,
+                                                                            app_log_told):
+    """The chmod test above cannot run on Windows (the review of Task 17, Minor 6). A folder where
+    the file should be is refused everywhere — `IsADirectoryError` on POSIX, `PermissionError` on
+    Windows — so the reader's default and the write's refusal are pinned there too."""
+    path = project_settings.path_for(tmp_path)
+    path.mkdir()
+    (path / "inside").write_text("kept", encoding="utf-8")
+
+    assert project_settings.get(tmp_path, "generator", "fallback") == "fallback"
+    assert project_settings.load(tmp_path) == {}
+    with pytest.raises(own_store.StoreUnreadable):
+        project_settings.set_value(tmp_path, "critic", "sdk:claude-opus-5")
+
+    assert (path / "inside").read_text(encoding="utf-8") == "kept", "never written over"
+    assert not list(tmp_path.glob("*.corrupt-*")), "and not set aside: its bytes may be fine"
+    assert len(app_log_told) == 1 and str(path) in app_log_told[0], "said once, not per read"
+
+
 def test_the_window_s_writer_says_a_store_it_cannot_read_once_and_returns(tmp_path, app_log_told):
     """The review of Task 17, Important 2: the window writes from slots and from `closeEvent`, and
     `StoreUnreadable` raised there skipped the rest of the slot — or the whole orderly quit, on
