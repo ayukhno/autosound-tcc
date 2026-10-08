@@ -371,3 +371,34 @@ def test_the_window_quieting_asks_for_the_tests_patches_itself():
     conftest = sys.modules["tests.conftest"]
 
     assert "monkeypatch" in inspect.signature(conftest._quiet_windows_left_behind).parameters
+
+
+def test_a_test_may_set_the_app_log_up_and_leave_it_so(tmp_path, monkeypatch):
+    """Item 9 of the G5+G8 fix dispatch, first of a pair: `app_log.setup()` run as
+    `test_app_log.py`'s first-run test runs it, and left as that test leaves it — TCC's logger and
+    `py.warnings` not propagating, a file handler on each, the log path, its thread hook. The next
+    test is the check that none of it reaches past this one (`_app_log_left_as_found`)."""
+    from autosound_tcc.core import app_log
+
+    monkeypatch.setattr(app_log, "log_dir", lambda: tmp_path / "logs")
+
+    assert app_log.setup(to_stderr=False) is not None
+    assert app_log.logger().propagate is False
+
+
+def test_the_next_test_starts_with_the_logging_a_fresh_process_has():
+    """Second of the pair, and a check only when both run in one process — a serial run, or one
+    file's CI shard; split across workers it cannot fail. pytest 9 attaches its log capture to
+    every logger that does not propagate, so a TCC logger left so was heard twice by the next test
+    that made it propagate for `caplog`: eight tests in the whole-suite run at 5847551."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
+    root = logging.getLogger().handlers
+    for log in (app_log.logger(), logging.getLogger("py.warnings")):
+        assert (log.propagate, log.level) == (True, logging.NOTSET), log.name
+        assert [handler for handler in log.handlers if handler not in root] == [], log.name
+    assert app_log.log_path() is None
+    assert "_install_excepthooks" not in getattr(threading.excepthook, "__qualname__", ""), \
+        "app_log's thread hook is still in pytest's place"

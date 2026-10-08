@@ -191,6 +191,51 @@ def real_critic_reaches(monkeypatch):
     return _REAL_CRITIC_REACHES
 
 
+@pytest.fixture(autouse=True)
+def _app_log_left_as_found():
+    """`app_log.setup()` rewires the process's logging, and a test that ran it — `test_app_log.py`,
+    `test_child.py`, any `app.main()` — left it rewired for every test after it: TCC's logger and
+    `py.warnings` no longer propagating, at a level of their own, each with a file handler into
+    that test's folder; `app_log`'s log path; and `threading.excepthook`, where pytest puts its own
+    once per session. pytest 9 then attaches its log capture to every logger that does not
+    propagate as well as to the root, so a later test that made TCC's logger propagate again for
+    `caplog` heard each line twice: eight tests failed in one process after `test_app_log.py`, each
+    green on its own (fix dispatch item 9). Every test gets back what it found.
+
+    pytest's capture is never kept or closed here — the root holds it too, and pytest lets go of
+    it itself. Named to sort before every autouse fixture that takes `monkeypatch`: pytest sets a
+    conftest's autouse fixtures up in name order, so this one is put back after `monkeypatch`
+    undoes a test's own changes, and has the last word."""
+    import threading
+
+    from autosound_tcc.core import app_log
+
+    def own(log: logging.Logger) -> list[logging.Handler]:
+        root = logging.getLogger().handlers
+        return [handler for handler in log.handlers if handler not in root]
+
+    found = [(log, own(log), log.propagate, log.level)
+             for log in (app_log.logger(), logging.getLogger("py.warnings"))]
+    log_path, thread_hook = app_log._log_path, threading.excepthook
+    yield
+    dropped: list[logging.Handler] = []
+    for log, handlers, propagate, level in found:
+        for handler in own(log):
+            if handler not in handlers:
+                log.removeHandler(handler)
+                if handler not in dropped:
+                    dropped.append(handler)
+        for handler in handlers:
+            if handler not in log.handlers:
+                log.addHandler(handler)
+        log.propagate = propagate
+        log.setLevel(level)
+    for handler in dropped:  # the file a test's `setup()` opened, once even when two loggers held it
+        handler.close()
+    app_log._log_path = log_path
+    threading.excepthook = thread_hook
+
+
 @pytest.fixture
 def app_log_heard():
     """What TCC's own logger says, heard on that logger itself: after `app_log.setup()` it does
