@@ -253,6 +253,21 @@ def test_a_last_line_torn_inside_a_character_is_skipped_like_any_torn_line(tmp_p
     assert [s.id for s in SignalBus(tmp_path).deliver()] == [kept.id]
 
 
+def test_a_signal_raised_after_a_torn_last_line_starts_a_line_of_its_own(tmp_path):
+    """Ruling 10 accepts losing the signal a crash tore, not the one after it (#173, the review of
+    Task 18, Minor 2). The next raise was appended straight onto the torn piece, the two read back
+    as one line that is not JSON, and the replay skipped both — and an ack lost that way would
+    bring back open the signal it closed. The append now starts a line of its own."""
+    kept = Signal(kind=PARAM_EDIT_MODE, payload={"on": True})
+    (tmp_path / "signals.jsonl").write_bytes(
+        _line(kept) + b'{"kind": "not_visible", "payl')  # torn mid-write
+
+    raised = SignalBus(tmp_path).push(CHANNEL_TOGGLE, group="rear", channel="r-L", on=False)
+
+    assert json.loads(_log_lines(tmp_path)[-1]) == raised.as_dict(), "read back whole"
+    assert [s.id for s in SignalBus(tmp_path).deliver()] == [kept.id, raised.id]
+
+
 def test_a_note_holding_a_line_separator_is_one_line_of_the_log(tmp_path):
     """The log is split where `_append_line` ends a record — at its newline — and not at every
     character `str.splitlines` calls a boundary: a note pasted with U+2028 in it is written raw

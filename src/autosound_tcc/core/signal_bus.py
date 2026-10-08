@@ -31,6 +31,7 @@ Everything here is guarded by one `Condition`; nothing in this module touches Qt
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import uuid
@@ -315,14 +316,33 @@ class SignalBus:
     def _append_line(self, record: dict[str, Any]) -> None:
         if self._log_path is None:
             return
+        line = json.dumps(record, ensure_ascii=False) + "\n"
         try:
             self._log_path.parent.mkdir(parents=True, exist_ok=True)
+            if _ends_mid_line(self._log_path):
+                # A line a crash tore mid-append, which `_restore_from_log` skips. Written onto it,
+                # this record would be skipped with it: ruling 10 accepts losing the torn signal,
+                # not the next one -- and an ack lost that way brings back open the signal it
+                # closed (#173).
+                line = "\n" + line
             with self._log_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                handle.write(line)
         except OSError:
             # The log is an audit convenience; a read-only or missing project folder must not take
             # the UI down mid-click. Delivery still works -- it lives in the queue, not the file.
             pass
+
+
+def _ends_mid_line(path: Path) -> bool:
+    """Whether the log's last byte is anything but a newline. False for an empty log or none."""
+    try:
+        with path.open("rb") as handle:
+            if handle.seek(0, os.SEEK_END) == 0:
+                return False
+            handle.seek(-1, os.SEEK_END)
+            return handle.read(1) != b"\n"
+    except FileNotFoundError:
+        return False
 
 
 def with_pending_brief(bus: Optional[SignalBus], text: str) -> str:
