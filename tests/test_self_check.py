@@ -591,9 +591,9 @@ def test_the_method_row_reads_the_contract_number_through_the_cache(project, oth
     linked(project, other_copy)
     monkeypatch.setattr(method_binding, "_CONTRACT_CACHE", {})
     parsed = []
-    real = method_binding.contract_number
-    monkeypatch.setattr(method_binding, "contract_number",
-                        lambda text: parsed.append(len(text)) or real(text))
+    real = method_binding.contract_of
+    monkeypatch.setattr(method_binding, "contract_of",
+                        lambda source: parsed.append(len(source)) or real(source))
 
     for _ in range(3):
         assert _method(self_check.run()).status == self_check.BAD

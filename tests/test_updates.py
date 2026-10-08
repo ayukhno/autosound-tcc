@@ -562,14 +562,33 @@ def _tag_with_contract(origin, tag: str, text) -> None:
     _git_in("tag", "-a", tag, "-m", tag, cwd=origin)
 
 
-def test_a_method_on_a_newer_contract_is_refused_before_anything_of_it_runs(monkeypatch, tmp_path):
+#: Syntax this interpreter does not know: `except` without parentheses is Python 3.14's (PEP 758).
+_NEWER_SYNTAX = b"try:\n    pass\nexcept ValueError, TypeError:\n    pass\n"
+
+
+@pytest.mark.parametrize("text, said", [
+    pytest.param(b"CONTRACT_VERSION = 2\n", "CONTRACT_VERSION 2 > {known}", id="contract 2"),
+    pytest.param(b"\xef\xbb\xbfCONTRACT_VERSION = 2\n", "CONTRACT_VERSION 2 > {known}",
+                 id="contract 2 behind a BOM"),
+    pytest.param(_NEWER_SYNTAX, "rew_tool/contract.py: ", id="3.14 syntax",
+                 marks=pytest.mark.skipif(sys.version_info >= (3, 14),
+                                          reason="3.14 parses its own syntax")),
+    pytest.param(b"X = 1\n\x00\n", "rew_tool/contract.py: ", id="a NUL"),
+    pytest.param(b"NAME = 'caf\xe9'\n", "rew_tool/contract.py: ",
+                 id="a byte that is not UTF-8, in code"),
+    pytest.param(b"\x00\xff\xfe not python", "rew_tool/contract.py: ", id="not source"),
+])
+def test_a_method_this_tcc_cannot_drive_is_refused_before_anything_of_it_runs(monkeypatch, tmp_path,
+                                                                              text, said):
     """#170: the skill names its CLI contract (`CONTRACT_VERSION` in `rew_tool/contract.py`), and
     this TCC drives the contracts up to `method_binding.KNOWN_CONTRACT`. A release on a newer one
     is refused at the press, the tag's signature checked first and nothing of it taken out: no
-    `status`, no `keep-local`, no `clone`. The session's patch and the clone's release stay as
-    they were, and both steps of the press say the same."""
+    `status`, no `keep-local`, no `clone`. So is one whose `contract.py` does not parse here — most
+    likely a newer method, and read as «no number» it installed (R-ar). The session's patch and the
+    clone's release stay as they were, and both steps of the press say the same: the tag, and the
+    numbers or Python's words."""
     clone, log, temp = _skill_repos(monkeypatch, tmp_path)
-    _tag_with_contract(tmp_path / "origin", "v3.0.12", "CONTRACT_VERSION = 2\n")
+    _tag_with_contract(tmp_path / "origin", "v3.0.12", text)
     head = _git_in("rev-parse", "HEAD", cwd=clone)
 
     found = updates.local_changes("v3.0.12")
@@ -577,8 +596,9 @@ def test_a_method_on_a_newer_contract_is_refused_before_anything_of_it_runs(monk
 
     assert (found.ok, found.reason) == (False, "newer_contract"), found
     assert (done.ok, done.reason) == (False, "newer_contract"), done
-    assert found.detail == done.detail == (
-        f"v3.0.12: CONTRACT_VERSION 2 > {method_binding.KNOWN_CONTRACT}"), "the tag and the numbers"
+    assert found.detail == done.detail
+    assert found.detail.startswith(
+        "v3.0.12: " + said.format(known=method_binding.KNOWN_CONTRACT)), found.detail
     assert done.patch == "" and done.sent is None, "nothing was kept"
     assert _runs(log) == []
     assert list(temp.iterdir()) == []
@@ -594,16 +614,24 @@ def test_a_method_on_a_newer_contract_is_refused_before_anything_of_it_runs(monk
 
 @pytest.mark.parametrize("text", [
     None,
+    "v3.1.1",
     '"""The CLI contract."""\nSCHEMA = 3\n',
     f"CONTRACT_VERSION = {method_binding.KNOWN_CONTRACT}\n",
-    b"\x00\xff\xfe not python",
-], ids=["no contract.py", "no number", "the number this TCC drives", "bytes that do not read"])
+], ids=["no contract.py", "v3.1.1's contract.py", "no number", "the number this TCC drives"])
 def test_a_method_that_names_no_newer_contract_installs_as_today(monkeypatch, tmp_path, text):
-    """No number is not a newer one: every release up to v3.1.1 names none — the older ones have no
-    `contract.py` at all — and they install as they always did. So does a release on the contract
-    this TCC drives."""
+    """No number is not a newer one. Every v3 release has a `contract.py`, and up to v3.1.1 it
+    names no number — v3.1.1's own is one of the rows here — so those install as they always did.
+    So does a release on the contract this TCC drives, and a tag with no `contract.py` at all:
+    there is no contract in it to hold to the number."""
+    from autosound_tcc.core import vendor_loader
+
     clone, log, _temp = _skill_repos(monkeypatch, tmp_path)
     tag = "v3.0.11"  # upkeep.py, and no contract.py
+    if text == "v3.1.1":
+        shipped = vendor_loader._SUBMODULE_DIR / "rew_tool" / "contract.py"
+        if not shipped.is_file():
+            pytest.skip("the vendored method is not checked out (git submodule update --init)")
+        text = shipped.read_bytes()
     if text is not None:
         tag = "v3.0.12"
         _tag_with_contract(tmp_path / "origin", tag, text)
@@ -617,19 +645,36 @@ def test_a_method_that_names_no_newer_contract_installs_as_today(monkeypatch, tm
         ["status"], ["keep-local"], ["clone", "--tag", tag], ["libs"]]
 
 
-@pytest.mark.parametrize("blob, number", [
-    (None, None),
-    (b"CONTRACT_VERSION = 2\n", 2),
-    (b"\xef\xbb\xbfCONTRACT_VERSION = 2\n", 2),
-    (b"# caf\xe9\nCONTRACT_VERSION = 2\n", 2),
-    (b"X = 1\r\nCONTRACT_VERSION = 2\r\n", 2),
-    (b"\x00\xff\xfe not python", None),
-], ids=["no file", "plain", "a BOM", "a byte that is not UTF-8", "CRLF", "not source"])
-def test_the_press_reads_the_tag_s_number_from_its_bytes(blob, number):
-    """`contract.py` as the tag holds it, decoded as UTF-8. A BOM — what an editor on Windows may
-    write — or a stray byte in a comment does not hide the number below it: read as «no number»,
-    a release on a newer contract would install. Bytes that are not source at all name none."""
-    assert updates._contract_in(blob) == number
+@pytest.mark.parametrize("breaks", ["ls-tree", "show"])
+def test_a_contract_git_could_not_read_refuses_until_it_is_tried_again(monkeypatch, tmp_path,
+                                                                       breaks):
+    """R-ar: a tag with no `contract.py` installs, so a read that failed must not pass for one.
+    Whether git could not list the tag's file (`ls-tree`) or not show its bytes (`show`), the press
+    refuses with a reason of its own — try again — in git's words, and nothing of the tag runs:
+    here a release this TCC would have installed."""
+    clone, log, temp = _skill_repos(monkeypatch, tmp_path)
+    _tag_with_contract(tmp_path / "origin", "v3.0.12",
+                       f"CONTRACT_VERSION = {method_binding.KNOWN_CONTRACT}\n")
+    head = _git_in("rev-parse", "HEAD", cwd=clone)
+    said = "fatal: unable to read 0123abcd"
+    if breaks == "ls-tree":
+        real_git = updates._git
+        monkeypatch.setattr(updates, "_git", lambda *args, **kw: (
+            (False, said) if "ls-tree" in args else real_git(*args, **kw)))
+    else:
+        real_show = updates._git_show
+        monkeypatch.setattr(updates, "_git_show", lambda repo, spec: (
+            (None, said) if spec.endswith("/rew_tool/contract.py") else real_show(repo, spec)))
+
+    found = updates.local_changes("v3.0.12")
+    done = updates.apply_skill("v3.0.12", keep_local=True)
+
+    for answer in (found, done):
+        assert (answer.ok, answer.reason, answer.detail) == (
+            False, "read_failed", f"v3.0.12: {said}"), answer
+    assert _runs(log) == [] and list(temp.iterdir()) == []
+    assert _git_in("rev-parse", "HEAD", cwd=clone) == head
+    assert "a session's patch" in (clone / "a.txt").read_text()
 
 
 def test_a_release_whose_signature_does_not_check_out_runs_nothing(monkeypatch, tmp_path):

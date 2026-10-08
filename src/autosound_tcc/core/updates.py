@@ -844,28 +844,49 @@ def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM,
     return False, f"{tag}: {last}", "bad_signature"
 
 
-def _git_blob(repo: Path, spec: str) -> Optional[bytes]:
-    """`git show <tag>:<path>` as BYTES, or None when the tag has no such file.
+def _git_show(repo: Path, spec: str) -> tuple[Optional[bytes], str]:
+    """`git show <tag>:<path>` as BYTES, or `(None, why)`: git's own words, or what kept it from
+    answering at all.
 
     Bytes, not text: a file is copied out of the tag as it is, the way install.ps1 takes a zip
     rather than let PowerShell decode it through the console's code page."""
     try:
         done = child.run_bounded(["git", "-C", str(repo), "show", spec], timeout=_ASK_TIMEOUT,
                                  env={**os.environ, **_NO_PROMPTING}, **child.quiet())
-    except Exception:  # noqa: BLE001 — no git: the same as no file
-        return None
-    return done.stdout if done.returncode == 0 else None
+    except Exception as exc:  # noqa: BLE001 — no git, a hung one: no answer
+        return None, f"{type(exc).__name__}: {exc}"
+    if done.returncode != 0:
+        said = (done.stderr or b"").decode("utf-8", errors="replace").strip()
+        return None, said or f"git show exited {done.returncode}"
+    return done.stdout, ""
 
 
-def _contract_in(blob: Optional[bytes]) -> Optional[int]:
-    """The contract number a tag's `contract.py` names (`method_binding.contract_number`), or None:
-    no file — a release from before the number — or nothing in it that reads as one.
+def _git_blob(repo: Path, spec: str) -> Optional[bytes]:
+    """`_git_show`'s bytes, or None when the tag has no such file — or git could not show it: the
+    installers' `|| true` for what `upkeep.py` takes along. Not for `contract.py`, where a failed
+    read is not the same as no file (`_tag_contract`)."""
+    return _git_show(repo, spec)[0]
 
-    UTF-8, a BOM skipped and a byte that does not decode replaced: an editor's BOM, or a stray
-    byte in a comment, read as «no number» would let a release on a newer contract install."""
+
+def _tag_contract(repo: Path, tag: str) -> tuple[Optional[method_binding.Contract], str]:
+    """What `tag`'s `contract.py` says (`method_binding.contract_of`), or `(None, why)` when git
+    could not say.
+
+    A tag with no `contract.py` installs, so a read that failed must not pass for one. `ls-tree`
+    tells the two apart: it lists the path, or answers nothing for a tree without it, or fails.
+    `cat-file -e` and `show` fail alike for a path that is not there and for a read that broke,
+    and only their messages differ — in the language git speaks here. `--full-tree`, so the path
+    is the tag's own whatever folder git runs in."""
+    path = f"{_SKILL_IN_REPO}/{_CONTRACT_FILE}"
+    listed, said = _git("ls-tree", "--full-tree", f"refs/tags/{tag}", "--", path, cwd=repo)
+    if not listed:
+        return None, said or "git ls-tree failed"
+    if not any(line.partition("\t")[2] == path for line in said.splitlines()):
+        return method_binding.contract_of(None), ""
+    blob, why = _git_show(repo, f"refs/tags/{tag}:{path}")
     if blob is None:
-        return None
-    return method_binding.contract_number(blob.decode("utf-8-sig", errors="replace"))
+        return None, why
+    return method_binding.contract_of(blob), ""
 
 
 @dataclass(frozen=True)
@@ -873,7 +894,8 @@ class Extracted:
     """The new tag's `upkeep.py`, taken out to run — or why there is none to run."""
 
     script: Optional[Path]
-    #: A key when `script` is None, as `Status.reason`; `detail` is git's words or the line.
+    #: A key when `script` is None, as `Status.reason`. `detail` is git's words, the signature
+    #: line, or the tag with what its `contract.py` said: the numbers, or Python's words (#170).
     reason: str = ""
     detail: str = ""
     #: TCC's own line about the tag's signature — shown on the row when `upkeep.py clone` gives
@@ -893,10 +915,13 @@ def _extract_upkeep(repo: Path, tag: str, root: Path) -> Extracted:
     tree, the index and HEAD are as they were, local changes included (skill #92's refspec, so
     `describe` can name the tag later).
 
-    **A release on a contract newer than this TCC drives is refused here** (`newer_contract`,
-    #170): its signature checked, nothing of it taken out, so `local_changes` and `apply_skill`
-    both stop before `status` or `keep-local` runs. A release that names no number installs as
-    it always did — every one up to v3.1.1 names none.
+    **A release this TCC cannot drive is refused here, before any of it is taken out** (#170), so
+    `local_changes` and `apply_skill` both stop before `status` or `keep-local` runs. Its signature
+    is checked first. `newer_contract` for a `CONTRACT_VERSION` above
+    `method_binding.KNOWN_CONTRACT`, and for a `contract.py` that does not parse here — most likely
+    a newer method; `read_failed` when git could not read the file at all, which another try may
+    mend. Every v3 release has a `contract.py`; up to v3.1.1 it names no number, and those install
+    as they always did — as does a tag without the file, which holds no contract to the number.
     """
     ok, said = _git("fetch", "--quiet", "--depth", "1", "origin",
                     f"+refs/tags/{tag}:refs/tags/{tag}", cwd=repo, timeout=_FETCH_TIMEOUT)
@@ -906,13 +931,18 @@ def _extract_upkeep(repo: Path, tag: str, root: Path) -> Extracted:
     _log.info("skill tag %s: %s", tag, line)
     if not signed:
         return Extracted(None, why, line)
-    number = _contract_in(_git_blob(repo, f"refs/tags/{tag}:{_SKILL_IN_REPO}/{_CONTRACT_FILE}"))
+    contract, unread = _tag_contract(repo, tag)
+    if contract is None:
+        _log.warning("skill tag %s: its %s could not be read — not installed: %s", tag,
+                     _CONTRACT_FILE, unread)
+        return Extracted(None, "read_failed", f"{tag}: {unread}", signature=line)
     known = method_binding.KNOWN_CONTRACT
-    if number is not None and number > known:
-        _log.warning("skill tag %s: contract %s, newer than this TCC drives (%s) — not installed",
-                     tag, number, known)
-        return Extracted(None, "newer_contract", f"{tag}: CONTRACT_VERSION {number} > {known}",
-                         signature=line)
+    if contract.newer_than(known):
+        detail = (f"{tag}: {_CONTRACT_FILE}: {contract.unreadable}" if contract.unreadable
+                  else f"{tag}: CONTRACT_VERSION {contract.number} > {known}")
+        _log.warning("skill tag %s: not one this TCC drives (contract %s) — not installed: %s",
+                     tag, known, detail)
+        return Extracted(None, "newer_contract", detail, signature=line)
     for name in _UPKEEP_FILES:
         blob = _git_blob(repo, f"refs/tags/{tag}:{_SKILL_IN_REPO}/{name}")
         if blob is None:

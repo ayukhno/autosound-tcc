@@ -30,7 +30,10 @@ there is not the project's: no sentence calls it inside, and `relink` moves noth
 
 A copy's contract number (`CONTRACT_VERSION` in its `rew_tool/contract.py`) is read with `ast`, never
 by import — importing a copy TCC has not decided to trust would run it — and a copy newer than
-`KNOWN_CONTRACT` is refused. Not TCC's own copy: holding that one to the number is S3's (W-10).
+`KNOWN_CONTRACT` is refused, as is one whose `contract.py` is there and cannot be read or parsed on
+this interpreter: most likely written for a newer TCC (#170). One reader, `contract_of`, for a copy on
+disk and for a release at the update press. Not TCC's own copy: holding that one to the number is
+S3's (W-10).
 
 Qt-free and light (`tests/test_packaging.py`).
 """
@@ -173,11 +176,16 @@ def _bind(project_dir: Path, entry: Path) -> Binding:
                                                 f"{remedy}.")
         return _refused(project_dir, entry, f"{entry} points at {target}, which is not a 3.x copy of "
                                             f"the method; {remedy}.")
-    number = read_contract_version(copy)
-    if number is not None and number > KNOWN_CONTRACT:
+    contract = read_contract(copy)
+    if contract.unreadable:
+        return _refused(project_dir, entry, f"{entry} points at {target}, a copy of the method whose "
+                                            f"rew_tool/contract.py TCC cannot read "
+                                            f"({contract.unreadable}), so it may be newer than this "
+                                            f"TCC; update TCC first, or {remedy}.")
+    if contract.newer_than(KNOWN_CONTRACT):
         return _refused(project_dir, entry, f"{entry} points at {target}, a copy of the method on "
-                                            f"contract {number}, newer than this TCC — update TCC "
-                                            f"first, or {remedy}.")
+                                            f"contract {contract.number}, newer than this TCC — "
+                                            f"update TCC first, or {remedy}.")
     if _is_known(target, own):
         return Binding(project_dir, KNOWN, copy, entry)
     if any(_same(target, approved) for approved in config.approved_methods()):
@@ -251,22 +259,55 @@ def _is_known(target: str, own: Path) -> bool:
 
 # ---- the contract number ----------------------------------------------------------------------
 
-#: path -> (st_mtime_ns, st_size, number): one entry per `contract.py`, read again when it changes.
-_CONTRACT_CACHE: dict[str, tuple[int, int, Optional[int]]] = {}
+@dataclass(frozen=True)
+class Contract:
+    """What a `contract.py` says (`contract_of`), one of three: no file (`present` False); read, its
+    `number` the top-level `CONTRACT_VERSION` or None when it names none — every v3 release has the
+    file, and up to v3.1.1 it names none; or there and unreadable, `unreadable` saying why."""
+
+    present: bool
+    number: Optional[int] = None
+    #: Why a file that is there was not read: it does not decode or parse on this interpreter, in
+    #: Python's words, or the system would not hand it over (`read_contract`). "" when it was read.
+    unreadable: str = ""
+
+    def newer_than(self, known: int) -> bool:
+        """Whether a TCC that drives the contracts up to `known` must not run it: a number above
+        `known`, or a file that is there and cannot be read — most likely written for a newer TCC.
+        No number is not newer, and no file is not either."""
+        return bool(self.unreadable) or (self.number is not None and self.number > known)
+
+
+#: path -> (st_mtime_ns, st_size, Contract): one entry per `contract.py`, read again when it changes.
+_CONTRACT_CACHE: dict[str, tuple[int, int, Contract]] = {}
+
+
+def contract_of(source: Union[bytes, str, None]) -> Contract:
+    """The one reader of a `contract.py` (#170): a copy's on disk (`read_contract`), and a release's
+    at the update press (`updates._extract_upkeep`), so the two cannot read one file two ways.
+
+    None is no file. Anything else goes to `ast.parse` as it is — never imported, so nothing in it
+    runs — and bytes are decoded there the way an import decodes them, a BOM and a coding cookie
+    honoured. What does not decode or parse on this interpreter is `unreadable`, never «no number»:
+    a newer method is the likeliest author of syntax this Python does not know."""
+    if source is None:
+        return Contract(False)
+    try:
+        tree = ast.parse(source, filename="contract.py")
+    except (SyntaxError, ValueError, RecursionError) as exc:
+        return Contract(True, unreadable=f"{type(exc).__name__}: {exc}")
+    return Contract(True, _top_level_int(tree, "CONTRACT_VERSION"))
 
 
 def contract_number(text: Union[str, bytes]) -> Optional[int]:
     """The top-level `CONTRACT_VERSION = <int>` of a `contract.py`'s text (an annotated one counts),
     or None. Found with `ast`, never by import: a file that raises on import still answers, and
-    nothing in it runs. Text that does not parse, or a value that is not an int literal, is None."""
-    return _top_level_int(text, "CONTRACT_VERSION")
+    nothing in it runs. Text that does not parse, or a value that is not an int literal, is None —
+    `contract_of` tells the first apart, and that is the reader a decision is made on."""
+    return contract_of(text).number
 
 
-def _top_level_int(text: Union[str, bytes], name: str) -> Optional[int]:
-    try:
-        tree = ast.parse(text)
-    except (SyntaxError, ValueError, RecursionError):
-        return None
+def _top_level_int(tree: ast.Module, name: str) -> Optional[int]:
     number = None
     for node in tree.body:  # top level only: a name inside a function or an `if` is not the module's
         if isinstance(node, ast.Assign):
@@ -283,10 +324,11 @@ def _top_level_int(text: Union[str, bytes], name: str) -> Optional[int]:
     return number
 
 
-def read_contract_version(skill_dir: Union[str, os.PathLike]) -> Optional[int]:
-    """The contract number of the copy at `skill_dir`, or None when it names none or cannot be read.
-    Cached by path, mtime and size: diagnostics asks on the GUI thread, and `contract.py` is 1800
-    lines of `ast` to walk."""
+def read_contract(skill_dir: Union[str, os.PathLike]) -> Contract:
+    """What the copy at `skill_dir` says in its `rew_tool/contract.py`: the file's bytes through
+    `contract_of`. Cached by path, mtime and size: diagnostics asks on the GUI thread, and
+    `contract.py` is 1800 lines of `ast` to walk. A file that is there and that the system will not
+    hand over is `unreadable` too, in its words — and not cached, so it is asked again."""
     path = os.path.join(os.fspath(skill_dir), "rew_tool", "contract.py")
     try:
         info = os.stat(path)
@@ -294,12 +336,20 @@ def read_contract_version(skill_dir: Union[str, os.PathLike]) -> Optional[int]:
         cached = _CONTRACT_CACHE.get(path)
         if cached is not None and cached[:2] == key:
             return cached[2]
-        text = Path(path).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    number = contract_number(text)
-    _CONTRACT_CACHE[path] = (*key, number)
-    return number
+        blob = Path(path).read_bytes()
+    except (FileNotFoundError, NotADirectoryError):
+        return Contract(False)
+    except OSError as exc:
+        return Contract(True, unreadable=f"{type(exc).__name__}: {_why(exc)}")
+    contract = contract_of(blob)
+    _CONTRACT_CACHE[path] = (*key, contract)
+    return contract
+
+
+def read_contract_version(skill_dir: Union[str, os.PathLike]) -> Optional[int]:
+    """The contract number of the copy at `skill_dir`, or None when it names none, has no
+    `contract.py`, or it cannot be read — `read_contract` tells the three apart."""
+    return read_contract(skill_dir).number
 
 
 # ---- what the person can do about a refusal ---------------------------------------------------

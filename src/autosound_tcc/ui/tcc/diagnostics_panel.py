@@ -173,6 +173,13 @@ def _reason(key: str, detail: str = "") -> str:
     return f"{text}: {detail}" if detail else text
 
 
+#: The refusals pressing again cannot change: the press would only fetch and say the same, so its
+#: button stays off until the next Re-check redraws the row. «ahead» (review of finding 144, M2),
+#: and a method newer than this TCC, which only a newer TCC changes (#170). Read by every press
+#: that can be refused; any other refusal can change on its own, and leaves the button on.
+_STANDING_REFUSALS = frozenset({"ahead", "newer_contract"})
+
+
 #: The sentences a tag's signature check writes — `updates._verify_tag` for TCC's own tags, the
 #: skill's `upkeep.py verify_tag` for its own, word for word the same — by their parts (tcc#122:
 #: «Підпис релізу: v3.0.7: signature good (ayukhno)» in a Ukrainian row). A failure never reaches
@@ -896,7 +903,7 @@ class DiagnosticsDialog(QDialog):
         label, button = self._update_rows["skill"]
         if not found.ok:
             label.setText(i18n.t("updFailed").format(why=_reason(found.reason, found.detail)))
-            button.setEnabled(True)
+            button.setEnabled(found.reason not in _STANDING_REFUSALS)
             return
         send = False
         if found.changed:
@@ -981,9 +988,9 @@ class DiagnosticsDialog(QDialog):
             version = done.version.lstrip("v")
             self.updateLearned.emit(updates.Status("skill", version, version, False))
         else:
-            # Pressed again, «ahead» would only fetch and say the same: off until a Re-check
-            # (review of finding 144, M2). Any other refusal can change on its own.
-            button.setEnabled(done.reason != "ahead")
+            # Pressed again, a standing refusal would only fetch and say the same: off until a
+            # Re-check (`_STANDING_REFUSALS`). Any other refusal can change on its own.
+            button.setEnabled(done.reason not in _STANDING_REFUSALS)
 
     def _update_tcc(self) -> None:
         """Handed to a terminal, with the reason said out loud — once TCC's own tag checks out.
@@ -1025,9 +1032,9 @@ class DiagnosticsDialog(QDialog):
             return
         if ready.script is None:
             # Nothing was written, so nothing runs: the reason where the window would have been.
-            # And «ahead» keeps the button off, as on the method's row (review of finding 144).
+            # And a standing refusal keeps the button off, as on the method's row («ahead»).
             label.setText(i18n.t("updFailed").format(why=_reason(ready.reason, ready.detail)))
-            button.setEnabled(ready.reason != "ahead")
+            button.setEnabled(ready.reason not in _STANDING_REFUSALS)
             return
         try:
             terminal_launcher.run_script(ready.script)

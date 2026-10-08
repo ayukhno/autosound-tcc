@@ -1512,6 +1512,35 @@ def test_a_press_refused_for_a_newer_contract_says_update_tcc_first(monkeypatch)
     assert asked == [], "apply_skill was never asked"
 
 
+@pytest.mark.parametrize("why", ["ahead", "newer_contract"])
+def test_a_refusal_pressing_again_cannot_change_keeps_the_button_off_at_both_steps(monkeypatch,
+                                                                                   why):
+    """R-as: after «newer than this TCC» the button came back on, and a second press fetched the
+    release again — up to five minutes over a phone — to be told the same, the very thing M2 ended
+    for «ahead». Both steps of the press read one list of such refusals. A read that failed can go
+    on another try, and leaves the button for it."""
+    from autosound_tcc.core import updates
+
+    dialog, asked = _skill_offered(monkeypatch)
+    monkeypatch.setattr(updates, "local_changes", lambda tag="": updates.LocalChanges(
+        False, reason=why, detail="v3.0.7"))
+    label, button = dialog._update_rows["skill"]
+
+    dialog._update_skill()
+    _finish_skill_update(dialog)
+    assert not button.isEnabled(), "off after the first step's refusal"
+
+    button.setEnabled(True)
+    dialog._after_skill_update(updates.SkillUpdate(False, why, "v3.0.7"))
+    assert not button.isEnabled(), "and after the second step's"
+
+    dialog._after_local_changes(updates.LocalChanges(False, reason="read_failed", detail="v3.0.7"))
+    assert button.isEnabled(), "a read that failed is tried again"
+    assert i18n.t("updWhy_read_failed") != "updWhy_read_failed", "a sentence of its own"
+    assert label.text() == i18n.t("updFailed").format(why=f"{i18n.t('updWhy_read_failed')}: v3.0.7")
+    assert asked == []
+
+
 def test_a_stale_update_tcc_press_says_ahead_and_installs_nothing(monkeypatch, tmp_path):
     """Review of finding 144, I1, at the row: a row gone stale was pressed — a candidate,
     `beta-v0.2.0-rc1` with 0.1.38 in its metadata, and the newest stable `v0.1.45`. No tag is

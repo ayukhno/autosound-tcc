@@ -26,7 +26,7 @@ import pytest
 
 from autosound_tcc.core import config, method_binding, vendor_loader
 
-from tests._method_copies import entry as _entry, same_path as _same_path
+from tests._method_copies import copy_of_the_method, entry as _entry, same_path as _same_path
 
 #: TCC's own copy in a checkout. Every copy of the method is made from it.
 _SKILL = vendor_loader._SUBMODULE_DIR
@@ -361,6 +361,73 @@ def test_tccs_own_copy_is_not_held_to_the_contract_check(project, newer_copy, mo
     assert (binding.state, binding.skill_dir) == ("same", newer_copy)
 
 
+#: Syntax this interpreter does not know: `except` without parentheses is Python 3.14's (PEP 758).
+_NEWER_SYNTAX = pytest.param(b"\ntry:\n    pass\nexcept ValueError, TypeError:\n    pass\n",
+                             marks=pytest.mark.skipif(sys.version_info >= (3, 14),
+                                                      reason="3.14 parses its own syntax"),
+                             id="3.14 syntax")
+
+#: What a `contract.py` can end in that no `ast` here parses, whatever the copy's number.
+_UNREADABLE_ENDINGS = [_NEWER_SYNTAX,
+                       pytest.param(b"\n\x00\n", id="a NUL"),
+                       pytest.param(b"\nNAME = 'caf\xe9'\n", id="a byte that is not UTF-8, in code")]
+
+
+def _copy_ending_in(root: Path, ending: bytes) -> Path:
+    """A copy of the method whose `contract.py` is v3.1.1's, then `ending`, byte for byte."""
+    copy = copy_of_the_method(root)
+    contract = copy / "rew_tool" / "contract.py"
+    contract.write_bytes(contract.read_bytes() + ending)
+    return copy
+
+
+@pytest.mark.parametrize("ending", _UNREADABLE_ENDINGS)
+def test_a_copy_whose_contract_cannot_be_read_is_refused_like_a_newer_one(project, tmp_path,
+                                                                           ending):
+    """#170: a `contract.py` that does not parse here read as «no number», and a copy approved on
+    this machine ran with it. Most likely it was written for a newer TCC — refused as one, with the
+    entry named and what to do; approving does not undo it."""
+    copy = _copy_ending_in(tmp_path / "unreadable-method", ending)
+    assert config.approve_method(copy), "approved on this machine"
+    entry = _link(_entry(project), copy)
+
+    binding = method_binding.for_project(project)
+
+    assert (binding.state, binding.can_approve, binding.skill_dir) == ("refused", False, None)
+    assert str(entry) in binding.reason and "rew_tool/contract.py" in binding.reason
+    assert "cannot read" in binding.reason and "update TCC first" in binding.reason
+
+
+def test_a_copy_on_a_newer_contract_behind_a_bom_is_refused(project, tmp_path):
+    """#170: the binding read `contract.py` as text, a BOM kept in front — what an editor on Windows
+    may write — and `ast` turned that into «no number»: a copy on contract 2, approved on this
+    machine, ran. It reads the bytes now, through the press's own reader."""
+    copy = copy_of_the_method(tmp_path / "bom-method", changes={
+        "rew_tool/contract.py": lambda text: "﻿" + text + "\nCONTRACT_VERSION = 2\n"})
+    assert (copy / "rew_tool" / "contract.py").read_bytes().startswith(b"\xef\xbb\xbf")
+    assert config.approve_method(copy), "approved on this machine"
+    entry = _link(_entry(project), copy)
+
+    assert method_binding.read_contract_version(copy) == 2
+    binding = method_binding.for_project(project)
+
+    assert (binding.state, binding.can_approve, binding.skill_dir) == ("refused", False, None)
+    assert str(entry) in binding.reason
+    assert "contract 2, newer than this TCC — update TCC first" in binding.reason
+
+
+def test_tccs_own_copy_is_not_held_to_a_contract_it_cannot_read(project, tmp_path, monkeypatch):
+    """S3's too (W-10): TCC's own copy runs as it does today, whatever its `contract.py` holds."""
+    own = _copy_ending_in(tmp_path / "own-method", b"\n\x00\n")
+    monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, str(own))
+    assert vendor_loader.skill_dir() == own
+    _link(_entry(project), own)
+
+    binding = method_binding.for_project(project)
+
+    assert (binding.state, binding.skill_dir) == ("same", own)
+
+
 # ---- the «is a link» rule where a parent is a link -------------------------------------------
 
 
@@ -419,6 +486,67 @@ def test_the_contract_number_is_only_a_top_level_int(text):
     assert method_binding.contract_number(text) is None
 
 
+def test_one_reader_answers_no_file_a_number_or_none_or_unreadable():
+    """#170: the press and the binding read a `contract.py` with one reader, and «no number» is not
+    the answer for a file that could not be read. Every v3 release has the file; up to v3.1.1 it
+    names no number."""
+    absent = method_binding.contract_of(None)
+    assert (absent.present, absent.number, absent.unreadable) == (False, None, "")
+    legacy = method_binding.contract_of((_SKILL / "rew_tool" / "contract.py").read_bytes())
+    assert (legacy.present, legacy.number, legacy.unreadable) == (True, None, ""), "v3.1.1"
+    two = method_binding.contract_of(b"CONTRACT_VERSION = 2\n")
+    assert (two.present, two.number, two.unreadable) == (True, 2, "")
+    broken = method_binding.contract_of(b"CONTRACT_VERSION = 2\n\x00\n")
+    assert (broken.present, broken.number) == (True, None) and broken.unreadable
+
+    known = method_binding.KNOWN_CONTRACT
+    assert not absent.newer_than(known) and not legacy.newer_than(known)
+    assert two.newer_than(1) and not two.newer_than(2)
+    assert broken.newer_than(known), "unreadable is most likely newer"
+
+
+@pytest.mark.parametrize("blob", [
+    b"\xef\xbb\xbfCONTRACT_VERSION = 2\n",
+    b"# -*- coding: latin-1 -*-\nNAME = 'caf\xe9'\nCONTRACT_VERSION = 2\n",
+    b"X = 1\r\nCONTRACT_VERSION = 2\r\n",
+], ids=["a BOM", "a coding cookie", "CRLF"])
+def test_the_reader_decodes_the_bytes_as_an_import_does(blob):
+    """`ast.parse` of the bytes honours a BOM — what an editor on Windows may write — and a coding
+    cookie, as importing the file would. A text decode kept the BOM, and `ast` read none there."""
+    assert method_binding.contract_of(blob) == method_binding.Contract(True, 2)
+
+
+@pytest.mark.parametrize("ending", [*_UNREADABLE_ENDINGS,
+                                    pytest.param(b"\nCONTRACT_VERSION = (\n", id="unclosed"),
+                                    pytest.param(b"\x00\xff\xfe not python", id="not source")])
+def test_a_contract_that_does_not_parse_here_is_unreadable_and_newer(ending):
+    """Present, and not parsed on this interpreter: most likely written for a newer one (#170).
+    `contract_number` still answers None for it — it names no number it could read."""
+    contract = method_binding.contract_of(ending)
+
+    assert (contract.present, contract.number) == (True, None)
+    assert contract.unreadable, "Python's words for why"
+    assert contract.newer_than(method_binding.KNOWN_CONTRACT)
+    assert method_binding.contract_number(ending) is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root reads everything")
+def test_a_contract_the_system_will_not_hand_over_is_unreadable(tmp_path, request):
+    """There, and not read: refused like one that does not parse — never «no number»."""
+    contract = tmp_path / "copy" / "rew_tool" / "contract.py"
+    contract.parent.mkdir(parents=True)
+    contract.write_text("CONTRACT_VERSION = 0\n", encoding="utf-8")
+    request.addfinalizer(lambda: contract.chmod(0o644))
+    contract.chmod(0)
+
+    read = method_binding.read_contract(tmp_path / "copy")
+
+    assert read.present and read.number is None and "Permission" in read.unreadable
+    assert read.newer_than(method_binding.KNOWN_CONTRACT)
+    assert method_binding.read_contract_version(tmp_path / "copy") is None
+
+
 def test_the_contract_number_is_cached_by_path_mtime_and_size(tmp_path, monkeypatch):
     """`for_project` runs on the GUI thread (diagnostics), and `contract.py` is 1800 lines."""
     skill = tmp_path / "copy"
@@ -427,9 +555,9 @@ def test_the_contract_number_is_cached_by_path_mtime_and_size(tmp_path, monkeypa
     shipped = (_SKILL / "rew_tool" / "contract.py").read_text(encoding="utf-8")
     contract.write_text(shipped + "\nCONTRACT_VERSION = 1\n", encoding="utf-8")
     parsed = []
-    real = method_binding.contract_number
-    monkeypatch.setattr(method_binding, "contract_number",
-                        lambda text: parsed.append(len(text)) or real(text))
+    real = method_binding.contract_of
+    monkeypatch.setattr(method_binding, "contract_of",
+                        lambda source: parsed.append(len(source)) or real(source))
 
     assert method_binding.read_contract_version(skill) == 1
     assert method_binding.read_contract_version(skill) == 1
