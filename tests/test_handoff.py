@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -14,7 +15,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
-from autosound_tcc.core import config, handoff, method_binding, method_cli, vendor_loader  # noqa: E402
+from autosound_tcc.core import (  # noqa: E402
+    config, handoff, method_binding, method_cli, process_writer, vendor_loader,
+)
+from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.state import process_view  # noqa: E402
 
 
@@ -40,13 +44,62 @@ def test_the_methods_answer_is_read_as_it_prints_it(tmp_path, monkeypatch):
     answer = {"ok": False, "missing": ["open round: process.py <dir> round-close"],
               "phase": "1", "resume": "", "next_message": "продовжуй"}
     _the_method_answers(monkeypatch, 1, json.dumps(answer, ensure_ascii=False))
-    got = handoff.check(tmp_path)
+    got, why = handoff.ask(tmp_path)
     assert got["ok"] is False and got["missing"] == answer["missing"]
+    assert why is None
 
 
 def test_an_older_method_is_said_as_such(tmp_path, monkeypatch):
-    _the_method_answers(monkeypatch, 2, err="process.py: error: unrecognized arguments: --json")
-    assert handoff.check(tmp_path) is None
+    """A method older than `handoff` answers with its usage text (`process_writer.TooOld`): no
+    answer and no sentence of its own, so the window says «update the method» — the one case
+    where that is the fix."""
+    _the_method_answers(monkeypatch, 2, err="usage: process.py <process-dir> <command> [args]")
+    assert handoff.ask(tmp_path) == (None, None)
+
+
+def test_a_copy_older_than_json_is_said_as_too_old(tmp_path, monkeypatch):
+    """A copy whose `process.py` does not know `--json` is refused the flag before it starts
+    (`UnknownFlag`, N19): too old as well, so «update the method»."""
+    from tests._method_copies import copy_of_the_method
+
+    older = copy_of_the_method(tmp_path / "older", changes={
+        "rew_tool/state/process.py": lambda text: text.replace("--json", "")})
+    monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, str(older))
+    monkeypatch.setattr(method_cli.child, "run_bounded",
+                        lambda argv, **_k: pytest.fail(f"a child started: {argv}"))
+    assert handoff.ask(tmp_path) == (None, None)
+
+
+_CRASH = ("Traceback (most recent call last):\n  File \"process.py\", line 3990, in _main\n"
+          "AttributeError: 'list' object has no attribute 'get'")
+
+
+@pytest.mark.parametrize("child, named", [
+    pytest.param(lambda argv, **_k: subprocess.CompletedProcess(argv, 1, "", _CRASH),
+                 "AttributeError: 'list' object has no attribute 'get'", id="crashed"),
+    pytest.param(lambda argv, **_k: subprocess.CompletedProcess(argv, 0, "ready", ""),
+                 "ready", id="no JSON"),
+    pytest.param(lambda argv, **_k: (_ for _ in ()).throw(subprocess.TimeoutExpired(argv, 30)),
+                 "timed out", id="timed out"),
+    pytest.param(lambda argv, **_k: (_ for _ in ()).throw(OSError(8, "Exec format error")),
+                 "Exec format error", id="could not start"),
+    pytest.param(lambda argv, **_k: subprocess.CompletedProcess(
+        argv, 1, "", "error: process-state.json is not a process record"),
+                 "error: process-state.json is not a process record", id="refused by the method"),
+])
+def test_a_handoff_that_got_no_answer_says_why_and_not_update_the_method(
+        tmp_path, monkeypatch, child, named):
+    """#169 review I4: a crash, a timeout, an interpreter that would not start, output that is no
+    answer — each read as None, and the window said «Update the method» to a method that was
+    current, which updating cannot fix. Each says what happened now, in the method's or TCC's
+    words; only a method too old for the check is left to «update the method»."""
+    monkeypatch.setattr(method_cli.child, "run_bounded", child)
+
+    answer, why = handoff.ask(tmp_path)
+
+    assert answer is None
+    assert why and named in why, why
+    assert "Traceback" not in why and "update the method" not in why.lower(), why
 
 
 def test_a_refused_copy_of_the_method_is_said_with_its_sentence_not_as_too_old(tmp_path):
@@ -60,11 +113,7 @@ def test_a_refused_copy_of_the_method_is_said_with_its_sentence_not_as_too_old(t
     binding = method_binding.for_project(car)
     assert binding.state == "refused", binding
 
-    assert handoff.check(car) is None
-    assert handoff.refusal(car) == binding.reason
-    plain = tmp_path / "plain"
-    plain.mkdir()
-    assert handoff.refusal(plain) is None
+    assert handoff.ask(car) == (None, binding.reason)
 
 
 def test_a_handoff_waits_for_no_lock_and_makes_no_process_folder(tmp_path):
@@ -91,7 +140,7 @@ def test_a_handoff_waits_for_no_lock_and_makes_no_process_folder(tmp_path):
     assert held.wait(5)
     started = time.monotonic()
     try:
-        got = handoff.check(car)
+        got, _why = handoff.ask(car)
     finally:
         release.set()
     elapsed = time.monotonic() - started
@@ -100,7 +149,7 @@ def test_a_handoff_waits_for_no_lock_and_makes_no_process_folder(tmp_path):
     assert got is not None and got["ok"] is False, got  # an empty project is not ready, and it said so
     assert elapsed < method_cli.GUI_LOCK_WAIT_S, f"{elapsed:.1f}s: it waited for the writer lock"
     assert not (car / "process").exists()
-    assert handoff.check(car) is not None  # nobody holds it now: a locked read would take the flock
+    assert handoff.ask(car)[0] is not None  # nobody holds it now: a locked read would take the flock
     assert not (car / "process").exists()
 
 
@@ -126,8 +175,9 @@ def test_the_offer_comes_once_per_phase(tmp_path, monkeypatch):
 
 def test_a_ready_handoff_opens_the_next_session_with_its_first_message(tmp_path, monkeypatch):
     window = _window(tmp_path, monkeypatch)
-    monkeypatch.setattr(handoff, "check", lambda p: {
-        "ok": True, "missing": [], "phase": "1", "resume": "the REW session", "next_message": "продовжуй"})
+    monkeypatch.setattr(handoff, "ask", lambda p: ({
+        "ok": True, "missing": [], "phase": "1", "resume": "the REW session",
+        "next_message": "продовжуй"}, None))
     opened = []
     monkeypatch.setattr(window, "_open_terminal", lambda: opened.append(1))
     monkeypatch.setattr(QMessageBox, "exec",
@@ -142,11 +192,13 @@ def test_a_ready_handoff_opens_the_next_session_with_its_first_message(tmp_path,
 def test_a_refused_handoff_shows_what_fixes_it(tmp_path, monkeypatch):
     """The method's refusal shows what is missing, item by item. A copy of the method TCC will not
     run (#169) has no answer to show, and «update the method» fixes nothing there: the window says
-    the binding's sentence instead. One window for both, as the ratchet asks."""
-    check = handoff.check
+    the binding's sentence instead — and a method that crashed says the crash (#169 review I4),
+    where «update the method» fixes nothing either. One window for all, as the ratchet asks."""
+    ask = handoff.ask
     window = _window(tmp_path, monkeypatch)
-    monkeypatch.setattr(handoff, "check", lambda p: {
-        "ok": False, "missing": ["a step left todo: s3"], "phase": "1", "resume": "", "next_message": ""})
+    monkeypatch.setattr(handoff, "ask", lambda p: ({
+        "ok": False, "missing": ["a step left todo: s3"], "phase": "1", "resume": "",
+        "next_message": ""}, None))
     shown = []
     monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(self.text()) or 0)
     opened = []
@@ -155,13 +207,22 @@ def test_a_refused_handoff_shows_what_fixes_it(tmp_path, monkeypatch):
     assert shown and "a step left todo: s3" in shown[0]
     assert opened == []
 
-    monkeypatch.setattr(handoff, "check", check)  # the real one, on a project the binding refuses
+    monkeypatch.setattr(handoff, "ask", ask)  # the real one, on a project the binding refuses
     (tmp_path / ".claude" / "skills" / vendor_loader.SKILL_NAME).mkdir(parents=True)
     said = []
     monkeypatch.setattr(window._status_strip, "notify", lambda text, **k: said.append((text, k)))
     window._on_handoff()
     assert said == [(method_binding.for_project(tmp_path).reason, {"level": "warn"})], said
     assert len(shown) == 1, "no box: there was no answer to show"
+
+    shutil.rmtree(tmp_path / ".claude")  # TCC's own copy again, and it crashes
+    monkeypatch.setattr(process_writer, "handoff_json", lambda p: (1, "", _CRASH))
+    said.clear()
+    window._on_handoff()
+    [(text, how)] = said
+    assert "AttributeError: 'list' object has no attribute 'get'" in text and how == {"level": "warn"}
+    assert text != i18n.t("hoTooOld"), "updating the method does not mend a crash"
+    assert len(shown) == 1
 
 
 # ---- the method's warnings (#126; S-084, hub #227) -----------------------------------------------
@@ -184,7 +245,7 @@ def test_the_methods_warnings_come_with_its_answer(tmp_path):
     (tmp_path / "tuning-changelog.md").write_text(
         "# Tuning changelog\n\n## ▶️ CONTINUE\n- HEAD: v_009 (FULL)\n", encoding="utf-8")
 
-    got = handoff.check(tmp_path)
+    got, _why = handoff.ask(tmp_path)
 
     assert got is not None and len(got["warnings"]) == 1, got
     assert "HEAD v_009" in got["warnings"][0] and "v_001 (FULL)" in got["warnings"][0]
@@ -195,7 +256,7 @@ def test_an_answer_with_no_warnings_key_reads_as_none(tmp_path, monkeypatch):
     answer = {"ok": True, "missing": [], "phase": "1", "resume": "", "next_message": "продовжуй"}
     _the_method_answers(monkeypatch, 0, json.dumps(answer, ensure_ascii=False))
 
-    assert handoff.check(tmp_path)["warnings"] == []
+    assert handoff.ask(tmp_path)[0]["warnings"] == []
 
 
 @pytest.mark.parametrize("ok", [True, False])
@@ -204,10 +265,10 @@ def test_the_handoff_box_names_the_methods_warnings(tmp_path, monkeypatch, ok):
     from autosound_tcc.ui.tcc import i18n
 
     window = _window(tmp_path, monkeypatch)
-    monkeypatch.setattr(handoff, "check", lambda p: {
+    monkeypatch.setattr(handoff, "ask", lambda p: ({
         "ok": ok, "missing": [] if ok else ["a step left todo: s3"], "phase": "1",
         "resume": "the REW session", "next_message": "продовжуй" if ok else None,
-        "warnings": [_STALE]})
+        "warnings": [_STALE]}, None))
     shown = []
     monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(self.text()) or 0)
     monkeypatch.setattr(window, "_open_terminal", lambda: None)
@@ -222,9 +283,9 @@ def test_a_handoff_with_no_warnings_says_nothing_of_them(tmp_path, monkeypatch):
     from autosound_tcc.ui.tcc import i18n
 
     window = _window(tmp_path, monkeypatch)
-    monkeypatch.setattr(handoff, "check", lambda p: {
+    monkeypatch.setattr(handoff, "ask", lambda p: ({
         "ok": False, "missing": ["a step left todo: s3"], "phase": "1", "resume": "",
-        "next_message": None, "warnings": []})
+        "next_message": None, "warnings": []}, None))
     shown = []
     monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(self.text()) or 0)
 

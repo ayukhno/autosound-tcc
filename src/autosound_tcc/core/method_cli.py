@@ -3,7 +3,7 @@
 project's lock when the caller asks for it.
 
 `process_writer` drove `process.py` through a path like this one, but not every caller took it:
-`title_fixes.supersede` and `handoff.check` started `process.py` with a bare `subprocess.run` of
+`title_fixes.supersede` and `handoff`'s check started `process.py` with a bare `subprocess.run` of
 their own — no lock around a write that rewrites the round, and on Windows no bound on the wait
 after a timeout (tcc#132) — and `profile_writer`, `config_writer`, `project_repo`, `contract_check`
 and `intake_form` started scripts of TCC's own copy, whatever the project linked. A launcher of its

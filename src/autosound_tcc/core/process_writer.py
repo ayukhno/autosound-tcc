@@ -98,6 +98,13 @@ Refused = method_cli.Refused
 UnknownFlag = method_cli.UnknownFlag
 
 
+class TooOld(ProcessWriterError):
+    """The project's copy of the method answered a command with its usage text: it is older than
+    the command (`LANDED_IN`), which `_refuse_if_too_old` says. A class of its own so a caller
+    whose answer to that alone is «update the method» (`handoff`) can tell it from a run that got
+    no answer — a crash, a timeout — where updating mends nothing (#169 review I4)."""
+
+
 def script_path() -> Path:
     """TCC's own `process.py`, for a caller with no project: `is_available`, a bare CLI run beside
     TCC (`test_writer_race.py`). A write runs the PROJECT's bound copy (`method_cli.spawn`); this is
@@ -421,7 +428,7 @@ def close_session(project_dir: Path) -> tuple[bool, str]:
     said = refusal(code, err)
     if said:
         raise ProcessWriterError(said)
-    if code == 1 and out and _TRACEBACK not in err:
+    if code == 1 and out and not crashed(err):
         return False, out
     raise no_answer("session-close", code, out, err)
 
@@ -430,7 +437,7 @@ def refusal(code: int, err: str) -> str:
     """The method's own refusal — its stderr from the `error: ` line on — or "" when exit `code`
     with `err` is none: another exit, or exit 1 with Python's traceback, or with no such line at
     all, which is a run that crashed rather than refused (#169 review I1)."""
-    if code != 1 or _TRACEBACK in err:
+    if code != 1 or crashed(err):
         return ""
     lines = err.splitlines()
     for index, line in enumerate(lines):
@@ -445,13 +452,23 @@ def no_answer(command: str, code: int, out: str, err: str) -> ProcessWriterError
     printed, for a crash the exception's own — and logged at WARNING with its stderr's tail, as a
     busy answer is: the caller may have nobody left to tell (`close_session` at quit). Returned,
     for the caller to raise or to say."""
-    crashed = _TRACEBACK in err
-    lines = [line.strip() for line in (err or out).splitlines() if line.strip()]
-    last = lines[-1] if lines else f"process.py exited {code}"
-    sentence = f"`{command}` {'crashed' if crashed else 'gave no answer'} in the method: {last}"
+    sentence = (f"`{command}` {'crashed' if crashed(err) else 'gave no answer'} in the method: "
+                f"{last_words(code, out, err)}")
     app_log.logger().warning("%s (exit %s)%s", sentence, code,
                              f"; its stderr ends:\n{method_cli.tail(err)}" if err else "")
     return ProcessWriterError(sentence)
+
+
+def crashed(err: str) -> bool:
+    """Whether a run's stderr holds Python's traceback: an exception nothing in the method caught."""
+    return _TRACEBACK in err
+
+
+def last_words(code: int, out: str, err: str) -> str:
+    """The last line a run printed — stderr's first, where a traceback ends in its exception — or
+    `process.py exited N` when it printed nothing."""
+    lines = [line.strip() for line in (err or out).splitlines() if line.strip()]
+    return lines[-1] if lines else f"process.py exited {code}"
 
 
 #: The reason a title fix gives the round for superseding a row (A17).
@@ -476,7 +493,7 @@ def supersede_capture(project_dir: Path, wrong: str, right: str) -> tuple[int, s
 def handoff_json(project_dir: Path) -> tuple[int, str, str]:
     """Is everything the next session needs on disk (hub #201): `handoff --json`. Returns
     `(exit code, stdout, stderr)` — 0 ready, 1 not, and the JSON on stdout either way, which
-    `handoff.check` reads.
+    `handoff.ask` reads.
 
     A READ: the command writes nothing, so it takes no lock. On the GUI thread a wait behind a
     120 s `capture-check` would be the bug, and so would the lock's own `process/`, made in a
@@ -506,7 +523,7 @@ def _refuse_if_too_old(command: str, out: str, err: str) -> None:
         return
     since = LANDED_IN.get(command)
     has_it = f" — the method has it by v{since}" if since else ""
-    raise ProcessWriterError(
+    raise TooOld(
         f"this project's method does not have `{command}`{has_it}. "
         "Update the method (TCC's own update row offers it), or do this step by hand; nothing "
         "here is broken on TCC's side."

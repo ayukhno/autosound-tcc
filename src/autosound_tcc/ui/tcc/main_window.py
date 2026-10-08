@@ -3862,11 +3862,11 @@ class MainWindow(QMainWindow):
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            answer = handoff.check(project)
+            answer, why = handoff.ask(project)
         finally:
             QApplication.restoreOverrideCursor()
-        if answer is None:
-            self._status_strip.notify(handoff.refusal(project) or i18n.t("hoTooOld"), level="warn")
+        if answer is None:  # «update the method» only for a method too old: `why` is None then
+            self._status_strip.notify(why or i18n.t("hoTooOld"), level="warn")
             return
         box = QMessageBox(self)
         box.setWindowTitle(i18n.t("hoTitle"))

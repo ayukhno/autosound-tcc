@@ -13,7 +13,9 @@ block naming a HEAD the ledger is not at, prose to bring up to date. TCC shows t
 starts nothing without the Arbiter's click.
 
 Asked through `process_writer.handoff_json`, as every call to the method goes: a read, so with no
-lock to wait for.
+lock to wait for. No answer is said as what it is (#169 review I4): «update the method» is the fix
+for a method too old for the check, and for nothing else — not a copy TCC will not run, nor a run
+that crashed, timed out or printed no answer, where updating a current method mends nothing.
 """
 
 from __future__ import annotations
@@ -22,43 +24,50 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import app_log, method_binding, process_writer
+from autosound_tcc.core import app_log, method_cli, process_writer
+
+#: What the window says for a check that got no answer: TCC's words around the method's or the
+#: system's. English, as every sentence `core` writes is — it does not import the ui.
+NO_ANSWER = "The method did not answer the handoff check: {why}"
+CRASHED = "The method crashed on the handoff check: {why}"
 
 
-def check(project_dir: Path) -> Optional[dict]:
-    """The method's answer, or None when it cannot give one: a method older than `--json` (or
-    than `handoff`), a call that did not get an answer — no script, a timeout — or a copy of the
-    method TCC will not run (#169), which `refusal` tells apart."""
+def ask(project_dir: Path) -> tuple[Optional[dict], Optional[str]]:
+    """The method's answer and None — or None and why there is none, for the window to say:
+
+    * None — the method is too old for `handoff --json`: it answered with its usage text
+      (`process_writer.TooOld`), or its `process.py` does not know `--json` (`UnknownFlag`). The
+      one case «update the method» fixes; the window says that in the Arbiter's language.
+    * the binding's sentence — a copy of the method TCC will not run (#169): re-link it, or
+      approve it. `method_cli` has logged it.
+    * `NO_ANSWER` — a timeout, an interpreter that would not start, the script not there, the
+      method's own refusal, output that is no answer — or `CRASHED`, with the exception's own line;
+      the last two logged at WARNING with the stderr's tail.
+    """
     try:
-        code, out, _err = process_writer.handoff_json(Path(project_dir))
+        code, out, err = process_writer.handoff_json(Path(project_dir))
+    except (process_writer.TooOld, process_writer.UnknownFlag) as exc:
+        app_log.logger().info("handoff: the method is too old for the check: %s", exc)
+        return None, None
+    except process_writer.Refused as exc:
+        return None, str(exc)
     except process_writer.ProcessWriterError as exc:
         app_log.logger().info("handoff: no answer: %s", exc)
-        return None
+        return None, NO_ANSWER.format(why=exc)
     app_log.logger().info("handoff --json -> exit %s", code)
-    if code not in (0, 1):
-        return None
-    try:
-        answer = json.loads(out)
-    except ValueError:
-        return None
+    answer = None
+    if code in (0, 1):
+        try:
+            answer = json.loads(out)
+        except ValueError:
+            pass
     if not isinstance(answer, dict) or "ok" not in answer:
-        return None
+        why = process_writer.refusal(code, err) or process_writer.last_words(code, out, err)
+        said = (CRASHED if process_writer.crashed(err) else NO_ANSWER).format(why=why)
+        app_log.logger().warning("handoff: %s (exit %s)%s", said, code,
+                                 f"; its stderr ends:\n{method_cli.tail(err)}" if err else "")
+        return None, said
     answer["missing"] = [str(m) for m in answer.get("missing") or []]
     # Absent from a method before v3.0.65, which did not say: none (#126).
     answer["warnings"] = [str(w) for w in answer.get("warnings") or []]
-    return answer
-
-
-def refusal(project_dir: Path) -> Optional[str]:
-    """Why `check` had no answer, when the reason is the project's copy of the method: the binding's
-    sentence — re-link it, or approve it — the one `process_writer.Refused` carries. None when the
-    binding does not refuse: then the method is too old for `handoff --json`, or did not answer.
-
-    Without it a refused copy read as a method too old, and «update the method» is the wrong fix
-    where the link is what has to change. Asked of the binding again rather than carried out of
-    `check`, which keeps its one answer: the method's, or None."""
-    try:
-        method_binding.for_project(Path(project_dir)).require()
-    except method_binding.MethodRefused as exc:
-        return str(exc)
-    return None
+    return answer, None
