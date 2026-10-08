@@ -22,6 +22,7 @@ its copy below on purpose or asks the method why.
 from __future__ import annotations
 
 import ast
+import os
 from pathlib import Path
 
 import pytest
@@ -132,11 +133,23 @@ CONTRACT_1 = {
 READ_OUTSIDE_CONTRACT_1 = {"project_seed.py": ("PROFILE_FILE", "PROSE_FILES")}
 
 
+#: `=1` for a run that is without the method on purpose: then the table skips, and says this is
+#: why. Without it a missing copy fails (the group review, G5): it skipped, and a skip is green --
+#: a CI checkout without the submodule, or a tag whose layout `vendor_loader` no longer knows,
+#: passed the nightly, which is there to catch a method release that breaks TCC.
+NO_METHOD_ENV = "AUTOSOUND_TCC_NO_METHOD"
+
+
 def _the_copy() -> Path:
-    """The method TCC's tests run: `vendor_loader.skill_dir()`, `AUTOSOUND_SKILL_DIR` first."""
+    """The method TCC's tests run: `vendor_loader.skill_dir()`, `AUTOSOUND_SKILL_DIR` first. None
+    there fails the test, unless the run says it is without the method on purpose."""
     copy = vendor_loader.skill_dir()
     if not vendor_loader._looks_like_the_skill(copy):
-        pytest.skip("the method is not checked out (git submodule update --init --recursive)")
+        if os.environ.get(NO_METHOD_ENV) == "1":
+            pytest.skip(f"{NO_METHOD_ENV}=1: this run is without the method on purpose")
+        pytest.fail(f"no copy of the method at {copy} to hold to contract 1 (git submodule update "
+                    f"--init --recursive); a run without it on purpose sets {NO_METHOD_ENV}=1",
+                    pytrace=False)
     return copy
 
 
@@ -200,6 +213,18 @@ def _differences(theirs: dict, ours: dict) -> list[str]:
     if theirs != ours and not said:
         said.append(f"the tables differ: {theirs!r}")
     return said
+
+
+def test_the_copy_held_is_the_one_the_run_names():
+    """G5: `skill_dir()` falls through without a word, from an `AUTOSOUND_SKILL_DIR` it does not
+    recognise to the submodule, and on to the home installs. The copy this file holds is the one
+    the run names: the variable's -- the nightly's tag -- or else the submodule's, the pin."""
+    named = os.environ.get(vendor_loader.SKILL_DIR_ENV)
+
+    copy = _the_copy()
+
+    assert copy == (Path(named).expanduser() if named else vendor_loader._SUBMODULE_DIR), (
+        f"the run names {named or 'the submodule'}, and the copy under test is {copy}")
 
 
 def test_the_method_tcc_runs_declares_contract_1():
