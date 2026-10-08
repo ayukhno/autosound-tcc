@@ -624,11 +624,33 @@ def test_a_backup_git_cannot_count_is_never_called_backed_up(tmp_path, unhurried
     assert state.level == "wait" and not state.counted
 
 
-def test_the_project_header_shows_a_folder_with_no_history(tmp_path, monkeypatch, unhurried_git):
-    """...and a language switch says the folder's last answer again in the new words without asking
-    git (#172): it re-said the whole panel, probe and all, on the GUI thread. A reload still
-    reads the folder afresh. A backup git could not count is «? not backed up», never «backed
-    up» (review of #172, I-1)."""
+def _git_rows(section) -> dict[str, str]:
+    """The git rows under the project header, by key, each value whole (an `ElidedLabel` may be
+    showing less): the rows `_kv_row` makes, read by their `.pk`/`.pv` classes."""
+    from PySide6.QtWidgets import QLabel
+
+    from autosound_tcc.ui.tcc import copy_menu, i18n
+
+    labels = section.findChildren(QLabel)
+    keys = [copy_menu.full_text(label) for label in labels if label.property("class") == "pk"]
+    values = [copy_menu.full_text(label) for label in labels if label.property("class") == "pv"]
+    git = {i18n.t(key) for key in ("gitRow", "gitChanges", "gitBackup", "gitUnpushed")}
+    return {key: value for key, value in zip(keys, values) if key in git}
+
+
+def test_the_project_header_says_each_state_of_the_history_and_its_backup(tmp_path, monkeypatch,
+                                                                          unhurried_git):
+    """A folder with no history, then one with no backup, read from real git. A language switch
+    says the folder's last answer again in the new words without asking git (#172): it re-said
+    the whole panel, probe and all, on the GUI thread. A reload still reads the folder afresh. A
+    backup git could not count is «? not backed up», never «backed up» (review of #172, I-1).
+
+    Then the states a project with a backup can be in, each as `git_status` answers it (the group
+    review, G3): the header's words, its dot and its tip, and the rows under it. Only «no history»,
+    «no backup» and «?» were pinned here, and the tips not at all -- swapped tips, «?» for a count
+    git gave, or «? not backed up» for a backed-up project all passed. A detached head and a
+    branch with no upstream read as backed up: that is today's rule, older than this test (Task
+    21's review put «no upstream» outside its task)."""
     from PySide6.QtWidgets import QApplication
 
     from autosound_tcc.core import config
@@ -660,3 +682,33 @@ def test_the_project_header_shows_a_folder_with_no_history(tmp_path, monkeypatch
     window._set_project_params(None)
     assert window._project_section.sub_text() == i18n.t("gitSubBehind").format(n="?")
     assert window._project_section.dot_status() == "wait"
+
+    remote, ok, behind = "github.com/o/car", i18n.t("gitSubOk"), i18n.t("gitSubBehind")
+    kept = dict(works=True, repo=True, branch="tune", changed=0, remote=remote)
+    row = {i18n.t("gitRow"): "tune", i18n.t("gitChanges"): i18n.t("gitClean"),
+           i18n.t("gitBackup"): remote}
+    told = {
+        "backed up": (project_view.GitStatus(**kept, unpushed=0),
+                      ok, "done", i18n.t("gitTipOk").format(remote=remote), row),
+        "2 not backed up": (project_view.GitStatus(**kept, unpushed=2),
+                            behind.format(n=2), "wait",
+                            i18n.t("gitTipBehind").format(n=2, remote=remote),
+                            {**row, i18n.t("gitUnpushed"): "2"}),
+        "detached": (project_view.GitStatus(**{**kept, "branch": "1a2b3c4"}, unpushed=None),
+                     ok, "done", i18n.t("gitTipOk").format(remote=remote),
+                     {**row, i18n.t("gitRow"): "1a2b3c4"}),
+        "no upstream": (project_view.GitStatus(**kept, unpushed=None),
+                        ok, "done", i18n.t("gitTipOk").format(remote=remote), row),
+        "uncounted": (project_view.GitStatus(works=True, repo=True, remote=remote, counted=False),
+                      behind.format(n="?"), "wait",
+                      i18n.t("gitTipUncounted").format(remote=remote),
+                      {i18n.t("gitRow"): "—", i18n.t("gitBackup"): remote,
+                       i18n.t("gitUnpushed"): "?"}),
+    }
+    section = window._project_section
+    for name, (state, sub, dot, tip, rows) in told.items():
+        monkeypatch.setattr(project_view, "git_status", lambda *_a, _state=state, **_k: _state)
+        window._set_project_params(None)
+        shown = (section.sub_text(), section.dot_status(), section._sub_label.toolTip())
+        assert shown == (sub, dot, tip), name
+        assert _git_rows(section) == rows, name
