@@ -8,7 +8,9 @@ reopen the same URL on a second click, and stop it when the project closes. The 
 the file watcher it already has.
 
 A child process rather than an import: `intake_form` rewrites `sys.path` to reach its siblings,
-which is the same reason `contract.py` runs out of process (`core/contract_check.py`).
+which is the same reason `contract.py` runs out of process (`core/contract_check.py`). The form is
+the one of the copy the project is bound to (#169), from `method_cli.resolve`; a server that runs
+until the project closes cannot be `method_cli.spawn`'s bounded run, so the `Popen` stays here.
 """
 
 from __future__ import annotations
@@ -19,15 +21,21 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from autosound_tcc.core import child as child_process
-from autosound_tcc.core import vendor_loader
+from autosound_tcc.core import method_cli, vendor_loader
 
 #: The machine twin of the form's translated start-up lines (skill `intake_form.serve`).
 URL_PREFIX = "INTAKE_URL: "
 DEFAULT_TIMEOUT_S = 10.0
 
+#: The form, relative to the method's `rew_tool/`.
+_SCRIPT = "intake_form.py"
+
 
 class IntakeFormError(Exception):
-    """Why the form is not on screen. `kind` picks the translated sentence, `detail` is the fact."""
+    """Why the form is not on screen. `kind` picks the translated sentence, `detail` is the fact:
+    `no_form` — the method has none, `detail` is where it was looked for; `failed` — it printed no
+    address, `detail` is its last stderr line; `refused` — the project's copy of the method is one
+    TCC will not run (#169), `detail` is the binding's sentence, and nothing was started."""
 
     def __init__(self, kind: str, detail: str = "") -> None:
         super().__init__(detail or kind)
@@ -36,7 +44,9 @@ class IntakeFormError(Exception):
 
 
 def script_path() -> Path:
-    return vendor_loader.rew_tool_dir() / "intake_form.py"
+    """TCC's own form, for a caller with no project. A form opened on a project is the one of the
+    copy that project is bound to (`IntakeForm.open_url`)."""
+    return vendor_loader.rew_tool_dir() / _SCRIPT
 
 
 class IntakeForm:
@@ -57,12 +67,27 @@ class IntakeForm:
         #: form the Arbiter actually opened.
         self.was_opened = False
 
-    def _script_file(self) -> Path:
-        return self._script or script_path()
+    def _args(self) -> list[str]:
+        return ["serve", str(self._project_dir), "--lang", self._lang, "--port", "0"]
+
+    def _bound(self) -> tuple[Path, dict[str, str]]:
+        """The form's script and the environment it serves in: the copy the project is bound to
+        (`method_cli.resolve`, #169), or `IntakeFormError("refused")` with the binding's sentence,
+        before anything starts. A script handed in (a test's form) takes the place of the copy's
+        file; the binding is asked all the same."""
+        try:
+            script, env = method_cli.resolve(self._project_dir, _SCRIPT, self._args())
+        except method_cli.Refused as exc:
+            raise IntakeFormError("refused", str(exc)) from exc
+        return self._script or script, env
+
+    def _command(self, script: Path) -> list[str]:
+        return [self._interpreter or child_process.script_interpreter(), str(script), *self._args()]
 
     def command(self) -> list[str]:
-        return [self._interpreter or child_process.script_interpreter(), str(self._script_file()),
-                "serve", str(self._project_dir), "--lang", self._lang, "--port", "0"]
+        """What `open_url` starts: the bound copy's form, serving this project in the interface
+        language on a port the OS picks."""
+        return self._command(self._bound()[0])
 
     def running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
@@ -71,12 +96,12 @@ class IntakeForm:
         if self.running() and self._url:
             return self._url
         self.stop()
-        script = self._script_file()
+        script, env = self._bound()
         if not script.is_file():
             raise IntakeFormError("no_form", str(script))
-        proc = self._popen(self.command(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        proc = self._popen(self._command(script), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            text=True, encoding="utf-8", errors="replace",
-                           env=vendor_loader.child_env(), **child_process.quiet())
+                           env=env, **child_process.quiet())
         found: list[str] = []
         answered = threading.Event()
         tail: list[str] = []

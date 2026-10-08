@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from autosound_tcc.core import contract_check
+from autosound_tcc.core import contract_check, method_binding
 
 pytestmark = pytest.mark.skipif(
     not contract_check.is_available(),
@@ -69,8 +69,20 @@ def test_skip_rew_is_reported_as_skipped_not_attempted(tmp_path):
     assert report.rew() == {"reachable": False, "note": "skipped (--no-rew)"}
 
 
+def _own_checker(tmp_path, monkeypatch, text=None) -> None:
+    """TCC's own copy — the one a project with no entry runs (`method_binding.own_copy`) — as a
+    folder whose `rew_tool/contract.py` is `text`, or that has none. `run` checks a project with the
+    copy that project is bound to (#169), so this is where a fake checker goes."""
+    own = tmp_path / "tccs-own"
+    if text is not None:
+        script = own / "rew_tool" / "contract.py"
+        script.parent.mkdir(parents=True)
+        script.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(method_binding, "own_copy", lambda: own)
+
+
 def test_a_missing_checker_is_an_error_not_an_exception(tmp_path, monkeypatch):
-    monkeypatch.setattr(contract_check, "script_path", lambda: tmp_path / "nope" / "contract.py")
+    _own_checker(tmp_path, monkeypatch)
 
     report = contract_check.run(tmp_path)
 
@@ -83,9 +95,7 @@ def test_a_missing_checker_is_an_error_not_an_exception(tmp_path, monkeypatch):
 def test_a_checker_that_prints_nothing_is_an_error(tmp_path, monkeypatch):
     """Exit code alone can't be trusted (1 means "issues found", which IS a report) — an empty
     stdout is what actually means "no answer"."""
-    fake = tmp_path / "fake_contract.py"
-    fake.write_text("import sys\nsys.stderr.write('boom\\n')\nsys.exit(3)\n", encoding="utf-8")
-    monkeypatch.setattr(contract_check, "script_path", lambda: fake)
+    _own_checker(tmp_path, monkeypatch, "import sys\nsys.stderr.write('boom\\n')\nsys.exit(3)\n")
 
     report = contract_check.run(tmp_path)
 
@@ -94,9 +104,7 @@ def test_a_checker_that_prints_nothing_is_an_error(tmp_path, monkeypatch):
 
 
 def test_timeout_is_reported_not_raised(tmp_path, monkeypatch):
-    fake = tmp_path / "slow_contract.py"
-    fake.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
-    monkeypatch.setattr(contract_check, "script_path", lambda: fake)
+    _own_checker(tmp_path, monkeypatch, "import time\ntime.sleep(30)\n")
 
     report = contract_check.run(tmp_path, timeout_s=0.5)
 
@@ -107,9 +115,7 @@ def test_timeout_is_reported_not_raised(tmp_path, monkeypatch):
 def test_a_caller_can_end_the_check_early(tmp_path, monkeypatch):
     """Waiting out the 30 s timeout is not an option for a window on its way out, and returning
     without waiting means Qt destroys a running QThread — a `qFatal`, i.e. the process aborts."""
-    fake = tmp_path / "slow_contract.py"
-    fake.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
-    monkeypatch.setattr(contract_check, "script_path", lambda: fake)
+    _own_checker(tmp_path, monkeypatch, "import time\ntime.sleep(30)\n")
 
     report = contract_check.run(tmp_path, register=lambda child: child.kill())
 

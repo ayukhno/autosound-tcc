@@ -218,7 +218,7 @@ def build_tools(project_dir: Path, vendor: str, model: str):
             "project_profile": draft["data"],
             "open_questions": current.get("open_questions", []),
             "bundled_exact_match": profile_writer.find_bundled(
-                vendor, model, config.bundled_profiles_dir()
+                vendor, model, config.bundled_profiles_dir(), project_dir=project_dir
             ),
         }
         return {"content": [{"type": "text", "text": json.dumps(out)}]}

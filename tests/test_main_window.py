@@ -1980,13 +1980,20 @@ def test_the_left_column_catches_up_when_the_skill_writes(tmp_path, monkeypatch)
 def test_closing_the_window_stops_the_contract_worker(tmp_path, monkeypatch):
     """Qt destroying a still-running QThread is a `qFatal`, not a warning: the process aborts.
     Observed as a macOS crash report with `_ContractWorker` blocked in `poll` (2026-08-06)."""
-    from autosound_tcc.core import contract_check
+    import shutil
+
+    from autosound_tcc.core import method_binding, vendor_loader
     from autosound_tcc.ui.tcc import main_window as mw
 
+    if not vendor_loader.is_available():
+        pytest.skip("skill submodule not checked out")
     _app()
-    slow = tmp_path / "slow_contract.py"
-    slow.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
-    monkeypatch.setattr(contract_check, "script_path", lambda: slow)
+    # The check runs the copy the project is bound to (#169) — TCC's own, for a project with no
+    # entry — so TCC's own is a copy whose checker hangs; the rest of it is the method as shipped.
+    own = tmp_path / "tccs-own" / vendor_loader.SKILL_NAME
+    shutil.copytree(vendor_loader.skill_dir(), own, ignore=shutil.ignore_patterns("__pycache__"))
+    (own / "rew_tool" / "contract.py").write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+    monkeypatch.setattr(method_binding, "own_copy", lambda: own)
     monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")  # the switch the launch-time check is gated on
 
     window = mw.MainWindow()

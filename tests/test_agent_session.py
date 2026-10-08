@@ -172,6 +172,26 @@ def test_both_callers_create_the_folder_before_the_session(caller):
         "the session now refuses a project directory that is not there")
 
 
+def test_the_cli_reads_the_approvals_the_window_keeps():
+    """R-ae (#169): a copy of the method approved in the window is kept in the window's settings
+    store, which the core is handed by whoever imports `ui/tcc/app_settings` — the window, `app.main`
+    and the tuning-session CLI. The interview CLI did not, so `profile_writer` there read every
+    approved copy as refused. Asked of a fresh interpreter, as a terminal starts it; a light install
+    without the window imports it all the same (`test_packaging.py`'s `LIGHT_MODULES`)."""
+    import subprocess
+    import sys
+
+    root = Path(agent_session.__file__).parents[3]
+    probe = ("import autosound_tcc.dsp_profile_interview\n"
+             "from autosound_tcc.core import config\n"
+             "print(config._settings_provider is not None)\n")
+    proc = subprocess.run([sys.executable, "-c", probe], cwd=str(root), capture_output=True,
+                          text=True, timeout=120)
+
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert proc.stdout.strip() == "True", "the interview reads no settings store: no approvals"
+
+
 def _session(tmp_path, monkeypatch):
     """A session with the skill's writer stubbed out: what is under test is the OPTIONS, and
     `build_tools` otherwise starts a real profile draft through the vendored method."""

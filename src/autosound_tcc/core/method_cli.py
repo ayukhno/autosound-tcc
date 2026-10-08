@@ -1,12 +1,22 @@
-"""The one place TCC starts a method script (#169, #171): the project's lock, a child that comes
-back, and the environment the method runs in.
+"""The one place TCC starts a script of the method's `rew_tool/` (#169, #171): the project's lock, a
+child that comes back, and the environment the method runs in — and the one place that says which
+script that is.
 
 `process_writer` drove `process.py` through a path like this one, but not every caller took it:
 `title_fixes.supersede` and `handoff.check` started `process.py` with a bare `subprocess.run` of
 their own — no lock around a write that rewrites the round, and on Windows no bound on the wait
-after a timeout (tcc#132). A launcher of its own is a launcher the next fix forgets, so every one
-goes through here, and a caller chooses only what really differs: whether it takes the lock, and
-how long it may wait for it.
+after a timeout (tcc#132) — and `profile_writer`, `config_writer`, `project_repo`, `contract_check`
+and `intake_form` started scripts of TCC's own copy, whatever the project linked. A launcher of its
+own is a launcher the next fix forgets, so every one goes through here, and a caller chooses only
+what really differs: whether it takes the lock, and how long it may wait for it.
+
+Every launcher but two runs its child through `spawn`. The two cannot be a bounded run:
+`contract_check.run` hands its child to a caller that may end it early (`register`), and
+`intake_form` is a server that runs until the project closes. They take the script and the
+environment from `resolve` — the answer `spawn` itself runs, refused and logged the same way — and
+keep a `Popen` of their own. Outside `rew_tool/`, two scripts run TCC's own copy by design and are
+started where they are: the reviewer's `scripts/autosound_ai.py` (`critic`, `reviewer_key`), and an
+update's `scripts/upkeep.py`, taken from the tag being applied (`updates`).
 
 A write takes the lock (`project_lock.hold`) and, past the wait, answers `Busy` having started
 nothing. A read takes none (`lock=False`): it has nothing to guard, and a read on the GUI thread
@@ -14,7 +24,7 @@ waiting behind a 120 s `capture-check` — or the lock's own `process/`, made in
 none — would be the bug. `timeout_s` bounds the child alone, under `child.run_bounded`: the child's
 whole tree is killed at the timeout, and the wait for its pipes after that is bounded too.
 
-Which copy of the method runs, and in what environment, is `_resolve`'s alone: the copy the
+Which copy of the method runs, and in what environment, is `resolve`'s alone: the copy the
 project is bound to (`method_binding`), or `Refused` with the binding's sentence and nothing
 started. Nor is that copy's `process.py` started with a flag its text does not hold: its parser
 takes one it does not know for data (N19), so that is `UnknownFlag`, a `Refused` too, before the
@@ -97,23 +107,50 @@ class UnknownFlag(Refused):
         self.flag = flag
 
 
-def _resolve(project_dir: Path, script_rel: str) -> tuple[Path, dict[str, str]]:
-    """The script to run and the environment to run it in: the copy of the method the project is
-    bound to (`method_binding.for_project`, asked once per spawn), and `AUTOSOUND_SKILL_ROOT` naming
-    that copy's skill folder to the child.
+class ScriptMissing(ProcessWriterError):
+    """The copy of the method the project runs has no such script, so nothing was started: a
+    method older than the command, or a copy with files missing. A class of its own so that a
+    launcher whose answer to that is «update the method» (`project_repo`) can tell it from a run
+    that failed; every other caller reads it as the `ProcessWriterError` it is."""
 
-    The one place that says which copy (#169). Every write used to run TCC's own copy whatever the
-    project linked, so a session could advise from one copy while the writers wrote with another.
-    A binding TCC will not run is `Refused`, with its own sentence — asked first in `spawn`, so
-    before the lock and before any child. TCC's own copy is resolved on every call, so the env
-    override (`AUTOSOUND_SKILL_DIR`) holds here as it does everywhere else.
+
+def resolve(
+    project_dir: Path | str, script_rel: str, args: Sequence[str] = ()
+) -> tuple[Path, dict[str, str]]:
+    """`rew_tool/<script_rel>` of the copy of the method the project is bound to, and the
+    environment to run it in: `vendor_loader.child_env`, with `AUTOSOUND_SKILL_ROOT` naming that
+    copy's skill folder to the child. `method_binding.for_project` is asked once per call.
+
+    The one place that says which copy (#169). Every launcher used to run TCC's own copy whatever
+    the project linked, so a session could advise from one copy while the writers wrote with
+    another. `spawn` asks here, and so do the two launchers that keep a `Popen` of their own
+    (`contract_check`, `intake_form`), so no launcher can name another copy than `spawn` would.
+
+    A binding TCC will not run is `Refused`, with its own sentence, before anything is started —
+    and said in the log here, once, in the one refused line every launcher leaves (`_say_refused`).
+    `args` are what would follow the script, and are read only to name the run in that line.
+    Whether the script is there is the caller's to ask. TCC's own copy is resolved on every call,
+    so the env override (`AUTOSOUND_SKILL_DIR`) holds here as it does everywhere else.
     """
+    project_dir = Path(project_dir)
     binding = method_binding.for_project(project_dir)
     try:
         script = binding.script(script_rel)
     except method_binding.MethodRefused as exc:
-        raise Refused(str(exc)) from exc
+        refused = Refused(str(exc))
+        _say_refused(script_rel, args, project_dir, refused)
+        raise refused from exc
     return script, vendor_loader.child_env(**binding.session_env())
+
+
+def _say_refused(script_rel: str, args: Sequence[str], project_dir: Path, exc: Refused) -> None:
+    """Into the log, as a busy answer goes and for the same reason: the caller may have nobody left
+    to tell — `close_session` at quit posts to a closing window, and `mcp_server` drops
+    `record_reviewer`'s error on purpose. A refused binding and a flag the copy does not know
+    alike, once each."""
+    app_log.logger().warning("refused: `%s` on %s was not run: %s",
+                             _named(Path(script_rel), [str(arg) for arg in args], project_dir),
+                             project_dir, exc)
 
 
 def _flags_known_to(script: Path) -> frozenset[str]:
@@ -153,10 +190,11 @@ def _refuse_a_flag_it_does_not_know(script: Path, args: Sequence[str]) -> None:
 
 
 def _named(script: Path, args: Sequence[str], project_dir: Path) -> str:
-    """What the busy and refused lines call the run: its first argument that is not a path in the
-    project — for `process.py`, the command after its `<process-dir>`. The project is named beside
-    it."""
-    words = [arg for arg in args if not Path(arg).is_relative_to(project_dir)]
+    """What the busy and refused lines call the run: its first argument that is neither a flag nor
+    a path in the project — for `process.py`, the command after its `<process-dir>`; for `state.py`,
+    the command after `--root <ledger>`. The project is named beside it."""
+    words = [arg for arg in args if not _FLAG.fullmatch(arg.split("=", 1)[0])
+             and not Path(arg).is_relative_to(project_dir)]
     return words[0] if words else script.name
 
 
@@ -177,9 +215,9 @@ def spawn(
     knows which.
 
     A project whose copy TCC will not run answers `Refused`, with the binding's sentence, before
-    the lock and before any child — a read as much as a write — and says so in the log once. So
-    does a `process.py` call with a flag that copy's text does not hold: `UnknownFlag`, naming the
-    flag (N19).
+    the lock and before any child — a read as much as a write — and says so in the log once
+    (`resolve`). So does a `process.py` call with a flag that copy's text does not hold:
+    `UnknownFlag`, naming the flag (N19). A script that copy does not have is `ScriptMissing`.
 
     `lock` holds the project's writer lock around the child, and `lock_wait_s` is how long to wait
     for it — by default `GUI_LOCK_WAIT_S` on the main thread and `LOCK_WAIT_S` on any other, read
@@ -189,23 +227,18 @@ def spawn(
     """
     project_dir = Path(project_dir)
     args = [str(arg) for arg in args]
-    try:
-        script, env = _resolve(project_dir, script_rel)
-        if not script.is_file():
-            raise ProcessWriterError(
-                f"{script.name} not found at {script}. Run: git submodule update --init --recursive"
-            )
-        # `process.py`'s alone (#169, N19): its parser takes a flag it does not know for data.
-        if script_rel == PROCESS_SCRIPT:
+    script, env = resolve(project_dir, script_rel, args)
+    if not script.is_file():
+        raise ScriptMissing(
+            f"{script.name} not found at {script}. Run: git submodule update --init --recursive"
+        )
+    # `process.py`'s alone (#169, N19): its parser takes a flag it does not know for data.
+    if script_rel == PROCESS_SCRIPT:
+        try:
             _refuse_a_flag_it_does_not_know(script, args)
-    except Refused as exc:
-        # Into the log, as a busy answer goes and for the same reason: the caller may have nobody
-        # left to tell — `close_session` at quit posts to a closing window, and `mcp_server` drops
-        # `record_reviewer`'s error on purpose. A refused binding and a flag the copy does not know
-        # alike.
-        app_log.logger().warning("refused: `%s` on %s was not run: %s",
-                                 _named(Path(script_rel), args, project_dir), project_dir, exc)
-        raise
+        except Refused as exc:
+            _say_refused(script_rel, args, project_dir, exc)
+            raise
     # One writer at a time, from this process and from any other (`project_lock`). How long to
     # wait for it is the calling THREAD's question, asked here and not bound at import.
     if lock_wait_s is None:

@@ -1,13 +1,16 @@
-"""`core.method_cli` — the one place a method script is started (#169, #171).
+"""`core.method_cli` — the one place a method script is started (#169, #171), and the one resolver
+every launcher asks which script that is.
 
 What is tested here is what its callers no longer do for themselves: a child that runs out of time
 is cut and said to have timed out — never «busy», which promises that nothing was written — and a
 lock wait the caller names is the one spent. The lock itself is `test_project_lock.py`'s, a read
-that takes none is `test_handoff.py`'s, a write that takes it is `test_title_fixes.py`'s.
+that takes none is `test_handoff.py`'s, a write that takes it is `test_title_fixes.py`'s. And the
+five launchers that are not `process.py`'s run the copy the project is bound to, or say why not.
 """
 
 from __future__ import annotations
 
+import io
 import logging
 import shutil
 import subprocess
@@ -18,7 +21,8 @@ from pathlib import Path
 import pytest
 
 from autosound_tcc.core import (
-    app_log, method_binding, method_cli, process_writer, project_lock, vendor_loader,
+    app_log, config, config_writer, contract_check, intake_form, method_binding, method_cli,
+    process_writer, profile_writer, project_lock, project_repo, vendor_loader,
 )
 
 
@@ -232,3 +236,208 @@ def test_only_process_py_is_held_to_the_flags_in_its_text(tmp_path, method_copy,
     method_cli.spawn(car, "state/state.py", ["save", "--no-such-flag"], timeout_s=5)
 
     assert len(started) == 1
+
+
+# ---- the other launchers (#169) -----------------------------------------------------------------
+# `profile_writer`, `config_writer`, `project_repo`, `contract_check` and `intake_form` each started a
+# script of TCC's own copy with a bare `subprocess.run` or `Popen`, whatever the project linked. They
+# run the copy the project is bound to now: the first three through `spawn`, and the two whose child
+# a bounded run cannot be — a check a caller cancels, a server — through `resolve`, its resolver.
+
+
+def _entry(project: Path) -> Path:
+    return project / ".claude" / "skills" / vendor_loader.SKILL_NAME
+
+
+@pytest.fixture(scope="session")
+def second_copy(tmp_path_factory) -> Path:
+    """A second copy of the method: the vendored tree copied to `<tmp>/skills/autosound-tuning`, the
+    layout of its own repository. One per session — it is 8 MB — while each test links it and
+    approves it on its own settings store. `vendor/` itself is never touched."""
+    if not vendor_loader._looks_like_the_skill(vendor_loader._SUBMODULE_DIR):
+        pytest.skip("skill submodule not checked out")
+    skill = tmp_path_factory.mktemp("second-method") / "skills" / vendor_loader.SKILL_NAME
+    shutil.copytree(vendor_loader._SUBMODULE_DIR, skill,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    return skill
+
+
+def _linked_and_approved(project: Path, skill: Path) -> method_binding.Binding:
+    """`project`'s entry linked to `skill`, and the link approved on this machine: the real
+    `method_binding.approve`, on the settings store each test is given its own of — as
+    `test_process_writer.py`'s second copy is."""
+    _entry(project).parent.mkdir(parents=True)
+    _entry(project).symlink_to(skill, target_is_directory=True)
+    binding = method_binding.approve(method_binding.for_project(project))
+    assert binding.state == method_binding.APPROVED, binding.reason
+    return binding
+
+
+class _Answered:
+    """A child that has already answered `out` and exited 0: what `_Launches` hands back instead of
+    starting one."""
+
+    cancelled = False
+    returncode = 0
+
+    def __init__(self, out: str = "") -> None:
+        self.stdout, self.stderr = io.StringIO(out), io.StringIO("")
+
+    def poll(self) -> int:
+        return self.returncode
+
+    def communicate(self, input=None, timeout=None) -> tuple[str, str]:
+        return self.stdout.read(), self.stderr.read()
+
+    def wait(self, timeout=None) -> int:
+        return self.returncode
+
+    def kill(self) -> None:
+        pass
+
+    terminate = kill
+
+
+class _Launches:
+    """Every child the five launchers start, as `(argv, env)`, and none of them run. Every door is
+    watched: `method_cli`'s bounded run, `contract_check`'s cancellable `Popen`, the bare
+    `subprocess.run` each of them used before #169 — so a launcher still on it is caught, not run —
+    and `popen`, which `intake_form` is handed."""
+
+    def __init__(self, monkeypatch) -> None:
+        self.started: list = []
+        launches = self
+
+        def run(argv, **kwargs):
+            launches.started.append((list(argv), kwargs.get("env")))
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+        class _Check(_Answered):
+            def __init__(self, argv, **kwargs):
+                launches.started.append((list(argv), kwargs.get("env")))
+                super().__init__('{"ok": true, "files": []}')
+
+        monkeypatch.setattr(method_cli.child, "run_bounded", run)
+        monkeypatch.setattr(subprocess, "run", run)
+        monkeypatch.setattr(contract_check, "_Cancellable", _Check)
+
+    def popen(self, argv, **kwargs) -> _Answered:
+        """`intake_form`'s: a form that prints its address at once."""
+        self.started.append((list(argv), kwargs.get("env")))
+        return _Answered(f"{intake_form.URL_PREFIX}http://127.0.0.1:1/\n")
+
+
+# Each launcher on a project, by its own way of answering: None when it went through, else the
+# sentence it answered with — raised, or carried in its result.
+
+
+def _profile_writer(project: Path, launches: _Launches):
+    try:
+        profile_writer.draft(project)
+    except profile_writer.ProfileWriterError as exc:
+        return str(exc)
+    return None
+
+
+def _config_writer(project: Path, launches: _Launches):
+    # The save dialog's own call: the current project's ledger, and no project named (R-h).
+    result = config_writer.save(config.state_root(), "v_001", "SQ-1")
+    return None if result.saved else result.said
+
+
+def _project_repo(project: Path, launches: _Launches):
+    result = project_repo.init(project)
+    return None if result.ok else result.said
+
+
+def _contract_check(project: Path, launches: _Launches):
+    return contract_check.run(project, skip_rew=True).error or None
+
+
+def _intake_form(project: Path, launches: _Launches):
+    form = intake_form.IntakeForm(project, "uk", popen=launches.popen)
+    try:
+        form.open_url()
+    except intake_form.IntakeFormError as exc:
+        return exc.detail
+    finally:
+        form.stop()
+    return None
+
+
+#: `(launcher, its script under rew_tool/, what the refused line calls the run)`.
+LAUNCHERS = [
+    pytest.param(_profile_writer, "dsp_profile.py", "draft", id="profile_writer"),
+    pytest.param(_config_writer, "state/state.py", "config", id="config_writer"),
+    pytest.param(_project_repo, "project_repo.py", "init", id="project_repo"),
+    pytest.param(_contract_check, "contract.py", "check", id="contract_check"),
+    pytest.param(_intake_form, "intake_form.py", "serve", id="intake_form"),
+]
+
+
+@pytest.mark.parametrize("launch, script, named", LAUNCHERS)
+def test_every_other_launcher_runs_the_copy_the_project_is_bound_to(
+        monkeypatch, second_copy, launch, script, named):
+    """The issue's first, for the five that are not `process.py`: the current project linked to a
+    copy approved on this machine has the script of THAT copy started, and the child is told which
+    copy it runs (`AUTOSOUND_SKILL_ROOT`) — not TCC's own, whatever the project linked."""
+    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
+    monkeypatch.delenv(method_binding.SKILL_ROOT_ENV, raising=False)
+    launches = _Launches(monkeypatch)
+    project = config.project_dir()
+    binding = _linked_and_approved(project, second_copy)
+
+    assert launch(project, launches) is None
+
+    [(argv, env)] = launches.started
+    assert argv[1] == str(binding.script(script)), "TCC's own copy ran, not the project's"
+    assert env[method_binding.SKILL_ROOT_ENV] == str(binding.skill_dir)
+
+
+@pytest.mark.parametrize("launch, script, named", LAUNCHERS)
+def test_every_other_launcher_answers_a_refused_binding_with_its_sentence_and_starts_nothing(
+        monkeypatch, app_log_warnings, launch, script, named):
+    """A project whose copy TCC will not run — a real folder at the entry: a copy inside the project
+    travels with it (HUB-050) — is answered by each launcher in its own kind of answer, with the
+    binding's sentence verbatim, and nothing is started. The log hears it once, in `spawn`'s own
+    line: the two launchers with a `Popen` of their own ask the resolver `spawn` asks."""
+    monkeypatch.delenv("AUTOSOUND_STATE_ROOT", raising=False)
+    launches = _Launches(monkeypatch)
+    project = config.project_dir()
+    _entry(project).mkdir(parents=True)
+    reason = method_binding.for_project(project).reason
+    assert reason
+    app_log_warnings.clear()
+
+    assert launch(project, launches) == reason
+
+    assert launches.started == [], "nothing started"
+    said = [record.getMessage() for record in app_log_warnings]
+    assert said == [f"refused: `{named}` on {project} was not run: {reason}"], said
+
+
+def test_spawn_runs_what_resolve_answers(tmp_path, monkeypatch):
+    """`spawn` takes its script and its environment from `resolve` — the resolver `contract_check`
+    and `intake_form` ask for theirs — so a launcher that keeps a `Popen` of its own cannot run
+    another copy than `spawn` would (#169)."""
+    script = tmp_path / "copy" / "rew_tool" / "contract.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("", encoding="utf-8")
+    asked, started = [], []
+
+    def resolve(project_dir, script_rel, args=()):
+        asked.append((Path(project_dir), script_rel, list(args)))
+        return script, {"FROM": "resolve"}
+
+    def run(argv, **kwargs):
+        started.append((argv[1:], kwargs["env"]))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(method_cli, "resolve", resolve)
+    monkeypatch.setattr(method_cli.child, "run_bounded", run)
+    car = tmp_path / "car"
+
+    method_cli.spawn(car, "contract.py", ["check", car], timeout_s=5, lock=False)
+
+    assert asked == [(car, "contract.py", ["check", str(car)])]
+    assert started == [([str(script), "check", str(car)], {"FROM": "resolve"})]

@@ -29,11 +29,14 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from autosound_tcc.core import child as child_process
-from autosound_tcc.core import app_log, config, vendor_loader
+from autosound_tcc.core import app_log, config, method_cli, vendor_loader
 
 # Generous next to critic.py's model calls: this is local file I/O plus at most one REW probe
 # (`rew_api` has its own 5s per-call timeout), so anything approaching this is a hang, not slowness.
 DEFAULT_TIMEOUT_S = 30.0
+
+#: The checker, relative to the method's `rew_tool/`.
+_SCRIPT = "contract.py"
 
 
 @dataclass(frozen=True)
@@ -123,8 +126,9 @@ class ContractReport:
 
 
 def script_path() -> Path:
-    """The vendored checker. Absent when the submodule hasn't been checked out."""
-    return vendor_loader.REW_TOOL_DIR / "contract.py"
+    """TCC's own checker, for a caller with no project (`is_available`). Absent when the submodule
+    hasn't been checked out. `run` checks a project with the copy that project is bound to."""
+    return vendor_loader.REW_TOOL_DIR / _SCRIPT
 
 
 def is_available() -> bool:
@@ -166,6 +170,11 @@ def run(
     thread can end it early. Without that the only way out is the 30 s timeout, and a window
     closed mid-check would have to be waited on for that long -- or the thread destroyed under
     Qt, which aborts the process.
+
+    The checker is the one of the copy the project is bound to (#169), from `method_cli.resolve` --
+    the answer `method_cli.spawn` runs; a child a caller may cancel cannot be its bounded run, so
+    the `Popen` stays here. A copy TCC will not run is an error report carrying the binding's
+    sentence, with nothing started.
     """
     project_dir = Path(project_dir or config.project_dir())
     started = time.monotonic()
@@ -180,7 +189,13 @@ def run(
             duration_s=time.monotonic() - started,
         )
 
-    script = script_path()
+    args = ["check", str(project_dir), "--json"]
+    if skip_rew:
+        args.append("--no-rew")
+    try:
+        script, env = method_cli.resolve(project_dir, _SCRIPT, args)
+    except method_cli.Refused as exc:
+        return failed(str(exc))
     if not script.is_file():
         return failed(
             f"contract.py not found at {script}. "
@@ -193,12 +208,8 @@ def run(
         # down, so whatever it runs opens a window of its own.
         python_executable or child_process.script_interpreter(),
         str(script),
-        "check",
-        str(project_dir),
-        "--json",
+        *args,
     ]
-    if skip_rew:
-        argv.append("--no-rew")
 
     try:
         # `child_process.quiet()`: no stdin to wait on, and no console window flashed on Windows
@@ -206,7 +217,7 @@ def run(
         # variable `child` — the process — as it was.
         proc = _Cancellable(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             encoding="utf-8", errors="replace",
-                            env=vendor_loader.child_env(), **child_process.quiet())
+                            env=env, **child_process.quiet())
     except OSError as exc:
         return failed(str(exc))
     if register is not None:

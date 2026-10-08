@@ -22,6 +22,14 @@ from pathlib import Path
 
 from autosound_tcc.core.agent_session import OnboardingSession
 
+# A copy of the method approved in the window lives in the window's settings store, as the saved
+# project does; a light install has none, and trusts only TCC's own copy and the ones it knows
+# (#169, `core/method_binding.py`). As `tuning_session_cli` does it.
+try:
+    from autosound_tcc.ui.tcc import app_settings  # noqa: F401 — hands that store to core.config
+except ImportError:
+    pass
+
 
 async def _run(project_dir: Path, vendor: str, model: str) -> None:
     project_dir.mkdir(parents=True, exist_ok=True)

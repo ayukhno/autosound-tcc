@@ -849,6 +849,30 @@ def test_check_existing_profile_finds_an_exact_bundled_match(tmp_path, monkeypat
     assert "dsp_profile" not in result["project_profile"]
 
 
+def test_check_existing_profile_reads_the_library_with_the_interviews_own_copy(tmp_path, monkeypatch):
+    """#169: `find_bundled` runs a script of the method too, so it runs the copy of the project the
+    interview is for — not the current project's, which a server or a terminal started on another
+    folder need not share. Here the current project's copy is refused while the interview's is not,
+    and the library is read all the same."""
+    from autosound_tcc.core import vendor_loader
+
+    bundled = _bundled_dir_with(tmp_path, "Audiotec-Fischer", "Helix DSP Ultra S")
+    monkeypatch.setattr(mcp_server.config, "bundled_profiles_dir", lambda: bundled)
+    current = tmp_path / "current-car"
+    (current / ".claude" / "skills" / vendor_loader.SKILL_NAME).mkdir(parents=True)
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(current))
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(exist_ok=True)
+    mcp, _, _ = _server(project_dir, HeadlessBridge(project_dir))
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool(
+        "check_existing_profile", {"vendor": "Audiotec-Fischer", "model": "Helix DSP Ultra S"},
+    ))))
+
+    assert "error" not in result, result
+    assert result["bundled_exact_match"]["vendor"] == "Audiotec-Fischer"
+
+
 def test_check_existing_profile_is_strict_no_fuzzy_matching(tmp_path, monkeypatch):
     """Regression context: free-typing "Helix"/"Ultra S" against a profile actually keyed
     `Audiotec-Fischer`/`Helix DSP Ultra S` must NOT match -- that strictness is deliberate

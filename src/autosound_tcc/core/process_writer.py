@@ -19,8 +19,11 @@ our own venv's, never a bare `python` the shell has to guess — `child.script_i
 is that venv's CONSOLE binary rather than the windowed `pythonw.exe` TCC itself runs under, because
 a script with no console hands none down and the git it calls then opens a window (TCC-006) — and
 the script is the one of the copy the project is bound to (`method_binding`), not an address only
-one harness understands. Both happen in `method_cli`, the one place a method script is started; a
-binding TCC will not run answers `Refused` there, with its own sentence.
+one harness understands. Both happen in `method_cli`, the one place a script of the method's
+`rew_tool/` is started — every launcher of one goes through it, and the two whose child cannot be
+its bounded run (the contract check a caller cancels, the intake form's server) take its `resolve`
+and keep a `Popen` of their own. A binding TCC will not run answers `Refused` there, with its own
+sentence.
 
 Reads stay where they were: `mcp_server._load_process_state()` imports the skill's module in-process
 and calls `Process(...).load()`. Writes go out-of-process for the same reason profile writes do —

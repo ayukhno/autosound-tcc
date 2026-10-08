@@ -5,8 +5,10 @@ Arbiter's `EPY-Sep2026`) it has one command: `project_repo.py init <project>`. T
 it offers and never makes: `status --json` carries the `gh repo create … --private --push` line,
 and running it is the Arbiter's yes — a remote is outward-facing.
 
-TCC runs the method's commands and reports what they said. A vendored method older than
-`project_repo.py` answers "update the method", not a failure.
+TCC runs the method's commands and reports what they said. A method older than `project_repo.py`
+answers "update the method", not a failure. The copy that runs is the one the project is bound to
+(#169), started through `method_cli` as every method script is; the GitHub offer is `gh`'s own
+line, and no copy's.
 """
 
 from __future__ import annotations
@@ -18,11 +20,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import app_log, child, vendor_loader
+from autosound_tcc.core import app_log, child, method_cli, vendor_loader
 
 #: Ten minutes: a first push carries the project's captures, and 120 s was not enough for one
 #: (Ruling 48). Still a bound: the push's tree is killed at it (`child.run_bounded`).
 _TIMEOUT_S = 600
+
+#: The method's command, relative to its `rew_tool/`.
+_SCRIPT = "project_repo.py"
 
 
 @dataclass(frozen=True)
@@ -33,44 +38,55 @@ class RepoResult:
 
 
 def script_path() -> Path:
-    return vendor_loader.REW_TOOL_DIR / "project_repo.py"
+    """TCC's own `project_repo.py`, for a caller with no project (`available`). A command on a
+    project runs the copy that project is bound to (`_run`)."""
+    return vendor_loader.REW_TOOL_DIR / _SCRIPT
 
 
 def available() -> bool:
+    """Whether TCC's own copy has the command. A project bound to another copy is answered for by
+    that copy when the command runs: too old there, or refused."""
     return script_path().is_file()
 
 
-def _run(argv: list[str]) -> Optional[subprocess.CompletedProcess]:
+def _run(project: Path, args: list[str]) -> tuple[int, str, str]:
+    """`project_repo.py *args` of the copy `project` is bound to, through `method_cli.spawn`:
+    bounded, in that copy's environment, and with no lock — the lock's own `process/` has no place
+    in a folder being made a repository. Raises `method_cli.ProcessWriterError`: `ScriptMissing`
+    for a copy older than the command, `Refused` with the binding's sentence (said in the log by
+    `method_cli`), any other for a run that did not come back."""
     try:
-        return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=_TIMEOUT_S,
-                              env=vendor_loader.child_env(), **child.quiet())
-    except (OSError, subprocess.SubprocessError) as exc:
-        app_log.logger().info("project repo: %s failed: %s", argv[2:4], type(exc).__name__)
-        return None
+        return method_cli.spawn(project, _SCRIPT, args, timeout_s=_TIMEOUT_S, lock=False)
+    except method_cli.Refused:
+        raise
+    except method_cli.ProcessWriterError as exc:
+        app_log.logger().info("project repo: %s failed: %s", args[0], exc)
+        raise
 
 
 def init(project: Path) -> RepoResult:
     """`git init`, the `.gitignore`, one first commit — the method's own way."""
-    if not available():
+    try:
+        code, out, err = _run(project, ["init", str(project)])
+    except method_cli.ScriptMissing:
         return RepoResult(False, "", too_old=True)
-    proc = _run([child.script_interpreter(), str(script_path()), "init", str(project)])
-    if proc is None:
-        return RepoResult(False, "")
-    said = (proc.stdout.strip() or proc.stderr.strip())
-    app_log.logger().info("project repo: init -> exit %s", proc.returncode)
-    return RepoResult(proc.returncode == 0, said)
+    except method_cli.ProcessWriterError as exc:
+        return RepoResult(False, str(exc))
+    app_log.logger().info("project repo: init -> exit %s", code)
+    return RepoResult(code == 0, out or err)
 
 
 def status(project: Path) -> Optional[dict]:
-    """`{repo, remote, gh, init, offer}` as the method reports it, or None when it cannot."""
-    if not available():
+    """`{repo, remote, gh, init, offer}` as the method reports it, or None when it cannot — a
+    method older than the command, a copy TCC will not run, a run that did not answer."""
+    try:
+        code, out, _err = _run(project, ["status", str(project), "--json"])
+    except method_cli.ProcessWriterError:
         return None
-    proc = _run([child.script_interpreter(), str(script_path()), "status", str(project), "--json"])
-    if proc is None or proc.returncode != 0:
+    if code != 0:
         return None
     try:
-        answer = json.loads(proc.stdout)
+        answer = json.loads(out)
     except ValueError:
         return None
     return answer if isinstance(answer, dict) else None

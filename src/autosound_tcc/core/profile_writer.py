@@ -14,21 +14,23 @@ owned — TCC gets whatever the writer decided, including its refusals.
 
 Subprocess, same reasoning as `core/contract_check.py`: `dsp_profile.py` is shaped as a CLI, and
 running it out-of-process means there is exactly one implementation of "write a profile field" in
-the world rather than an in-process copy that drifts.
+the world rather than an in-process copy that drifts. The copy that runs is the one the project is
+bound to (#169), started through `method_cli` as every method script is.
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
-from autosound_tcc.core import child
-from autosound_tcc.core import vendor_loader
+from autosound_tcc.core import config, method_cli, vendor_loader
 
 # Local file I/O and a JSON dump; anything near this is a hang, not slowness.
 DEFAULT_TIMEOUT_S = 20.0
+
+#: The writer, relative to the method's `rew_tool/`.
+_SCRIPT = "dsp_profile.py"
 
 
 class ProfileWriterError(RuntimeError):
@@ -40,41 +42,33 @@ class ProfileWriterError(RuntimeError):
 
 
 def script_path() -> Path:
-    return vendor_loader.REW_TOOL_DIR / "dsp_profile.py"
+    """TCC's own writer, for a caller with no project (`is_available`). A call on a project runs
+    the copy that project is bound to (`_run`)."""
+    return vendor_loader.REW_TOOL_DIR / _SCRIPT
 
 
 def is_available() -> bool:
     return script_path().is_file()
 
 
-def _run(args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
-    script = script_path()
-    if not script.is_file():
-        raise ProfileWriterError(
-            f"dsp_profile.py not found at {script}. Run: git submodule update --init --recursive"
-        )
+def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
+    """`dsp_profile.py *args` of the copy `project_dir` is bound to, through `method_cli.spawn`:
+    bounded, in that copy's environment, and with no lock — the draft is the writer's own file,
+    not the journal the project's lock guards. Every failure is a `ProfileWriterError` with its own
+    sentence: a copy TCC will not run (`method_cli.Refused`, verbatim), a script not there, a
+    timeout, and a non-zero exit's own words."""
     try:
-        proc = subprocess.run(
-            # The console interpreter, not TCC's windowed one (`child.script_interpreter`).
-            [child.script_interpreter(), str(script), *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_s,
-            env=vendor_loader.child_env(), **child.quiet())
-    except subprocess.TimeoutExpired:
-        raise ProfileWriterError(f"dsp_profile.py timed out after {timeout_s:.0f}s") from None
-    except OSError as exc:
-        raise ProfileWriterError(str(exc)) from None
-    if proc.returncode != 0:
-        message = (proc.stderr or proc.stdout or "").strip()
-        raise ProfileWriterError(message or f"dsp_profile.py exited {proc.returncode}")
-    return proc.stdout
+        code, out, err = method_cli.spawn(project_dir, _SCRIPT, args, timeout_s=timeout_s,
+                                          lock=False)
+    except method_cli.ProcessWriterError as exc:
+        raise ProfileWriterError(str(exc)) from exc
+    if code != 0:
+        raise ProfileWriterError(err or out or f"{_SCRIPT} exited {code}")
+    return out
 
 
-def _run_json(args: list[str]) -> Any:
-    out = _run(args)
+def _run_json(project_dir: Path, args: list[str]) -> Any:
+    out = _run(project_dir, args)
     try:
         return json.loads(out)
     except ValueError:
@@ -83,12 +77,12 @@ def _run_json(args: list[str]) -> Any:
 
 def start(project_dir: Path, vendor: str, model: str) -> dict:
     """Begin or resume the interview. Returns `{"draft": ..., "open_questions": [...]}`."""
-    return _run_json(["start", str(project_dir), vendor, model])
+    return _run_json(project_dir, ["start", str(project_dir), vendor, model])
 
 
 def draft(project_dir: Path) -> dict:
     """The in-progress draft plus what is still unanswered, straight off disk."""
-    return _run_json(["draft", str(project_dir)])
+    return _run_json(project_dir, ["draft", str(project_dir)])
 
 
 def set_field(project_dir: Path, path: str, value: Any) -> dict:
@@ -96,30 +90,36 @@ def set_field(project_dir: Path, path: str, value: Any) -> dict:
     the writer decodes a JSON-looking string back into the real structure, which is what makes a
     list survive the round trip."""
     raw = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-    return _run_json(["set-field", str(project_dir), path, raw])
+    return _run_json(project_dir, ["set-field", str(project_dir), path, raw])
 
 
 def reset_field(project_dir: Path, path: str) -> dict:
-    return _run_json(["reset-field", str(project_dir), path])
+    return _run_json(project_dir, ["reset-field", str(project_dir), path])
 
 
 def finalize(project_dir: Path) -> Path:
     """Promote the draft to `dsp_profile.json`. Raises `ProfileWriterError` with the writer's own
     reason when the draft is not a valid profile yet — the draft survives, so the interview can
     fix and retry."""
-    out = _run(["finalize", str(project_dir)]).strip()
+    out = _run(project_dir, ["finalize", str(project_dir)]).strip()
     return Path(out.split(" ", 1)[1]) if out.startswith("wrote ") else Path(out)
 
 
-def find_bundled(vendor: str, model: str, bundled_dir: Path) -> Optional[dict]:
+def find_bundled(vendor: str, model: str, bundled_dir: Path, *,
+                 project_dir: Optional[Path] = None) -> Optional[dict]:
     """Exact vendor+model match in the reference library, or None. A read, but routed here so the
     onboarding path has one door to the skill's profile module.
 
     Returned UNWRAPPED (no top-level `dsp_profile` key), matching the draft's shape. An agent that
     sees the two answers in different shapes starts guessing prefixes — that is exactly how a
     `dsp_profile.dsp_profile` double-nesting reached disk in the 2026-07-29 dogfood run.
+
+    The library names no project, but the script that reads it is a copy's (#169): the copy of
+    `project_dir`, the project whose interview this is — the current one (`config.project_dir()`)
+    when it is not given.
     """
-    out = _run(["find-bundled", vendor, model, str(bundled_dir)]).strip()
+    project = Path(project_dir) if project_dir is not None else config.project_dir()
+    out = _run(project, ["find-bundled", vendor, model, str(bundled_dir)]).strip()
     if not out or out == "no exact match":
         return None
     try:

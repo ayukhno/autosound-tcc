@@ -6,11 +6,13 @@ import json
 import os
 import subprocess
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from autosound_tcc.core import config_writer  # noqa: E402
+from autosound_tcc.core import config_writer, method_binding, method_cli, vendor_loader  # noqa: E402
 from autosound_tcc.state import ledger_line  # noqa: E402
 
 
@@ -111,14 +113,24 @@ def test_the_window_compares_with_the_previous_configuration_by_default(tmp_path
     assert "SQ-1" in combo.currentText()
 
 
-def test_a_save_goes_through_the_method_with_its_arguments(tmp_path, monkeypatch):
+def _the_method_answers(monkeypatch, code: int, out: str = "", err: str = "") -> list:
+    """The method's `state.py` answering `(code, out, err)` at the one door a method script is
+    started by (`method_cli`, #169), and what it was started with, one argv per run. The script is
+    the copy the current project runs — TCC's own, for a project with no entry."""
+    if not config_writer.script_path().is_file():
+        pytest.skip("skill submodule not checked out")
     seen = []
 
-    def fake_run(argv, **kwargs):
+    def run(argv, **kwargs):
         seen.append(argv)
-        return subprocess.CompletedProcess(argv, 0, "SQ-2 = v_006 in slot SQ (DSP preset 1)\n", "")
+        return subprocess.CompletedProcess(argv, code, out, err)
 
-    monkeypatch.setattr(config_writer.subprocess, "run", fake_run)
+    monkeypatch.setattr(method_cli.child, "run_bounded", run)
+    return seen
+
+
+def test_a_save_goes_through_the_method_with_its_arguments(tmp_path, monkeypatch):
+    seen = _the_method_answers(monkeypatch, 0, "SQ-2 = v_006 in slot SQ (DSP preset 1)\n")
     result = config_writer.save(tmp_path, "v_006", "SQ-2", slot="SQ", dsp_preset="1",
                                 purpose="sound quality")
     assert result.saved and result.said.startswith("SQ-2 = v_006")
@@ -129,10 +141,26 @@ def test_a_save_goes_through_the_method_with_its_arguments(tmp_path, monkeypatch
 
 
 def test_a_method_without_config_is_said_as_too_old(tmp_path, monkeypatch):
-    monkeypatch.setattr(config_writer.subprocess, "run", lambda argv, **k: subprocess.CompletedProcess(
-        argv, 2, "", "state.py: error: argument cmd: invalid choice: 'config' (choose from ...)"))
+    _the_method_answers(monkeypatch, 2, "",
+                        "state.py: error: argument cmd: invalid choice: 'config' (choose from ...)")
     result = config_writer.save(tmp_path, "v_006", "SQ-2")
     assert not result.saved and result.too_old
+
+
+def test_a_save_runs_the_copy_of_the_project_it_is_given(tmp_path, monkeypatch):
+    """R-h (#169): `project_dir=` is the project whose copy of the method runs the save, the current
+    one when it is not given — the dialog's case, whose `state_root` is that project's `state/`.
+    Here the named project's copy is refused while the current one's is not, and the save says the
+    named one's sentence, having started nothing."""
+    seen = _the_method_answers(monkeypatch, 0, "saved")
+    other = tmp_path / "other-car"
+    (other / ".claude" / "skills" / vendor_loader.SKILL_NAME).mkdir(parents=True)
+
+    result = config_writer.save(other / "state", "v_006", "SQ-2", project_dir=other)
+
+    assert (result.saved, result.said) == (False, method_binding.for_project(other).reason)
+    assert seen == []
+    assert config_writer.save(other / "state", "v_006", "SQ-2").saved, "the current project's runs"
 
 
 def test_the_form_offers_the_device_preset_it_was_last_saved_to(tmp_path, monkeypatch):

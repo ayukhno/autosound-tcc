@@ -11,24 +11,52 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton  # noqa: E402
 
-from autosound_tcc.core import child, config, project_repo  # noqa: E402
+from autosound_tcc.core import child, config, method_binding, project_repo, vendor_loader  # noqa: E402
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from tests import _hung_child  # noqa: E402
 
 
+def _own_copy(tmp_path, monkeypatch, script: str | None = None):
+    """TCC's own copy — the one a project with no entry runs (`method_binding.own_copy`, #169) — as
+    a folder whose `rew_tool/project_repo.py` is `script`, or that has none: a method older than the
+    command. The commands run the copy the project is bound to, so this is where a fake one goes."""
+    own = tmp_path / "tccs-own"
+    if script is not None:
+        path = own / "rew_tool" / "project_repo.py"
+        path.parent.mkdir(parents=True)
+        path.write_text(script, encoding="utf-8")
+    monkeypatch.setattr(method_binding, "own_copy", lambda: own)
+
+
+def _nothing_starts(monkeypatch) -> None:
+    """Both doors a child could take: `method_cli`'s bounded run, and the bare run — whose real
+    `init` asks `gh` for an identity and whose `status` asks `gh` whether it is signed in."""
+    for owner, name in ((child, "run_bounded"), (subprocess, "run")):
+        monkeypatch.setattr(owner, name, lambda argv, **_kw: pytest.fail(f"a child started: {argv}"))
+
+
 def test_a_method_without_the_command_says_update(tmp_path, monkeypatch):
-    monkeypatch.setattr(project_repo, "script_path", lambda: tmp_path / "missing.py")
+    _own_copy(tmp_path, monkeypatch)
+    _nothing_starts(monkeypatch)
     result = project_repo.init(tmp_path)
     assert not result.ok and result.too_old
     assert project_repo.status(tmp_path) is None
 
 
 def test_init_runs_the_methods_command_on_the_project(tmp_path, monkeypatch):
-    script = tmp_path / "project_repo.py"
-    script.write_text("import sys; print('initialised', sys.argv[1:])", encoding="utf-8")
-    monkeypatch.setattr(project_repo, "script_path", lambda: script)
+    _own_copy(tmp_path, monkeypatch, "import sys; print('initialised', sys.argv[1:])")
     result = project_repo.init(tmp_path / "car")
     assert result.ok and "init" in result.said and "car" in result.said
+
+
+def test_a_copy_tcc_will_not_run_has_no_status_and_starts_nothing(tmp_path, monkeypatch):
+    """`status` has one answer for «the method cannot say», None, and a project whose copy TCC will
+    not run is one (#169): nothing is started, and `method_cli` says the refusal in the log."""
+    project = tmp_path / "car"
+    (project / ".claude" / "skills" / vendor_loader.SKILL_NAME).mkdir(parents=True)
+    _nothing_starts(monkeypatch)
+
+    assert project_repo.status(project) is None
 
 
 def test_only_a_gh_line_is_ever_run(tmp_path):

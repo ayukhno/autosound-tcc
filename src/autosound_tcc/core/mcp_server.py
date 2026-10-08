@@ -825,7 +825,7 @@ def build_server(
         try:
             current = profile_writer.start(project_dir, vendor, model)
             bundled = profile_writer.find_bundled(
-                vendor, model, config.bundled_profiles_dir()
+                vendor, model, config.bundled_profiles_dir(), project_dir=project_dir
             )
         except profile_writer.ProfileWriterError as exc:
             return json.dumps({"error": str(exc)})
