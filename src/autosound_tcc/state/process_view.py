@@ -436,9 +436,10 @@ def _stale_in(project_dir: Path, process) -> tuple[dict[str, dict], int, set[str
 
     With it, what that reading rests on, for the memo to judge (the review of Task 20, M1): how
     many events the journal gave, and which other reading came back empty where the answer used
-    it — `project.json` with no channel when a capture was matched against what went stale, the
-    glossary with no channel for a full rebaseline. The method reads a file it cannot open as
-    empty (#134, R53), so an empty reading is no evidence that the file is."""
+    it — `project.json` with no channel when a capture was matched against what went stale or a
+    full rebaseline asked which channels are on, the glossary with no channel for a full
+    rebaseline. The method reads a file it cannot open as empty (#134, R53), so an empty reading
+    is no evidence that the file is."""
     proc = process.Process(str(process_dir(project_dir)))
     parse = _impact_parser()
     aliases = _channel_aliases(project_dir)
@@ -456,6 +457,10 @@ def _stale_in(project_dir: Path, process) -> tuple[dict[str, dict], int, set[str
                 codes = _known_channel_codes(project_dir)
                 if not codes:
                     read_empty.add("glossary")
+                # `project.json`'s rows switch each channel on or off (skill #83): read as none,
+                # the glossary's own flags stand, and they can be wrong either way.
+                if not aliases:
+                    read_empty.add("project.json")
             for code in codes:
                 stale[code] = {**event, "impact_parsed": parsed}
         elif kind == process.EV_STEP_DONE:

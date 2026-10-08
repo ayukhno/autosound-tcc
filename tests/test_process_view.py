@@ -579,6 +579,29 @@ def test_a_glossary_the_method_could_not_open_is_not_remembered(project, process
     assert set(process_view.stale_channels(project)) == {"w-L", "w-R"}
 
 
+def test_a_full_rebaseline_read_while_project_json_is_held_is_not_remembered(project, process,
+                                                                             monkeypatch):
+    """The re-review of Task 20, M1's last path: a full rebaseline reads `project.json` too, for
+    the rows that switch a channel on or off (skill #83). Held, it gives no rows, and each channel
+    keeps the glossary's own flag — here `r-L`, switched off in the project, is flagged. That
+    answer is not kept either."""
+    import json
+
+    vendor_loader.load_project().Project(str(project)).set_channel("r-L", tier="channels",
+                                                                   hidden=True)
+    (project / "glossary.json").write_text(json.dumps({"channels": [
+        {"code": "w-L", "active": True}, {"code": "r-L", "active": True}]}), encoding="utf-8")
+    process.enter_phase("2")
+    _record_change(project, process, "full_rebaseline", what="mic recalibrated")
+    holds = [_held(monkeypatch, vendor_loader.load_dsp_state(), "project.json"),
+             _held(monkeypatch, vendor_loader.load_naming(), "project.json")]
+
+    assert set(process_view.stale_channels(project)) == {"w-L", "r-L"}  # r-L's switch unread
+    for hold in holds:
+        hold["on"] = False
+    assert set(process_view.stale_channels(project)) == {"w-L"}
+
+
 def test_an_impact_the_parser_cannot_act_on_flags_nothing(project, process):
     """`voicing` (written by the skill's own set_target) and free prose are real impacts a human
     should read — but guessing which channels a sentence meant is how a checklist starts lying."""
