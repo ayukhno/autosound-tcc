@@ -29,15 +29,14 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+# `vendor_loader` imports `method_binding`, which imports this module back: each of the three uses
+# the others only inside its functions, so any of them can load first. At the top, because
+# `bundled_profiles_dir` runs on the MCP server's loop (#172).
+from autosound_tcc.core import vendor_loader
+
 # config.py -> core -> autosound_tcc -> src -> <repo root>
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_STATE_ROOT = _REPO_ROOT / "data" / "private" / "state"
-# INSIDE the package, not beside it. It used to be `<repo>/data/dsp_profiles`, which exists in a
-# checkout and nowhere else: a `uv tool install` produced a New Project dialog with no bundled
-# profiles at all, silently, because a wheel contains only what is under `src/autosound_tcc`
-# (found by installing it, 2026-08-12). One location that works in both layouts beats a build
-# rule that copies it into a second one.
-DEFAULT_BUNDLED_PROFILES_DIR = Path(__file__).resolve().parent.parent / "dsp_profiles"
 
 
 def state_root() -> Path:
@@ -260,9 +259,21 @@ def project_path(project_dir_: Optional[Path] = None) -> Path:
     return (project_dir_ or project_dir()) / "project.json"
 
 
-def bundled_profiles_dir() -> Path:
-    """Reference DSP profiles shipped with the app (public, no project data)."""
-    return DEFAULT_BUNDLED_PROFILES_DIR
+def bundled_profiles_dir() -> Optional[Path]:
+    """The reference DSP profiles: the method's own library, `bundled_dir()` of the skill TCC
+    loads, which answers a str (#175 D-1).
+
+    TCC kept a library of its own in the package, one older Helix file, and the New-project picker
+    read it: the method's richer Helix was never offered, and its Musway could not be picked (F8).
+    Read from the copy TCC loads, not a project's: the library names no project, and a project's
+    writes go through its own copy (`profile_writer`).
+
+    None when that skill keeps no library: one older than v3.0.19, when `bundled_dir` arrived with
+    the library itself. There is then no bundled profile to match, which is an answer, not an error
+    in the middle of an interview. No skill found raises, as every load does
+    (`vendor_loader.VendorNotInitializedError`)."""
+    library = getattr(vendor_loader.load_dsp_profile(), "bundled_dir", None)
+    return Path(library()) if callable(library) else None
 
 
 def _preset_dirs(root: Path) -> list[str]:

@@ -131,6 +131,67 @@ def test_bundled_profile_picker_defaults_to_an_exact_find_bundled_match():
     assert not dlg._model_edit.isHidden()
 
 
+def _offered(dlg) -> list:
+    combo = dlg._profile_combo
+    return [combo.itemData(index) for index in range(combo.count())]
+
+
+def _warnings(caplog) -> list[str]:
+    return [record.getMessage() for record in caplog.records if record.levelname == "WARNING"]
+
+
+def test_the_picker_offers_the_skills_library_helix_then_musway_then_add_new():
+    """#175 D-1 (F8): the picker read TCC's own folder, one older Helix file, so the method's
+    Musway could not be picked at all. It offers the method's library now, in `list_bundled()`'s
+    order, with «Add new» last."""
+    from autosound_tcc.core import vendor_loader
+
+    _app()
+    dlg = npd.NewProjectDialog()
+
+    library = vendor_loader.load_dsp_profile().list_bundled()
+    offered = _offered(dlg)
+    assert offered == [(vendor, model) for vendor, model, _path in library] + [None]
+    assert offered[0] == ("Audiotec-Fischer", "Helix DSP Ultra S")
+    assert offered[1][0] == "Musway" and offered[1][1].startswith("M6V4"), offered
+    assert offered[-1] is None
+    assert dlg._profile_combo.itemText(len(offered) - 1) == npd.i18n.t("npAddNew")
+
+
+def test_with_no_skill_the_picker_offers_only_add_new_and_the_log_says_why(monkeypatch, caplog):
+    """The first screen a fresh install meets opens without a skill too (#175 D-1): «Add new» is
+    the one entry, its fields are open to type a DSP into, and the log names what is missing."""
+    from autosound_tcc.core import vendor_loader
+
+    def no_skill():
+        raise vendor_loader.VendorNotInitializedError("the autosound-tuning skill was not found")
+
+    monkeypatch.setattr(vendor_loader, "load_dsp_profile", no_skill)
+    _app()
+    dlg = npd.NewProjectDialog()
+
+    assert _offered(dlg) == [None]
+    assert not dlg._vendor_edit.isHidden() and not dlg._model_edit.isHidden()
+    assert any("was not found" in said for said in _warnings(caplog)), caplog.text
+
+
+def test_a_skill_older_than_the_library_leaves_only_add_new_and_says_so(monkeypatch, caplog):
+    """`bundled_dir` and `list_bundled` arrived with the library, in the method's v3.0.19, and
+    the loader takes an older 3.0 skill all the same: no library, so only «Add new» (the map's
+    note 11), and the log says which skill it read."""
+    import types
+
+    from autosound_tcc.core import vendor_loader
+
+    monkeypatch.setattr(vendor_loader, "load_dsp_profile", lambda: types.SimpleNamespace())
+    _app()
+    dlg = npd.NewProjectDialog()
+
+    assert _offered(dlg) == [None]
+    skill = str(vendor_loader.skill_dir())
+    assert any("v3.0.19" in said and skill in said for said in _warnings(caplog)), caplog.text
+
+
 def test_run_via_combo_lists_detected_clis_and_defaults_to_in_app(monkeypatch):
     monkeypatch.setattr(
         npd.terminal_launcher,

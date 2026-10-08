@@ -56,7 +56,8 @@ def _project(root: Path, codes=("sw", "w-L", "w-R")) -> Path:
         "channels": [{"code": code, "tier": "channels"} for code in codes],
     }), encoding="utf-8")
     shutil.copy2(
-        Path(config.bundled_profiles_dir()) / "helix-dsp-ultra-s.json", root / "dsp_profile.json"
+        config.bundled_profiles_dir() / "audiotec-fischer-helix-dsp-ultra-s.json",
+        root / "dsp_profile.json",
     )
     return root
 
@@ -249,7 +250,7 @@ def test_clean_values_under_an_unknown_channel_are_still_not_bankable(tmp_path, 
     profile_only = tmp_path / "profile-only"
     profile_only.mkdir()
     shutil.copy2(
-        Path(config.bundled_profiles_dir()) / "helix-dsp-ultra-s.json",
+        config.bundled_profiles_dir() / "audiotec-fischer-helix-dsp-ultra-s.json",
         profile_only / "dsp_profile.json",
     )
 

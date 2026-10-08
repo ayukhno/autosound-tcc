@@ -1041,6 +1041,97 @@ def test_check_existing_profile_is_strict_no_fuzzy_matching(tmp_path, monkeypatc
     assert result["bundled_exact_match"] is None
 
 
+def test_check_existing_profile_finds_the_musway_of_the_skills_library(tmp_path):
+    """#175 D-1 (F8): TCC read its own folder, which held one Helix file, so an interview for the
+    method's Musway found no bundled profile. The model is spelled as the library spells it,
+    variant and all -- the 512K is another processor (the profile's `_open_questions`), the
+    match stays exact (`..._is_strict_no_fuzzy_matching`), and the picker supplies the strings."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(exist_ok=True)
+    mcp, _, _ = _server(project_dir, HeadlessBridge(project_dir))
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool(
+        "check_existing_profile", {"vendor": "Musway", "model": "M6V4 (no 512K)"},
+    ))))
+
+    assert "error" not in result, result
+    match = result["bundled_exact_match"]
+    assert match is not None, "the method's library has this Musway and the tool did not find it"
+    assert (match["vendor"], match["name"]) == ("Musway", "M6V4 (no 512K)")
+    assert "dsp_profile" not in match
+
+
+def test_a_skill_older_than_the_library_answers_no_match_and_runs_no_lookup(tmp_path, monkeypatch):
+    """`bundled_dir` arrived with the method's library, in v3.0.19, and the loader takes an older
+    3.0 skill all the same (the map's note 11). There is no library then, so no match: the draft
+    and its questions come back as ever, and no lookup runs against a folder that is not there."""
+    import types
+
+    from autosound_tcc.core import profile_writer, vendor_loader
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(exist_ok=True)
+    mcp, _, _ = _server(project_dir, HeadlessBridge(project_dir))
+    monkeypatch.setattr(vendor_loader, "load_dsp_profile", lambda: types.SimpleNamespace())
+    ran = []
+    run = profile_writer._run
+
+    def recorded(project, args, *rest, **kwargs):
+        ran.append(args[0])
+        return run(project, args, *rest, **kwargs)
+
+    monkeypatch.setattr(profile_writer, "_run", recorded)
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool(
+        "check_existing_profile", {"vendor": "Musway", "model": "M6V4 (no 512K)"},
+    ))))
+
+    assert mcp_server.config.bundled_profiles_dir() is None
+    assert "error" not in result, result
+    assert result["bundled_exact_match"] is None
+    assert "open_questions" in result
+    assert ran == ["start"], ran
+
+
+def test_the_library_is_read_on_the_servers_loop_from_a_module_loaded_when_it_was_built(
+        tmp_path, monkeypatch):
+    """`check_existing_profile` asks `config.bundled_profiles_dir()`, which loads the method's
+    `dsp_profile.py` (#175 D-1). In the app a tool runs on the server's own thread (`tcc-mcp`), and
+    a method module's first load there is a worker loading the method (#172). It is not the first:
+    `build_server` loads the module on the thread that builds it -- the field vocabulary in
+    `save_profile_field`'s description; in the app the GUI thread, `TccMcpServer.start` -- so on the
+    loop it comes out of `sys.modules`, under `vendor_loader._LOCK`. Here the tool runs on a thread
+    of its own, as in the app, with the import guard watching it."""
+    from autosound_tcc.core import vendor_loader
+
+    name = vendor_loader._VENDORED["dsp_profile.py"]
+    first_loads = []
+    load = vendor_loader._load_file_locked
+
+    def watched(path, module_name):
+        if module_name == name and module_name not in sys.modules:
+            first_loads.append(threading.get_ident())
+        return load(path, module_name)
+
+    monkeypatch.setattr(vendor_loader, "_load_file_locked", watched)
+    monkeypatch.delitem(sys.modules, name, raising=False)  # as it was again when the test ends
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(exist_ok=True)
+    mcp, _, _ = _server(project_dir, HeadlessBridge(project_dir))
+    assert first_loads == [threading.get_ident()], "the build did not load the module"
+
+    answers = []
+    loop = threading.Thread(target=lambda: answers.append(_text(asyncio.run(mcp.call_tool(
+        "check_existing_profile", {"vendor": "Audiotec-Fischer", "model": "Helix DSP Ultra S"},
+    )))), name="tcc-mcp", daemon=True)
+    loop.start()
+    loop.join(60)
+
+    assert not loop.is_alive(), "the tool did not answer"
+    assert first_loads == [threading.get_ident()], "the loop's thread loaded the module itself"
+    assert json.loads(answers[0])["bundled_exact_match"]["vendor"] == "Audiotec-Fischer"
+
+
 def test_save_reset_and_finalize_profile_round_trip(tmp_path):
     project_dir = tmp_path / "project"
     project_dir.mkdir(exist_ok=True)

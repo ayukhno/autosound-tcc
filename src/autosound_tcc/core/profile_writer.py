@@ -105,7 +105,7 @@ def finalize(project_dir: Path) -> Path:
     return Path(out.split(" ", 1)[1]) if out.startswith("wrote ") else Path(out)
 
 
-def find_bundled(vendor: str, model: str, bundled_dir: Path, *,
+def find_bundled(vendor: str, model: str, bundled_dir: Optional[Path], *,
                  project_dir: Optional[Path] = None) -> Optional[dict]:
     """Exact vendor+model match in the reference library, or None. A read, but routed here so the
     onboarding path has one door to the skill's profile module.
@@ -117,7 +117,12 @@ def find_bundled(vendor: str, model: str, bundled_dir: Path, *,
     The library names no project, but the script that reads it is a copy's (#169): the copy of
     `project_dir`, the project whose interview this is — the current one (`config.project_dir()`)
     when it is not given.
+
+    `bundled_dir` None is a method that keeps no library (`config.bundled_profiles_dir`, #175):
+    nothing to match, so nothing is run.
     """
+    if bundled_dir is None:
+        return None
     project = Path(project_dir) if project_dir is not None else config.project_dir()
     out = _run(project, ["find-bundled", vendor, model, str(bundled_dir)]).strip()
     if not out or out == "no exact match":

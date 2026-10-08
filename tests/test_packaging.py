@@ -380,17 +380,20 @@ def test_the_app_icon_ships_inside_the_package():
         )
 
 
-def test_the_bundled_profiles_ship_inside_the_package():
-    """They lived in `<repo>/data/dsp_profiles`, which exists in a checkout and nowhere else — so
-    an installed TCC opened New Project with no bundled profile in the list, silently. A wheel
-    contains what is under `src/autosound_tcc` and nothing more."""
-    from autosound_tcc.core import config
+def test_the_bundled_profiles_are_the_skills_library_and_the_package_carries_none():
+    """#175 D-1 (F8). The reference profiles were TCC's own: one Helix file, moved into the package
+    on 2026-08-12 so that a wheel would carry it at all. That made it a second library beside the
+    method's, and the one the New-project picker read -- the method's richer Helix (schema 3) was
+    never offered, and its Musway could not be picked. The library is the method's since v3.0.19,
+    `dsp_profile.bundled_dir()` (a str), read from the skill TCC loads; the package holds no copy."""
+    from autosound_tcc.core import config, vendor_loader
 
     directory = config.bundled_profiles_dir()
 
-    assert directory.is_dir() and list(directory.glob("*.json")), directory
-    assert (ROOT / "src" / "autosound_tcc") in directory.parents, (
-        "outside the package directory it will not be in the wheel"
+    assert directory == Path(vendor_loader.load_dsp_profile().bundled_dir()), directory
+    assert list(directory.glob("*.json")), f"the method's library is empty: {directory}"
+    assert not (ROOT / "src" / "autosound_tcc" / "dsp_profiles").exists(), (
+        "the package carries a library of its own beside the method's"
     )
 
 

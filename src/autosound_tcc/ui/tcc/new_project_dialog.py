@@ -63,8 +63,8 @@ def _said(line: car_source.Line) -> str:
 def _seeder():
     """The method's seeding module, or None on an install that has no skill checked out.
 
-    None is a real state, not a bug: `_bundled_profiles` below reads the packaged profiles
-    directly for the same reason -- this dialog is the first screen a fresh install meets, and it
+    None is a real state, not a bug: `_bundled_profiles` below offers only «Add new» without a
+    skill for the same reason -- this dialog is the first screen a fresh install meets, and it
     has to open and say something useful even when the submodule is missing.
     """
     try:
@@ -144,28 +144,34 @@ def _fs_carried(target: Path) -> Optional[int]:
     return count
 
 
-def _bundled_profiles(bundled_dir: Path) -> list[tuple[str, str]]:
-    """(vendor, name) pairs from the packaged `dsp_profiles/*.json` -- read directly rather than through
-    the vendored `rew_tool` so this dialog still works if that submodule isn't checked out.
+def _bundled_profiles() -> list[tuple[str, str]]:
+    """(vendor, name) pairs of the method's library of reference profiles, in its own order:
+    `list_bundled()` of the skill TCC loads, over `config.bundled_profiles_dir()` (#175 D-1).
 
     Picking one of these guarantees an EXACT match against `dsp_profile.find_bundled()`'s
     deliberately strict, no-fuzzy-matching check (project-intake.md §4) -- free-typing "Helix" /
     "Ultra S" against a profile actually keyed `Audiotec-Fischer` / `Helix DSP Ultra S` is exactly
-    how a real bundled profile gets missed (user report 2026-07-29)."""
-    import json
+    how a real bundled profile gets missed (user report 2026-07-29).
 
-    pairs = []
-    for path in sorted(bundled_dir.glob("*.json")):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        profile = data.get("dsp_profile", data) if isinstance(data, dict) else data
-        vendor = str(profile.get("vendor", "")).strip()
-        name = str(profile.get("name", "")).strip()
-        if vendor and name:
-            pairs.append((vendor, name))
-    return pairs
+    Empty, with a warning in the log, when there is no library to read: no skill found, one that
+    does not load here, or one older than v3.0.19, which keeps none. The picker then offers only
+    «Add new», whose fields name a DSP all the same -- this dialog is the first screen a fresh
+    install meets, and it has to open."""
+    try:
+        library = config.bundled_profiles_dir()
+        rows = [] if library is None else vendor_loader.load_dsp_profile().list_bundled(str(library))
+        pairs = [(str(vendor).strip(), str(name).strip()) for vendor, name, _path in rows]
+    except Exception as exc:  # noqa: BLE001 — no skill, or one that does not load: only «Add new»
+        app_log.logger().warning(
+            "the New-project picker offers no reference DSP profile: the method's library could "
+            "not be read (%s: %s)", type(exc).__name__, exc,
+            exc_info=not isinstance(exc, vendor_loader.VendorNotInitializedError))
+        return []
+    if library is None:
+        app_log.logger().warning("the New-project picker offers no reference DSP profile: the "
+                                 "skill at %s keeps no library (it arrived in v3.0.19)",
+                                 vendor_loader.skill_dir())
+    return [(vendor, name) for vendor, name in pairs if vendor and name]
 
 
 #: How long the seed-note redraw waits for typing to stop. Below the threshold where the note
@@ -321,7 +327,7 @@ class NewProjectDialog(QDialog):
         layout.addWidget(_field_label(i18n.t("npProfile")))
         self._profile_combo = QComboBox()
         self._profile_combo.setProperty("class", "mini-select")
-        for vendor, name in _bundled_profiles(config.bundled_profiles_dir()):
+        for vendor, name in _bundled_profiles():
             self._profile_combo.addItem(f"{vendor} — {name}", (vendor, name))
         self._profile_combo.addItem(i18n.t("npAddNew"), None)
         self._profile_combo.currentIndexChanged.connect(self._on_profile_selected)
@@ -663,7 +669,7 @@ class NewProjectDialog(QDialog):
         """Take the DSP from the source project instead of asking for it again.
 
         The two strings are matched EXACTLY against the bundled profiles, and the source project
-        holds a pair that matched once already -- so when it is one of ours, select that entry;
+        holds a pair that matched once already -- so when it is in the library, select that entry;
         when it is not, fall to "Add new" with the fields filled, which is the same state a person
         reaches by typing them correctly.
         """
@@ -702,7 +708,7 @@ class NewProjectDialog(QDialog):
     def _on_profile_selected(self, _index: int) -> None:
         """A bundled pick fills vendor/model with the EXACT strings `find_bundled()` checks
         against and hides the free-text fields (nothing to type); "Add new" clears and reveals
-        them for a DSP that isn't in the packaged `dsp_profiles/` yet."""
+        them for a DSP that isn't in the method's library yet."""
         pair = self._profile_combo.currentData()
         is_new = pair is None
         if not is_new:
