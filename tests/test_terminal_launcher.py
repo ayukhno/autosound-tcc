@@ -492,6 +492,48 @@ def test_a_refused_applescript_is_reported_in_osascripts_own_words(monkeypatch, 
     assert "-2740" in str(refused.value)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="AppleScript exists only on macOS")
+def test_osascript_is_given_a_time_bound(recorded, monkeypatch, tmp_path):
+    """#172 (the audit's TA-1l): osascript runs on the GUI thread and had no bound — it waits for
+    as long as macOS's Automation prompt is up, and the window waits with it. Both doors are
+    bounded: a session's terminal and a line's."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(terminal_launcher, "_yield_focus_to", lambda app: None)
+
+    launch(tmp_path, "claude")
+    assert recorded[-1][0] == "osascript" and recorded.kwargs.get("timeout") == 30
+
+    terminal_launcher.run_line("echo hi")
+    assert recorded[-1][0] == "osascript" and recorded.kwargs.get("timeout") == 30
+
+
+@pytest.mark.skipif(os.name == "nt", reason="AppleScript exists only on macOS")
+@pytest.mark.parametrize("door", ["session", "line"])
+def test_an_osascript_that_does_not_answer_is_cut_and_names_the_automation_prompt(
+        monkeypatch, tmp_path, door):
+    """#172: the cut is a `TerminalLaunchError` like every other terminal that did not open — the
+    one thing each caller catches — and it says the likely cause and where it is answered, not
+    «timed out»."""
+    import subprocess
+
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(terminal_launcher.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(terminal_launcher, "_yield_focus_to", lambda app: None)
+
+    def never_answers(argv, **kw):
+        raise subprocess.TimeoutExpired(argv, kw.get("timeout"))
+
+    monkeypatch.setattr(terminal_launcher.subprocess, "run", never_answers)
+    with pytest.raises(TerminalLaunchError) as cut:
+        if door == "session":
+            launch(tmp_path, "claude")
+        else:
+            terminal_launcher.run_line("echo hi")
+    assert str(cut.value) == (
+        "macOS may be asking whether TCC may control Terminal — allow it in System Settings → "
+        "Privacy & Security → Automation, then try again")
+
+
 # ---- the update window: a script run by name, never typed out (hub #221, skill #94) -----------
 
 @pytest.mark.skipif(os.name == "nt", reason="AppleScript exists only on macOS")

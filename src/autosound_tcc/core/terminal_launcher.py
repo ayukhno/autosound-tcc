@@ -298,11 +298,30 @@ def _mac_script(app: str, line: str) -> str:
     )
 
 
+#: How long osascript may take to open a terminal (#172). It runs on the GUI thread, and the wait
+#: that happens is macOS's Automation prompt — may TCC control Terminal? — which osascript sits
+#: on until somebody answers it. Long for a terminal to open; past it, the sentence below says
+#: where that prompt is answered.
+_OSASCRIPT_TIMEOUT_S = 30
+
+#: What the person reads when osascript does not answer in time: the likely cause, and where to
+#: answer it. English, as every sentence this module raises: `core/` does not import the ui.
+_AUTOMATION_PROMPT = (
+    "macOS may be asking whether TCC may control Terminal — allow it in System Settings → "
+    "Privacy & Security → Automation, then try again"
+)
+
+
 def _osascript(script: str) -> None:
-    """Run it, and keep osascript's own words: «exit status 1» alone named no reason (finding 89)."""
+    """Run it, and keep osascript's own words: «exit status 1» alone named no reason (finding 89).
+
+    Bounded (#172): a cut is a `TerminalLaunchError` like every terminal that did not open, and it
+    names the Automation prompt — the likely reason osascript did not answer."""
     try:
         subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
+                       encoding="utf-8", errors="replace", timeout=_OSASCRIPT_TIMEOUT_S)
+    except subprocess.TimeoutExpired as exc:
+        raise TerminalLaunchError(_AUTOMATION_PROMPT) from exc
     except subprocess.CalledProcessError as exc:
         said = (exc.stderr or "").strip()
         raise TerminalLaunchError(
@@ -469,6 +488,6 @@ def launch(
             _launch_windows(project_dir, cli, hint, model, extra, env)
         else:
             _launch_linux(project_dir, cli, hint, model, extra, env)
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise TerminalLaunchError(f"could not open a terminal: {exc}") from exc
     return cli
