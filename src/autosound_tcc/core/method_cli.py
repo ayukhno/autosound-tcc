@@ -233,7 +233,8 @@ def spawn(
     for it — by default `GUI_LOCK_WAIT_S` on the main thread and `LOCK_WAIT_S` on any other, read
     now. Past it the answer is `Busy`, with nothing started. Past `timeout_s` the child's tree is
     killed and the answer is a `ProcessWriterError` saying it timed out — never `Busy`, because a
-    child cut halfway may have written.
+    child cut halfway may have written. An `OSError` — no interpreter, a lock the filesystem cannot
+    take — is a `ProcessWriterError` in its words. Each of these is logged once, as a refusal is.
     """
     project_dir = Path(project_dir)
     args = [str(arg) for arg in args]
@@ -255,8 +256,10 @@ def spawn(
         on_gui_thread = threading.current_thread() is threading.main_thread()
         lock_wait_s = GUI_LOCK_WAIT_S if on_gui_thread else LOCK_WAIT_S
     held = project_lock.hold(project_dir, lock_wait_s) if lock else contextlib.nullcontext()
+    locking = lock  # until the lock is held: an OSError before that is the lock's
     try:
         with held:
+            locking = False
             proc = child.run_bounded(
                 # The CONSOLE interpreter, not ours. TCC is a GUI app, so `sys.executable` is
                 # `pythonw.exe`, which has no console — and the git this script runs then opens
@@ -284,8 +287,18 @@ def spawn(
         raise Busy(
             "busy: another write to this project is still running — nothing was written, try again"
         ) from exc
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        # Logged as busy is, and more so: a child cut halfway may have written, and what it had
+        # said on stderr goes nowhere else (#169 review I6).
+        app_log.logger().warning(
+            "timed out: `%s` on %s after %gs: %s", _named(script, args, project_dir), project_dir,
+            timeout_s, tail(exc.stderr) or "(nothing on stderr)")
         raise ProcessWriterError(f"{script.name} timed out after {timeout_s:g}s") from None
     except OSError as exc:
+        # An interpreter that would not start, or a lock this filesystem cannot take (ENOLCK on a
+        # network share): its words name no path, so the lock file is named beside them.
+        where = f" (taking the lock {project_lock.lock_file(project_dir)})" if locking else ""
+        app_log.logger().warning("failed: `%s` on %s was not run%s: %s",
+                                 _named(script, args, project_dir), project_dir, where, exc)
         raise ProcessWriterError(str(exc)) from None
     return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()

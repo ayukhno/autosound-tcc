@@ -74,6 +74,11 @@ def locks_itself(skill_dir: Path | str) -> bool:
     return _PROTOCOL_1.search(text) is not None
 
 
+def lock_file(project_dir: Path | str) -> Path:
+    """The file the cross-process half locks: `process/.process-write.lock` in the project."""
+    return Path(project_dir) / _PROCESS_DIR / _LOCK_NAME
+
+
 def _thread_lock(project_dir: Path | str) -> threading.Lock:
     """This process's lock for one project: one per resolved path, so two spellings of a project
     share it and two projects never wait on each other."""
@@ -122,12 +127,12 @@ def _flock(project_dir: Path, deadline: float, timeout_s: float) -> Iterator[Non
     if fcntl is None:  # no flock here; this process's threads are still one at a time
         yield
         return
-    folder = project_dir / _PROCESS_DIR
-    folder.mkdir(parents=True, exist_ok=True)
+    path = lock_file(project_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
     # Nothing is written into it, but it is opened in text mode, and a text handle with no encoding
     # is the same defect as the one that emptied the DSP panel on a Ukrainian Windows. One rule, no
     # exceptions to remember.
-    handle = (folder / _LOCK_NAME).open("a+", encoding="utf-8")
+    handle = path.open("a+", encoding="utf-8")
     try:
         while True:
             try:
@@ -139,7 +144,7 @@ def _flock(project_dir: Path, deadline: float, timeout_s: float) -> Iterator[Non
                 # a sentence no retry could ever make true.
                 if time.monotonic() >= deadline:
                     raise LockTimeout(
-                        f"the flock on {folder / _LOCK_NAME} was still held after "
+                        f"the flock on {path} was still held after "
                         f"{timeout_s:g}s (another process is writing)"
                     ) from None
                 time.sleep(min(_POLL_S, _left(deadline)))

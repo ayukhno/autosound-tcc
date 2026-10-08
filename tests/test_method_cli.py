@@ -10,6 +10,7 @@ six launchers that are not `process.py`'s run the copy the project is bound to, 
 
 from __future__ import annotations
 
+import errno
 import io
 import logging
 import shutil
@@ -149,6 +150,67 @@ def test_a_refused_binding_leaves_one_warning_naming_the_command_and_the_sentenc
     assert len(said) == 1, said
     assert app_log_warnings[0].levelno == logging.WARNING
     assert said[0] == f"refused: `session-close` on {car} was not run: {reason}", said[0]
+
+
+def _flock_cannot_lock(monkeypatch) -> None:
+    """A filesystem whose flock answers ENOLCK — a network share — for every exclusive lock."""
+    real = project_lock.fcntl.flock
+
+    def flock(fd, op):
+        if op & project_lock.fcntl.LOCK_EX:
+            raise OSError(errno.ENOLCK, "No locks available")
+        return real(fd, op)
+
+    monkeypatch.setattr(project_lock.fcntl, "flock", flock)
+
+
+_STDERR = "\n".join(f"reading capture {n}" for n in range(1, 13))
+
+
+@pytest.mark.parametrize("fails", ["timed out", "could not start", "could not lock"])
+def test_a_timeout_or_a_run_that_could_not_start_leaves_one_warning_in_the_busy_lines_form(
+        tmp_path, monkeypatch, app_log_warnings, fails):
+    """#169 review I6: a busy or refused answer leaves its line in the log, because the caller may
+    have nobody left to tell — `close_session` at quit, `record_reviewer` dropped by the MCP tool.
+    A timeout left nothing, though a child cut halfway may have written, and what it had said on
+    stderr went with it; so did an OSError — an interpreter that would not start, a filesystem
+    whose flock answers ENOLCK. Each leaves one line now, in the busy line's form: the command and
+    the project, the timeout's with the tail of what the child had printed, the lock's with the
+    lock file."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    if fails == "could not lock" and project_lock.fcntl is None:
+        pytest.skip("POSIX flock")
+    car = tmp_path / "car"
+    car.mkdir()
+    if fails == "timed out":
+        def run(argv, **kw):
+            raise subprocess.TimeoutExpired(argv, kw["timeout"], output="", stderr=_STDERR)
+        monkeypatch.setattr(method_cli.child, "run_bounded", run)
+    elif fails == "could not start":
+        def run(argv, **_kw):
+            raise OSError(errno.ENOEXEC, "Exec format error")
+        monkeypatch.setattr(method_cli.child, "run_bounded", run)
+    else:
+        _flock_cannot_lock(monkeypatch)
+        _no_child(monkeypatch)
+    app_log_warnings.clear()
+
+    with pytest.raises(method_cli.ProcessWriterError) as failed:
+        method_cli.spawn(car, "state/process.py", [str(car / "process"), "show"], timeout_s=0.5)
+
+    assert type(failed.value) is method_cli.ProcessWriterError, repr(failed.value)
+    said = [record.getMessage() for record in app_log_warnings]
+    assert len(said) == 1 and app_log_warnings[0].levelno == logging.WARNING, said
+    tail = "\n".join(_STDERR.splitlines()[-8:])
+    assert said[0] == {
+        "timed out": f"timed out: `show` on {car} after 0.5s: {tail}",
+        "could not start": f"failed: `show` on {car} was not run: [Errno {errno.ENOEXEC}] Exec "
+                           f"format error",
+        "could not lock": f"failed: `show` on {car} was not run (taking the lock "
+                          f"{project_lock.lock_file(car)}): [Errno {errno.ENOLCK}] No locks "
+                          f"available",
+    }[fails], said[0]
 
 
 # ---- a flag the copy does not know (#169, N19) --------------------------------------------------
