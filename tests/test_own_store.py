@@ -117,3 +117,70 @@ def test_a_write_is_on_the_disk_before_it_takes_the_name(store, monkeypatch):
     assert calls == [("fsync", store.stat().st_size), ("replace", str(store.parent), str(store))]
     assert json.loads(store.read_text(encoding="utf-8")) == {"generator": "sdk:claude-opus-5"}
     assert _left(store) == ["store.json"], "and no temp file is left beside it"
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
+                    reason="POSIX permissions, and root reads a file whatever its mode")
+def test_a_store_made_unreadable_again_is_said_again(store, app_log_told):
+    """`chmod` moves neither the size nor the mtime, so a store said unreadable, read fine after a
+    fix and made unreadable again was the same state and never said again; a mode change while
+    it stays unreadable was not either (the review of Task 17, Minor 2)."""
+    store.write_text('{"generator": "sdk:claude-opus-5"}', encoding="utf-8")
+    try:
+        for mode in (0, 0o600, 0, 0o200):
+            store.chmod(mode)
+            if mode & 0o400:
+                assert own_store.read_json(store) == {"generator": "sdk:claude-opus-5"}
+            else:
+                with pytest.raises(own_store.StoreUnreadable):
+                    own_store.read_json(store)
+    finally:
+        store.chmod(0o600)
+
+    assert len(app_log_told) == 3, app_log_told
+
+
+def test_an_aside_name_another_process_holds_is_never_taken(store, monkeypatch):
+    """Naming was look-then-rename: the window and the CLI setting one store aside in the same
+    second could both find a name free, and on POSIX the second rename replaced the first copy
+    (the review of Task 17, Minor 3). The name is reserved now, so one another process holds is
+    passed over even when a look would have missed it."""
+    monkeypatch.setattr(own_store, "_stamp", lambda: "20261008-153012")
+    held = store.parent / "store.json.corrupt-20261008-153012"
+    held.write_bytes(b"{ the other process's copy")
+    monkeypatch.setattr(own_store.os.path, "lexists", lambda _path: False)  # the look missed it
+    store.write_bytes(b"{ ours")
+
+    assert own_store.read_json(store) == {}
+
+    assert held.read_bytes() == b"{ the other process's copy"
+    assert (store.parent / "store.json.corrupt-20261008-153012-2").read_bytes() == b"{ ours"
+
+
+def test_a_broken_store_that_cannot_be_moved_is_refused_and_leaves_no_name_behind(
+        store, monkeypatch, app_log_told):
+    """A broken file is only safe to start afresh once it is out of the way. When the move is
+    refused, it is the unreadable case: said, refused, never written over — and the aside name
+    reserved for it is given back."""
+    store.write_bytes(b"{ broken")
+
+    def refuse(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(own_store.os, "rename", refuse)
+    monkeypatch.setattr(own_store.os, "replace", refuse)
+    for _ in range(2):
+        with pytest.raises(own_store.StoreUnreadable):
+            own_store.read_json(store)
+
+    assert _left(store) == ["store.json"] and store.read_bytes() == b"{ broken"
+    assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told
+
+
+def test_a_store_saved_with_a_byte_order_mark_is_read_not_set_aside(store, app_log_told):
+    """Older Windows Notepad saves UTF-8 with a BOM, and `json.loads` refuses one: a settings file
+    edited there was set aside and the settings restarted empty (the review of Task 17, Minor 4)."""
+    store.write_bytes(b'\xef\xbb\xbf{"generator": "sdk:claude-opus-5"}')
+
+    assert own_store.read_json(store) == {"generator": "sdk:claude-opus-5"}
+    assert _left(store) == ["store.json"] and app_log_told == []

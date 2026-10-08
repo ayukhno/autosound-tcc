@@ -6,29 +6,32 @@ not allowed to open alike, and the next write put that `{}` back with one field 
 else the file held was gone, and nothing said so (#173, F5). Here the three are told apart:
 
 * **absent** — `{}`, silently: a project nobody has opened has no settings yet;
-* **broken** (bad JSON, bad UTF-8, or JSON that is not an object) — the file is moved to
-  `<name>.corrupt-<YYYYMMDD-HHMMSS>` beside it, the person is told, and `{}` comes back. The next
-  write starts a fresh file, and the original bytes are still there for whoever wants them;
+* **broken** (bad JSON, bad UTF-8, or JSON that is not an object; a byte-order mark is not
+  broken) — the file is moved to `<name>.corrupt-<YYYYMMDD-HHMMSS>` beside it, the person is told,
+  and `{}` comes back. The next write starts a fresh file, and the original bytes are still there
+  for whoever wants them;
 * **there but unreadable** (any other `OSError`: no permission, a folder where the file should
   be, a broken file that could not be moved) — the person is told and `StoreUnreadable` is
   raised. Nothing is moved and nothing may be written: the bytes may be perfectly good. A plain
   reader catches it and carries on with `{}`; a read-modify-write lets it through.
 
 Told once per state of the file, not on every read: a store is read on every tool call, and one
-sentence repeated on each would bury the strip and the log.
+sentence repeated on each would bury the strip and the log. A store read whole again is news
+again the next time it fails.
 
 Light and Qt-free: the MCP server and the CLI read these stores too.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from autosound_tcc.core import app_log
 
@@ -62,11 +65,14 @@ def read_json(path: Path) -> dict[str, Any]:
         _say_once(path, message)
         raise StoreUnreadable(message) from exc
     try:
-        data = json.loads(raw.decode("utf-8"))
+        # `utf-8-sig`: older Windows Notepad saves UTF-8 with a byte-order mark, and a store edited
+        # there is not broken (the review of Task 17).
+        data = json.loads(raw.decode("utf-8-sig"))
     except ValueError as exc:  # a JSON error and a UTF-8 error are both ValueErrors
         return _set_aside(path, _why(exc))
     if not isinstance(data, dict):
         return _set_aside(path, "valid JSON, but not an object")
+    _forget(path)
     return data
 
 
@@ -93,12 +99,16 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 
 def _set_aside(path: Path, why: str) -> dict[str, Any]:
     """Move a broken store out of the way, keeping its bytes, and say so. `{}` once it is moved."""
-    aside = _aside_for(path)
+    aside: Optional[Path] = None
     try:
-        os.rename(path, aside)
-    except FileNotFoundError:
-        return {}  # another reader moved it between our read and this rename, and said so
+        aside = _reserve_aside(path)
+        os.replace(path, aside)
     except OSError as exc:
+        if aside is not None:
+            with contextlib.suppress(OSError):
+                aside.unlink()  # the reserved name, still empty: given back
+        if isinstance(exc, FileNotFoundError):
+            return {}  # another reader moved it between our read and this move, and said so
         message = (f"{path} could not be read ({why}) and could not be set aside "
                    f"({_why(exc)}); TCC will not write over it")
         _say_once(path, message)
@@ -108,17 +118,25 @@ def _set_aside(path: Path, why: str) -> dict[str, Any]:
     return {}
 
 
-def _aside_for(path: Path) -> Path:
-    """`<name>.corrupt-<YYYYMMDD-HHMMSS>` beside the store, then `-2`, `-3` … within one second.
+def _reserve_aside(path: Path) -> Path:
+    """`<name>.corrupt-<YYYYMMDD-HHMMSS>` beside the store, then `-2`, `-3` …: reserved, not looked
+    up.
 
-    The stamp is to the second, and a second broken file inside it must not take the first one's
-    place — on POSIX a rename onto an existing name replaces it without a word."""
+    The stamp is to the second, and on POSIX a rename onto a taken name replaces the copy already
+    there without a word. Created exclusively (`"x"`: `O_CREAT | O_EXCL`), the name is this
+    process's alone: the window and the CLI setting one store aside in the same second cannot
+    both take it (the review of Task 17). The empty file is what `os.replace` then puts the
+    broken store over."""
     stem = f"{path.name}.corrupt-{_stamp()}"
-    aside, n = path.with_name(stem), 1
-    while os.path.lexists(aside):
-        n += 1
-        aside = path.with_name(f"{stem}-{n}")
-    return aside
+    n = 1
+    while True:
+        aside = path.with_name(stem if n == 1 else f"{stem}-{n}")
+        try:
+            aside.open("xb").close()
+        except FileExistsError:
+            n += 1
+            continue
+        return aside
 
 
 def _stamp() -> str:
@@ -136,13 +154,22 @@ def _say_once(path: Path, message: str) -> None:
     app_log.report(message)
 
 
+def _forget(path: Path) -> None:
+    """A store read whole: what was said about it no longer stands. `chmod 0`, a fix and `chmod 0`
+    again is the same state twice, and the second time is news (the review of Task 17)."""
+    if _said:
+        with _said_lock:
+            _said.pop(os.path.abspath(path), None)
+
+
 def _state(path: Path) -> tuple:
-    """Which file this is, as far as `stat` can tell: a changed file is a new thing to say."""
+    """Which file this is, as far as `stat` can tell: a changed file is a new thing to say. The
+    mode is in it because `chmod` moves neither the size nor the mtime."""
     try:
         st = os.stat(path)
     except OSError as exc:
         return (type(exc).__name__,)
-    return (st.st_ino, st.st_size, st.st_mtime_ns)
+    return (st.st_ino, st.st_size, st.st_mtime_ns, st.st_mode)
 
 
 def _why(exc: BaseException) -> str:
