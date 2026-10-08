@@ -456,8 +456,8 @@ def test_an_import_tcc_runs_off_the_main_thread_fails_the_test_at_its_end(
     from autosound_tcc.core import app_log
 
     conftest = sys.modules["tests.conftest"]
-    monkeypatch.delitem(conftest._WORKER_IMPORTS_ALLOWED,
-                        ("src/autosound_tcc/core/app_log.py", "dump_threads"))
+    # By its path inside the package, wherever `autosound_tcc` was imported from (review M1).
+    monkeypatch.delitem(conftest._WORKER_IMPORTS_ALLOWED, ("core/app_log.py", "dump_threads"))
     monkeypatch.setattr(app_log, "_log_path", tmp_path / "tcc.log")
     guard = _no_import_on_a_worker_thread
 
@@ -475,10 +475,68 @@ def test_an_import_tcc_runs_off_the_main_thread_fails_the_test_at_its_end(
     assert "asked by the watchdog" in (tmp_path / "tcc.log").read_text(encoding="utf-8"), \
         "the guard changed nothing the worker does"
     with pytest.raises(pytest.fail.Exception,
-                       match=r"(?s)src/autosound_tcc/core/app_log\.py:\d+ in dump_threads: "
-                             r"import faulthandler.*'tcc-test-watchdog'"):
+                       match=r"(?s)\n  core/app_log\.py:\d+ in dump_threads: "
+                             r"import faulthandler -- thread 'tcc-test-watchdog'") as said:
         guard.verdict()
+    assert "started before this test" not in str(said.value), "this test started that thread"
     guard.verdict()  # said once; this test's own end has nothing left to fail on
+
+
+def test_a_hit_from_a_thread_older_than_the_test_says_so(
+        _no_import_on_a_worker_thread, tmp_path, monkeypatch):
+    """Review M7: a thread an earlier test left running that imports during this one fails this
+    one -- the shape `_an_exception_in_a_qt_slot_fails_the_test` describes for a slot. The guard
+    takes the threads alive at its setup, and a hit from one of them says the thread is older than
+    the test, so the reader looks at the tests before it too."""
+    import sys
+
+    from autosound_tcc.core import app_log
+
+    conftest = sys.modules["tests.conftest"]
+    monkeypatch.delitem(conftest._WORKER_IMPORTS_ALLOWED, ("core/app_log.py", "dump_threads"))
+    monkeypatch.setattr(app_log, "_log_path", tmp_path / "tcc.log")
+    go = threading.Event()
+
+    def left_running() -> None:
+        go.wait(10)
+        app_log.dump_threads("from a thread older than the test")
+
+    older = threading.Thread(target=left_running, name="tcc-test-older", daemon=True)
+    older.start()
+    guard = _no_import_on_a_worker_thread
+    guard.older = conftest._thread_idents()  # as the next test's setup takes them, this one alive
+    go.set()
+    older.join(10)
+
+    with pytest.raises(pytest.fail.Exception,
+                       match=r"(?s)in dump_threads: import faulthandler -- thread "
+                             r"'tcc-test-older', started before this test"):
+        guard.verdict()
+
+
+def test_an_import_c_makes_on_a_thread_with_no_python_frame_is_not_counted(
+        _no_import_on_a_worker_thread):
+    """Review M4: C code importing on a thread of its own -- a native thread through
+    `PyImport_Import` -- has no Python frame under `__import__`, and `sys._getframe(1)` raises
+    `ValueError` there. That is C asking for a module, no line anybody could move; the guard took
+    the error for its own failure and failed the test.
+
+    `deque(map(guard, names()))` started by `_thread` is that shape: C calls the guard, and the
+    generator that hands it the name is off the stack while the guard runs."""
+    import _thread
+    import collections
+
+    guard = _no_import_on_a_worker_thread
+    answered = threading.Event()
+
+    def names():
+        yield "json"
+        answered.set()  # `map` asks again only once the guard has given the import back
+
+    _thread.start_new_thread(collections.deque, (map(guard, names()), 0))
+
+    assert answered.wait(10), "the native thread never got its import back"
+    guard.verdict()
 
 
 def test_an_import_on_the_allowlist_does_not_fail_the_test(
@@ -608,6 +666,32 @@ def test_a_modal_from_a_callback_on_the_allowlist_does_not_fail_the_test(
     _no_modal_waits_for_nobody.verdict()
 
 
+def test_the_series_question_asked_from_a_callback_is_noted_too(_no_modal_waits_for_nobody):
+    """Review M5: `_isolated_machine_config` answers three questions quietly, and the capture's
+    series question (`MeasurementPanel._ask_series`) is reached from a worker's slot
+    (`_on_import_renamed` -> `_finish_import` -> `_write_ledger`). Noted like the other two when a
+    callback asks it; the quiet answer still answers."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel
+
+    QApplication.instance() or QApplication([])
+    asked: list = []
+
+    def write_ledger() -> None:  # stands for the panel's slot
+        asked.append(MeasurementPanel._ask_series(None))
+
+    QTimer.singleShot(0, write_ledger)
+    _spin_until(lambda: asked)
+
+    assert asked == [None], "Cancel, as before"
+    with pytest.raises(pytest.fail.Exception,
+                       match=r"(?s)MeasurementPanel\._ask_series at tests/test_conftest_guards\.py:"
+                             r"\d+ \(.*write_ledger\)"):
+        _no_modal_waits_for_nobody.verdict()
+
+
 def _functions_in(path: Path) -> dict:
     """The functions in `path` by qualified name (as `co_qualname` spells them), each with whether
     its own body -- not a function nested in it -- holds an `import` statement."""
@@ -650,14 +734,15 @@ def test_the_allowlists_may_only_shrink():
     import sys
 
     conftest = sys.modules["tests.conftest"]
-    root = Path(conftest.__file__).resolve().parents[1]
+    source = Path(conftest.__file__).resolve().parents[1] / "src/autosound_tcc"
 
-    assert len(conftest._WORKER_IMPORTS_ALLOWED) == 15
+    assert len(conftest._WORKER_IMPORTS_ALLOWED) == 14
     assert len(conftest._MODALS_FROM_A_CALLBACK_ALLOWED) == 0
     for (path, function), reason in conftest._WORKER_IMPORTS_ALLOWED.items():
         assert reason.strip(), f"{path} {function}: an entry says why"
-        assert _functions_in(root / path).get(function), \
+        assert _functions_in(source / path).get(function), \
             f"{path} {function} is gone or imports nothing inside any more: the entry is stale"
     for (path, function), reason in conftest._MODALS_FROM_A_CALLBACK_ALLOWED.items():
         assert reason.strip(), f"{path} {function}: an entry says why"
-        assert function in _functions_in(root / path), f"{path} {function} is gone: the entry is stale"
+        assert function in _functions_in(source / path), \
+            f"{path} {function} is gone: the entry is stale"
