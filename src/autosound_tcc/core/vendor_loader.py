@@ -19,6 +19,14 @@ from pathlib import Path
 from types import ModuleType
 from typing import Optional
 
+# `method_binding` imports this module as well: either loads first, because each uses the other
+# only inside its functions. At the top, and with Windows' junction call, because
+# `link_skill_into` runs on the session worker's thread at every session start (#172).
+from autosound_tcc.core import method_binding
+
+if sys.platform.startswith("win"):
+    import _winapi
+
 # The skill's own name, and the directory both adapters expect it under inside a project.
 # Duplicated from `tuning_session` on purpose: this module is imported by it, not the other way.
 SKILL_NAME = "autosound-tuning"
@@ -237,12 +245,9 @@ def link_skill_into(project_dir: Path) -> Optional[Path]:
     with a warning beats no session. omp says so before its turn (`OmpSession.skill_warning`); the
     SDK route loads the method as a plugin and does not read this link.
     """
-    # Here and not at the top: `method_binding` imports this module.
-    from autosound_tcc.core.method_binding import _inside
-
     link = project_dir / ".claude" / "skills" / SKILL_NAME
     try:
-        if not _inside(os.path.realpath(link.parent), os.path.realpath(project_dir)):
+        if not method_binding._inside(os.path.realpath(link.parent), os.path.realpath(project_dir)):
             return None
         if link.exists() or link.is_symlink():
             return link
@@ -258,8 +263,6 @@ def link_skill_into(project_dir: Path) -> Optional[Path]:
             # A symlink on Windows needs Developer Mode or an admin (WinError 1314), and the
             # refusal left the project with no method at all (finding 103, tcc#88). A junction
             # needs neither, and it is how the skill's own installer links (`install.ps1`).
-            import _winapi
-
             _winapi.CreateJunction(str(target), str(link))
         return link
     except OSError:

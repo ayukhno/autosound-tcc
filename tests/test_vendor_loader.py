@@ -187,7 +187,6 @@ def test_on_windows_a_refused_symlink_becomes_a_junction(tmp_path, monkeypatch):
     and the session ran without the method. A symlink needs Developer Mode or an admin there
     (WinError 1314) and the refusal was swallowed; a junction needs neither — the skill's own
     installer links the same way (`install.ps1`)."""
-    import sys
     import types
     from pathlib import Path
 
@@ -196,7 +195,8 @@ def test_on_windows_a_refused_symlink_becomes_a_junction(tmp_path, monkeypatch):
     made = []
     fake = types.ModuleType("_winapi")
     fake.CreateJunction = lambda target, link: (made.append((target, link)), Path(link).mkdir())
-    monkeypatch.setitem(sys.modules, "_winapi", fake)
+    # Imported at the module's top, and only on Windows (#172): the fake goes where the call is.
+    monkeypatch.setattr(vendor_loader, "_winapi", fake, raising=False)
     monkeypatch.setattr(vendor_loader.sys, "platform", "win32")
     monkeypatch.setattr(vendor_loader, "is_available", lambda: True)
     skill = tmp_path / "skill" / "autosound-tuning"

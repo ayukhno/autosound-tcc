@@ -32,6 +32,11 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
+# At the top, not in `_console_windows_of`: that runs on the console keeper's thread, as often as
+# 20 times a second, and an import there costs PySide6's import hook on every pass (#172).
+if sys.platform.startswith("win"):
+    from ctypes import wintypes
+
 
 def _no_window() -> int:
     """`CREATE_NO_WINDOW` where it exists and this is Windows, `0` everywhere else."""
@@ -492,8 +497,6 @@ def _console_windows_of(pid: int) -> list:
     if not sys.platform.startswith("win"):
         return []
     try:
-        from ctypes import wintypes
-
         user32 = ctypes.windll.user32
         # Declared, like every other handle call here: undeclared, a 64-bit window handle is passed
         # as a C int and loses its top half without a word (see `process_is_running`).
