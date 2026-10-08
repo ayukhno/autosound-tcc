@@ -5922,12 +5922,12 @@ class MainWindow(QMainWindow):
         """Called from `app_log` when something was written to the log. Never from a worker
         thread's own stack -- `threading.excepthook` runs on the failing thread, so this touches
         widgets via a queued signal rather than directly."""
-        self.loggedError.emit(f"{message}", str(path))
+        self.loggedError.emit(f"{message}", str(path) if path else "")  # None: no log file
 
     def _show_logged_error(self, message: str, path: str) -> None:
         self._status_strip.notify(
-            i18n.t("logError").format(error=message, path=path), level="warn"
-        )
+            i18n.t("logError" if path else "logErrorNoFile").format(error=message, path=path),
+            level="warn")
 
     def stop_workers(self) -> None:
         """Bring every background thread this window owns to a stop.

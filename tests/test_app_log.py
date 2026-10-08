@@ -128,6 +128,38 @@ def test_a_sink_that_reports_is_not_called_back_into(tmp_path, monkeypatch, app_
     assert said == ["the store was set aside", "said from inside the sink"], said
 
 
+def test_a_report_made_before_a_window_exists_is_heard_when_one_registers(tmp_path, monkeypatch):
+    """The review of Task 17: on every launch the ☰ menu's gate tick reads `tcc-project.json`
+    while the header is built, before the window registers its sink — so a file found broken then
+    was said to the log alone and, once set aside, never again. Held until a sink exists, then
+    handed over in order, once each."""
+    monkeypatch.setattr(app_log, "_log_path", tmp_path / "tcc.log")
+    monkeypatch.setattr(app_log, "_ui_sink", None)
+    heard = []
+
+    app_log.report("first")
+    app_log.report("second")
+    app_log.set_ui_sink(lambda message, path: heard.append(message))
+
+    assert heard == ["first", "second"], "in order, when the sink registers"
+    app_log.report("third")
+    app_log.set_ui_sink(lambda message, path: heard.append(message))
+    assert heard == ["first", "second", "third"], "and nothing is handed over twice"
+
+
+def test_a_report_reaches_the_window_with_no_log_file_to_point_at(monkeypatch):
+    """`setup()` leaves no log path when the log folder cannot be written, and the sink heard
+    nothing then: the one machine whose log cannot hold the sentence was the one whose strip
+    did not either (the review of Task 17, Minor 5)."""
+    monkeypatch.setattr(app_log, "_log_path", None)
+    seen = []
+    monkeypatch.setattr(app_log, "_ui_sink", lambda message, path: seen.append((message, path)))
+
+    app_log.report("tcc-project.json could not be read")
+
+    assert seen == [("tcc-project.json could not be read", None)]
+
+
 def test_ctrl_c_is_a_decision_not_a_defect(installed, capsys):
     """KeyboardInterrupt keeps the default hook: it belongs on the terminal, where the person who
     pressed it is looking."""

@@ -38,10 +38,10 @@ LOGGER_NAME = "autosound_tcc"
 _MAX_BYTES = 2 * 1024 * 1024
 _BACKUPS = 3
 
-# Set by `set_ui_sink` once a window exists: (short message, log path) -> shown in the status
-# strip. Optional on purpose -- a crash during startup has no window to tell, and must still land
-# in the file.
-_ui_sink: Optional[Callable[[str, Path], None]] = None
+# Set by `set_ui_sink` once a window exists: (short message, log path or None) -> shown in the
+# status strip. Optional on purpose -- a crash during startup has no window to tell, and must still
+# land in the file.
+_ui_sink: Optional[Callable[[str, Optional[Path]], None]] = None
 _log_path: Optional[Path] = None
 
 
@@ -227,14 +227,34 @@ def _version_string() -> str:
         return "unknown"
 
 
-def set_ui_sink(sink: Optional[Callable[[str, Path], None]]) -> None:
-    """Register (or clear) the callback that tells the user something was logged."""
-    global _ui_sink
-    _ui_sink = sink
+#: Reports made while no sink was registered, oldest first, for the next one (`set_ui_sink`).
+#: Bounded: the log keeps every one of them, and a window needs the latest.
+_held: list[str] = []
+_HELD_MAX = 20
+#: `_ui_sink` and `_held` change together, so a report made on another thread while a window
+#: registers is either held and handed over, or told directly — never neither.
+_sink_lock = threading.Lock()
+
+
+def set_ui_sink(sink: Optional[Callable[[str, Optional[Path]], None]]) -> None:
+    """Register (or clear) the callback that tells the user something was logged.
+
+    A sink registered after reports were made hears them now, in order and once each. On every
+    launch the ☰ menu reads `tcc-project.json` while the header is built, before the window gets
+    here, and a file found broken then was said to the log alone (the review of Task 17). Only
+    `report`s are held; the excepthooks tell a window when there is one, as before."""
+    global _ui_sink, _held
+    with _sink_lock:
+        _ui_sink = sink
+        held, _held = (_held, []) if sink is not None else ([], _held)
+    for message in held:
+        _tell(message)
 
 
 def _notify(message: str) -> None:
-    if _ui_sink is None or _log_path is None:
+    """Tell the sink, with the log file to point at — or None when `setup` could not open one:
+    the machine whose log cannot hold the sentence is no reason for the strip not to."""
+    if _ui_sink is None:
         return
     try:
         _ui_sink(message, _log_path)
@@ -254,12 +274,25 @@ def report(message: str) -> None:
     (#173). A call rather than a handler that forwards every ERROR record: the places that log an
     error and then say it in their own words would each have been said twice.
 
+    Made before a window exists, it is held and handed to the window when it registers
+    (`set_ui_sink`).
+
     Re-entrancy guarded, per thread: a sink whose own work reports (a window reading a store that
     is broken) is not called back into — that report goes to the log only — and a sink that raises
     is logged once, by `_notify`, and the report returns. What is being reported must not be lost
     to the failure of what reports it.
     """
     logger().error("%s", message)
+    with _sink_lock:
+        if _ui_sink is None:
+            _held.append(message)
+            del _held[:-_HELD_MAX]
+            return
+    _tell(message)
+
+
+def _tell(message: str) -> None:
+    """One report to the sink, unless this thread is already inside the sink (`report`)."""
     if getattr(_reporting, "active", False):
         return
     _reporting.active = True

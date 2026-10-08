@@ -1810,13 +1810,21 @@ def test_the_gate_mode_is_a_project_setting_and_defaults_to_not_asking(monkeypat
     someone makes deliberately.
 
     The default is asserted through `GATE_DEFAULT` and not by naming a mode, because the point of
-    the constant is that six call sites cannot drift apart again."""
+    the constant is that six call sites cannot drift apart again.
+
+    A settings file broken by hand falls back to that default — and is said on the strip, though
+    the gate's tick reads it while the header is still being built, before the window has
+    registered its sink (the review of Task 17)."""
     from autosound_tcc.core import omp_session, project_settings
 
+    store = project_settings.path_for(config.tcc_dir())
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text('{"gate": "foreign",}', encoding="utf-8")
     _catalogue(monkeypatch, [])
     _app()
     window = MainWindow()
 
+    assert str(store) in window._status_strip.text(), window._status_strip.text()
     assert omp_session.GATE_DEFAULT == omp_session.GATE_AUTO
     assert window._gate_actions[omp_session.GATE_DEFAULT].isChecked()
     assert not window._gate_actions[omp_session.GATE_WRITES].isChecked()
@@ -7790,6 +7798,24 @@ def test_a_render_fault_on_a_reread_is_logged_with_its_type(caplog):
     MainWindow._safe_load_project(host)
     assert "KeyError" in notes[0] and "slot" in notes[0]
     assert "could not be drawn" in caplog.text
+
+
+def test_a_logged_error_with_no_log_file_is_said_without_a_path():
+    """`app_log` tells the window even when it has no log file to point at (the review of Task
+    17, Minor 5), and `str(None)` put «the details are in None» on the strip."""
+    from pathlib import Path
+
+    emitted, notes = [], []
+    host = SimpleNamespace(loggedError=SimpleNamespace(emit=lambda *a: emitted.append(a)),
+                           _status_strip=SimpleNamespace(notify=lambda text, **_k: notes.append(text)))
+
+    MainWindow._on_logged_error(host, "the store was set aside", None)
+    MainWindow._on_logged_error(host, "the store was set aside", Path("logs") / "tcc.log")
+    for message, path in emitted:
+        MainWindow._show_logged_error(host, message, path)
+
+    assert "None" not in notes[0] and notes[0].endswith("the store was set aside"), notes
+    assert str(Path("logs") / "tcc.log") in notes[1], "with a file, the file is still named"
 
 
 def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):

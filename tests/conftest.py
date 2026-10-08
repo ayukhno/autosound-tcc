@@ -200,7 +200,9 @@ def _app_log_left_as_found():
     once per session. pytest 9 then attaches its log capture to every logger that does not
     propagate as well as to the root, so a later test that made TCC's logger propagate again for
     `caplog` heard each line twice: eight tests failed in one process after `test_app_log.py`, each
-    green on its own (fix dispatch item 9). Every test gets back what it found.
+    green on its own (fix dispatch item 9). Every test gets back what it found — the UI sink and
+    the reports held for a sink too: otherwise a window a test left registered would hear the next
+    test's reports, and a window built later the reports held in tests before it (#173).
 
     pytest's capture is never kept or closed here — the root holds it too, and pytest lets go of
     it itself. Named to sort before every autouse fixture that takes `monkeypatch`: pytest sets a
@@ -217,6 +219,7 @@ def _app_log_left_as_found():
     found = [(log, own(log), log.propagate, log.level)
              for log in (app_log.logger(), logging.getLogger("py.warnings"))]
     log_path, thread_hook = app_log._log_path, threading.excepthook
+    sink, held = app_log._ui_sink, list(app_log._held)
     yield
     dropped: list[logging.Handler] = []
     for log, handlers, propagate, level in found:
@@ -234,6 +237,7 @@ def _app_log_left_as_found():
         handler.close()
     app_log._log_path = log_path
     threading.excepthook = thread_hook
+    app_log._ui_sink, app_log._held = sink, held
 
 
 @pytest.fixture
