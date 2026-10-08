@@ -231,6 +231,7 @@ class CaptureImportDialog(QDialog):
         #: unless one turns out unusable — then the window stays for the tuner to see it once.
         self._apply_waiting = False
         self._to_retake_at_apply: set[str] = set()
+        self._not_judged_at_apply: set[str] = set()
         #: How many times the check could not run; an Apply that waited through a new one stays.
         self._check_failures = 0
         self._failures_at_apply = 0
@@ -547,7 +548,8 @@ class CaptureImportDialog(QDialog):
     # ---- the capture check (tcc#21) ----------------------------------------------------------
 
     def _render_check(self, index: int, row: capture_import.Candidate) -> None:
-        """What the check said about one row: nothing yet, checking, fine, or unusable."""
+        """What the check said about one row: nothing yet, checking, could not judge, fine, or
+        unusable."""
         self._table.removeCellWidget(index, _COL_CHECK)
         cell = QTableWidgetItem("")
         cell.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -558,6 +560,13 @@ class CaptureImportDialog(QDialog):
             cell.setToolTip(i18n.t("capCheckAsIsTip"))
         elif row.uuid in self._checking:
             cell.setText(i18n.t("capCheckRunning"))
+        elif capture_import.could_not_judge(verdict):
+            # Its own answer, neither ✓ nor red (#170 F16-3): the method's check failed on this
+            # sweep. Its error on the hover, on a line after our words: Qt guesses rich text from
+            # the first line, and an error can hold a `<`.
+            cell.setText(i18n.t("capCheckNotJudged"))
+            cell.setToolTip(f"{i18n.t('capCheckNotJudgedTip')}\n"
+                            f"{capture_import.could_not_judge(verdict)}")
         elif capture_import.unusable(verdict):
             self._table.setItem(index, _COL_CHECK, cell)
             self._table.setCellWidget(index, _COL_CHECK, self._answer(row.uuid, verdict))
@@ -662,6 +671,11 @@ class CaptureImportDialog(QDialog):
         return {row.uuid for row in self._all if row.uuid not in self._ticked
                 and capture_import.unusable(self._verdict(row.uuid))}
 
+    def _not_judged(self) -> set[str]:
+        """Ticked sweeps the method's check failed on (#170 F16-3) — taken in unchecked."""
+        return {row.uuid for row in self.ticked_rows()
+                if capture_import.could_not_judge(self._verdict(row.uuid))}
+
     def _schedule_check(self) -> None:
         if self._check is not None:
             # Deferred, so a burst of ticks is one batch and the window is on screen first.
@@ -722,10 +736,11 @@ class CaptureImportDialog(QDialog):
             return
         self._apply_waiting = False
         if (self._to_retake() - self._to_retake_at_apply
+                or self._not_judged() - self._not_judged_at_apply
                 or self._check_failures > self._failures_at_apply):
             # The window stays, once: the mark and the line under the table say what to re-take
-            # — or that the sweeps were NOT checked, which a closed window would say to nobody
-            # (review M2). The next Apply goes whatever is chosen.
+            # — or that the sweeps, or one of them (#170 F16-3), were NOT checked, which a closed
+            # window would say to nobody (review M2). The next Apply goes whatever is chosen.
             self._render_note(self._table.rowCount())
             return
         self._on_apply()
@@ -770,6 +785,11 @@ class CaptureImportDialog(QDialog):
         if retakes:
             # What to re-take, by name, while the microphone is still in place (tcc#21's title).
             lines.append(i18n.t("capCheckRetakeList").format(names=", ".join(retakes)))
+        not_judged = self._not_judged()
+        if not_judged:
+            # And what the check could not judge, by name, as its own line (#170 F16-3).
+            lines.append(i18n.t("capCheckNotJudgedList").format(names=", ".join(
+                sorted({row.title for row in self._all if row.uuid in not_judged}))))
         if self._apply_waiting:
             lines.append(i18n.t("capCheckWaiting"))
         if self._check_error:
@@ -932,6 +952,7 @@ class CaptureImportDialog(QDialog):
             # goes by itself when they are in; a second one goes now. Never refused.
             self._apply_waiting = True
             self._to_retake_at_apply = self._to_retake()
+            self._not_judged_at_apply = self._not_judged()
             self._failures_at_apply = self._check_failures
             # And starts the check itself, so a wait always has a worker behind it, whichever
             # door ticked the row (review I2). A check already running is left to finish.

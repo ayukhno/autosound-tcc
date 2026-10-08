@@ -1039,6 +1039,66 @@ def test_an_apply_that_waited_stays_open_when_the_check_could_not_run(tmp_path):
     assert dialog.result() == int(QDialog.DialogCode.Accepted)
 
 
+def _breaks_on(title: str, gate=None):
+    """The panel's check over the real `check_sweeps`, with the method's verdict raising inside
+    on one title (#170 F16-3) and passing every other sweep."""
+    def verdict(name, measurements=None, **_band):
+        if name == title:
+            raise TypeError("unsupported operand type(s) for -: 'str' and 'float'")
+        return dict(_USABLE, name=name)
+
+    def check(rows, stop=None):
+        if gate is not None:
+            gate.wait(10)
+        return capture_import.check_sweeps(rows, listing=lambda: _rew(3), verdict=verdict,
+                                           stop=stop)
+
+    return check
+
+
+def test_a_sweep_the_check_could_not_judge_says_so_and_is_neither_fine_nor_unusable(tmp_path):
+    """#170 F16-3: the method's verdict raised on m_3, and its row read as if nobody had asked —
+    no mark at all. It says «could not judge» with the error on its hover, and is its own answer:
+    not ✓, not the red pair; still ticked, taken in with nothing said for the card, not as it is."""
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_2 (sw)", "m_3 (sw)"],
+                     check=_breaks_on("m_3 (sw)"))
+    _settle(dialog)
+
+    cell = dialog._table.item(_row_of(dialog, "u3"), _COL_CHECK)
+    assert cell.text() == i18n.t("capCheckNotJudged")
+    assert "TypeError: unsupported operand type(s)" in cell.toolTip()
+    assert dialog._table.cellWidget(_row_of(dialog, "u3"), _COL_CHECK) is None, "not red"
+    assert dialog._table.item(_row_of(dialog, "u2"), _COL_CHECK).text() == "✓"
+    assert i18n.t("capCheckNotJudgedList").format(names="m_3 (sw)") in dialog._note.text()
+    assert [(row.uuid, row.as_is, row.checked) for row in dialog.taken()] == [
+        ("u2", False, "usable"), ("u3", False, "")]
+
+
+def test_an_apply_that_waited_stays_open_once_for_a_sweep_the_check_could_not_judge(tmp_path):
+    """Review M2's rule, for one sweep: «could not judge» written into a window that has already
+    closed is read by nobody. Said once; the next Apply takes it in."""
+    import threading
+
+    gate = threading.Event()
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"],
+                     check=_breaks_on("m_3 (sw)", gate=gate))
+    _app().processEvents()
+
+    try:
+        dialog._on_apply()
+    finally:
+        gate.set()
+    _settle(dialog)
+
+    assert dialog.result() != int(QDialog.DialogCode.Accepted), "the tuner sees it once"
+    assert i18n.t("capCheckNotJudgedList").format(names="m_3 (sw)") in dialog._note.text()
+
+    dialog._on_apply()
+
+    assert dialog.result() == int(QDialog.DialogCode.Accepted)
+    assert [row.uuid for row in dialog.taken()] == ["u3"]
+
+
 def test_closing_the_window_tells_a_running_check_to_stop(tmp_path):
     """Review M4: a cancelled check went on pulling an FR and an impulse for every sweep left, up to
     five seconds each against a hung REW. The check is asked to stop when the window closes."""

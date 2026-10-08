@@ -484,6 +484,17 @@ def _without_truncation(verdict: dict) -> dict:
     return dict(verdict, issues=kept, valid=not kept)
 
 
+#: Where `check_sweeps` puts a sweep's «could not judge: <error>» (#170 F16-3) — a key the method's
+#: verdict never has. With no `exists` beside it, `unusable` never reads it red, `window_said` never
+#: `usable` and `verdict_reader` adds no clash: it is its own answer, said as such on the row.
+_NOT_JUDGED = "not_judged"
+
+
+def could_not_judge(verdict: Optional[dict]) -> str:
+    """`could not judge: <error>` for a sweep the method's verdict raised on, "" for any other."""
+    return str((verdict or {}).get(_NOT_JUDGED) or "")
+
+
 def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]] = None,
                  verdict: Optional[Callable[..., dict]] = None,
                  stop: Optional[Callable[[], bool]] = None) -> dict[str, dict]:
@@ -504,6 +515,10 @@ def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]
     Each is asked over the range REW holds for it (`sweep_band`, tcc#148): over 20-20000 Hz every
     sub, mid-bass and woofer sweep read «truncated» (finding 146). Where REW gives no range the
     method reads its own default band, and its «truncated» is left out (`_without_truncation`).
+
+    A sweep the verdict raised on gets «could not judge: <error>» (`could_not_judge`), its
+    traceback in the log (#170 F16-3): it used to drop out of the answer, and its row read as one
+    nobody had asked about.
     """
     wanted = to_check(rows)
     if not wanted:
@@ -526,7 +541,10 @@ def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]
         try:
             answer = dict(judge(str(raw.get("title") or ""), measurements={ordinal: raw},
                                 **asked) or {})
-        except Exception:  # noqa: BLE001 — the verdict "never raises"; one that does says nothing
+        except Exception as exc:  # noqa: BLE001 — the verdict «never raises»; one that does is said
+            app_log.logger().exception("capture check: the method's verdict raised on %r",
+                                       raw.get("title"))
+            found[row.uuid] = {_NOT_JUDGED: f"could not judge: {type(exc).__name__}: {exc}"}
             continue
         found[row.uuid] = answer if band else _without_truncation(answer)
     return found

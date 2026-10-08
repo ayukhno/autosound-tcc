@@ -682,6 +682,61 @@ def test_a_sweep_rew_no_longer_shows_gets_no_verdict():
     assert asked == []
 
 
+@pytest.fixture
+def app_log_errors():
+    """What TCC's own logger said at ERROR, heard on that logger itself (the idiom of
+    `test_method_cli.py`): after `app_log.setup()` it does not propagate, so caplog on the root
+    would hear nothing."""
+    import logging
+
+    from autosound_tcc.core import app_log
+
+    records: list[logging.LogRecord] = []
+
+    class _Keep(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    log = app_log.logger()
+    handler = _Keep(level=logging.ERROR)
+    log.addHandler(handler)
+    try:
+        yield records
+    finally:
+        log.removeHandler(handler)
+
+
+def test_a_verdict_that_raises_is_logged_and_its_sweep_says_it_could_not_be_judged(
+        tmp_path, app_log_errors):
+    """#170 F16-3: the method's verdict «never raises»; one that did dropped its sweep from the
+    answer with nothing logged, and the window showed the row as one nobody had asked about. Now
+    the traceback goes to the log and the sweep's answer is «could not judge: <error>» — its own
+    answer: not a pass (`window_said` is not `usable`), not red (`unusable`), and no title clash
+    is read into it (`verdict_reader`)."""
+    rows = ci.candidates(_rew(("m-L_1 (sw)", "a", "2026-Aug-25 20:10:00"),
+                              ("m-R_1 (sw)", "b", "2026-Aug-25 20:10:10")), imported={})
+    listing = {str(i): {"title": r.title, "uuid": r.uuid} for i, r in enumerate(rows, start=1)}
+
+    def verdict(name, measurements=None, **_band):
+        if name == "m-R_1 (sw)":
+            raise TypeError("unsupported operand type(s) for -: 'str' and 'float'")
+        return dict(_verdict(), name=name)
+
+    found = ci.check_sweeps(rows, listing=lambda: listing, verdict=verdict)
+
+    assert set(found) == {"a", "b"}, "the sweep the verdict failed on is not dropped"
+    assert ci.could_not_judge(found["b"]) == (
+        "could not judge: TypeError: unsupported operand type(s) for -: 'str' and 'float'")
+    assert ci.could_not_judge(found["a"]) == ""
+    assert not ci.unusable(found["b"])
+    assert ci.window_said(found["b"]) == ""
+    shown = ci.verdict_reader(tmp_path)(found["b"], "tw-R_1 (rta)")
+    assert ci.could_not_judge(shown) and not ci.unusable(shown) and "clashes" not in shown
+    [record] = app_log_errors
+    assert record.exc_info is not None and record.exc_info[0] is TypeError, "with its traceback"
+    assert "m-R_1 (sw)" in record.getMessage()
+
+
 def test_a_method_without_the_verdict_checks_nothing(monkeypatch):
     """No method on this machine, or one too old to have `verify.verdict`: no marks, and REW is not
     asked for anything — the import window works as it did before the check existed."""

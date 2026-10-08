@@ -19,7 +19,21 @@ REW must be running locally; `rew_api` talks to http://localhost:4735.
 
 from __future__ import annotations
 
+import inspect
 from types import ModuleType
+
+
+def _takes_smoothing(call) -> bool:
+    """Whether `call` takes `smoothing=`: a parameter of that name, or `**kwargs`.
+
+    A reader whose signature cannot be read (a builtin, a C function) is taken to take it: asked,
+    the read is either the smoothing asked for or a TypeError out loud, where the other guess reads
+    REW's view and passes it off as the smoothing asked for without a word."""
+    try:
+        parameters = inspect.signature(call).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(p.name == "smoothing" or p.kind is p.VAR_KEYWORD for p in parameters)
 
 
 class RewBridge:
@@ -100,12 +114,14 @@ class RewBridge:
 
     @staticmethod
     def _read(call, mid, smoothing):
+        """One read, called once. Whether the reader takes `smoothing` is read off its signature
+        (#170 F16-3): a retry on any TypeError took one raised INSIDE a reader that does take it
+        for a method too old to — swallowed it, and read the view in place of the smoothing asked."""
         if smoothing is None:
             return call(mid)
-        try:
+        if _takes_smoothing(call):
             return call(mid, smoothing=smoothing)
-        except TypeError:
-            return call(mid)
+        return call(mid)
 
     def impulse_response(self, mid):
         """(times, samples)."""
