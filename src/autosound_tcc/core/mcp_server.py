@@ -1660,11 +1660,12 @@ def _url(port: int) -> str:
 
 
 def _read_config(project_dir: Path) -> dict:
-    """`.mcp.json` the way TCC's own stores are read (#173, F16-6), by the write and the
-    withdrawal alike. Absent is `{}`. Broken — bad JSON, bad UTF-8, not an object — is set aside
-    with its bytes and said, then `{}`: it used to read as `{}` with nothing kept, and the write
-    put TCC's entry alone in its place, the user's other servers gone. There and unreadable raises
-    `own_store.StoreUnreadable`, said; nothing may be written over it.
+    """`.mcp.json` as the write reads it: the way TCC's own stores are read (#173, F16-6). The
+    withdrawal reads it plainly and never sets it aside (`forget_mcp_config`). Absent is `{}`.
+    Broken — bad JSON, bad UTF-8, not an object — is set aside with its bytes and said, then `{}`:
+    it used to read as `{}` with nothing kept, and the write put TCC's entry alone in its place,
+    the user's other servers gone. There and unreadable raises `own_store.StoreUnreadable`, said;
+    nothing may be written over it.
 
     The copy goes into `.tcc/`, not beside the file (ruling 9): it carries the old `X-TCC-Token`,
     and git ignores `.tcc/` whole but `.mcp.json` by that exact name only (`_IGNORE_LINES`), so a
@@ -1709,15 +1710,29 @@ def forget_mcp_config(project_dir: Path, port: Optional[int] = None,
     next TCC can take that port and write its own entry in between.
 
     Same rule as writing it: the file is the user's, so only our own key is removed and everything
-    else is left exactly as it was. Read the same way too (`_read_config`): one that cannot be read
-    is left alone, and one that is broken goes into `.tcc/` with its bytes. Never raises — this
-    runs on the way out, where an exception has nowhere to go and the window is already closing.
+    else is left exactly as it was. **Read plainly, never set aside** (the review of Task 19, I1):
+    one that cannot be read, or is damaged, is left where it is, byte for byte, and logged. The
+    window unhooks its strip before it stops the server, so a file moved aside here left the
+    folder with nobody told; and a damaged file holds no entry to take out, with no write to
+    follow. The next start's write sets it aside into `.tcc/` and says so on the strip.
+
+    Never raises — this runs on the way out, where an exception has nowhere to go and the window
+    is already closing. Nesting deeper than the parser or the encoder can follow is one more way
+    to be damaged (`RecursionError`, M2).
     """
     path = config.mcp_config_path(project_dir)
     try:
-        data = _read_config(project_dir)
-    except own_store.StoreUnreadable:
-        return  # said by the store, and not written over
+        # `utf-8-sig` as the write reads it: a file TCC could write its entry into is a file it
+        # can take the entry back out of, a byte-order mark from Notepad included.
+        data = json.loads(path.read_bytes().decode("utf-8-sig"))
+        if not isinstance(data, dict):
+            raise ValueError("not a JSON object")
+    except FileNotFoundError:
+        return  # nothing advertised here
+    except (OSError, ValueError, RecursionError) as exc:
+        app_log.logger().warning("%s could not be read to withdraw %s from it (%s); left as it is",
+                                 path, SERVER_NAME, exc)
+        return
     servers = data.get("mcpServers")
     if not isinstance(servers, dict) or SERVER_NAME not in servers:
         return
@@ -1726,7 +1741,7 @@ def forget_mcp_config(project_dir: Path, port: Optional[int] = None,
     servers.pop(SERVER_NAME)
     try:
         _write_atomically(path, _config_body(data))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         app_log.logger().warning("could not withdraw %s from %s: %s", SERVER_NAME, path, exc)
 
 

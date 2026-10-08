@@ -568,14 +568,33 @@ def test_the_advertisement_is_withdrawn_when_the_server_goes_down(tmp_path, monk
     assert set(servers) == {"theirs"}, "ours goes, theirs stays"
 
 
-def test_withdrawing_an_advertisement_that_is_not_there_is_not_an_error(tmp_path, monkeypatch):
+@pytest.mark.parametrize("damaged", [
+    b"{ not json",
+    b"[]",
+    b'{"mcpServers": {"theirs": "\xff"}}',
+    b'{"mcpServers": ' + b"[" * 100_000 + b"]" * 100_000 + b"}",
+], ids=["not-json", "not-an-object", "not-utf8", "nested-too-deep"])
+def test_withdrawing_an_advertisement_that_is_not_there_is_not_an_error(
+        tmp_path, monkeypatch, damaged, app_log_told, app_log_warnings):
     """It runs on the way out, where an exception has nowhere useful to go and would be raised
-    while the window is already closing."""
+    while the window is already closing.
+
+    A damaged file is left where it is, byte for byte, and only logged (the review of Task 19,
+    I1). The window unhooks its strip before it stops the server, so a file moved aside at quit
+    left the folder with nobody told. It holds no entry the withdrawal could take out, and no write
+    follows; the next start's write sets it aside into `.tcc/` and says so on the strip."""
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = tmp_path / ".mcp.json"
 
     mcp_server.forget_mcp_config(tmp_path)  # no file at all
-    (tmp_path / ".mcp.json").write_text("{ not json", encoding="utf-8")
-    mcp_server.forget_mcp_config(tmp_path)  # and one that cannot be parsed
+    path.write_bytes(damaged)
+    mcp_server.forget_mcp_config(tmp_path)  # the folder alone: any entry of TCC's
+    TccMcpServer(project_dir=tmp_path).stop()  # and a quit's own withdrawal
+
+    assert path.read_bytes() == damaged, "left where it is, byte for byte"
+    assert not list(tmp_path.glob(".tcc/*")), "nothing under .tcc/"
+    assert app_log_told == [], "nothing said: at quit the strip is unhooked already"
+    assert any(str(path) in r.getMessage() for r in app_log_warnings), "logged"
 
 
 def test_the_advertisement_is_readable_only_by_its_owner(tmp_path, monkeypatch):
@@ -664,6 +683,29 @@ def test_an_advertisement_that_cannot_be_withdrawn_is_logged_not_raised(
     mcp_server.forget_mcp_config(tmp_path)
 
     assert any(".mcp.json" in r.getMessage() for r in app_log_warnings)
+
+
+def test_an_mcp_json_nested_too_deep_to_write_back_is_left_as_it_was(tmp_path, monkeypatch,
+                                                                     app_log_warnings):
+    """The review of Task 19, M2. `json.dumps(indent=2)` takes the pure-Python encoder, which runs
+    out of stack on nesting `json.loads` still reads (3.12: from about 1 200 levels to 8 000), and
+    the withdrawal's `except (OSError, ValueError)` let that `RecursionError` out of a function
+    that never raises. Now it is logged and the file left as it was. The write raises it into
+    `start()`, which keeps it as the advertisement's error, and writes nothing either."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = tmp_path / ".mcp.json"
+    depth = 3_000
+    body = (b'{"mcpServers": {"tcc": {"type": "http", "url": "http://127.0.0.1:8765/mcp"}, '
+            b'"deep": ' + b"[" * depth + b"]" * depth + b"}}")
+    path.write_bytes(body)
+
+    mcp_server.forget_mcp_config(tmp_path)
+    assert path.read_bytes() == body, "the withdrawal leaves it as it was"
+    assert any(str(path) in r.getMessage() for r in app_log_warnings), "and logs it"
+
+    with pytest.raises(RecursionError):
+        write_mcp_config(tmp_path, 8765, "tok")
+    assert path.read_bytes() == body, "the write writes nothing"
 
 
 def test_an_advertisement_whose_mode_cannot_be_set_is_logged_not_raised(
