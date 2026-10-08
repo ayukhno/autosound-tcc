@@ -431,12 +431,14 @@ def test_the_next_test_starts_with_the_logging_a_fresh_process_has():
         "app_log's thread hook is still in pytest's place"
 
 
-def _on_a_thread(target, name: str) -> None:
-    """`target` run on a thread of its own, as a worker runs it; back once it has finished."""
+def _on_a_thread(target, name: str) -> int:
+    """`target` run on a thread of its own, as a worker runs it; back once it has finished, with
+    the thread's ident."""
     worker = threading.Thread(target=target, name=name, daemon=True)
     worker.start()
     worker.join(10)
     assert not worker.is_alive(), f"{name} did not finish"
+    return worker.ident
 
 
 def test_an_import_tcc_runs_off_the_main_thread_fails_the_test_at_its_end(
@@ -470,7 +472,7 @@ def test_an_import_tcc_runs_off_the_main_thread_fails_the_test_at_its_end(
         except BaseException:  # noqa: BLE001 — what a worker's own code might do
             pass
 
-    _on_a_thread(watchdog, "tcc-test-watchdog")
+    ident = _on_a_thread(watchdog, "tcc-test-watchdog")
 
     assert "asked by the watchdog" in (tmp_path / "tcc.log").read_text(encoding="utf-8"), \
         "the guard changed nothing the worker does"
@@ -478,7 +480,11 @@ def test_an_import_tcc_runs_off_the_main_thread_fails_the_test_at_its_end(
                        match=r"(?s)\n  core/app_log\.py:\d+ in dump_threads: "
                              r"import faulthandler -- thread 'tcc-test-watchdog'") as said:
         guard.verdict()
-    assert "started before this test" not in str(said.value), "this test started that thread"
+    # The marker goes by ident, and a thread may inherit the ident of one that was alive at the
+    # guard's setup and has ended since (`_thread_idents`; glibc reuses them): said exactly when
+    # this one's ident was among those. Asserting it absent could flake (Task 23's re-review, N1).
+    assert ("started before this test" in str(said.value)) == (ident in guard.older), \
+        (ident, str(said.value))
     guard.verdict()  # said once; this test's own end has nothing left to fail on
 
 
