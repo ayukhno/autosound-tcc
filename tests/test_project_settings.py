@@ -166,3 +166,29 @@ def test_the_window_s_writer_says_a_write_that_fails_once_and_returns(tmp_path, 
     with pytest.raises(OSError) as refused:
         project_settings.set_value(tmp_path, "effort", "high")
     assert refused.type is OSError, "the write's own failure, as it was"
+
+
+def test_a_write_that_fails_again_after_one_landed_is_said_again(tmp_path, monkeypatch,
+                                                                 app_log_told):
+    """The re-review of Task 17, N2: what was said about a failed write was never forgotten. A
+    write failing while the store is absent, one landing, the store deleted while TCC ran, and the
+    same failure again: the same state as the first time, so it went unsaid."""
+    path = project_settings.path_for(tmp_path)
+    real_write, full = own_store.write_json, []
+
+    def write(target, data):
+        if full:
+            raise OSError(28, "No space left on device")
+        real_write(target, data)
+
+    monkeypatch.setattr(own_store, "write_json", write)
+
+    full.append(True)
+    assert project_settings.set_value_or_say(tmp_path, "effort", "high") is False
+    full.clear()
+    assert project_settings.set_value_or_say(tmp_path, "effort", "high") is True
+    path.unlink()
+    full.append(True)
+    assert project_settings.set_value_or_say(tmp_path, "effort", "high") is False
+
+    assert len(app_log_told) == 2, app_log_told

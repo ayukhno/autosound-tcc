@@ -120,6 +120,7 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+    _forget(path, "write")
 
 
 def _set_aside(path: Path, why: str, aside_dir: Optional[Path] = None) -> dict[str, Any]:
@@ -196,12 +197,14 @@ def _say_once(path: Path, message: str, kind: str = "read") -> None:
     app_log.report(message)
 
 
-def _forget(path: Path) -> None:
-    """A store read whole: what was said about it no longer stands. `chmod 0`, a fix and `chmod 0`
-    again is the same state twice, and the second time is news (the review of Task 17)."""
+def _forget(path: Path, kind: str = "read") -> None:
+    """A store read whole, or written whole: what was said about reading it, or writing it, no
+    longer stands. `chmod 0`, a fix and `chmod 0` again is the same state twice, and the second
+    time is news (the review of Task 17); so is a write failing with the store absent, one
+    landing, the store deleted and the same failure again (N2)."""
     if _said:
         with _said_lock:
-            _said.pop((os.path.abspath(path), "read"), None)
+            _said.pop((os.path.abspath(path), kind), None)
 
 
 def _state(path: Path) -> tuple:
