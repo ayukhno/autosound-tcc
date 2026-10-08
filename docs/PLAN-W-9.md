@@ -63,6 +63,8 @@ Each is `what — why — the cost if wrong`; the ledger repeats them.
    it must not be until G4/J6 — a breaking skill tag is seen up to a day later.
 3. **`KNOWN_CONTRACT = 0` in the build** — §4.2: 1 only if the skill confirms contract 1 = the v3.1.x surface before
    the release; the controller checks the bus at release — none (no released copy carries a number).
+   **Superseded 2026-10-08:** v3.1.2 declares contract 1 (hub #265) and the Arbiter's word put `KNOWN_CONTRACT = 1`
+   in #178 with the re-pin — Task S2.
 4. **GUI-thread writes wait 5 s for the lock, other threads 60 s** — the GUI must not freeze behind a 120 s
    `capture-check`; MCP calls run on their own threads — a GUI write during a long check is refused as busy and
    retried by hand.
