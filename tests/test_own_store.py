@@ -86,9 +86,11 @@ def test_a_store_that_cannot_be_opened_is_refused_said_once_and_left_where_it_is
     (store / "inside").write_text("kept", encoding="utf-8")
 
     for _ in range(3):
-        with pytest.raises(own_store.StoreUnreadable):
+        with pytest.raises(own_store.StoreUnreadable) as refused:
             own_store.read_json(store)
 
+    assert not isinstance(refused.value, own_store.StoreNotSetAside), (
+        "not read at all: not the broken store whose move was refused (N2)")
     assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told
     assert _left(store) == ["store.json"], "nothing set aside"
     assert (store / "inside").read_text(encoding="utf-8") == "kept"
@@ -176,7 +178,8 @@ def test_a_broken_store_that_cannot_be_moved_is_refused_and_leaves_no_name_behin
         store, monkeypatch, app_log_told):
     """A broken file is only safe to start afresh once it is out of the way. When the move is
     refused, it is the unreadable case: said, refused, never written over — and the aside name
-    reserved for it is given back."""
+    reserved for it is given back. Refused as `StoreNotSetAside`, a `StoreUnreadable` of its own
+    kind: the file was read, so the advice for one that could not be opened is not its (N2)."""
     store.write_bytes(b"{ broken")
 
     def refuse(*_args, **_kwargs):
@@ -185,7 +188,7 @@ def test_a_broken_store_that_cannot_be_moved_is_refused_and_leaves_no_name_behin
     monkeypatch.setattr(own_store.os, "rename", refuse)
     monkeypatch.setattr(own_store.os, "replace", refuse)
     for _ in range(2):
-        with pytest.raises(own_store.StoreUnreadable):
+        with pytest.raises(own_store.StoreNotSetAside):
             own_store.read_json(store)
 
     assert _left(store) == ["store.json"] and store.read_bytes() == b"{ broken"
@@ -252,7 +255,7 @@ def test_a_store_whose_aside_folder_cannot_be_made_is_refused_and_left_where_it_
     blocked.write_text("a file, where the folder should be", encoding="utf-8")
     store.write_bytes(b"{ broken")
 
-    with pytest.raises(own_store.StoreUnreadable):
+    with pytest.raises(own_store.StoreNotSetAside):
         own_store.read_json(store, aside_dir=blocked)
 
     assert _left(store) == ["store.json"] and store.read_bytes() == b"{ broken"

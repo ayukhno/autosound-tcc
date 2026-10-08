@@ -13,8 +13,9 @@ else the file held was gone, and nothing said so (#173, F5). Here the three are 
   whoever wants them;
 * **there but unreadable** (any other `OSError`: no permission, a folder where the file should
   be, a broken file that could not be moved) — the person is told and `StoreUnreadable` is
-  raised. Nothing is moved and nothing may be written: the bytes may be perfectly good. A plain
-  reader catches it and carries on with `{}`; a read-modify-write lets it through.
+  raised (`StoreNotSetAside`, a kind of it, for the broken file that could not be moved).
+  Nothing is moved and nothing may be written: the bytes may be perfectly good. A plain reader
+  catches it and carries on with `{}`; a read-modify-write lets it through.
 
 Told once per state of the file, not on every read: a store is read on every tool call, and one
 sentence repeated on each would bury the strip and the log. A store read whole again is news
@@ -44,6 +45,14 @@ class StoreUnreadable(OSError):
     that failed: whoever already handles that handles this. Its text is the sentence the person
     was told.
     """
+
+
+class StoreNotSetAside(StoreUnreadable):
+    """A broken store that could not be moved out of the way: read, found broken, and the move
+    aside refused — a read-only folder, a lock on the rename, a file where the aside folder should
+    be. Not written over, as an unreadable one is not, and caught wherever that is. Its own kind
+    because the file did open: advice to check that it can be opened points away from the cause
+    (the re-review of Task 19, N2)."""
 
 
 #: What has been said about each store: `{(absolute path, "read" | "write"): (the file's state,
@@ -149,7 +158,7 @@ def _set_aside(path: Path, why: str, aside_dir: Optional[Path] = None) -> dict[s
         message = (f"{path} could not be read ({why}) and could not be set aside "
                    f"({_why(exc)}); TCC will not write over it")
         _say_once(path, message)
-        raise StoreUnreadable(message) from exc
+        raise StoreNotSetAside(message) from exc
     # Beside the store, its name is where it is; anywhere else, only its whole path says that.
     kept = aside.name if aside_dir is None else str(aside)
     app_log.report(f"{path} could not be read ({why}); it is kept as {kept}, "

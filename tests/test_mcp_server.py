@@ -1826,6 +1826,7 @@ def test_an_unwritable_advertisement_does_not_take_the_server_down(tmp_path, mon
         assert port, "the server is up"
         assert "PermissionError" in server.config_error
         assert server.config_unreadable is None, "a write that failed is not a read refused"
+        assert server.config_unmoved is None, "nor a damaged file whose move was refused"
         assert any("mcp config not written" in r.getMessage() for r in caplog.records)
     finally:
         server.stop()
@@ -1844,9 +1845,38 @@ def test_a_start_that_could_not_read_the_advertisement_keeps_which_file(tmp_path
         server.start()
         assert server.serving and server.config_error.startswith("StoreUnreadable"), (
             server.config_error)
-        assert server.config_unreadable == path
+        assert server.config_unreadable == path and server.config_unmoved is None
     finally:
         server.stop()
+
+
+def test_a_start_that_could_not_move_a_damaged_advertisement_aside_keeps_it_apart(
+        tmp_path, monkeypatch, app_log_told):
+    """The re-review of Task 19, N2. A damaged `.mcp.json` whose move into `.tcc/` is refused — a
+    read-only project folder, a lock on the rename — is refused as unreadable too, and it got the
+    advice for a file that could not be opened: «check that it can be opened», pointing away from
+    the cause. It was read. `start()` keeps it apart, so the window can say what fits."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = tmp_path / ".mcp.json"
+    path.write_bytes(b'{"mcpServers": {"theirs": {}},}')  # a hand edit's trailing comma
+    real_replace = os.replace
+
+    def refuse_the_move_aside(src, dst, *args, **kwargs):
+        if Path(src) == path:
+            raise PermissionError(13, "Permission denied", str(src))
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(own_store.os, "replace", refuse_the_move_aside)
+    server = TccMcpServer(project_dir=tmp_path, preferred_port=8990)
+    try:
+        server.start()
+        assert server.serving and server.config_error.startswith("StoreNotSetAside"), (
+            server.config_error)
+        assert server.config_unmoved == path and server.config_unreadable is None
+    finally:
+        server.stop()
+
+    assert path.read_bytes() == b'{"mcpServers": {"theirs": {}},}', "never written over"
 
 
 def test_the_advertisement_is_renamed_over_never_truncated_in_place(tmp_path):

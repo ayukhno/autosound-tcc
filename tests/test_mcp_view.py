@@ -27,6 +27,25 @@ def test_a_file_tcc_could_not_read_is_named_and_not_blamed_on_the_folder():
         assert folder_advice not in sentence and "{path}" in sentence, (lang, sentence)
 
 
+def test_a_damaged_file_tcc_could_not_move_aside_is_not_told_to_be_opened():
+    """The re-review of Task 19, N2. TCC read this file, found it damaged, and the move into
+    `.tcc/` was refused — a read-only folder, a lock on the rename. «Check that it can be opened»
+    points away from that: the file opened fine. Its own sentence names it, says it is damaged,
+    and gives what fits — fix or remove it, or make the folder writable."""
+    path = Path("project") / ".mcp.json"
+    error = (f"StoreNotSetAside: {path} could not be read (Expecting value) and could not be set "
+             "aside (Permission denied); TCC will not write over it")
+    server = SimpleNamespace(config_error=error, config_unmoved=path, config_unreadable=None)
+
+    said = mcp_view.omp_without_config(server)
+
+    assert said == i18n.t("mcpConfigUnmovedOmp").format(path=path, error=error)
+    assert said.count(str(path)) == 2, "named, besides the reason"
+    for lang, open_advice in (("en", "can be opened"), ("uk", "можна відкрити")):
+        sentence = i18n.T[lang]["mcpConfigUnmovedOmp"]
+        assert open_advice not in sentence and "{path}" in sentence, (lang, sentence)
+
+
 def test_a_file_tcc_could_not_write_keeps_the_folder_advice():
     """A write that failed is the folder's to fix: that sentence stays as it was."""
     server = SimpleNamespace(config_error="PermissionError: read-only")

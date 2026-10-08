@@ -106,6 +106,8 @@ _CORE: dict[Lang, dict[str, str]] = {
         "mcpNoConfigOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and it could not be written ({error}). Make the project folder writable and start TCC again, or pick a Claude model.",
         # A file that is there and could not be read is not the folder's to fix (#173, M4).
         "mcpConfigUnreadOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and TCC could not read it ({error}). Check that {path} can be opened — its permissions, or a folder where the file should be — then start TCC again, or pick a Claude model.",
+        # Read, damaged, and the move aside refused: it opened fine, so not that advice (N2).
+        "mcpConfigUnmovedOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and that file is damaged: TCC could not move it aside, so it did not write over it ({error}). Fix or remove {path}, or make the project folder writable, then start TCC again — or pick a Claude model.",
         "rewOnlineTip": "REW: online",
         "rewOfflineTip": "REW: not reachable on this port.\nThe API is in REW's BETA builds only — the release version has no API tab at all (roomeqwizard.com/beta.html).",
         "createProject": "+ Create new project",
@@ -1417,6 +1419,7 @@ Choose sweeps (sw) above to read this.",
         "mcpNoConfig": "TCC працює й доступний, але `.mcp.json` не записався ({error}). CLI, запущений у теці проєкту, TCC не знайде, і сесія omp теж — omp бачить TCC лише через цей файл; на сесію Claude у вікні це не впливає.",
         "mcpNoConfigOmp": "⚠️ Сесія omp не може стартувати: omp бачить TCC лише через `.mcp.json`, а його не вдалося записати ({error}). Зробіть теку проєкту доступною для запису й запустіть TCC знову або виберіть модель Claude.",
         "mcpConfigUnreadOmp": "⚠️ Сесія omp не може стартувати: omp бачить TCC лише через `.mcp.json`, а його TCC прочитати не зміг ({error}). Перевірте, чи можна відкрити {path} — права доступу, чи не тека на місці файлу, — і запустіть TCC знову або виберіть модель Claude.",
+        "mcpConfigUnmovedOmp": "⚠️ Сесія omp не може стартувати: omp бачить TCC лише через `.mcp.json`, а цей файл пошкоджений: TCC не зміг перенести його вбік, тож не записав поверх ({error}). Виправте або приберіть {path} чи зробіть теку проєкту доступною для запису, тоді запустіть TCC знову — або виберіть модель Claude.",
         "rewOnlineTip": "REW: онлайн",
         "rewOfflineTip": "REW: недоступний на цьому порту.\nAPI є лише в БЕТА-збірках REW — у релізній версії вкладки API немає взагалі (roomeqwizard.com/beta.html).",
         "createProject": "+ Створити новий проєкт",
@@ -2629,6 +2632,8 @@ Choose sweeps (sw) above to read this.",
         "mcpNoConfigOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and it could not be written ({error}). Make the project folder writable and start TCC again, or pick a Claude model.",
         # #170: the English until the Advisor.
         "mcpConfigUnreadOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and TCC could not read it ({error}). Check that {path} can be opened — its permissions, or a folder where the file should be — then start TCC again, or pick a Claude model.",
+        # #170: the English until the Advisor.
+        "mcpConfigUnmovedOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and that file is damaged: TCC could not move it aside, so it did not write over it ({error}). Fix or remove {path}, or make the project folder writable, then start TCC again — or pick a Claude model.",
         "rewOnlineTip": 'REW: online',
         "rewOfflineTip": 'REW: nieosiągalny na tym porcie.\nAPI jest tylko w wersjach BETA REW — wydanie stabilne nie '
                          'ma zakładki API w ogóle (roomeqwizard.com/beta.html).',
@@ -3917,6 +3922,8 @@ Choose sweeps (sw) above to read this.",
         "mcpNoConfigOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and it could not be written ({error}). Make the project folder writable and start TCC again, or pick a Claude model.",
         # #170: the English until the Advisor.
         "mcpConfigUnreadOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and TCC could not read it ({error}). Check that {path} can be opened — its permissions, or a folder where the file should be — then start TCC again, or pick a Claude model.",
+        # #170: the English until the Advisor.
+        "mcpConfigUnmovedOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and that file is damaged: TCC could not move it aside, so it did not write over it ({error}). Fix or remove {path}, or make the project folder writable, then start TCC again — or pick a Claude model.",
         "rewOnlineTip": 'REW: online',
         "rewOfflineTip": 'REW: auf diesem Port nicht erreichbar.\nDie API gibt es nur in den BETA-Builds von REW — die '
                          'Release-Version hat gar keinen API-Reiter (roomeqwizard.com/beta.html).',

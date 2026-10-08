@@ -1901,6 +1901,10 @@ class TccMcpServer:
     #: refused (`own_store.StoreUnreadable`), so never written over. A file to check, not a folder
     #: to make writable: the window names it (#173, the review of Task 19, M4).
     config_unreadable: Optional[Path] = None
+    #: The `.mcp.json` that WAS read, found damaged, and could not be moved aside into `.tcc/`
+    #: (`own_store.StoreNotSetAside`) — so not written over either. It opened fine: its advice is
+    #: to fix or remove it, or to make the folder writable (the re-review of Task 19, N2).
+    config_unmoved: Optional[Path] = None
 
     def __init__(
         self,
@@ -1986,7 +1990,9 @@ class TccMcpServer:
                 write_mcp_config(self.project_dir, self.port, self.token)
             except Exception as exc:  # noqa: BLE001 — the server is up; only the advert failed
                 self.config_error = f"{type(exc).__name__}: {exc}"
-                if isinstance(exc, own_store.StoreUnreadable):
+                if isinstance(exc, own_store.StoreNotSetAside):
+                    self.config_unmoved = config.mcp_config_path(self.project_dir)
+                elif isinstance(exc, own_store.StoreUnreadable):
                     self.config_unreadable = config.mcp_config_path(self.project_dir)
                 app_log.logger().warning("mcp config not written (%s): %s — the server is up; a "
                                          "CLI started in the project folder will not find it",
