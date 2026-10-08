@@ -220,6 +220,48 @@ def test_a_torn_log_line_restores_what_can_be_read(tmp_path):
     assert [s.id for s in bus.deliver()] == [fresh.id]
 
 
+def _line(signal: Signal) -> bytes:
+    """One raise as `_append_line` writes it: UTF-8, with anything not ASCII kept as it is."""
+    return json.dumps(signal.as_dict(), ensure_ascii=False).encode("utf-8") + b"\n"
+
+
+def test_a_log_line_that_is_not_utf8_is_skipped_and_the_rest_restored(tmp_path):
+    """#173, ruling 10. One byte that is not UTF-8 made the whole log unreadable: `read_text`
+    raised UnicodeDecodeError — a ValueError, past the `except OSError` around it — and the bus
+    could not be built, nor the MCP server that builds it. The line is skipped, as a torn one
+    always was, and the lines on both sides of it are restored."""
+    before = Signal(kind=PARAM_EDIT_MODE, payload={"on": True})
+    after = Signal(kind=CHANNEL_TOGGLE, payload={"group": "rear", "channel": "r-L", "on": False})
+    damaged = b'{"kind": "not_visible", "payload": {"note": "\xff"}, "id": "d00d"}\n'
+    (tmp_path / "signals.jsonl").write_bytes(_line(before) + damaged + _line(after))
+
+    bus = SignalBus(tmp_path)
+
+    assert [s.id for s in bus.deliver()] == [before.id, after.id]
+
+
+def test_a_last_line_torn_inside_a_character_is_skipped_like_any_torn_line(tmp_path):
+    """How a log comes to hold bytes that are not UTF-8 with nobody editing it: a power cut while
+    a note in Ukrainian was being appended, and the last line ends one byte into a two-byte letter.
+    That is a torn line — the signal it held is the one ruling 10 accepts losing — and it is
+    skipped like one."""
+    kept = Signal(kind=PARAM_EDIT_MODE, payload={"on": True})
+    torn = _line(Signal(kind=NOT_VISIBLE, payload={"note": "смуги 3 не видно"}))
+    cut = torn.index("с".encode("utf-8")) + 1
+    (tmp_path / "signals.jsonl").write_bytes(_line(kept) + torn[:cut])
+
+    assert [s.id for s in SignalBus(tmp_path).deliver()] == [kept.id]
+
+
+def test_a_note_holding_a_line_separator_is_one_line_of_the_log(tmp_path):
+    """The log is split where `_append_line` ends a record — at its newline — and not at every
+    character `str.splitlines` calls a boundary: a note pasted with U+2028 in it is written raw
+    (`ensure_ascii=False`), and splitting there cut the record in two and lost the signal."""
+    pasted = SignalBus(tmp_path).push(NOT_VISIBLE, note="band 3\u2028is missing")
+
+    assert [s.id for s in SignalBus(tmp_path).deliver()] == [pasted.id]
+
+
 # ---- the per-turn preamble -------------------------------------------------
 
 

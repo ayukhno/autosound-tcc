@@ -270,20 +270,26 @@ class SignalBus:
 
         Replay, not state: the log is the one record that survives a crash, and an Arbiter whose
         click was in flight when TCC died should not have to know to click again. Reads are as
-        tolerant as `_append_line` is -- a torn last line or a missing file restores what can be
-        read and never blocks construction.
+        tolerant as `_append_line` is -- a torn last line, a line that is not UTF-8 or a missing
+        file restores what can be read and never blocks construction.
+
+        Read as bytes and decoded a line at a time (#173, ruling 10): decoded whole, one byte that
+        is not UTF-8 -- a damaged one, or the last append torn inside a letter by a power cut --
+        raised out of here and the bus was never built. Split at the newline `_append_line` ends
+        a record with, not at every character `str.splitlines` calls a boundary: U+2028 in a
+        note is written raw, and splitting there cut the record in two.
         """
         if self._log_path is None:
             return
         try:
-            text = self._log_path.read_text(encoding="utf-8")
+            raw = self._log_path.read_bytes()
         except OSError:
             return
         open_signals: dict[str, Signal] = {}
-        for line in text.splitlines():
+        for line in raw.splitlines():
             try:
-                record = json.loads(line)
-            except ValueError:
+                record = json.loads(line.decode("utf-8"))
+            except ValueError:  # a JSON error and a UTF-8 error alike: the line is skipped
                 continue
             if not isinstance(record, dict):
                 continue
