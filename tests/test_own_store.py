@@ -121,6 +121,30 @@ def test_a_write_is_on_the_disk_before_it_takes_the_name(store, monkeypatch):
     assert _left(store) == ["store.json"], "and no temp file is left beside it"
 
 
+def test_a_write_the_rename_refuses_leaves_the_store_as_it_was_and_no_temp_file(store,
+                                                                                 monkeypatch):
+    """The group review, G6: on Windows a store held open -- by an antivirus, the indexer, another
+    TCC thread -- makes `os.replace` refuse. The refusal goes to the caller; the store keeps its
+    bytes; and the temp file written beside it goes too. Kept, every refused write would leave a
+    `.<stem>-*.tmp` in `.tcc/`, and the window writes on every pick."""
+    own_store.write_json(store, {"generator": "sdk:claude-opus-5"})
+    before, real_replace = store.read_bytes(), os.replace
+
+    def held_open(src, dst, *args, **kwargs):
+        if os.fspath(dst) == os.fspath(store):
+            raise PermissionError(13, "The process cannot access the file because it is being "
+                                      "used by another process")
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(own_store.os, "replace", held_open)
+
+    with pytest.raises(PermissionError):
+        own_store.write_json(store, {"generator": "sdk:claude-opus-6"})
+
+    assert store.read_bytes() == before, "the store as it was"
+    assert _left(store) == ["store.json"], "and no temp file beside it"
+
+
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
                     reason="POSIX permissions, and root reads a file whatever its mode")
 def test_a_store_made_unreadable_again_is_said_again(store, app_log_told):
