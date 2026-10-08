@@ -242,6 +242,33 @@ def _notify(message: str) -> None:
         logger().exception("the UI log sink raised")
 
 
+#: Set on a thread while its report is being handed to the sink (`report`).
+_reporting = threading.local()
+
+
+def report(message: str) -> None:
+    """Something the person has to hear about: an ERROR line in the log AND the window's strip.
+
+    An ERROR line alone never reached the strip — only the two excepthooks call the sink — so a
+    settings file set aside after a bad hand edit would have been said to a file nobody opens
+    (#173). A call rather than a handler that forwards every ERROR record: the places that log an
+    error and then say it in their own words would each have been said twice.
+
+    Re-entrancy guarded, per thread: a sink whose own work reports (a window reading a store that
+    is broken) is not called back into — that report goes to the log only — and a sink that raises
+    is logged once, by `_notify`, and the report returns. What is being reported must not be lost
+    to the failure of what reports it.
+    """
+    logger().error("%s", message)
+    if getattr(_reporting, "active", False):
+        return
+    _reporting.active = True
+    try:
+        _notify(message)
+    finally:
+        _reporting.active = False
+
+
 def _install_excepthooks() -> None:
     previous = sys.excepthook
 

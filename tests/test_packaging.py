@@ -34,6 +34,8 @@ LIGHT_MODULES = (
     "autosound_tcc.core.config",
     "autosound_tcc.core.delay_bank",
     "autosound_tcc.core.project_settings",
+    # Under `project_settings`, which the MCP server reads on a light install (#173).
+    "autosound_tcc.core.own_store",
     "autosound_tcc.core.contract_check",
     "autosound_tcc.core.method_binding",
     # The nightly's pick job (`method-newest.yml`) imports it on the light install (M81).

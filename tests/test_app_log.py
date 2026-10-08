@@ -75,6 +75,59 @@ def test_a_failing_sink_cannot_mask_the_error_it_was_reporting(installed):
     assert "the original" in text and "sink died" in text
 
 
+def test_a_report_is_logged_and_reaches_the_window(tmp_path, monkeypatch, app_log_errors):
+    """#173. An ERROR line alone never reached the strip — only the two excepthooks call the sink
+    — so a settings file set aside after a bad hand edit would have been said to a file nobody
+    opens. `report` says it in both places."""
+    log_file = tmp_path / "tcc.log"
+    monkeypatch.setattr(app_log, "_log_path", log_file)
+    seen = []
+    monkeypatch.setattr(app_log, "_ui_sink", lambda message, path: seen.append((message, path)))
+
+    app_log.report("tcc-project.json could not be read")
+
+    assert seen == [("tcc-project.json could not be read", log_file)]
+    assert [r.getMessage() for r in app_log_errors] == ["tcc-project.json could not be read"]
+
+
+def test_a_sink_that_raises_is_logged_once_and_the_report_still_returns(tmp_path, monkeypatch,
+                                                                         app_log_errors):
+    """What is being reported must not be lost to the failure of what reports it."""
+    monkeypatch.setattr(app_log, "_log_path", tmp_path / "tcc.log")
+    calls = []
+
+    def sink(message, path):
+        calls.append(message)
+        raise RuntimeError("sink died")
+
+    monkeypatch.setattr(app_log, "_ui_sink", sink)
+
+    app_log.report("the store was set aside")
+
+    said = [r.getMessage() for r in app_log_errors]
+    assert calls == ["the store was set aside"]
+    assert said == ["the store was set aside", "the UI log sink raised"], said
+
+
+def test_a_sink_that_reports_is_not_called_back_into(tmp_path, monkeypatch, app_log_errors):
+    """A sink whose own work reports — a window reading a store that is broken — would otherwise
+    call itself until the stack ran out. The inner report still reaches the log."""
+    monkeypatch.setattr(app_log, "_log_path", tmp_path / "tcc.log")
+    calls = []
+
+    def sink(message, path):
+        calls.append(message)
+        app_log.report("said from inside the sink")
+
+    monkeypatch.setattr(app_log, "_ui_sink", sink)
+
+    app_log.report("the store was set aside")
+
+    assert calls == ["the store was set aside"], "the sink is not called back into"
+    said = [r.getMessage() for r in app_log_errors]
+    assert said == ["the store was set aside", "said from inside the sink"], said
+
+
 def test_ctrl_c_is_a_decision_not_a_defect(installed, capsys):
     """KeyboardInterrupt keeps the default hook: it belongs on the terminal, where the person who
     pressed it is looking."""

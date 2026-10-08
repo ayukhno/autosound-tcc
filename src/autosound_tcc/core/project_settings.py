@@ -16,11 +16,10 @@ free to ignore it.
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any, Optional
+
+from autosound_tcc.core import own_store
 
 FILENAME = "tcc-project.json"
 SCHEMA_VERSION = 1
@@ -31,16 +30,17 @@ def path_for(tcc_dir: Path) -> Path:
 
 
 def load(tcc_dir: Path) -> dict[str, Any]:
-    """Whatever is on disk, or an empty dict. A missing or broken file is not an error.
+    """Whatever is on disk, or an empty dict — never an exception.
 
-    A project that has never been opened has no settings, and one whose file was hand-edited into
-    invalid JSON should degrade to "no preference" rather than take the window down.
+    A project that has never been opened has no settings, and that is not news. A file that cannot
+    be read is (#173): `own_store` sets a broken one aside with its bytes and says so, and says so
+    about one it may not open. For a reader both still come back as "no preference" rather than
+    take the window down. A write must not do the same — see `set_value`.
     """
     try:
-        data = json.loads(path_for(tcc_dir).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        return own_store.read_json(path_for(tcc_dir))
+    except own_store.StoreUnreadable:
         return {}
-    return data if isinstance(data, dict) else {}
 
 
 def get(tcc_dir: Path, key: str, default: Optional[str] = None) -> Optional[str]:
@@ -49,31 +49,27 @@ def get(tcc_dir: Path, key: str, default: Optional[str] = None) -> Optional[str]
 
 
 def set_value(tcc_dir: Path, key: str, value: Any = None) -> None:
-    """Write one field, keeping the rest. Atomic, same shape as `core/session_registry.py`.
+    """Write one field, keeping the rest. Atomic, and on the disk before it takes the name.
 
     `value` is usually a string (a model key, a language). It may be any JSON-serialisable thing —
     `core/delay_bank.py` keeps a `{title: ms}` mapping here — but the reader is the caller's
     problem then: `get()` deliberately returns only scalars, so a structured value needs its own
     accessor rather than a cast at every call site. `None` removes the field.
 
-    Write-then-rename rather than write-in-place: this is touched on model changes, which can
-    happen while a session is mid-turn, and a half-written settings file would read as "no
-    preference" on the next launch -- silently forgetting what the user chose.
+    Read through `own_store.read_json`, not `load()`: a file that is there and cannot be read
+    raises `StoreUnreadable` out of here instead of coming back as `{}` — and that `{}`, written
+    back with one field in it, was every model choice, tick, delay and import answer gone (#173,
+    F5). A broken file has been set aside, bytes and all, by the time this writes a fresh one.
+
+    Write-then-rename (`own_store.write_json`) rather than write-in-place: this is touched on model
+    changes, which can happen while a session is mid-turn, and a half-written settings file would
+    read as "no preference" on the next launch -- silently forgetting what the user chose.
     """
-    tcc_dir = Path(tcc_dir)
-    tcc_dir.mkdir(parents=True, exist_ok=True)
-    data = load(tcc_dir)
+    target = path_for(tcc_dir)
+    data = own_store.read_json(target)
     if value is None:
         data.pop(key, None)
     else:
         data[key] = value
     data["schema_version"] = SCHEMA_VERSION
-    target = path_for(tcc_dir)
-    handle, tmp = tempfile.mkstemp(dir=str(tcc_dir), prefix=".tcc-project-", suffix=".tmp")
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False, indent=2)
-        os.replace(tmp, target)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    own_store.write_json(target, data)

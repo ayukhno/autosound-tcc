@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+
+import pytest
 
 from autosound_tcc.core import project_settings
 
@@ -53,3 +56,50 @@ def test_no_temp_file_is_left_behind(tmp_path):
     leftovers = [p.name for p in tmp_path.iterdir() if p.name.startswith(".tcc-project-")]
     assert leftovers == []
     assert project_settings.path_for(tmp_path).is_file()
+
+
+def test_a_broken_file_is_set_aside_and_said_and_the_write_starts_a_fresh_one(tmp_path,
+                                                                              app_log_told):
+    """#173, F5. A trailing comma — what a hand edit leaves — read as "no preference", and the
+    next `set_value` wrote that back with one field in it: every model choice, tick, delay and
+    import answer gone, and nothing said. Now the broken file is set aside with its bytes, the
+    window is told, and the write starts a fresh file."""
+    path = project_settings.path_for(tmp_path)
+    broken = (b'{\n  "generator": "sdk:claude-opus-5",\n'
+              b'  "curve_delays": {"w-L_01 (sw)": 0.198},\n}\n')
+    path.write_bytes(broken)
+
+    project_settings.set_value(tmp_path, "critic", "sdk:claude-opus-5")
+
+    aside = list(tmp_path.glob(f"{project_settings.FILENAME}.corrupt-*"))
+    assert len(aside) == 1, f"exactly one copy set aside: {aside}"
+    assert aside[0].read_bytes() == broken, "holding the original bytes"
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "critic": "sdk:claude-opus-5", "schema_version": 1}, "the new file holds only the new field"
+    assert len(app_log_told) == 1 and str(path) in app_log_told[0], app_log_told
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
+                    reason="POSIX permissions, and root reads a file whatever its mode")
+def test_a_file_that_cannot_be_opened_is_refused_and_left_as_it_was(tmp_path, app_log_told):
+    """There and not readable is not "no preference". The old reader answered `{}` for it, and
+    the write renamed a fresh file over it — a rename needs the folder, not the file — so the
+    settings went the same way. Now the write refuses; a plain read still answers the default,
+    because a reader must not take the window down (R-l)."""
+    path = project_settings.path_for(tmp_path)
+    before = b'{"generator": "sdk:claude-opus-5", "schema_version": 1}'
+    path.write_bytes(before)
+    path.chmod(0)
+    try:
+        assert project_settings.get(tmp_path, "generator", "fallback") == "fallback"
+        with pytest.raises(OSError) as refused:
+            project_settings.set_value(tmp_path, "critic", "sdk:claude-opus-5")
+    finally:
+        path.chmod(0o600)
+
+    assert path.read_bytes() == before, "never written over"
+    from autosound_tcc.core.own_store import StoreUnreadable
+
+    assert refused.type is StoreUnreadable, "refused as the store's own failure, an OSError"
+    assert not list(tmp_path.glob("*.corrupt-*")), "and not set aside: its bytes may be fine"
+    assert len(app_log_told) == 1 and str(path) in app_log_told[0], "said once, not per read"

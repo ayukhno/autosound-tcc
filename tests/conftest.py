@@ -282,6 +282,22 @@ def app_log_errors(app_log_heard):
     return app_log_heard(logging.ERROR)
 
 
+@pytest.fixture
+def app_log_told(_machine_dir, monkeypatch):
+    """What the window would have been told: each message `app_log`'s UI sink received, in order.
+
+    The sink speaks only when there is a log file to point at, so one is named in the machine
+    folder (nothing here writes it); the sink and the path are both put back at the test's end.
+    One copy for every store that is set aside or refused and says so (#173) — the log half of the
+    same sentence is `app_log_errors`."""
+    from autosound_tcc.core import app_log
+
+    told: list[str] = []
+    monkeypatch.setattr(app_log, "_log_path", _machine_dir / "tcc.log")
+    monkeypatch.setattr(app_log, "_ui_sink", lambda message, _path: told.append(message))
+    return told
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _no_live_rew():
     """Point the REW API at a port nothing listens on, for the whole session.
