@@ -704,6 +704,10 @@ answers the first five questions anybody would ask.",
                         "nothing to ask the model to write.",
         # A Save whose writes did not land still answers, with what kept them off (#173).
         "savedTccFailed": "TCC's own settings were not saved: {why}",
+        # A gate, an effort or a model picked while the store cannot be written: in force for the
+        # run all the same (#173, I2). «Until TCC is closed», not «this session»: an effort applies
+        # to the NEXT session, and the two would read as one contradicting the other.
+        "pickThisRun": "Not saved — this choice holds only until TCC is closed: {why}",
         "sessionFresh": "Session ended and state saved — starting a new one with an empty context.",
         "generator": "Generator",
         "interviewTitle": "DSP profile onboarding — {vendor} {model}",
@@ -1998,6 +2002,7 @@ Choose sweeps (sw) above to read this.",
         "savedTccOnly": "Власні налаштування TCC на диску. Сесія не запущена, тож просити модель "
                         "щось записати немає про що.",
         "savedTccFailed": "Власні налаштування TCC не збережено: {why}",
+        "pickThisRun": "Не збережено — цей вибір діє лише до закриття TCC: {why}",
         "sessionFresh": "Сесію закрито, стан збережено — починаю нову з порожнім контекстом.",
         "generator": "Генератор",
         "interviewTitle": "Опитування для профілю DSP — {vendor} {model}",
@@ -3276,6 +3281,8 @@ Choose sweeps (sw) above to read this.",
         "savedTccOnly": 'Własne ustawienia TCC są na dysku. Sesja nie działa, więc nie ma o co prosić modelu.',
         # #170: the English until the Advisor.
         "savedTccFailed": "TCC's own settings were not saved: {why}",
+        # #170: the English until the Advisor.
+        "pickThisRun": "Not saved — this choice holds only until TCC is closed: {why}",
         "sessionFresh": 'Sesja zamknięta, stan zapisany — rozpoczynanie nowej z pustym kontekstem.',
         "generator": 'Generator',
         "interviewTitle": 'Wywiad do profilu DSP — {vendor} {model}',
@@ -4586,6 +4593,8 @@ Choose sweeps (sw) above to read this.",
                         'nichts, worum man das Modell bitten könnte.',
         # #170: the English until the Advisor.
         "savedTccFailed": "TCC's own settings were not saved: {why}",
+        # #170: the English until the Advisor.
+        "pickThisRun": "Not saved — this choice holds only until TCC is closed: {why}",
         "sessionFresh": 'Sitzung beendet und Zustand gespeichert — beginne eine neue mit leerem Kontext.',
         "generator": 'Generator',
         "interviewTitle": 'DSP-Profil-Interview — {vendor} {model}',

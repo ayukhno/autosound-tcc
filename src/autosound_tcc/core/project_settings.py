@@ -16,13 +16,28 @@ free to ignore it.
 
 from __future__ import annotations
 
+import os
+import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from autosound_tcc.core import own_store
 
 FILENAME = "tcc-project.json"
 SCHEMA_VERSION = 1
+
+#: The fields a person picks — the gate, the effort, the two models (the window's `_GATE_KEY`,
+#: `_EFFORT_KEY`, `_GENERATOR_KEY`, `_CRITIC_KEY`). One whose write did not land is in force for
+#: the rest of the run all the same (#173, I2): the window reads them back from the store — the
+#: gate at every permission, the effort at every session start — so a pick that did not reach it
+#: had no effect at all. `always_allowed` is not one: a tick that did not land asks again, which
+#: is the safe way to be wrong (the review of Task 17, N1).
+HELD_FOR_THE_RUN = frozenset({"gate", "effort", "generator", "critic"})
+
+#: The picks that did not land, `{(absolute store path, key): value}`, for this run (`pick`).
+_held: dict[tuple[str, str], Any] = {}
+_held_lock = threading.Lock()
+_NOT_HELD = object()
 
 
 def path_for(tcc_dir: Path) -> Path:
@@ -43,8 +58,18 @@ def load(tcc_dir: Path) -> dict[str, Any]:
         return {}
 
 
-def get(tcc_dir: Path, key: str, default: Optional[str] = None) -> Optional[str]:
-    value = load(tcc_dir).get(key)
+def get(tcc_dir: Path, key: str, default: Optional[str] = None, *,
+        strict: bool = False) -> Optional[str]:
+    """One scalar field: a pick held for this run first (`pick`), else what the store holds.
+
+    `strict` is for a reader to whom a store that is there and cannot be read is not «no
+    preference»: it raises `StoreUnreadable` instead of answering `default` — the gate, which
+    then runs on the strictest mode (R-bt). Absent, or broken and set aside, answers `default`
+    either way: there is nothing more to know."""
+    with _held_lock:
+        value = _held.get(_slot(tcc_dir, key), _NOT_HELD)
+    if value is _NOT_HELD:
+        value = (own_store.read_json(path_for(tcc_dir)) if strict else load(tcc_dir)).get(key)
     return str(value) if isinstance(value, (str, int, float)) else default
 
 
@@ -73,6 +98,8 @@ def set_value(tcc_dir: Path, key: str, value: Any = None) -> None:
         data[key] = value
     data["schema_version"] = SCHEMA_VERSION
     own_store.write_json(target, data)
+    with _held_lock:
+        _held.pop(_slot(tcc_dir, key), None)  # on the disk now: what was held is no longer news
 
 
 def set_value_or_say(tcc_dir: Path, key: str, value: Any = None) -> bool:
@@ -94,6 +121,33 @@ def set_value_or_say(tcc_dir: Path, key: str, value: Any = None) -> bool:
         own_store.say_unwritten(path_for(tcc_dir), exc)
         return False
     return True
+
+
+class Picked(NamedTuple):
+    """`pick`'s answer: whether the write landed, and whether the window has a pick to say."""
+
+    landed: bool
+    say: bool
+
+
+def pick(tcc_dir: Path, key: str, value: Any = None) -> Picked:
+    """A field the person picked, written by `set_value_or_say` — and, for one of
+    `HELD_FOR_THE_RUN` that did not land, held in force for the rest of the run: `get` answers it
+    before the store (#173, I2). `say` is True when such a pick is new — not for the same value
+    picked again, nor for one picker answering twice for one choice — and the window then says
+    it as a Save does (`why_not_saved`): the store's report was spent, likely at launch, and a
+    pick is the person asking. Never raises, as `set_value_or_say` does not."""
+    landed = set_value_or_say(tcc_dir, key, value)
+    if landed or key not in HELD_FOR_THE_RUN:
+        return Picked(landed, False)
+    with _held_lock:
+        new = _held.get(_slot(tcc_dir, key), _NOT_HELD) != value
+        _held[_slot(tcc_dir, key)] = value
+    return Picked(False, new)
+
+
+def _slot(tcc_dir: Path, key: str) -> tuple[str, str]:
+    return os.path.abspath(path_for(tcc_dir)), key
 
 
 def why_not_saved(tcc_dir: Path) -> str:

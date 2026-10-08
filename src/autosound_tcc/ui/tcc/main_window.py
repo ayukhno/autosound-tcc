@@ -204,7 +204,7 @@ _LANG_KEY = "ui/lang"
 # the opposite -- a fact about the user's accounts, not about any project -- so it stays global.
 _GENERATOR_KEY = "generator"          # per project: the picked Choice.key
 _CRITIC_KEY = "critic"                # per project: the picked Choice.key for the reviewer
-_GATE_KEY = "gate"                    # per project: which writes still ask the Arbiter
+_GATE_KEY = shell_gate.PROJECT_KEY    # per project: which writes still ask the Arbiter
 #: The same question, answered once for this MACHINE (QSettings UserScope). It is the DEFAULT a
 #: new project starts from, not an override — a project set deliberately keeps what it was set to,
 #: or answering the install question would silently retune every car already in progress.
@@ -3649,12 +3649,14 @@ class MainWindow(QMainWindow):
 
     def _set_project_setting(self, key: str, value) -> bool:
         """A choice made in this window, saved into its project's `.tcc/` — unless the window is on
-        its way out (TODO F-053). A closing window has no business writing, and a window a test
-        left behind resolved the NEXT test's folder through `config` and created `.tcc/` in it.
-        The flush on close writes directly (`_flush_own_state`), so nothing of a real close is lost."""
+        its way out (TODO F-053): one a test left behind made `.tcc/` in the NEXT test's folder, and
+        the flush on close writes directly (`_flush_own_state`). A pick that did not land is in
+        force for the run all the same (`project_settings.pick`) and answers as a Save does (I2)."""
         if getattr(self, "_closing", False):
             return False
-        return project_settings.set_value_or_say(config.tcc_dir(), key, value)
+        if (picked := project_settings.pick(config.tcc_dir(), key, value)).say:
+            self._say_saved(False, i18n.t("pickThisRun"))
+        return picked.landed
 
     def _reload_project_files(self) -> None:
         """Re-read what the skill wrote and put it on screen."""
@@ -5647,9 +5649,9 @@ class MainWindow(QMainWindow):
     # ---- the project menu ---------------------------------------------------
 
     def _effective_gate(self) -> str:
-        """The mode this project runs in (`shell_gate.effective_gate`: project, machine, default)."""
-        return shell_gate.effective_gate(self._project_setting(_GATE_KEY),
-                                         str(self._settings.value(_MACHINE_GATE_KEY, "") or ""))
+        """The mode this project runs in (`shell_gate.project_gate`: picked, project, machine,
+        default — and the strictest while its store cannot be read, R-bt)."""
+        return shell_gate.project_gate(config.tcc_dir(), str(self._settings.value(_MACHINE_GATE_KEY, "") or ""))
 
     def _ensure_default_terminal_answered(self) -> None:
         """Offer, once per machine, to make Windows' default terminal the old console host.
@@ -5868,9 +5870,9 @@ class MainWindow(QMainWindow):
             return
         self._say_saved(wrote)
 
-    def _say_saved(self, wrote: bool) -> None:
+    def _say_saved(self, wrote: bool, failed: str = "") -> None:
         """A Save always answers, on the strip too: «on disk», or what kept it off (#173, N1)."""
-        said = i18n.t("savedTccOnly") if wrote else i18n.t("savedTccFailed").format(
+        said = i18n.t("savedTccOnly") if wrote else (failed or i18n.t("savedTccFailed")).format(
             why=project_settings.why_not_saved(config.tcc_dir()))
         self._dialog._add_system_message(said)
         self._status_strip.notify(said, level="info" if wrote else "warn")

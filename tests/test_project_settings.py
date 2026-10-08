@@ -208,3 +208,54 @@ def test_what_kept_a_save_off_the_disk_is_named_after_it_was_said_once(tmp_path,
     path.rmdir()
     assert project_settings.set_value_or_say(tmp_path, "effort", "high") is True
     assert project_settings.why_not_saved(tmp_path) == str(path)
+
+
+def test_a_pick_that_did_not_land_is_in_force_for_the_run(tmp_path, app_log_told):
+    """#173, I2: the window reads the gate and the effort back from the store — the gate at every
+    permission, the effort at every session start — so a pick whose write did not land had no
+    effect at all, and after the store's one report, nothing said so. Held for the run, it is what
+    `get` answers, strict or not; said once per value; let go of when a write of it lands."""
+    path = project_settings.path_for(tmp_path)
+    path.mkdir()
+
+    first = project_settings.pick(tmp_path, "gate", "writes")
+    assert first == (False, True), "not saved, and the window has it to say"
+    assert project_settings.get(tmp_path, "gate") == "writes"
+    assert project_settings.get(tmp_path, "gate", strict=True) == "writes", "known: no refusal"
+    assert project_settings.pick(tmp_path, "gate", "writes") == (False, False), "said once"
+    assert project_settings.pick(tmp_path, "gate", "auto") == (False, True), "a new pick is news"
+    assert project_settings.pick(tmp_path, "effort", "low") == (False, True)
+    assert project_settings.get(tmp_path, "effort") == "low"
+    assert len(app_log_told) == 1, "the store itself is said once, as before"
+
+    path.rmdir()
+    project_settings.set_value(tmp_path, "effort", "high")
+    assert project_settings.get(tmp_path, "effort") == "high", "a write that landed lets go"
+    assert project_settings.pick(tmp_path, "gate", "foreign") == (True, False)
+    assert project_settings.get(tmp_path, "gate", strict=True) == "foreign"
+
+
+def test_a_tick_that_did_not_land_is_not_held(tmp_path, app_log_told):
+    """`always_allowed` is no pick held for the run: a tool whose tick did not land asks again,
+    the safe way to be wrong (the review of Task 17, N1)."""
+    project_settings.path_for(tmp_path).mkdir()
+
+    assert project_settings.pick(tmp_path, "always_allowed", "Bash") == (False, False)
+    assert project_settings.get(tmp_path, "always_allowed") is None
+
+
+def test_a_strict_read_tells_a_store_that_cannot_be_read_from_one_that_is_not_there(
+        tmp_path, app_log_told):
+    """I2 (c): for the gate, «unreadable» is not «no preference» (R-bt). A plain read still answers
+    the default (R-l); a strict one raises the store's refusal. Absent, and broken — set aside,
+    so absent now — are «no preference» either way."""
+    assert project_settings.get(tmp_path, "gate", "", strict=True) == ""
+    path = project_settings.path_for(tmp_path)
+    path.write_text('{"gate": "writes",}', encoding="utf-8")
+    assert project_settings.get(tmp_path, "gate", "", strict=True) == ""
+    assert not path.exists() and len(app_log_told) == 1, "set aside, and said"
+    path.mkdir()
+
+    assert project_settings.get(tmp_path, "gate", "") == ""
+    with pytest.raises(own_store.StoreUnreadable):
+        project_settings.get(tmp_path, "gate", "", strict=True)

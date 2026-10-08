@@ -20,9 +20,12 @@ import itertools
 import posixpath
 import re
 import shlex
+import threading
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Iterable, Optional, Sequence
+
+from autosound_tcc.core import app_log, own_store, project_settings
 
 # Which writes still ask. `writes` gates everything that is not read-only; `foreign` also lets the
 # skill write its own files (`process/`, `state/`, and the project files it owns) and asks only
@@ -58,6 +61,43 @@ def effective_gate(project_choice: str = "", machine_choice: str = "") -> str:
     And when the machine has never been asked, the window asks it once and keeps the answer.
     """
     return project_choice or machine_choice or GATE_DEFAULT
+
+
+#: Which field of the project's own store holds its gate (`main_window._GATE_KEY`).
+PROJECT_KEY = "gate"
+
+#: What the strip is told when the project's gate cannot be read (R-bt): which gate the session
+#: runs on, and why. English, as every sentence `core/` writes is.
+STRICTEST_SAID = ("this session asks before every write — the strictest gate — because {path}, "
+                  "which holds this project's gate, could not be read")
+
+#: The stores the strictest gate has been said for since each was last read: said once per
+#: stretch of not being readable, not once per permission judged.
+_strictest_said: set[str] = set()
+_strictest_lock = threading.Lock()
+
+
+def project_gate(tcc_dir: Path, machine_choice: str = "") -> str:
+    """`effective_gate` over the project's own store: a gate picked this run first, saved or not
+    (`project_settings.get`, #173 I2), then the project's, the machine's, the default.
+
+    A store that is there and cannot be read is no preference of anyone's: the gate it holds is
+    unknown, and the machine's answer ran a car set to ask about every write on a looser one,
+    with nothing said (I2). So the strictest, `writes`, until it can be read (R-bt) — and said,
+    once for each stretch of not being readable, with the store's own refusal said beside it."""
+    store = str(project_settings.path_for(tcc_dir))
+    try:
+        chosen = project_settings.get(tcc_dir, PROJECT_KEY, "", strict=True) or ""
+    except own_store.StoreUnreadable:
+        with _strictest_lock:
+            new = store not in _strictest_said
+            _strictest_said.add(store)
+        if new:
+            app_log.report(STRICTEST_SAID.format(path=store))
+        return GATE_WRITES
+    with _strictest_lock:
+        _strictest_said.discard(store)
+    return effective_gate(chosen, machine_choice)
 
 
 # Read-only commands the skill runs constantly. Anything outside this set still works -- it just

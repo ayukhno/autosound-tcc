@@ -2249,6 +2249,42 @@ def test_changing_the_permission_mode_reaches_the_running_session(tmp_path, monk
     assert Worker.session.gate == omp_session.GATE_AUTO
     assert "Bash" in Worker.session.always_allowed
 
+    # #173, I2, in the real order: the store becomes unreadable and a read spends its one report,
+    # as launch does. R-bt: the strictest gate then, not the machine's, and the strip says why.
+    from autosound_tcc.core import model_choices, shell_gate
+
+    store = project_settings.path_for(tmp_path)
+    store.unlink()
+    store.mkdir()
+    window._refresh_project_button()
+    assert window._effective_gate() == omp_session.GATE_WRITES
+    assert window._gate_actions[omp_session.GATE_WRITES].isChecked()
+    strip = window._status_strip
+    said = [strip.text(), *strip.waiting()]
+    assert str(store) in said[0], said
+    assert any(shell_gate.STRICTEST_SAID.format(path=store) in line for line in said), said
+
+    # Then the pick: it answers though the report is spent, and it is in force — the menu, the
+    # running session and the next one — though nothing reached the disk.
+    bubbles = len(window._dialog._bubbles)
+    window._set_gate_mode(omp_session.GATE_FOREIGN)
+    answer = i18n.t("pickThisRun").format(why=project_settings.why_not_saved(tmp_path))
+    assert strip.waiting()[-1] == answer and len(window._dialog._bubbles) == bubbles + 1
+    assert Worker.session.gate == omp_session.GATE_FOREIGN
+    assert window._gate_actions[omp_session.GATE_FOREIGN].isChecked()
+    effort = window._ai_effort_combo
+    other = next(i for i in range(effort.count()) if effort.itemData(i) != effort.currentData())
+    level = effort.itemData(other)
+    effort.setCurrentIndex(other)
+    assert model_choices.resolve_effort(window._project_setting(main_window._EFFORT_KEY)) == level
+    window._reload_model_choices()
+    assert effort.currentData() == level, "the picker does not snap back to the store's"
+    built = {}
+    monkeypatch.setattr(main_window, "TuningSession", lambda **kw: built.update(kw))
+    server = SimpleNamespace(project_dir=tmp_path, url="http://127.0.0.1:1", token="t")
+    window._session_factory(SimpleNamespace(harness="sdk", model="m"), server, False, level)()
+    assert built["gate"] == omp_session.GATE_FOREIGN
+
 
 def test_a_channel_toggle_goes_on_the_bus_and_writes_nothing(tmp_path, monkeypatch):
     """Enabling a channel changes the ledger, and the ledger is the skill's to write (D-6). TCC
@@ -7953,12 +7989,28 @@ def test_a_tool_allowed_into_an_unreadable_settings_file_is_not_said_to_be_allow
 
 def test_a_pick_saved_to_an_unreadable_settings_file_says_it_and_carries_on(app_log_told):
     """The review of Task 17, Minor 1: a picker's slot wrote before it updated the window, and
-    the raise left the window half-updated. The window's writer says it and returns."""
+    the raise left the window half-updated. The window's writer says it and returns.
+
+    In the real order (#173, I2): launch reads the store first and spends its one report, so the
+    pick's own read is silent — and the pick answered nothing, while the gate read back from the
+    store stayed what it was. It answers, as a Save does, and is in force for the run."""
+    from autosound_tcc.core import project_settings
+
     store, host = _over_an_unreadable_settings_file()
+    notes, bubbles = [], []
+    host._status_strip = SimpleNamespace(notify=lambda text, **k: notes.append(text))
+    host._dialog = SimpleNamespace(_add_system_message=lambda text, *a, **k: bubbles.append(text))
+    host._say_saved = lambda wrote, failed="": MainWindow._say_saved(host, wrote, failed)
+    assert project_settings.get(config.tcc_dir(), main_window._GATE_KEY) is None  # launch's read
 
-    MainWindow._set_project_setting(host, main_window._GATE_KEY, "foreign")
+    landed = MainWindow._set_project_setting(host, main_window._GATE_KEY, "foreign")
+    MainWindow._set_project_setting(host, main_window._GATE_KEY, "foreign")  # the same pick again
 
+    assert landed is False
     assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told
+    answer = i18n.t("pickThisRun").format(why=app_log_told[0])
+    assert notes == [answer] and bubbles == [answer], "said once, on the strip and in the dialog"
+    assert project_settings.get(config.tcc_dir(), main_window._GATE_KEY) == "foreign"
 
 
 def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):

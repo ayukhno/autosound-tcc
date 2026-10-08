@@ -595,3 +595,41 @@ def test_the_gate_is_the_project_s_then_the_machine_s_then_the_default(project, 
 
     assert effective_gate(project, machine) == gate
     assert effective_gate() == GATE_DEFAULT
+
+
+def test_a_store_that_cannot_be_read_runs_the_project_on_the_strictest_gate_and_says_so(
+        tmp_path, app_log_told):
+    """R-bt (#173, I2). A `tcc-project.json` that is there and cannot be read was «no preference»,
+    so a car set to ask about every write ran on the machine's looser answer, and nothing said
+    which gate the session ran on. The strictest instead, said once with why — not once per
+    permission judged — and said again when the store, readable in between, is refused again."""
+    from autosound_tcc.core import project_settings, shell_gate
+
+    store = project_settings.path_for(tmp_path)
+    store.mkdir()  # a folder in the file's place: refused on every platform
+
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
+    said = shell_gate.STRICTEST_SAID.format(path=store)
+    assert app_log_told[-1] == said and len(app_log_told) == 2, app_log_told  # and the store's own
+
+    store.rmdir()
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_AUTO
+    project_settings.set_value(tmp_path, "gate", shell_gate.GATE_FOREIGN)
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_FOREIGN
+    store.unlink()
+    store.mkdir()
+    assert shell_gate.project_gate(tmp_path, "") == shell_gate.GATE_WRITES
+    assert app_log_told.count(said) == 2, "news again after a good read"
+
+
+def test_a_gate_picked_this_run_outranks_the_strictest(tmp_path, app_log_told):
+    """I2 (a): what the person picks applies to this run even when it was not saved — over the
+    strictest gate too: that is the default for not knowing, and now it is known."""
+    from autosound_tcc.core import project_settings, shell_gate
+
+    project_settings.path_for(tmp_path).mkdir()
+    assert not project_settings.pick(tmp_path, "gate", shell_gate.GATE_AUTO).landed
+
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_FOREIGN) == shell_gate.GATE_AUTO
+    assert shell_gate.STRICTEST_SAID.split("{")[0] not in " ".join(app_log_told), app_log_told
