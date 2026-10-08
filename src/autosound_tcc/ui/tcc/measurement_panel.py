@@ -1397,7 +1397,7 @@ class MeasurementPanel(QWidget):
 
         Returns `(done, refused, not_asked)`: the `(wrong, right)` the round took, and
         `title_fixes.supersede_each`'s two, for the status to name."""
-        taken = set(((process_view.capture_round() or {}).get("taken") or {}))
+        taken = set(process_view.standing(process_view.capture_round()))
         fixes = [(row.title, (titles or {}).get(row.uuid)) for row in rows]
         fixes = [(wrong, right) for wrong, right in fixes
                  if right and wrong != right and wrong in taken]

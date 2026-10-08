@@ -822,3 +822,32 @@ def test_no_journal_or_no_reader_has_no_opinion(project, process, monkeypatch, t
     process._append(module.EV_SESSION_CLOSED)
     monkeypatch.delattr(module.Process, "session_closed")
     assert process_view.session_closed(project) is None
+
+
+# ---- what a round took that still stands (#175) ------------------------------------------------
+
+
+def test_standing_is_the_methods_own_rule_row_by_row(project, process):
+    """#175, F6: `standing()` is the method's `_is_taken`, asked of every row of a round — a row
+    that is a dict and was not superseded. A superseded row is a typo's trace (S-039), and a row
+    that is no dict at all is not a capture either: TCC read both as taken. Asked of the same round
+    side by side, row by row, so a rule that drifts from the method's fails here first."""
+    module = vendor_loader.load_process()
+    process.start_capture("1", ["w-L_1 (sw)", "w-R_1 (sw)"])
+    process.record_capture("w-R_1 (sw)")
+    process.supersede_capture("w-R_1 (sw)", "w-L_1 (sw)", "it was the left")
+    round_ = process.load()["capture"]
+    assert round_["taken"]["w-R_1 (sw)"]["superseded_by"] == "w-L_1 (sw)", "the method wrote it"
+    # The odd rows a hand-edited or older state can hold, beside the two the method just wrote.
+    round_["taken"].update({"none (sw)": None, "text (sw)": "taken", "blank (sw)": {"superseded_by": ""}})
+
+    assert list(process_view.standing(round_)) == [
+        title for title in round_["taken"] if module._is_taken(round_, title)]
+    assert list(process_view.standing(round_)) == ["w-L_1 (sw)", "blank (sw)"]
+    assert process_view.standing(round_)["w-L_1 (sw)"] is round_["taken"]["w-L_1 (sw)"]
+
+
+@pytest.mark.parametrize("round_", [None, {}, {"taken": None}, {"taken": []}],
+                         ids=["no-round", "empty", "taken-null", "taken-a-list"])
+def test_standing_of_no_round_or_no_taken_is_nothing(round_):
+    assert process_view.standing(round_) == {}

@@ -582,6 +582,25 @@ def test_a_named_round_offers_its_own_channels_not_the_open_rounds(tmp_path):
     assert round_channel_codes(project, closed) == ["m-L", "m-R"], "and the named one by name"
 
 
+def test_a_title_the_round_superseded_offers_no_channel(tmp_path):
+    """#175: `tw-L_1 (sw)` taken, then superseded by `m-L_1 (sw)` — the sweep was the mid, typed
+    under the tweeter's title (S-039). The pass never measured the tweeter, so the dialog offers no
+    row for it: the round's titles are what it still holds as taken, `process_view.standing`."""
+    from autosound_tcc.core import vendor_loader
+    from autosound_tcc.ui.tcc.protective_dialog import round_channel_codes
+
+    project = _described(tmp_path, [{"code": "m-L"}, {"code": "m-R"}, {"code": "tw-L"}])
+    proc = vendor_loader.load_process().Process(str(project / "process"))
+    proc.start_capture("1", ["m-R_1 (sw)"])
+    proc.record_capture("tw-L_1 (sw)")
+    proc.supersede_capture("tw-L_1 (sw)", "m-L_1 (sw)", "the mid, typed as the tweeter")
+    closed = proc.load()["capture"]["id"]
+
+    assert round_channel_codes(project) == ["m-R", "m-L"]
+    proc.start_capture("1", ["m-R_1 (sw)"])  # history now: read from the journal's fold
+    assert round_channel_codes(project, closed) == ["m-R", "m-L"]
+
+
 def test_with_a_round_open_only_output_channels_are_offered_too(tmp_path):
     """TEST-FINDINGS 22, the other half: the round's titles named a virtual channel and the dialog
     offered it. Filtered by the same rule — when the project says which channels are outputs."""

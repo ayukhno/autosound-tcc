@@ -2058,6 +2058,46 @@ def test_a_capture_taken_and_found_unusable_is_still_outstanding():
     assert panel.outstanding_titles() == ["w-L_1 (sw)", "w-R_1 (sw)"]
 
 
+def test_the_rows_the_panel_waits_on_are_the_methods_outstanding_after_a_supersede(
+        tmp_path, monkeypatch):
+    """#175, F6 (the issue's first): a real round took `w-R_1`, then superseded it — the sweep
+    under that title was the left driver (S-039). The method asks for `w-R_1` again; the panel
+    showed it green, «taken», because nothing in TCC read `superseded_by`. The rows the panel waits
+    on — yellow or blue — are the method's `capture_outstanding()`, by `name_key`: the rows are the
+    derived names, the round holds titles as typed. No `optional` titles: TCC does not read them."""
+    import json
+
+    from autosound_tcc.core import vendor_loader
+    from autosound_tcc.state import measurement_view
+
+    from tests import _rounds
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _app()
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    (tmp_path / "glossary.json").write_text(json.dumps({
+        "schema_version": 1,
+        "channels": [{"code": code, "active": True} for code in ("sw", "w-L", "w-R")],
+        "pairs": {"Ws": ["w-L", "w-R"]}}), encoding="utf-8")
+    process = _rounds.write_round(tmp_path, version=1,
+                                  expected=["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"],
+                                  taken=["w-R_1 (sw)"], superseded={"w-R_1 (sw)": "w-L_1 (sw)"})
+    naming = vendor_loader.load_naming()
+    glossary = naming.Glossary.for_project(str(tmp_path))
+
+    def key(title):
+        return naming.name_key(naming.parse_name(title, glossary))
+
+    panel = MeasurementPanel()
+    panel.set_sessions(measurement_view.build_sessions("0", 1, [], tmp_path, taken=[]), version=1)
+
+    waiting = [with_method(row.item_name, row.method_suffix) for row in panel._rows
+               if row.status in ("wait", "found") and not row.additional]
+    assert {key(t) for t in waiting} == {key(t) for t in process.capture_outstanding()}
+    assert len(waiting) == len(process.capture_outstanding()) == 2, waiting
+
+
 def test_an_import_after_the_round_closed_takes_its_captures_into_a_new_round(tmp_path, monkeypatch):
     """Finding 147, on the Arbiter's VM: `sw_7 (sw)` taken «as it is», `sw_7 (rta)` left on
     «Re-take», Applied — and the card showed both blue. The last round was closed and its id was

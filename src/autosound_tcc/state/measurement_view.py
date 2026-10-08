@@ -118,7 +118,7 @@ def highest_series(project_dir: Optional[Path] = None) -> Optional[int]:
     found = [
         read(title)
         for round_ in process_view.capture_rounds(project_dir)
-        for title in list(round_.get("expected") or []) + list(round_.get("taken") or {})
+        for title in list(round_.get("expected") or []) + list(process_view.standing(round_))
     ]
     found = [n for n in found if n is not None]
     return max(found) if found else None
@@ -337,7 +337,7 @@ def _round_is_at(round_: dict, version, naming, glossary) -> bool:
     wanted = str(version).lstrip("v_").lstrip("0")
     if str(round_.get("version") or "").lstrip("v_").lstrip("0") in ("", wanted):
         return True
-    for title in list(round_.get("expected") or []) + list(round_.get("taken") or {}):
+    for title in list(round_.get("expected") or []) + list(process_view.standing(round_)):
         entry = naming.parse_name(str(title), glossary)
         if entry and str(entry.get("version_n")) == wanted:
             return True
@@ -435,7 +435,7 @@ def build_session(
     for round_at in process_view.capture_rounds(project):
         if not _round_is_at(round_at, version, naming, glossary):
             continue
-        for title in (round_at.get("taken") or {}):
+        for title in process_view.standing(round_at):
             key = _key(title)
             if key is not None:
                 taken_keys.add(key)
@@ -450,7 +450,9 @@ def build_session(
     # into an empty checklist. What was recorded is a fact; what REW happens to have open is a
     # snapshot of another application's session.
     round_ = live_round if round_open or not next_round else {}
-    recorded_taken = {str(t) for t in (round_.get("taken") or {})}
+    # What the round took that still STANDS (#175): a superseded row is a typo's trace — taken
+    # under the wrong title and corrected — and every read below asks the method's rule of it.
+    recorded_taken = {str(t) for t in process_view.standing(round_)}
     # A skip and a verdict are keyed the same way "taken" is — BY KEY, not by the string. The
     # round records the title as somebody typed it in REW (`sw_01 (sw)`); the checklist derives
     # `sw_1 (sw)`. The taken half was corrected on the live project; these two are the same fault
@@ -461,10 +463,12 @@ def build_session(
     skipped_keys = {_key(t) for t in recorded_skipped} - {None}
     # What the arithmetic said about each curve (SCR-040). A verdict outranks "a title exists":
     # a sweep that never finished and a muted channel both leave a title behind, and every later
-    # phase used to compute on them.
+    # phase used to compute on them. Over the standing rows only (#175): `verdicts_by_key` is the
+    # last row of a key, and a superseded `w_R_1 (sw)` under the key of the `w-R_1 (sw)` that
+    # corrected it lent the corrected row its verdict.
     verdicts = {
-        str(title): (entry or {}).get("verified") or {}
-        for title, entry in (round_.get("taken") or {}).items()
+        str(title): entry.get("verified") or {}
+        for title, entry in process_view.standing(round_).items()
     }
     verdicts_by_key = {
         _key(title): verdict for title, verdict in verdicts.items() if _key(title) is not None
@@ -648,7 +652,7 @@ def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict
     the whole reason SCR-034 wrote the round down in the first place.
     """
     expected = [str(t) for t in (round_.get("expected") or [])]
-    taken = {str(k): (v or {}) for k, v in (round_.get("taken") or {}).items()}
+    taken = {str(k): v for k, v in process_view.standing(round_).items()}
     skipped = {str(k) for k in (round_.get("skipped") or {})}
     if not expected and not taken:
         return None

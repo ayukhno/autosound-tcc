@@ -4293,6 +4293,29 @@ def test_the_picker_offers_the_capture_rounds_and_narrows_to_what_one_took(tmp_p
     assert dialog._group_note, "and the window says where it looked"
 
 
+def test_a_round_s_titles_leave_out_what_it_superseded():
+    """#175: a round's set in the picker is what it took and still holds as taken. `w-R_02 (sw)`
+    taken, then superseded by `w-L_02 (sw)` — the sweep was the left — is a typo's trace (S-039):
+    offering it plots a curve under a title the round no longer stands behind. A real round, open
+    and then history, read from the journal's fold."""
+    from autosound_tcc.core import config, vendor_loader
+
+    project = config.project_dir()
+    (project / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                         encoding="utf-8")
+    proc = vendor_loader.load_process().Process(str(project / "process"))
+    proc.start_capture("2", ["m-L_02 (sw)"])
+    proc.record_capture("w-R_02 (sw)")
+    proc.supersede_capture("w-R_02 (sw)", "w-L_02 (sw)", "it was the left")
+    rid = proc.load()["capture"]["id"]
+    dialog = _group_dialog()
+    _fetch(dialog)
+
+    assert dialog._round_titles(rid) == ["m-L_02 (sw)", "w-L_02 (sw)"]
+    proc.start_capture("2", ["m-R_02 (sw)"])
+    assert dialog._round_titles(rid) == ["m-L_02 (sw)", "w-L_02 (sw)"]
+
+
 # ---- the protective filter, in or out ---------------------------------------------------------
 
 

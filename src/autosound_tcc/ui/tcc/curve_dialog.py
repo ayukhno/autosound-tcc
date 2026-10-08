@@ -1060,7 +1060,7 @@ class CurveDialog(QDialog):
             if str(round_.get("id") or "") != round_id:
                 continue
             titles = [str(x) for x in (round_.get("expected") or [])]
-            for title in (round_.get("taken") or {}):
+            for title in process_view.standing(round_):  # never a superseded typo (#175)
                 if str(title) not in titles:
                     titles.append(str(title))
             return titles

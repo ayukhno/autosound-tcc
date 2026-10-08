@@ -493,7 +493,9 @@ def round_channel_codes(project_dir: Optional[Path] = None, capture_id: str = ""
                        if str(r.get("id") or "") == str(capture_id)), {})
     else:
         round_ = process_view.capture_round(project_dir) or {}
-    titles = list(round_.get("expected") or []) + list((round_.get("taken") or {}).keys())
+    # What it took that still stands (#175): a superseded title is a typo's trace, never a channel
+    # this pass measured.
+    titles = list(round_.get("expected") or []) + list(process_view.standing(round_))
     # Outputs only, as with no round (TEST-FINDINGS 22): a round's titles can name a virtual
     # channel, and a virtual channel is not measured through a protective filter. Filtered only
     # when the project says which channels are outputs — a fresh one keeps what the round names.

@@ -8,14 +8,13 @@ because a checklist with impossible rows in it stops being read.
 from __future__ import annotations
 
 import json
-import re
 
 import pytest
 
 from autosound_tcc.core import vendor_loader
 from autosound_tcc.state import measurement_view, process_view
 
-from tests import _intake, _rew_fakes
+from tests import _intake, _rew_fakes, _rounds
 from autosound_tcc.state import measurement_view as mv
 
 pytestmark = pytest.mark.skipif(
@@ -273,42 +272,9 @@ def test_a_recapture_after_the_change_makes_it_done_again(project):
     assert by_name["w-L_1 (sw)"] == mv.STATUS_DONE
 
 
-def _as_typed(title: str) -> str:
-    """A title the way a PERSON types it in REW: `sw_1 (sw)` -> `sw_01 (sw)`.
-
-    Zero-padding is what REW titles carry in the field, and the checklist derives the unpadded
-    form — `naming.name_key` exists precisely because those two are one name. A fixture that
-    writes both sides in the same spelling cannot tell whether the code compares keys or strings.
-    """
-    return re.sub(r"_(\d)(?=\D|$)", r"_0\1", str(title))
-
-
-def _round(project, **fields):
-    """Write a capture round the way the skill would (SCR-034), through the skill's own writer.
-
-    **The awkward shape is the default** (2026-09-06). Titles go in ZERO-PADDED, as typed in REW,
-    while every assertion is written against the derived name — because that is the shape a real
-    project has and the shape no fixture here had. It cost a regression that reached a tag's door:
-    a closed pass holding fourteen verified captures read as fourteen rows still waiting, and
-    every test passed, because every fixture wrote the round in the checklist's own spelling.
-
-    `pad=False` for a fixture that is deliberately about the tidy case.
-    """
-    from autosound_tcc.state import process_view
-
-    pad = fields.pop("pad", True)
-    typed = _as_typed if pad else (lambda title: str(title))
-    module = vendor_loader.load_process()
-    _intake.seed(project)
-    process = module.Process(str(process_view.process_dir(project)))
-    process.enter_phase("0")
-    process.start_capture(fields.pop("version", 1),
-                          expected=[typed(t) for t in fields.pop("expected", ())])
-    for title in fields.pop("taken", ()):
-        process.record_capture(typed(title))
-    for title, reason in (fields.pop("skipped", {}) or {}).items():
-        process.skip_capture(typed(title), reason)
-    return process
+#: The round fixtures live in `tests/_rounds.py` since #175, shared with the panel's tests.
+_as_typed = _rounds.as_typed
+_round = _rounds.write_round
 
 
 def test_a_recorded_capture_survives_rew_being_closed(project):
@@ -1129,3 +1095,191 @@ def test_a_capture_the_window_flagged_for_its_driver_reads_as_in_the_window(proj
     item = _item(mv.build_session("0", 7, [tw], project, taken=[tw]), "tw-L_7 (sw)")
 
     assert (item.status, item.as_is) == (mv.STATUS_DONE, True)
+
+
+# ---- a superseded capture is not done (#175, F6 N16) ------------------------------------------
+# Parity with the method: what a round still waits for is the method's own list — the open round's
+# `capture_outstanding()`, a closed round's closing event. Compared by `name_key`, because the rows
+# are the derived names and the round holds titles as typed. No `optional` titles in these rounds:
+# TCC does not read them, and the method leaves them out of `outstanding`.
+
+
+def _key(project):
+    naming = vendor_loader.load_naming()
+    glossary = naming.Glossary.for_project(str(project))
+
+    def key(title):
+        entry = naming.parse_name(str(title), glossary)
+        return naming.name_key(entry) if entry else str(title)
+
+    return key
+
+
+def _rows(session, key, *statuses) -> set:
+    return {key(i.name) for g in session.groups for i in g.items
+            if i.status in statuses and not i.additional}
+
+
+def _closing(process, rid: str) -> dict:
+    """The method's own closing event for round `rid`, read from its journal."""
+    return [e for e in process.events() if e.get("type") == "capture_round_closed"
+            and e.get("capture") == rid][-1]
+
+
+def _past(project, rid: str):
+    return next(s for s in mv.build_sessions("0", 1, [], project, taken=[]) if s.id == rid)
+
+
+def _folded(project, rid: str) -> dict:
+    return next(r for r in process_view.capture_rounds(project) if r["id"] == rid)
+
+
+class _Silent:
+    """The method's `verify.verify` for a check that heard silence under every title: held by
+    REW, judged unusable, pinned to a uuid — what `Process.check_captures` records."""
+
+    def verify(self, wanted):
+        return [{"name": title, "valid": False, "exists": True, "applicable": True,
+                 "reachable": True, "stats": {"uuid": f"u-{index}"},
+                 "issues": ["in-band mean -94.0 dB — silence, not a sweep"]}
+                for index, title in enumerate(wanted)]
+
+
+_THREE = ["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"]
+
+
+def test_the_open_round_waits_for_what_the_method_waits_for_after_a_supersede(project):
+    """#175, F6 (the issue's first): `w-R_1` taken, then superseded — the sweep under that title
+    was the left driver. The method asks for `w-R_1` again (`capture_outstanding()`); the card
+    showed it green, because no reader in TCC knew `superseded_by`. The rows the card waits on are
+    the method's list."""
+    process = _round(project, version=1, expected=_THREE, taken=["w-R_1 (sw)"],
+                     superseded={"w-R_1 (sw)": "w-L_1 (sw)"})
+    key = _key(project)
+    outstanding = process.capture_outstanding()
+    assert outstanding == [_as_typed("w-R_1 (sw)"), _as_typed("sw_1 (sw)")], outstanding
+
+    session = mv.build_session("0", 1, [], project, taken=[])
+
+    assert _rows(session, key, mv.STATUS_WAIT, mv.STATUS_FOUND) == {key(t) for t in outstanding}
+    assert _item(session, "w-L_1 (sw)").status == mv.STATUS_DONE, "the corrected title is taken"
+
+
+@pytest.mark.parametrize("pad", [False, True], ids=["by-raw-title", "by-key"])
+def test_a_same_key_supersede_never_colours_the_corrected_row(project, pad):
+    """#175 (`measurement_view.py:465-471`): `w-R_1 (sw)` taken, then a second sweep typed
+    `w_R_1 (sw)` — the older notation, the same `name_key` — judged silent by the check, then
+    superseded by `w-R_1 (sw)`. The verdicts were built over every row, and the one by key is the
+    last row of that key: the superseded one, so the corrected row came up red with a typo's
+    verdict. Looked up by the raw title (the tidy spelling) and by key (as typed), live and once
+    the round is history, where the superseded row was a red row of its own."""
+    typed = _as_typed if pad else str
+    process = _round(project, version=1, expected=["w-R_1 (sw)"],
+                     taken=["w-R_1 (sw)", "w_R_1 (sw)"], pad=pad)
+    process.check_captures([typed("w_R_1 (sw)")], verifier=_Silent())
+    process.supersede_capture(typed("w_R_1 (sw)"), typed("w-R_1 (sw)"), "typed with an underscore")
+    assert process.capture_outstanding() == []
+
+    live = _item(mv.build_session("0", 1, [], project, taken=[]), "w-R_1 (sw)")
+    assert (live.status, live.extra) == (mv.STATUS_DONE, None)
+
+    process.start_capture(1, expected=[typed("sw_1 (sw)")])  # closes cap_001: history now
+    past = _past(project, "cap_001")
+    assert {i.name: i.status for g in past.groups for i in g.items} == {
+        typed("w-R_1 (sw)"): mv.STATUS_DONE}, "the typo's trace is no row, and nothing is red"
+
+
+def test_an_older_round_after_a_supersede_waits_for_what_its_close_named(project):
+    """#175: the last round is read from `process-state.json`, which carries `superseded_by`; an
+    OLDER one only from the journal, whose fold had no `capture_superseded`. Two rounds, so the
+    superseded one is history: its waiting rows are its closing event's `outstanding`, and the
+    typo's row stays in the fold, marked, as the method keeps it."""
+    process = _round(project, version=1, expected=_THREE, taken=["w-R_1 (sw)"],
+                     superseded={"w-R_1 (sw)": "w-L_1 (sw)"})
+    process.start_capture(1, expected=[_as_typed("w-L_1 (sw)")])  # closes cap_001 as superseded
+    key = _key(project)
+    closed = _closing(process, "cap_001")
+
+    past = _past(project, "cap_001")
+
+    assert _rows(past, key, mv.STATUS_WAIT, mv.STATUS_FOUND) == {key(t) for t in closed["outstanding"]}
+    assert _rows(past, key, mv.STATUS_DONE) == {key("w-L_1 (sw)")}
+    folded = _folded(project, "cap_001")
+    assert folded["taken"][_as_typed("w-R_1 (sw)")]["superseded_by"] == _as_typed("w-L_1 (sw)")
+    assert _as_typed("w-R_1 (sw)") not in process_view.standing(folded)
+
+
+def test_an_older_round_after_a_skip_then_a_take_reads_taken(project):
+    """#175, N16: a capture skipped and then taken after all — the method pops the skip when it
+    takes (`record_capture`); the fold did not, so history kept the round's grey «skipped» over a
+    capture it had."""
+    process = _round(project, version=1, expected=_THREE, skipped={"w-R_1 (sw)": "rears later"})
+    process.record_capture(_as_typed("w-R_1 (sw)"))  # taken after all
+    process.start_capture(1, expected=[_as_typed("w-L_1 (sw)")])
+    key = _key(project)
+    closed = _closing(process, "cap_001")
+    assert closed["skipped"] == []
+
+    past = _past(project, "cap_001")
+
+    assert _item(past, _as_typed("w-R_1 (sw)")).status == mv.STATUS_DONE
+    assert _rows(past, key, mv.STATUS_SKIPPED) == set()
+    assert _rows(past, key, mv.STATUS_WAIT, mv.STATUS_FOUND) == {key(t) for t in closed["outstanding"]}
+    assert _folded(project, "cap_001")["skipped"] == {}
+
+
+def test_an_older_round_reads_what_its_close_said_was_still_outstanding(project):
+    """#175: the read against REW (`reconcile_captures`, which `capture-close` runs) takes what REW
+    holds and takes back a skip with no `capture_taken` of its own, so a past round's lines never
+    hear of it — only its closing event does. Its `outstanding` and `skipped` are the round's truth:
+    what neither names nor skips was taken. Its `taken` is not read (N17)."""
+    process = _round(project, version=1, expected=_THREE, skipped={"sw_1 (sw)": "sub later"})
+    process.reconcile_captures([_as_typed("w-L_1 (sw)"), _as_typed("sw_1 (sw)")])
+    process.start_capture(1, expected=[_as_typed("w-R_1 (sw)")])
+    key = _key(project)
+    closed = _closing(process, "cap_001")
+    assert not [e for e in process.events() if e.get("type") == "capture_taken"], \
+        "the round's takes are the read's, with no line of their own"
+    assert closed["outstanding"] == [_as_typed("w-R_1 (sw)")] and closed["skipped"] == []
+
+    past = _past(project, "cap_001")
+
+    assert _rows(past, key, mv.STATUS_WAIT, mv.STATUS_FOUND) == {key(t) for t in closed["outstanding"]}
+    assert _rows(past, key, mv.STATUS_DONE) == {key("w-L_1 (sw)"), key("sw_1 (sw)")}
+    folded = _folded(project, "cap_001")
+    assert folded["outstanding"] == closed["outstanding"]
+    assert folded["skipped"] == {}
+
+
+def _as_an_older_method_closed_it(project, rid: str, *keys: str) -> None:
+    """Drop `keys` from round `rid`'s closing event in the journal the method wrote: the event as a
+    method before those fields wrote it. Every other line stays as the method wrote it."""
+    journal = process_view.journal_file(project)
+    lines = journal.read_text(encoding="utf-8").splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        event = json.loads(line) if line.strip() else {}
+        if event.get("type") == "capture_round_closed" and event.get("capture") == rid:
+            lines[index] = json.dumps({k: v for k, v in event.items() if k not in keys}) + "\n"
+    journal.write_text("".join(lines), encoding="utf-8")
+
+
+def test_a_close_without_outstanding_leaves_the_round_as_its_lines_folded_it(project):
+    """#175: a journal older than the closing event's `outstanding` is read by its lines — the
+    supersede and the take after a skip — and the key's absence is not `[]`: read as an empty
+    list, every capture the round asked for and nobody took would have read as taken."""
+    process = _round(project, version=1, expected=_THREE + ["sw_1 (rta)"],
+                     taken=["w-R_1 (sw)"], superseded={"w-R_1 (sw)": "w-L_1 (sw)"},
+                     skipped={"sw_1 (sw)": "sub later"})
+    process.record_capture(_as_typed("sw_1 (sw)"))  # taken after all
+    process.start_capture(1, expected=[_as_typed("w-L_1 (sw)")])
+    key = _key(project)
+    said = _closing(process, "cap_001")["outstanding"]
+    _as_an_older_method_closed_it(project, "cap_001", "outstanding", "outstanding_optional",
+                                  "skipped")
+
+    past = _past(project, "cap_001")
+
+    assert "outstanding" not in _folded(project, "cap_001")
+    assert _rows(past, key, mv.STATUS_WAIT, mv.STATUS_FOUND) == {key(t) for t in said} == {
+        key("w-R_1 (sw)"), key("sw_1 (rta)")}
+    assert _rows(past, key, mv.STATUS_DONE) == {key("w-L_1 (sw)"), key("sw_1 (sw)")}

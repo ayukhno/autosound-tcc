@@ -112,6 +112,23 @@ def capture_round(project_dir: Optional[Path] = None) -> Optional[dict]:
     return round_ if isinstance(round_, dict) else None
 
 
+def standing(round_: Optional[dict]) -> dict[str, dict]:
+    """What a round took that still stands: its `taken` rows, `{title: row}` in the round's own
+    order, less the ones that are no capture (#175).
+
+    The method's own rule, asked of each row — `_is_taken` (`process.py`): a row that is a dict and
+    was not superseded. A superseded row is a typo's trace, kept so the round can be audited
+    (S-039), never a measurement (N17); TCC read it as taken, and the card showed a capture the
+    method was still asking for as green. A reader of `taken` outside the fold asks this, and
+    counts no row itself.
+    """
+    taken = (round_ or {}).get("taken") or {}
+    if not isinstance(taken, dict):
+        return {}
+    return {title: row for title, row in taken.items()
+            if isinstance(row, dict) and not row.get("superseded_by")}
+
+
 def journal_file(project_dir: Optional[Path] = None) -> Path:
     return process_dir(project_dir) / "journal.jsonl"
 
@@ -167,6 +184,20 @@ def capture_rounds(project_dir: Optional[Path] = None) -> list[dict]:
                 "at": event.get("at"),
                 "planned": event.get("planned"),
             }
+            # Taken after all: the method pops the skip when it takes (`record_capture`), and a
+            # past round kept the grey «skipped» over a capture it had (N16).
+            round_["skipped"].pop(str(event.get("title")), None)
+        elif kind == "capture_superseded":
+            # The wrong row STAYS, marked with the title it was corrected to, as the method keeps
+            # it (S-039); the right title comes on the `capture_taken` that follows. Without this
+            # an older round's typo read as a capture it took (#175).
+            title = str(event.get("title"))
+            row = round_["taken"].get(title)
+            row = dict(row) if isinstance(row, dict) else {}
+            row["superseded_by"] = event.get("corrected_to") or True
+            if event.get("reason"):
+                row["reason"] = str(event["reason"]).strip()
+            round_["taken"][title] = row
         elif kind == "capture_skipped":
             # `planned` beside the reason, the way `capture_taken` above carries it: `expected[]`
             # is not a closed set, so a reader cannot assume everything skipped was ever asked for
@@ -195,6 +226,7 @@ def capture_rounds(project_dir: Optional[Path] = None) -> list[dict]:
             round_.setdefault("protective", {})[str(event.get("channel"))] = event.get("legs")
         elif kind == "capture_round_closed":
             round_["closed"] = event.get("at") or True
+            _as_it_closed(round_, event)
 
     # The open round as `process-state.json` has it wins: the journal is append-only history, the
     # state file is the live record, and only it carries the full `verified` payload with issues.
@@ -206,6 +238,40 @@ def capture_rounds(project_dir: Optional[Path] = None) -> list[dict]:
         rounds[rid] = {**rounds.get(rid, {}), **live}
 
     return [rounds[rid] for rid in reversed(order)]
+
+
+def _as_it_closed(round_: dict, event: dict) -> None:
+    """A past round as its closing event says it ended — the one line that is the whole truth for a
+    round `process-state.json` no longer holds (#175, N16).
+
+    The other lines are not: the read against REW (`reconcile_captures`, which `capture-close`
+    runs) takes what REW holds and takes back a skip with no `capture_taken` of its own, and a
+    check names titles REW does not hold. So `skipped` is the event's list, each with its reason
+    from the skip's own line; and `outstanding` — the method's `_outstanding` at the close, the
+    required titles, `outstanding_optional` beside it — settles the rest of what was asked for:
+    named there, not taken; named nowhere and not skipped, taken. The event's `taken` is not read:
+    up to the method's v3.1.1 it lists superseded rows too (N17).
+
+    An event without `outstanding` — a journal older than the field — leaves the round as its lines
+    folded it. Absent is not `[]`: read as an empty list, everything asked for would read taken.
+    """
+    skipped = event.get("skipped")
+    if isinstance(skipped, list):
+        was = round_["skipped"]
+        round_["skipped"] = {str(t): was.get(str(t)) or {"reason": None, "planned": None}
+                             for t in skipped}
+    outstanding = event.get("outstanding")
+    if not isinstance(outstanding, list):
+        return
+    round_["outstanding"] = [str(t) for t in outstanding]
+    waiting = set(round_["outstanding"]) | {str(t) for t in event.get("outstanding_optional") or []}
+    held = standing(round_)
+    for title in round_["expected"]:
+        if title in waiting:
+            if title in held:
+                del round_["taken"][title]  # a row the check made for a title REW did not hold
+        elif title not in round_["skipped"] and title not in held:
+            round_["taken"][title] = {"at": None, "planned": True}  # taken by the read against REW
 
 
 def steps_using(state: Optional[dict], titles) -> tuple[str, ...]:
