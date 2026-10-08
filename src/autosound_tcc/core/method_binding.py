@@ -76,6 +76,9 @@ class Binding:
     entry: Path
     reason: str = ""
     can_approve: bool = False
+    #: Where the link at `entry` led when it was judged: its realpath, the copy an approval stores
+    #: (`approve`). "" when the entry is no link — absent, a folder, a file, or not readable.
+    target: str = ""
 
     def require(self) -> Path:
         """The skill folder to run, or `MethodRefused` with the binding's sentence."""
@@ -157,49 +160,51 @@ def _bind(project_dir: Path, entry: Path) -> Binding:
                                                 f"the project cannot be trusted; {remedy}.")
         return _refused(project_dir, entry, f"{entry} is a folder outside the project, not a link; "
                                             f"{remedy}.")
+    # A link from here on: every answer carries where it led, `target` — what an approval stores.
     try:
         os.stat(entry)  # the link followed to its end
     except (FileNotFoundError, NotADirectoryError):
         return _refused(project_dir, entry, f"{entry} points at {target}, which is not on this "
-                                            f"machine; {remedy}.")
+                                            f"machine; {remedy}.", target)
     except OSError as exc:
         return _refused(project_dir, entry, f"TCC cannot read what {entry} points at ({_why(exc)}); "
-                                            f"fix the permissions of {target}, or {remedy}.")
+                                            f"fix the permissions of {target}, or {remedy}.", target)
     own = own_copy()
     if _same(target, os.path.realpath(own)):
-        return Binding(project_dir, SAME, own, entry)
+        return Binding(project_dir, SAME, own, entry, target=target)
     if _inside(target, home):
         return _refused(project_dir, entry, f"{entry} points at {target}, inside the project, and a "
-                                            f"copy inside the project cannot be trusted; {remedy}.")
+                                            f"copy inside the project cannot be trusted; {remedy}.",
+                        target)
     copy = Path(target)
     if not vendor_loader._looks_like_the_skill(copy):
         if vendor_loader._looks_like_an_older_skill(copy):
             return _refused(project_dir, entry, f"{entry} points at {target}, a 2.x copy of the "
                                                 f"method — an older line this TCC cannot drive; "
-                                                f"{remedy}.")
+                                                f"{remedy}.", target)
         return _refused(project_dir, entry, f"{entry} points at {target}, which is not a 3.x copy of "
-                                            f"the method; {remedy}.")
+                                            f"the method; {remedy}.", target)
     contract = read_contract(copy)
     if contract.unreadable:
         return _refused(project_dir, entry, f"{entry} points at {target}, a copy of the method whose "
                                             f"rew_tool/contract.py TCC cannot read "
                                             f"({contract.unreadable}), so it may be newer than this "
-                                            f"TCC; update TCC first, or {remedy}.")
+                                            f"TCC; update TCC first, or {remedy}.", target)
     if contract.newer_than(KNOWN_CONTRACT):
         return _refused(project_dir, entry, f"{entry} points at {target}, a copy of the method on "
                                             f"contract {contract.number}, newer than this TCC — "
-                                            f"update TCC first, or {remedy}.")
+                                            f"update TCC first, or {remedy}.", target)
     if _is_known(target, own):
-        return Binding(project_dir, KNOWN, copy, entry)
+        return Binding(project_dir, KNOWN, copy, entry, target=target)
     if any(_same(target, approved) for approved in config.approved_methods()):
-        return Binding(project_dir, APPROVED, copy, entry)
+        return Binding(project_dir, APPROVED, copy, entry, target=target)
     return Binding(project_dir, REFUSED, None, entry,
                    f"{entry} points at {target}, a copy of the method TCC does not know; approve it "
-                   f"on this machine, or {remedy}.", can_approve=True)
+                   f"on this machine, or {remedy}.", can_approve=True, target=target)
 
 
-def _refused(project_dir: Path, entry: Path, reason: str) -> Binding:
-    return Binding(project_dir, REFUSED, None, entry, reason, False)
+def _refused(project_dir: Path, entry: Path, reason: str, target: str = "") -> Binding:
+    return Binding(project_dir, REFUSED, None, entry, reason, False, target)
 
 
 def _why(exc: OSError) -> str:
@@ -416,7 +421,9 @@ def approve(binding: Binding) -> Binding:
     Only a binding with `can_approve`. The approval is kept in TCC's own settings, never in the
     project — a project must not be able to approve itself — as the copy's realpath, the thing every
     look compares. The link is looked at again first: the person approved the copy the sentence
-    named, and a link re-pointed since is another copy. `MethodRefused` when the settings do not
+    named, and a link re-pointed since is another copy. What is stored is the `target` that look
+    judged, never the link resolved once more (M20): a link re-pointed between the look and the
+    store would have a copy approved that nobody judged. `MethodRefused` when the settings do not
     keep the approval (`config.approve_method` reads it back).
     """
     if not binding.can_approve:
@@ -429,16 +436,15 @@ def approve(binding: Binding) -> Binding:
         return now
     if not now.can_approve:
         raise MethodRefused(now.reason)
-    if now.reason != binding.reason:
+    if now.target != binding.target:
         raise MethodRefused(f"{binding.entry} points at another copy than when it was checked; look "
                             f"at it again before approving it.")
-    target = os.path.realpath(binding.entry)
-    if not config.approve_method(target):
-        raise MethodRefused(f"TCC could not keep the approval of {target} for {binding.entry}: its "
-                            f"settings on this machine did not store it; approve it again once they "
-                            f"can be written.")
+    if not config.approve_method(now.target):
+        raise MethodRefused(f"TCC could not keep the approval of {now.target} for {binding.entry}: "
+                            f"its settings on this machine did not store it; approve it again once "
+                            f"they can be written.")
     # A trust decision: in the log, where a dialog row does not stay (#169 review m2).
-    app_log.logger().info("method: approved %s on this machine, for %s", target, binding.entry)
+    app_log.logger().info("method: approved %s on this machine, for %s", now.target, binding.entry)
     return for_project(binding.project_dir)
 
 

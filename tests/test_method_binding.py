@@ -819,6 +819,26 @@ def test_an_approval_of_a_link_changed_since_it_was_checked_is_refused(project, 
     assert config.approved_methods() == ()
 
 
+def test_an_approval_stores_the_copy_it_judged_not_where_the_link_points_since(
+        project, other_copy, bare_copy, monkeypatch):
+    """M20 (Fable's ruling m1): `approve` looked at the link again, compared the sentences, and then
+    resolved the link a third time for the store — so a link re-pointed between the look and the
+    store had a copy approved that nobody judged. Here the look answers what it saw (`for_project`
+    hands back the old binding) while the link already points at another copy: what is stored is
+    the copy that was judged, the binding's own `target`."""
+    _link(_entry(project), other_copy)
+    seen = method_binding.for_project(project)
+    assert seen.can_approve, seen.reason
+    os.unlink(_entry(project))
+    _link(_entry(project), bare_copy)
+    monkeypatch.setattr(method_binding, "for_project", lambda project_dir: seen)
+
+    method_binding.approve(seen)
+
+    assert config.approved_methods() == (os.path.realpath(other_copy),), \
+        "the store holds a copy nobody judged"
+
+
 def test_an_approval_the_settings_drop_raises(project, other_copy, monkeypatch):
     """`_NoSettings` answers before anyone handed the core a store — headless, the light half."""
     _link(_entry(project), other_copy)
