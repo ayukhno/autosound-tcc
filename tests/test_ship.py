@@ -354,6 +354,30 @@ def test_the_paired_line_is_read_from_the_tags_own_section():
     ship_mod.check_paired_method(text, METHOD_SHA, "v0.1.25")  # no Stop
 
 
+#: A sha with every hex digit in it, so any one character sits somewhere inside it.
+HEX_SHA = "0123456789abcdef" * 2 + "01234567"
+
+
+@pytest.mark.parametrize("said, sha", [
+    ("a", METHOD_SHA),               # one character, the one the sha starts with
+    ("e", HEX_SHA),                  # one character, somewhere inside the sha
+    ("aaaaaa", METHOD_SHA),          # six: one short of git's own short sha
+    ("3456789a", HEX_SHA),           # eight, inside the sha but not where it starts
+])
+def test_the_pairing_needs_seven_characters_from_the_start_of_the_sha(said, sha):
+    """F13 (#174). `startswith(said) or said in method_sha` paired one character, any one the sha
+    held, so the line a release is reproduced from could name no commit at all and pass."""
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.check_paired_method(CHANGELOG.format(tag="v0.1.25", sha=said), sha, "v0.1.25")
+
+    assert f"`{said}`" in str(stop.value), "the refusal names what the line says"
+
+
+def test_seven_characters_from_the_start_of_the_sha_pair():
+    ship_mod.check_paired_method(CHANGELOG.format(tag="v0.1.25", sha=HEX_SHA[:7]), HEX_SHA,
+                                 "v0.1.25")  # no Stop
+
+
 # ---------------------------------------------------------------- the seam to the hub
 
 
@@ -834,6 +858,26 @@ def test_no_pytest_caller_carries_its_own_distribution_flags():
                 continue
             assert not re.search(r"(^|\s)-n(\s|=)", line), f"{relative}: {line.strip()}"
             assert "--dist" not in line, f"{relative}: {line.strip()}"
+
+
+def test_every_uv_run_in_a_workflow_runs_what_the_lock_records():
+    """F13 (#174). `uv run` without `--locked` resolves again whenever `uv.lock` is behind
+    `pyproject.toml`, and CI then tests a set of packages no release carries. With it, the run
+    stops instead. Every workflow file is read, so a new one is held to it too.
+
+    A `--no-project` line is exempt, and that is uv's rule, not a gap: with no project there is no
+    lock for `--locked` to hold the run to — `ci.yml`'s shard splitter is stdlib only and runs
+    without the project on purpose."""
+    workflows = ROOT / ".github" / "workflows"
+    runs = [(path.name, line.strip())
+            for path in sorted(workflows.iterdir()) if path.suffix in (".yml", ".yaml")
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if "uv run" in line and not line.lstrip().startswith("#")]
+
+    assert runs, f"no `uv run` in any workflow under {workflows}: a scan of nothing passes"
+    unlocked = [(name, line) for name, line in runs
+                if "--locked" not in line and "--no-project" not in line]
+    assert unlocked == [], unlocked
 
 
 def test_ci_runs_on_every_push_so_the_release_gate_has_a_run_to_read():

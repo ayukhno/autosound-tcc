@@ -143,7 +143,7 @@ jobs:
             exit 0
           fi
           printf 'running %s entries\n' "${#ids[@]}"
-          uv run --extra dev --python 3.12 python -m pytest "${ids[@]}" -q
+          uv run --locked --extra dev --python 3.12 python -m pytest "${ids[@]}" -q
 
   # The pull request's whole answer, four ways per platform. macOS is in here rather than on its
   # own any more: as the control it earns nothing on a push (it is the machine the author already
@@ -185,12 +185,13 @@ jobs:
           GROUP: ${{ matrix.group }}
         run: |
           # `--no-project`: the splitter is stdlib only, and syncing the project twice to ask it
-          # one question would spend the minutes this job exists to save.
+          # one question would spend the minutes this job exists to save. So no `--locked` here
+          # either: with no project there is no lock to hold the run to.
           files=$(uv run --no-project --python 3.12 python scripts/ci_shard.py --splits 4 --group "$GROUP")
           count=$(printf '%s\n' $files | grep -c .)
           echo "shard $GROUP of 4 on ${{ matrix.os }}: $count files"
           echo "shard **$GROUP/4** on \`${{ matrix.os }}\`: $count test files" >> "$GITHUB_STEP_SUMMARY"
-          uv run --extra dev --python 3.12 python -m pytest $files -q
+          uv run --locked --extra dev --python 3.12 python -m pytest $files -q
 
   # How many Linux runs this workflow was asked for, as a matrix. One on a push; whatever the
   # dispatch input says when a person is chasing the abort.
@@ -252,7 +253,7 @@ jobs:
       # reason Linux is in this file. PYTHONFAULTHANDLER prints the C-level stack with it.
       #
       # QT_QPA_PLATFORM is not set here -- `tests/conftest.py` already does it for every platform.
-      - run: uv run --extra dev --python 3.12 python -m pytest tests/ -v
+      - run: uv run --locked --extra dev --python 3.12 python -m pytest tests/ -v
         env:
           PYTHONFAULTHANDLER: "1"
 
@@ -328,7 +329,7 @@ jobs:
           attempts=3
           for i in $(seq 1 $attempts); do
             set +e
-            uv run --extra dev --python 3.12 python -m pytest $args -q -p no:cacheprovider \
+            uv run --locked --extra dev --python 3.12 python -m pytest $args -q -p no:cacheprovider \
               2>&1 | tee /tmp/pytest-out.txt
             code=${PIPESTATUS[0]}
             set -e

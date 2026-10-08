@@ -212,6 +212,10 @@ _UNRELEASED = re.compile(r"^## \[unreleased\]", re.I | re.M)
 #: floor; one rule, two doors, and they should not drift apart.
 RELEASE_NOTE_MIN_LINES = 3
 
+#: The fewest characters of a sha the `Paired with method` line may name the method by: git's
+#: own short sha. One character used to pair with any sha that held it (F13, #174).
+PAIRED_SHA_MIN = 7
+
 
 def section(text: str, heading: str) -> str | None:
     """The body under `## [heading]`, up to the next `## `; None when there is no such heading."""
@@ -294,12 +298,17 @@ def check_paired_method(changelog: str, method_sha: str, tag: str) -> None:
     if not method_sha:
         raise Stop("the method's sha could not be read, so the CHANGELOG's pairing cannot be "
                    "checked — see core/install_report.skill_sha")
-    if not (method_sha.startswith(said) or said in method_sha):
+    if not method_sha.startswith(said):
         # A tag name is allowed there too, and is what the file uses today; only a SHA can be
-        # checked automatically, so a tag is reported rather than silently accepted.
+        # checked automatically, so a tag is reported rather than silently accepted. From its
+        # start only: `said in method_sha` paired any piece of the sha (F13, #174).
         raise Stop(f"CHANGELOG says the method is `{said}`, the checkout is at "
                    f"`{method_sha[:12]}` — if `{said}` is a tag, put the sha beside it so this "
                    "can be checked rather than believed")
+    if len(said) < PAIRED_SHA_MIN:
+        raise Stop(f"CHANGELOG says the method is `{said}` — the start of the checkout's "
+                   f"`{method_sha[:12]}`, but too short to name one commit; write at least "
+                   f"{PAIRED_SHA_MIN} characters of the sha")
 
 
 # ---------------------------------------------------------------- the writing half
