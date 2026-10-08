@@ -2923,9 +2923,9 @@ class MainWindow(QMainWindow):
         elif not git.remote:
             sub, tip = i18n.t("gitSubNoRemote"), i18n.t("gitTipNoRemote").format(
                 name=config.chosen_project_dir().name)
-        elif git.unpushed:
-            sub, tip = (i18n.t("gitSubBehind").format(n=git.unpushed),
-                        i18n.t("gitTipBehind").format(n=git.unpushed, remote=git.remote))
+        elif git.unpushed or not git.counted:  # not counted is «?», never «backed up» (#172)
+            n, said = git.unpushed or "?", i18n.t("gitTipBehind" if git.counted else "gitTipUncounted")
+            sub, tip = i18n.t("gitSubBehind").format(n=n), said.format(n=n, remote=git.remote)
         else:
             sub, tip = i18n.t("gitSubOk"), i18n.t("gitTipOk").format(remote=git.remote)
         section.set_sub(sub)
@@ -2945,8 +2945,8 @@ class MainWindow(QMainWindow):
             body.addWidget(_kv_row(i18n.t("gitChanges"),
                                    str(git.changed) if git.changed else i18n.t("gitClean")))
         body.addWidget(_kv_row(i18n.t("gitBackup"), git.remote or i18n.t("gitNone")))
-        if git.unpushed:
-            body.addWidget(_kv_row(i18n.t("gitUnpushed"), str(git.unpushed)))
+        if git.unpushed or not git.counted:
+            body.addWidget(_kv_row(i18n.t("gitUnpushed"), str(git.unpushed or "?")))
         if not git.remote:
             self._backup_step = 1
             body.addWidget(self._git_button(_backup_label(1), "gitBackupTip", self._on_git_backup))

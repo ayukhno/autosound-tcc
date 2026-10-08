@@ -389,15 +389,20 @@ class GitStatus:
     changed: Optional[int] = None
     #: Where the backup goes, as a person reads it (`github.com/owner/name`); "" for none.
     remote: str = ""
-    #: Commits the remote does not have yet; None when there is no upstream to count against.
+    #: Commits the remote does not have yet; None when there is no upstream to count against, or
+    #: when git could not count them (`counted`).
     unpushed: Optional[int] = None
+    #: False when git could not count them: `status` failed and `rev-list` too (review of #172,
+    #: I-1). Not counted is never «backed up».
+    counted: bool = True
 
     @property
     def level(self) -> str:
-        """`bad` — no history kept; `wait` — kept but not backed up, or behind; `done` — backed up."""
+        """`bad` — no history kept; `wait` — kept but not backed up, behind, or not counted;
+        `done` — backed up."""
         if not self.works or not self.repo:
             return "bad"
-        if not self.remote or self.unpushed:
+        if not self.remote or self.unpushed or not self.counted:
             return "wait"
         return "done"
 
@@ -453,9 +458,10 @@ def git_status(project_dir: Optional[Path] = None, *, reuse: bool = False) -> Gi
     history and no backup, and nothing told him (TCC F-074, 2026-09-23); he asked to see whether
     there is a repository and whether there is git at all.
 
-    Two children once the probe is kept (#172): it was seven on a Mac, on the GUI thread, on every
-    reload. `reuse` answers the last read when it was of this folder, with no child — for the
-    window's actions that are not about git; a reload never passes it.
+    Two children once the probe is kept (#172), a third only when the status fails and a backup
+    is still to be counted: it was seven on a Mac, on the GUI thread, on every reload. `reuse`
+    answers the last read when it was of this folder, with no child — for the window's actions
+    that are not about git; a reload never passes it.
     """
     global _last_read
     project = Path(project_dir or config.project_dir())
@@ -497,9 +503,17 @@ def _read_git(project: Path) -> GitStatus:
     detached = head == "(detached)"
     branch = oid[:7] if detached else ("" if head == "(unknown)" else head)
     url = _backup_url(remotes or "")
+    counted = True
+    if status is None and url:
+        # The status failed — a corrupt index, the bound on a slow folder, a broken submodule, a
+        # git older than porcelain v2 — and there is a backup: its count the old way, which needs
+        # neither the index nor the work tree. A third child, on this path only (review of #172).
+        count = _git(project, "rev-list", "--count", "@{u}..HEAD")
+        counted = count is not None and count.isdigit()
+        ahead = int(count) if counted else None
     return GitStatus(works=True, repo=True, branch=branch, changed=changed,
                      remote=_remote_label(url) if url else "",
-                     unpushed=ahead if url and not detached else None)
+                     unpushed=ahead if url and not detached else None, counted=counted)
 
 
 def _backup_url(remotes: str) -> str:

@@ -778,14 +778,28 @@ def test_nothing_is_chosen_until_someone_chooses_it():
     assert window._ai_main_combo.itemData(0) == ""
 
 
-def test_choosing_a_model_arms_the_button_without_starting_anything():
+def _panel_refreshes(monkeypatch, window) -> list:
+    """Each `_set_project_params` call's `reuse_git` from here on, in place of the call. The
+    actions that are not about git re-say the panel with git's last answer, not a new read (#172);
+    what the build queued is run first, as it is not the action's."""
+    QApplication.processEvents()
+    refreshed: list = []
+    monkeypatch.setattr(window, "_set_project_params",
+                        lambda view, reuse_git=False: refreshed.append(reuse_git))
+    return refreshed
+
+
+def test_choosing_a_model_arms_the_button_without_starting_anything(monkeypatch):
     _app()
     window = MainWindow()
+    refreshed = _panel_refreshes(monkeypatch, window)
 
     window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5"))
+    QApplication.processEvents()
 
     assert getattr(window, "_agent_worker", None) is None
     assert "not started" in window._dialog._session_chip.text().lower()
+    assert refreshed and all(refreshed), "the panel follows the pick, and git is not read again"
 
 
 def test_the_placeholder_disappears_once_a_model_is_chosen(tmp_path, monkeypatch):
@@ -1854,6 +1868,7 @@ def test_the_gate_menu_has_a_fourth_choice_that_asks_about_nothing(monkeypatch):
     assert never.text() == i18n.t("gateNever")
     assert never.toolTip() == i18n.t("gateNeverTip")
     assert window._gate_actions[omp_session.GATE_AUTO].toolTip() == i18n.t("gateAutoTip")
+    refreshed = _panel_refreshes(monkeypatch, window)
 
     window._set_gate_mode(omp_session.GATE_NEVER)
 
@@ -1862,6 +1877,7 @@ def test_the_gate_menu_has_a_fourth_choice_that_asks_about_nothing(monkeypatch):
     assert never.isChecked()
     assert not window._gate_actions[omp_session.GATE_AUTO].isChecked()
     assert dict(window._app_config_rows())[i18n.t("cfgGate")] == i18n.t("gateNever")
+    assert refreshed == [True], "the panel shows the mode; git is not read again (#172)"
 
 
 def test_the_effort_picker_offers_three_levels_and_none_of_them_is_cheap(monkeypatch):
@@ -1878,10 +1894,13 @@ def test_the_effort_picker_offers_three_levels_and_none_of_them_is_cheap(monkeyp
     levels = [combo.itemData(i) for i in range(combo.count())]
     assert levels == ["high", "xhigh", "max"]
     assert combo.currentData() == model_choices.EFFORT_DEFAULT
+    refreshed = _panel_refreshes(monkeypatch, window)
 
     combo.setCurrentIndex(levels.index("max"))
+    QApplication.processEvents()
 
     assert project_settings.get(config.tcc_dir(), "effort") == "max"
+    assert refreshed == [True], "the panel shows the effort; git is not read again (#172)"
 
 
 def test_system_params_shows_what_tcc_itself_is_set_to():

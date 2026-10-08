@@ -511,10 +511,48 @@ def test_git_is_asked_whether_it_runs_until_it_does(tmp_path, monkeypatch):
     assert asked == [("--version",), ("--version",)], "a yes is kept: no third question"
 
 
+def _corrupt_index(project) -> None:
+    """`git status` then exits 128 («index file smaller than expected») while `remote -v` and
+    `rev-list` still answer: neither needs the index."""
+    (project / ".git" / "index").write_bytes(b"not an index")
+
+
+def test_a_status_git_cannot_give_still_counts_what_the_backup_lacks(tmp_path, monkeypatch):
+    """Review of #172, I-1: the count of commits the backup lacks came from `git status`, so a
+    status that failed — a corrupt index, the 2 s bound on a slow folder, a broken submodule, a
+    git older than porcelain v2 — left it None, and None read as «backed up» with one commit not
+    pushed. A failed status now has it counted the old way, by `rev-list`, which needs no index: a
+    third child, on that path only."""
+    project, _ = _ahead(tmp_path)
+    _corrupt_index(project)
+    project_view._git_works()  # primes the probe: once per process and `git` path
+    started = _children(monkeypatch)
+
+    state = project_view.git_status(project)
+
+    assert state.changed is None, "the status failed: this is the path under test"
+    assert (state.unpushed, state.level) == (1, "wait"), "one commit is not backed up"
+    assert [argv[3:] for argv in started][2:] == [["rev-list", "--count", "@{u}..HEAD"]]
+
+
+def test_a_backup_git_cannot_count_is_never_called_backed_up(tmp_path):
+    """...and when `rev-list` cannot count either — here no upstream to count against — the
+    count is unknown, and an unknown count is not «backed up»."""
+    project = _repo(tmp_path / "car")
+    remote = _backup(tmp_path, project, upstream=False)
+    _corrupt_index(project)
+
+    state = project_view.git_status(project)
+
+    assert state.remote == remote and state.unpushed is None
+    assert state.level == "wait" and not state.counted
+
+
 def test_the_project_header_shows_a_folder_with_no_history(tmp_path, monkeypatch):
     """...and a language switch says the folder's last answer again in the new words without asking
     git (#172): it re-said the whole panel, probe and all, on the GUI thread. A reload still
-    reads the folder afresh."""
+    reads the folder afresh. A backup git could not count is «? not backed up», never «backed
+    up» (review of #172, I-1)."""
     from PySide6.QtWidgets import QApplication
 
     from autosound_tcc.core import config
@@ -540,3 +578,9 @@ def test_the_project_header_shows_a_folder_with_no_history(tmp_path, monkeypatch
     finally:
         window._on_language_selected("en")
     assert [argv for argv in started if argv[0] in ("git", "xcode-select")] == []
+
+    _git("-C", str(tmp_path), "remote", "add", "origin", str(tmp_path.parent / "backup.git"))
+    _corrupt_index(tmp_path)  # and no commit for `rev-list` to count from
+    window._set_project_params(None)
+    assert window._project_section.sub_text() == i18n.t("gitSubBehind").format(n="?")
+    assert window._project_section.dot_status() == "wait"
