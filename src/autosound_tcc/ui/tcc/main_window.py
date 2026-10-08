@@ -101,7 +101,7 @@ from autosound_tcc.state import (
 )
 from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, VersionRefused, load_project_view, rig_view
-from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, sizing
+from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, mcp_view, sizing
 from autosound_tcc.ui.tcc import main_menu, menu_registry
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
@@ -5157,7 +5157,7 @@ class MainWindow(QMainWindow):
             return
         if choice.harness == "omp" and getattr(server, "config_error", ""):
             # omp reaches TCC only through `.mcp.json`: unwritten, it ran without TCC's tools.
-            self._dialog._add_system_message(i18n.t("mcpNoConfigOmp").format(error=server.config_error))
+            self._dialog._add_system_message(mcp_view.omp_without_config(server))
             return
         probe = TuningSession(project_dir=server.project_dir)  # cheap: only reads the registry
         # "Start a new session" means an empty context on purpose: the project's state is on disk

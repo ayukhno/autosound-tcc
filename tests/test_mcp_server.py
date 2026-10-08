@@ -1809,7 +1809,26 @@ def test_an_unwritable_advertisement_does_not_take_the_server_down(tmp_path, mon
 
         assert port, "the server is up"
         assert "PermissionError" in server.config_error
+        assert server.config_unreadable is None, "a write that failed is not a read refused"
         assert any("mcp config not written" in r.getMessage() for r in caplog.records)
+    finally:
+        server.stop()
+
+
+def test_a_start_that_could_not_read_the_advertisement_keeps_which_file(tmp_path, monkeypatch,
+                                                                        app_log_told):
+    """The review of Task 19, M4: a read refusal reached the window's advice for a write that
+    failed, «Make the project folder writable». `start()` keeps the file it could not read, so the
+    window can name it and say to check it instead. A folder in its place is refused everywhere."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = tmp_path / ".mcp.json"
+    path.mkdir()
+    server = TccMcpServer(project_dir=tmp_path, preferred_port=8970)
+    try:
+        server.start()
+        assert server.serving and server.config_error.startswith("StoreUnreadable"), (
+            server.config_error)
+        assert server.config_unreadable == path
     finally:
         server.stop()
 

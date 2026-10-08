@@ -7929,6 +7929,12 @@ def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):
                                              config_error="PermissionError: read-only",
                                              project_dir=tmp_path)
         window._launch_session()
+        # A file TCC could not read is named, not blamed on the folder (#173, M4).
+        unread = tmp_path / ".mcp.json"
+        window._mcp_server = SimpleNamespace(stopped_reason=None, serving=True,
+                                             config_error="StoreUnreadable: x",
+                                             config_unreadable=unread, project_dir=tmp_path)
+        window._launch_session()
 
         # A Claude session never reads `.mcp.json`: the same unwritten file refuses nothing.
         class _PastTheGate(Exception):
@@ -7945,10 +7951,11 @@ def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):
         window._mcp_server, window._mcp_error = None, ""
 
     assert built == [] and window._agent_worker is None
-    assert len(said) == 3
+    assert len(said) == 4
     assert i18n.t("mcpDown") in said[0] and "OSError: p" in said[0]
     assert i18n.t("mcpDown") in said[1] and "OSError: bind" in said[1]
     assert said[2] == i18n.t("mcpNoConfigOmp").format(error="PermissionError: read-only")
+    assert said[3] == i18n.t("mcpConfigUnreadOmp").format(path=unread, error="StoreUnreadable: x")
 
 
 def test_the_signal_nudge_reads_every_open_signals_id_from_the_brief(tmp_path, monkeypatch):
