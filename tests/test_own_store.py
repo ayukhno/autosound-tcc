@@ -278,6 +278,50 @@ def test_a_shape_check_that_raises_reads_as_a_misshapen_store(store, app_log_tol
     assert len(app_log_told) == 1 and "AttributeError" in app_log_told[0], app_log_told
 
 
+@pytest.mark.parametrize("error", [TypeError, AttributeError, KeyError, IndexError, ValueError,
+                                   RecursionError], ids=lambda error: error.__name__)
+def test_a_shape_check_that_trips_on_the_shape_logs_where(store, app_log_told, app_log_warnings,
+                                                          error):
+    """R-bo (the review of Task 19, M1): what a look inside an object trips on when the shape is
+    not the one it assumed reads as misshapen — set aside, said once, the type in the reason. The
+    reason keeps only `Type: text`, so the traceback goes to the log: the line the check tripped
+    on is what its owner needs."""
+    body = b'{"phases": []}'
+    store.write_bytes(body)
+
+    def misshapen(data):
+        raise error("tripped")
+
+    assert own_store.read_json(store, misshapen=misshapen) == {}
+
+    left = _left(store)
+    assert len(left) == 1 and (store.parent / left[0]).read_bytes() == body, left
+    assert len(app_log_told) == 1 and error.__name__ in app_log_told[0], app_log_told
+    assert any(r.exc_info and r.exc_info[0] is error for r in app_log_warnings), (
+        "the traceback is logged")
+
+
+@pytest.mark.parametrize("error", [NameError, ImportError, MemoryError],
+                         ids=lambda error: error.__name__)
+def test_a_shape_check_failing_for_reasons_of_its_own_is_not_the_store_s_shape(
+        store, app_log_told, error):
+    """R-bo (the review of Task 19, M1): a bug in the check itself, a module it could not import,
+    a machine out of memory — none says anything about the store, which an owner whose check
+    works reads fine. Taken for a shape, it moved a good store aside and kept only `Type: text`.
+    It goes up instead, and the store stays where it is."""
+    body = b'{"phases": {}}'
+    store.write_bytes(body)
+
+    def misshapen(data):
+        raise error("not about the store")
+
+    with pytest.raises(error):
+        own_store.read_json(store, misshapen=misshapen)
+
+    assert _left(store) == ["store.json"] and store.read_bytes() == body, "left where it is"
+    assert app_log_told == [], "and nothing said about it"
+
+
 def test_a_store_nested_too_deep_to_parse_is_broken_json(store, app_log_told):
     """R-bn: `json.loads` answers nesting deeper than the interpreter can follow with
     `RecursionError`, not a `ValueError`, so it escaped past every reader. Bytes the parser cannot

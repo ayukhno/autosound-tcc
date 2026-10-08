@@ -52,6 +52,10 @@ class StoreUnreadable(OSError):
 _said: dict[tuple[str, str], tuple] = {}
 _said_lock = threading.Lock()
 
+#: What a `misshapen` look trips on when the object is not the shape it assumed: a list where a
+#: map was, a missing key, a value of the wrong type, nesting too deep to walk (R-bo).
+_SHAPE_ERRORS = (TypeError, AttributeError, KeyError, IndexError, ValueError, RecursionError)
+
 
 def read_json(path: Path, *,
               misshapen: Optional[Callable[[dict[str, Any]], str]] = None,
@@ -64,8 +68,10 @@ def read_json(path: Path, *,
     owner can read, or "" when it is. An object it refuses goes the broken way — set aside with
     its bytes, and said with that reason: `sessions.json` holding `"phases": []` was valid JSON
     and an object, and the registry's code tripped over it on every read (#173). A look that
-    raises refuses the same way, its exception named in the reason (R-bn): it tripped over the
-    very shape it was there to catch, and its exception escaped past every reader.
+    trips on the shape refuses the same way, its exception named in the reason and its traceback
+    logged (R-bn, R-bo): before, its exception escaped past every reader. Only what a shape trips
+    — `_SHAPE_ERRORS`; anything else from the look (a bug of its own, an import, memory) says
+    nothing about the store, and goes up rather than move a good store aside.
 
     `aside_dir`, when given, is where a broken store's copy goes instead of beside it, the folder
     made when it is not there (R-k). For a store whose own folder travels and whose bytes must
@@ -94,7 +100,10 @@ def read_json(path: Path, *,
         return _set_aside(path, "valid JSON, but not an object", aside_dir)
     try:
         wrong = misshapen(data) if misshapen is not None else ""
-    except Exception as exc:  # noqa: BLE001 — the owner's check tripped over the shape (R-bn)
+    except _SHAPE_ERRORS as exc:
+        # The owner's check tripped over the shape it was there to catch (R-bn). The reason keeps
+        # `Type: text`; the line it tripped on is for the log (R-bo).
+        app_log.logger().warning("the shape check of %s raised", path, exc_info=True)
         wrong = f"checking its shape raised {type(exc).__name__}: {exc}"
     if wrong:
         return _set_aside(path, f"valid JSON, but {wrong}", aside_dir)
