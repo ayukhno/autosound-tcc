@@ -336,6 +336,23 @@ def test_the_last_call_is_remembered_until_the_log_changes(tmp_path, monkeypatch
     assert opened == [str(path)]
 
 
+def test_a_call_logged_within_the_same_mtime_is_read(tmp_path, monkeypatch):
+    """The review of Task 20, M3: the log only grows, so on a clock that ticks coarsely the miss
+    that matters is a call logged within one tick of the last — the same mtime, more bytes. The
+    size half of the key reads it."""
+    path = _logged(tmp_path, "gemini-a")
+    critic.last_call(tmp_path)
+    opened = _reads.opened_under(monkeypatch, tmp_path)
+    was = path.stat()
+
+    with path.open("a", encoding="utf-8") as log:
+        log.write(json.dumps({"mode": critic.MODE_API_OR_CLI, "model": "gemini-b"}) + "\n")
+    os.utime(path, ns=(was.st_atime_ns, was.st_mtime_ns))
+
+    assert critic.last_call(tmp_path)["model"] == "gemini-b"
+    assert opened == [str(path)]
+
+
 # --- "choose a model" is a QUESTION, not a failure (SKL-023) --------------------------------
 
 

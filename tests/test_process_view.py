@@ -481,6 +481,25 @@ def test_what_went_stale_is_remembered_until_a_file_it_reads_changes(project, pr
     assert str(path) in opened, opened
 
 
+def test_an_event_appended_within_the_same_mtime_is_read(project, process, monkeypatch):
+    """The review of Task 20, M3: the journal only grows, so on a clock that ticks coarsely the
+    miss that matters is a line appended within one tick of the last — the same mtime, more bytes.
+    The size half of the key reads it: the capture that clears `w-L` is not lost."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    _record_change(project, process, "remeasure: [w-L, w-R]")
+    assert set(process_view.stale_channels(project)) == {"w-L", "w-R"}
+    journal = project / "process" / "journal.jsonl"
+    was = journal.stat()
+
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+    os.utime(journal, ns=(was.st_atime_ns, was.st_mtime_ns))
+    opened = _reads.opened_under(monkeypatch, project)
+
+    assert set(process_view.stale_channels(project)) == {"w-R"}
+    assert str(journal) in opened, opened
+
+
 def test_what_went_stale_is_read_again_by_a_method_read_again(project, process, monkeypatch):
     """#172 beside #126: an in-app update reads the method again (`vendor_loader.reload_loaded`),
     and what went stale is the method's reading of the journal — so the answer remembered from the
@@ -498,6 +517,66 @@ def test_what_went_stale_is_read_again_by_a_method_read_again(project, process, 
 
     assert set(process_view.stale_channels(project)) == {"w-L"}
     assert str(project / "process" / "journal.jsonl") in opened, opened
+
+
+def _held(monkeypatch, module, name: str) -> dict:
+    """`name` held as another program holds a file: the method's reader in `module` meets the
+    refusal Windows gives a sharing violation, EACCES, and reads the file as empty, as it reads
+    every file it cannot open (#134, R53). Nothing on disk moves. Returns the switch that ends it."""
+    hold = {"on": True}
+
+    def opening(file, *args, **kwargs):
+        if hold["on"] and os.path.basename(os.fspath(file)) == name:
+            raise PermissionError(13, "held by another program", os.fspath(file))
+        return open(file, *args, **kwargs)
+
+    monkeypatch.setitem(vars(module), "open", opening)
+    return hold
+
+
+def test_a_journal_the_method_could_not_open_is_not_remembered(project, process, monkeypatch):
+    """The review of Task 20, M1: a held journal reads as no events — its bytes are there, its
+    stamp is the one it had. Kept, that answer would say «nothing stale» after the hold is gone,
+    until the journal's next line: the silence SCR-014 exists to prevent. So the next call reads
+    the journal again."""
+    process.enter_phase("2")
+    _record_change(project, process, "remeasure: [w-L]")
+    hold = _held(monkeypatch, vendor_loader.load_process(), "journal.jsonl")
+
+    assert process_view.stale_channels(project) == {}  # what the method reads a held journal as
+    hold["on"] = False
+    assert set(process_view.stale_channels(project)) == {"w-L"}
+
+
+def test_a_project_json_the_method_could_not_open_is_not_remembered(project, process, monkeypatch):
+    """M1's other two readings. A held `project.json` gives no channel, so a capture under a
+    channel's old name clears nothing (SCR-039) — and that answer is not kept either."""
+    process.enter_phase("2")
+    process.add_step("2.1", "sweep the fronts")
+    _rename(project, "w-L", "wf-L")
+    _record_change(project, process, "remeasure: [wf-L]")
+    process.finish_step("2.1", ["w-L_10 (sw)"])
+    hold = _held(monkeypatch, vendor_loader.load_dsp_state(), "project.json")
+
+    assert set(process_view.stale_channels(project)) == {"wf-L"}  # no channel: no old name
+    hold["on"] = False
+    assert process_view.stale_channels(project) == {}
+
+
+def test_a_glossary_the_method_could_not_open_is_not_remembered(project, process, monkeypatch):
+    """A held glossary gives no channel for a full rebaseline to flag — not kept."""
+    import json
+
+    (project / "glossary.json").write_text(json.dumps({
+        "channels": [{"code": "w-L", "active": True}, {"code": "w-R", "active": True}],
+    }), encoding="utf-8")
+    process.enter_phase("2")
+    _record_change(project, process, "full_rebaseline", what="mic recalibrated")
+    hold = _held(monkeypatch, vendor_loader.load_naming(), "glossary.json")
+
+    assert process_view.stale_channels(project) == {}  # no channel to flag
+    hold["on"] = False
+    assert set(process_view.stale_channels(project)) == {"w-L", "w-R"}
 
 
 def test_an_impact_the_parser_cannot_act_on_flags_nothing(project, process):

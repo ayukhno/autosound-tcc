@@ -408,6 +408,8 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
     glossary — and handed out as a copy (#172): the window asks this at least twice a refresh, on
     the GUI thread, and the journal only grows. The method it was read with is in the key too: the
     reading is the method's, and an update reads the method again (`vendor_loader.reload_loaded`).
+    An answer read while a file could not be opened is not kept (the review of Task 20, M1): the
+    method reads such a file as empty, and a hold or a permission lifted moves no stamp.
     """
     process = _process_module()
     if process is None:
@@ -415,32 +417,50 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
     root = Path(project_dir or config.project_dir())
     if not journal_file(root).is_file():
         return {}
-    files = (journal_file(root), config.project_path(root), root / "glossary.json")
-    key = (process, *(_stamp(path) for path in files))
+    journal = _stamp(journal_file(root))
+    key = (process, journal, _stamp(config.project_path(root)), _stamp(root / "glossary.json"))
     held = _STALE.get(str(root))
-    if held is None or held[0] != key:
-        held = _STALE[str(root)] = (key, _stale_in(root, process))
-    return copy.deepcopy(held[1])
+    if held is not None and held[0] == key:
+        return copy.deepcopy(held[1])
+    stale, events_seen, read_empty = _stale_in(root, process)
+    # Kept when the journal gave events, or has no bytes to give any; and when nothing the answer
+    # used came back empty. A journal with bytes and no events may be one the method could not
+    # open — it reads such a file as none — and «nothing stale» from it must not outlive the hold.
+    if (events_seen or not journal[2]) and not read_empty:
+        _STALE[str(root)] = (key, stale)
+    return copy.deepcopy(stale)
 
 
-def _stale_in(project_dir: Path, process) -> dict[str, dict]:
-    """`stale_channels`, read from the files: one ordered pass over the journal."""
+def _stale_in(project_dir: Path, process) -> tuple[dict[str, dict], int, set[str]]:
+    """`stale_channels`, read from the files: one ordered pass over the journal.
+
+    With it, what that reading rests on, for the memo to judge (the review of Task 20, M1): how
+    many events the journal gave, and which other reading came back empty where the answer used
+    it — `project.json` with no channel when a capture was matched against what went stale, the
+    glossary with no channel for a full rebaseline. The method reads a file it cannot open as
+    empty (#134, R53), so an empty reading is no evidence that the file is."""
     proc = process.Process(str(process_dir(project_dir)))
     parse = _impact_parser()
     aliases = _channel_aliases(project_dir)
     one, tags = _reading()
+    events = proc.events()  # oldest first
+    read_empty: set[str] = set()
 
     stale: dict[str, dict] = {}
-    for event in proc.events():  # oldest first
+    for event in events:
         kind = event.get("type")
         if kind == process.EV_CONFIG_CHANGE:
             parsed = parse(event.get("impact")) if parse else {"kind": "other", "codes": ()}
             codes = parsed.get("codes") or ()
             if parsed.get("kind") == "full_rebaseline":
                 codes = _known_channel_codes(project_dir)
+                if not codes:
+                    read_empty.add("glossary")
             for code in codes:
                 stale[code] = {**event, "impact_parsed": parsed}
         elif kind == process.EV_STEP_DONE:
+            if stale and not aliases:
+                read_empty.add("project.json")
             # Evidence is free-form pointers (REW names, `v_003`, an audit entry), so the code is
             # looked for in the text -- as a whole code, not a substring (`_cites`).
             evidence = _evidence_text(event.get("evidence"), one)
@@ -450,7 +470,7 @@ def _stale_in(project_dir: Path, process) -> dict[str, dict]:
             ]
             for code in cleared:
                 del stale[code]
-    return stale
+    return stale, len(events), read_empty
 
 
 #: The two controls `naming.generate_name` writes INTO a code with a `-` (`m-L-ctl1_49 (sw)`): the
