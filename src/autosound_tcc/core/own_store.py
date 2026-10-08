@@ -6,10 +6,11 @@ not allowed to open alike, and the next write put that `{}` back with one field 
 else the file held was gone, and nothing said so (#173, F5). Here the three are told apart:
 
 * **absent** — `{}`, silently: a project nobody has opened has no settings yet;
-* **broken** (bad JSON, bad UTF-8, or JSON that is not an object; a byte-order mark is not
-  broken) — the file is moved to `<name>.corrupt-<YYYYMMDD-HHMMSS>` beside it (or into the folder
-  its owner names, `aside_dir`), the person is told, and `{}` comes back. The next write starts a
-  fresh file, and the original bytes are still there for whoever wants them;
+* **broken** (bad JSON or nested too deep to parse, bad UTF-8, or JSON that is not an object; a
+  byte-order mark is not broken) — the file is moved to `<name>.corrupt-<YYYYMMDD-HHMMSS>`
+  beside it (or into the folder its owner names, `aside_dir`), the person is told, and `{}`
+  comes back. The next write starts a fresh file, and the original bytes are still there for
+  whoever wants them;
 * **there but unreadable** (any other `OSError`: no permission, a folder where the file should
   be, a broken file that could not be moved) — the person is told and `StoreUnreadable` is
   raised. Nothing is moved and nothing may be written: the bytes may be perfectly good. A plain
@@ -62,7 +63,9 @@ def read_json(path: Path, *,
     `misshapen`, when given, is the owner's own look inside the object: why it is not a shape the
     owner can read, or "" when it is. An object it refuses goes the broken way — set aside with
     its bytes, and said with that reason: `sessions.json` holding `"phases": []` was valid JSON
-    and an object, and the registry's code tripped over it on every read (#173).
+    and an object, and the registry's code tripped over it on every read (#173). A look that
+    raises refuses the same way, its exception named in the reason (R-bn): it tripped over the
+    very shape it was there to catch, and its exception escaped past every reader.
 
     `aside_dir`, when given, is where a broken store's copy goes instead of beside it, the folder
     made when it is not there (R-k). For a store whose own folder travels and whose bytes must
@@ -82,11 +85,16 @@ def read_json(path: Path, *,
         # `utf-8-sig`: older Windows Notepad saves UTF-8 with a byte-order mark, and a store edited
         # there is not broken (the review of Task 17).
         data = json.loads(raw.decode("utf-8-sig"))
-    except ValueError as exc:  # a JSON error and a UTF-8 error are both ValueErrors
+    except (ValueError, RecursionError) as exc:
+        # A JSON error and a UTF-8 error are both ValueErrors. Nesting deeper than the parser can
+        # follow is a RecursionError, and bytes it cannot read are broken all the same (R-bn).
         return _set_aside(path, _why(exc), aside_dir)
     if not isinstance(data, dict):
         return _set_aside(path, "valid JSON, but not an object", aside_dir)
-    wrong = misshapen(data) if misshapen is not None else ""
+    try:
+        wrong = misshapen(data) if misshapen is not None else ""
+    except Exception as exc:  # noqa: BLE001 — the owner's check tripped over the shape (R-bn)
+        wrong = f"checking its shape raised {type(exc).__name__}: {exc}"
     if wrong:
         return _set_aside(path, f"valid JSON, but {wrong}", aside_dir)
     _forget(path)

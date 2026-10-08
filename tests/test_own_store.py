@@ -257,3 +257,39 @@ def test_a_store_whose_aside_folder_cannot_be_made_is_refused_and_left_where_it_
 
     assert _left(store) == ["store.json"] and store.read_bytes() == b"{ broken"
     assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told
+
+
+def test_a_shape_check_that_raises_reads_as_a_misshapen_store(store, app_log_told):
+    """R-bn: the owner's `misshapen` is code, and code trips — on the very shapes it is there to
+    catch. Its exception escaped past every reader of the store. It now reads as a shape the
+    owner cannot read: set aside with its bytes, said once, the exception named in the reason."""
+    body = b'{"phases": []}'
+    store.write_bytes(body)
+
+    def misshapen(data):  # assumes the outer shape: a list has no `.values()`
+        return "" if all(isinstance(p, dict) for p in data["phases"].values()) else "a bad phase"
+
+    assert own_store.read_json(store, misshapen=misshapen) == {}
+    assert own_store.read_json(store, misshapen=misshapen) == {}, "nothing more to say"
+
+    left = _left(store)
+    assert len(left) == 1 and _ASIDE.fullmatch(left[0]), left
+    assert (store.parent / left[0]).read_bytes() == body, "the original bytes are kept"
+    assert len(app_log_told) == 1 and "AttributeError" in app_log_told[0], app_log_told
+
+
+def test_a_store_nested_too_deep_to_parse_is_broken_json(store, app_log_told):
+    """R-bn: `json.loads` answers nesting deeper than the interpreter can follow with
+    `RecursionError`, not a `ValueError`, so it escaped past every reader. Bytes the parser cannot
+    read are broken JSON: set aside with their bytes, said once."""
+    depth = 100_000  # Python 3.12 parses 5 000 and gives up before 20 000
+    body = b'{"phases": ' + b"[" * depth + b"]" * depth + b"}"
+    store.write_bytes(body)
+
+    assert own_store.read_json(store) == {}
+    assert own_store.read_json(store) == {}, "nothing more to say"
+
+    left = _left(store)
+    assert len(left) == 1 and _ASIDE.fullmatch(left[0]), left
+    assert (store.parent / left[0]).read_bytes() == body, "the original bytes are kept"
+    assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told
