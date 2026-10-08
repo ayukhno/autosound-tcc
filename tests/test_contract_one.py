@@ -124,6 +124,13 @@ CONTRACT_1 = {
     "verify.py": ("verdict(name, measurements=None, f_low=20, f_high=20000)",),
 }
 
+#: What TCC reads in-process from the method beyond `CONTRACT_1`: names a release may rename
+#: without breaking contract 1. Today the two files the seed preview's memory is keyed on
+#: (`new_project_dialog._seed_reads`, #172; the group review, G1). A rename does not break the
+#: dialog -- it falls back to v3.1.2's names and logs it -- so this is where the nightly says it.
+#: The list only shrinks: a name the method lists in `IMPORTABLE` moves into `CONTRACT_1`.
+READ_OUTSIDE_CONTRACT_1 = {"project_seed.py": ("PROFILE_FILE", "PROSE_FILES")}
+
 
 def _the_copy() -> Path:
     """The method TCC's tests run: `vendor_loader.skill_dir()`, `AUTOSOUND_SKILL_DIR` first."""
@@ -145,6 +152,15 @@ def _importable(contract_py: Path) -> dict:
     assert len(values) == 1, (
         f"{contract_py}: {len(values)} top-level IMPORTABLE assignments, where contract 1 has one")
     return ast.literal_eval(values[0])
+
+
+def _top_level_names(module_py: Path) -> set[str]:
+    """The names a module binds at its top level by assignment, read by `ast` -- never imported."""
+    tree = ast.parse(module_py.read_bytes(), filename=str(module_py))
+    targets = [target for node in tree.body
+               for target in (node.targets if isinstance(node, ast.Assign)
+                              else [node.target] if isinstance(node, ast.AnnAssign) else [])]
+    return {target.id for target in targets if isinstance(target, ast.Name)}
 
 
 def _name(entry: str) -> str:
@@ -209,6 +225,23 @@ def test_its_importable_table_is_contract_1s_entry_for_entry():
     assert table == CONTRACT_1, (
         f"{contract_py}: IMPORTABLE is not contract 1's table as TCC keeps it "
         f"(tests/test_contract_one.py):\n" + "\n".join(_differences(table, CONTRACT_1)))
+
+
+def test_what_tcc_reads_outside_the_table_is_still_in_the_copy():
+    """The group review, G1: `IMPORTABLE` holds what the method promises TCC, and TCC reads two
+    names it does not hold. Each is still bound at the top of its module in the copy under test,
+    and none of them is in the copy's table yet -- one that is moves into `CONTRACT_1`."""
+    copy = _the_copy()
+    table = _importable(copy / "rew_tool" / "contract.py")
+
+    for module, names in READ_OUTSIDE_CONTRACT_1.items():
+        bound = _top_level_names(copy / "rew_tool" / module)
+        listed = {_name(entry) for entry in table.get(module, ())}
+        assert [name for name in names if name not in bound] == [], (
+            f"{copy / 'rew_tool' / module}: TCC reads these names, outside contract 1, and the "
+            "copy no longer binds them (tests/test_contract_one.py, READ_OUTSIDE_CONTRACT_1)")
+        assert [name for name in names if name in listed] == [], (
+            f"{module}: contract 1's table lists these now: move them into CONTRACT_1")
 
 
 def test_the_table_is_keyed_as_tccs_loader_imports():

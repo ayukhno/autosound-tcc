@@ -838,6 +838,93 @@ def test_the_real_preview_seeds_under_the_tests_own_folder(tmp_path, monkeypatch
     assert all(target.resolve().is_relative_to(tmp_path.resolve()) for target in into), into
 
 
+def _the_method_counted(monkeypatch, source) -> tuple:
+    """The method TCC runs, its `seed` counted for `source`: the module and the list of calls."""
+    method = npd._seeder()
+    if method is None:
+        pytest.skip("the vendored skill is not checked out")
+    seeds: list = []
+    seed = method.seed
+    monkeypatch.setattr(method, "seed", lambda src, target, **kwargs:
+                        (seeds.append(src) if str(src) == str(source) else None)
+                        or seed(src, target, **kwargs))
+    return method, seeds
+
+
+def _stood_in_for(warnings) -> list[str]:
+    """The fallback's WARNING (`_seed_reads`): which of the method's names it stood in for."""
+    return [record.getMessage() for record in warnings
+            if "project_seed names no" in record.getMessage()]
+
+
+def test_a_second_identical_preview_with_the_real_method_runs_no_seed(
+        tmp_path, monkeypatch, app_log_warnings):
+    """The group review, G1: every memory test above runs on `_StubSeeder`, which names its files
+    itself. With the method TCC runs (P1), the first preview is a real seed -- `project_repo.init`
+    and its git children on the GUI thread -- keyed on the files that method's `PROFILE_FILE` and
+    `PROSE_FILES` name, with no stand-in; and a second identical one is drawn from memory. On the
+    nightly a release that renamed either name is red here, as well as in contract 1's list."""
+    source = _passat_with_fs(tmp_path)
+    method, seeds = _the_method_counted(monkeypatch, source)
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    dlg._seed_edit.setText(str(source))
+    _settled(dlg)
+    seeded = len(seeds)
+
+    dlg._refresh_seed_note_now()
+
+    assert seeded == 1, "the first preview was a real seed"
+    assert _stood_in_for(app_log_warnings) == [], "the method names both: nothing stood in"
+    keyed = {path for path, _mtime, _size in dlg._preview_key(method, source)[2]}
+    named = {str(source / method.PROFILE_FILE), *(str(source / n) for n in method.PROSE_FILES)}
+    assert named <= keyed, keyed
+    assert len(seeds) == seeded, "nothing it reads changed: no second seed"
+
+
+class _MethodWithout:
+    """The method TCC runs less one name, as a release that renamed it looks to TCC: its own
+    `seed()` still reads its own globals; only the name the dialog asks for is gone."""
+
+    def __init__(self, method, gone: str) -> None:
+        self._method, self._gone = method, gone
+
+    def __getattr__(self, name: str):
+        if name == self._gone:
+            raise AttributeError(name)
+        return getattr(self._method, name)
+
+
+@pytest.mark.parametrize("name", ["PROFILE_FILE", "PROSE_FILES"])
+def test_the_real_method_without_a_name_the_memory_keys_on_is_remembered_all_the_same(
+        tmp_path, monkeypatch, app_log_warnings, name):
+    """G1: both names are outside contract 1, so a release may rename either. Without one, the
+    real method's preview is still remembered -- keyed on TCC's copy of v3.1.2's name (part A's
+    fallback) -- so redrawing runs no seed on the GUI thread, and the log names what stood in,
+    once for the dialog."""
+    source = _passat_with_fs(tmp_path)
+    method, seeds = _the_method_counted(monkeypatch, source)
+    seeder = _MethodWithout(method, name)
+    monkeypatch.setattr(npd, "_seeder", lambda: seeder)
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    dlg._seed_edit.setText(str(source))
+    _settled(dlg)
+    seeded = len(seeds)
+
+    dlg._refresh_seed_note_now()
+    dlg._refresh_seed_note_now()
+
+    assert seeded == 1, "the first preview was a real seed"
+    assert len(seeds) == seeded, "remembered: neither redraw seeds"
+    said = _stood_in_for(app_log_warnings)
+    # Exactly what the seeder lacks: this name, and the other only where the copy lacks it too --
+    # a release that renamed it is the test above's to say, and contract 1's list's.
+    names = ("PROFILE_FILE", "PROSE_FILES")
+    assert len(said) == 1, said
+    assert [n for n in names if n in said[0]] == [n for n in names if not hasattr(seeder, n)], said
+
+
 def test_what_travels_is_said_on_one_line_the_fs_its_last_part(tmp_path, monkeypatch):
     """tcc#122 (W-4's review of tcc#93): the note said «Travels:» twice, the Fs on a line of its
     own, and «the Fs of 1 drivers». One line names what travels, the Fs its last part; the count's
