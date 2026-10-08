@@ -688,15 +688,31 @@ def test_an_advertisement_that_cannot_be_withdrawn_is_logged_not_raised(
 def test_an_mcp_json_nested_too_deep_to_write_back_is_left_as_it_was(tmp_path, monkeypatch,
                                                                      app_log_warnings):
     """The review of Task 19, M2. `json.dumps(indent=2)` takes the pure-Python encoder, which runs
-    out of stack on nesting `json.loads` still reads (3.12: from about 1 200 levels to 8 000), and
-    the withdrawal's `except (OSError, ValueError)` let that `RecursionError` out of a function
-    that never raises. Now it is logged and the file left as it was. The write raises it into
-    `start()`, which keeps it as the advertisement's error, and writes nothing either."""
+    out of stack from about 1 000 levels, on nesting `json.loads` still reads, and the
+    withdrawal's `except (OSError, ValueError)` let that `RecursionError` out of a function that
+    never raises. Now it is logged and the file left as it was. The write raises it into
+    `start()`, which keeps it as the advertisement's error, and writes nothing either.
+
+    The parser's reach is the platform's: Python 3.12 gives it a C recursion budget of 3 000 on
+    Windows and 10 000 elsewhere, and 3 000 levels failed the Windows runner — the file was set
+    aside as broken before it reached the encoder (N1). So the depth is one both read and the
+    encoder cannot write, and both halves of that are checked here, not assumed."""
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     path = tmp_path / ".mcp.json"
-    depth = 3_000
+    depth = 1_500
     body = (b'{"mcpServers": {"tcc": {"type": "http", "url": "http://127.0.0.1:8765/mcp"}, '
             b'"deep": ' + b"[" * depth + b"]" * depth + b"}}")
+    try:
+        data = json.loads(body)
+    except RecursionError:
+        pytest.skip(f"this Python's JSON parser cannot read {depth} levels, so no file it reads "
+                    "is too deep for the encoder alone")
+    try:
+        json.dumps(data, indent=2)
+    except RecursionError:
+        pass
+    else:
+        pytest.fail(f"the indented encoder wrote {depth} levels: this depth no longer reaches M2")
     path.write_bytes(body)
 
     mcp_server.forget_mcp_config(tmp_path)
