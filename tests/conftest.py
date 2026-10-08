@@ -225,7 +225,7 @@ def _app_log_left_as_found():
     found = [(log, own(log), log.propagate, log.level)
              for log in (app_log.logger(), logging.getLogger("py.warnings"))]
     log_path, thread_hook = app_log._log_path, threading.excepthook
-    sink, held = app_log._ui_sink, list(app_log._held)
+    sink, held, held_dropped = app_log._ui_sink, list(app_log._held), app_log._held_dropped
     yield
     dropped: list[logging.Handler] = []
     for log, handlers, propagate, level in found:
@@ -243,7 +243,7 @@ def _app_log_left_as_found():
         handler.close()
     app_log._log_path = log_path
     threading.excepthook = thread_hook
-    app_log._ui_sink, app_log._held = sink, held
+    app_log._ui_sink, app_log._held, app_log._held_dropped = sink, held, held_dropped
 
 
 @pytest.fixture

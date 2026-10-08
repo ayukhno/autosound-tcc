@@ -165,6 +165,36 @@ def test_reports_held_past_their_bound_lose_the_oldest_and_the_window_hears_the_
     assert heard == made[-app_log._HELD_MAX:], heard
 
 
+def test_reports_dropped_past_their_bound_are_logged_once_per_stretch(tmp_path, monkeypatch,
+                                                                      app_log_warnings):
+    """...and the drop is logged (G7): every report is in the log, but a window that registers
+    later hears the latest `_HELD_MAX` and nothing says there were more. Once while nothing takes
+    them -- each report past the bound is another drop -- and once again for the next stretch,
+    after a window took what was held and went."""
+    monkeypatch.setattr(app_log, "_log_path", tmp_path / "tcc.log")
+    monkeypatch.setattr(app_log, "_ui_sink", None)
+    monkeypatch.setattr(app_log, "_held", [])
+
+    def overflow() -> None:
+        for n in range(app_log._HELD_MAX + 5):
+            app_log.report(f"report {n}")
+
+    def dropped() -> list[str]:  # each report is an ERROR line of its own
+        return [record.getMessage() for record in app_log_warnings
+                if record.levelno == logging.WARNING]
+
+    overflow()
+    assert len(dropped()) == 1 and str(app_log._HELD_MAX) in dropped()[0], dropped()
+    overflow()
+    assert len(dropped()) == 1, "once while nothing takes them"
+
+    heard = []
+    app_log.set_ui_sink(lambda message, path: heard.append(message))
+    app_log.set_ui_sink(None)
+    overflow()
+    assert len(heard) == app_log._HELD_MAX and len(dropped()) == 2, dropped()
+
+
 def test_a_report_reaches_the_window_with_no_log_file_to_point_at(monkeypatch):
     """`setup()` leaves no log path when the log folder cannot be written, and the sink heard
     nothing then: the one machine whose log cannot hold the sentence was the one whose strip
