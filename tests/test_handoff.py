@@ -6,8 +6,6 @@ import json
 import os
 import shutil
 import subprocess
-import threading
-import time
 
 import pytest
 
@@ -16,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from autosound_tcc.core import (  # noqa: E402
-    config, handoff, method_binding, method_cli, process_writer, vendor_loader,
+    config, handoff, method_binding, method_cli, process_writer, project_lock, vendor_loader,
 )
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.state import process_view  # noqa: E402
@@ -116,40 +114,23 @@ def test_a_refused_copy_of_the_method_is_said_with_its_sentence_not_as_too_old(t
     assert handoff.ask(car) == (None, binding.reason)
 
 
-def test_a_handoff_waits_for_no_lock_and_makes_no_process_folder(tmp_path):
+def test_a_handoff_takes_no_lock_and_makes_no_process_folder(tmp_path, monkeypatch):
     """#171: `handoff` is a READ, asked on the GUI thread, and it writes nothing either way. Behind
     the writer lock it would wait out the GUI's wait behind somebody else's write and then answer
-    nothing; and the lock's flock would make `process/` in a project that has none. The real
-    method, so an answer means it ran."""
-    from autosound_tcc.core import project_lock, vendor_loader
-
+    nothing; and the lock's flock would make `process/` in a project that has none. So it never
+    asks for the lock, and `project_lock.hold` fails the test if it is called — no clock, which two
+    real children on a cold runner could not keep inside the GUI's wait. The real method, so an
+    answer means it ran."""
     if not vendor_loader.is_available():
         pytest.skip("rew_tool submodule not checked out")
+    monkeypatch.setattr(project_lock, "hold",
+                        lambda *_a, **_k: pytest.fail("the handoff read asked for the writer lock"))
     car = tmp_path / "car"
     car.mkdir()
-    held, release = threading.Event(), threading.Event()
 
-    def holder():
-        # Only the thread lock: a full `hold` takes the flock, which makes `process/` itself.
-        with project_lock._thread_lock(car):
-            held.set()
-            release.wait(10)
-
-    thread = threading.Thread(target=holder, daemon=True)
-    thread.start()
-    assert held.wait(5)
-    started = time.monotonic()
-    try:
-        got, _why = handoff.ask(car)
-    finally:
-        release.set()
-    elapsed = time.monotonic() - started
-    thread.join(5)
+    got, _why = handoff.ask(car)
 
     assert got is not None and got["ok"] is False, got  # an empty project is not ready, and it said so
-    assert elapsed < method_cli.GUI_LOCK_WAIT_S, f"{elapsed:.1f}s: it waited for the writer lock"
-    assert not (car / "process").exists()
-    assert handoff.ask(car)[0] is not None  # nobody holds it now: a locked read would take the flock
     assert not (car / "process").exists()
 
 

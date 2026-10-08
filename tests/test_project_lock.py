@@ -338,20 +338,24 @@ def test_a_filesystem_that_cannot_flock_fails_at_once_and_gives_the_thread_lock_
 @posix_only
 def test_one_deadline_covers_both_locks_rather_than_one_each(tmp_path, holder_process):
     """What the wait for the thread lock spent comes off the flock's. A deadline per lock would
-    let a write on the GUI thread freeze the window for twice its budget — here at least 1.9 s
-    (0.9 s for the thread lock, then a whole second for the flock), so the bound below cannot
-    pass it however fast the machine is, and a slow machine still has 0.8 s of slack."""
+    let a write on the GUI thread freeze the window for twice its budget — here at least 3 s
+    (1 s for the thread lock, then the whole 2 s again for the flock), so the bound below cannot
+    pass it however fast the machine is, and a slow machine still has 0.8 s of slack.
+
+    The timeout is the flock's, named by its file (M2): with no stage asked, a timer late under
+    load let the thread-lock stage time out instead, and that passed a deadline per lock too. A
+    timer up to a second late still frees the thread lock inside the budget."""
     thread_lock = project_lock._thread_lock(tmp_path)
     thread_lock.acquire()
-    frees = threading.Timer(0.9, thread_lock.release)  # free at 0.9 s of a 1 s budget...
+    frees = threading.Timer(1.0, thread_lock.release)  # free at 1 s of a 2 s budget...
     frees.daemon = True
     frees.start()
 
     started = time.monotonic()
-    with pytest.raises(project_lock.LockTimeout):
-        with project_lock.hold(tmp_path, timeout_s=1.0):  # ...so the flock gets what is left
+    with pytest.raises(project_lock.LockTimeout, match=r"\.process-write\.lock"):
+        with project_lock.hold(tmp_path, timeout_s=2.0):  # ...so the flock gets what is left
             pass
     elapsed = time.monotonic() - started
     frees.join(5)
 
-    assert elapsed < 1.8, f"{elapsed:.2f}s on a 1 s deadline: one deadline per lock"
+    assert elapsed < 2.8, f"{elapsed:.2f}s on a 2 s deadline: one deadline per lock"
