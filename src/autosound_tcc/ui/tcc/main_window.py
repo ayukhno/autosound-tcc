@@ -5927,7 +5927,7 @@ class MainWindow(QMainWindow):
     def _show_logged_error(self, message: str, path: str) -> None:
         self._status_strip.notify(
             i18n.t("logError" if path else "logErrorNoFile").format(error=message, path=path),
-            level="warn")
+            level="warn", sticky=True)  # stands until its ✕; later lines wait behind it (#173, I1)
 
     def stop_workers(self) -> None:
         """Bring every background thread this window owns to a stop.

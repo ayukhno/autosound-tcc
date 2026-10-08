@@ -421,6 +421,13 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="status-strip-text"][class~="status-warn"] {{
         color: {t.warn};
     }}
+    /* How many lines wait behind one that stands until its ✕ (#173, I1): beside the ✕. */
+    QLabel[class~="status-strip-more"] {{
+        background: transparent;
+        color: {t.muted};
+        font-size: 11px;
+        padding: 5px 2px;
+    }}
     QScrollArea[class~="status-strip-scroll"],
     QScrollArea[class~="status-strip-scroll"] > QWidget,
     QScrollArea[class~="status-strip-scroll"] > QWidget > QWidget {{

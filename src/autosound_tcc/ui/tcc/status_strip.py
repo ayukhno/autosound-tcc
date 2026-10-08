@@ -7,15 +7,22 @@ regardless of view/control mode, that holds the latest fact and nothing else (no
 
 A long message scrolls inside three lines instead of pushing the window down, and a warning can
 always be closed (the Arbiter, 2026-09-23, about sixteen lines that took half the window).
+
+One line is "the latest" except for what `app_log` reports, which stands until its ✕ (#173, I1):
+a store set aside at launch was said and, in the same `__init__`, written over before anyone read
+it. The latest of the other lines waits behind it, counted beside the ✕.
 """
 
 from __future__ import annotations
 
 import html
+from dataclasses import dataclass
 from typing import Callable, Literal, Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QToolButton
+
+from autosound_tcc.ui.tcc import i18n
 
 Level = Literal["info", "warn"]
 
@@ -24,6 +31,20 @@ Level = Literal["info", "warn"]
 _INFO_SECONDS = 30
 #: How many lines the strip may take before it scrolls.
 _MAX_LINES = 3
+#: How many standing lines are kept, the one shown among them — `app_log`'s own bound on what it
+#: holds for a window. Each is said once per state of its file; this is for what is not.
+_STANDING_MAX = 20
+
+
+@dataclass(eq=False)
+class _Line:
+    """One `notify`, as it was asked for: shown now, or waiting its turn."""
+
+    text: str
+    level: Level
+    action: Optional[tuple[str, Callable[[], None]]]
+    dismissible: bool
+    on_dismiss: Optional[Callable[[], None]]
 
 
 class StatusStrip(QFrame):
@@ -54,18 +75,27 @@ class StatusStrip(QFrame):
         self._close.setCursor(Qt.CursorShape.PointingHandCursor)
         self._close.clicked.connect(lambda: self.linkActivated.emit("close"))
         self._close.setVisible(False)
+        # How many lines wait behind a standing one: beside the ✕ that brings the next (I1).
+        self._more = QLabel("")
+        self._more.setProperty("class", "status-strip-more")
+        self._more.setVisible(False)
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 6, 0)
         row.setSpacing(0)
         row.addWidget(self._scroll, 1)
+        row.addWidget(self._more, 0, Qt.AlignmentFlag.AlignTop)
         row.addWidget(self._close, 0, Qt.AlignmentFlag.AlignTop)
         self._fit_height()
         self.setVisible(False)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._expire)
-        self._action: Optional[Callable[[], None]] = None
-        self._on_dismiss: Optional[Callable[[], None]] = None
+        #: The lines that stand until their ✕, oldest first; the first is the one shown.
+        self._standing: list[_Line] = []
+        #: The latest of every other line: shown, or waiting behind a standing one. The clock is
+        #: its own, running either way.
+        self._line: Optional[_Line] = None
+        self._shown: Optional[_Line] = None
         self.linkActivated.connect(self._on_link)
 
     def _fit_height(self) -> None:
@@ -97,7 +127,8 @@ class StatusStrip(QFrame):
     def notify(self, text: str, level: Level = "info",
                action: Optional[tuple[str, Callable[[], None]]] = None,
                dismissible: bool = False,
-               on_dismiss: Optional[Callable[[], None]] = None) -> None:
+               on_dismiss: Optional[Callable[[], None]] = None,
+               sticky: bool = False) -> None:
         """Show the latest fact — and, when it is an EVENT, let go of it after a while.
 
         The difference is not decoration. `info` says something HAPPENED ("opened a terminal
@@ -115,23 +146,55 @@ class StatusStrip(QFrame):
         follows was never made.
 
         `dismissible` offers the ✕ for a message that is not a warning; `on_dismiss` hears it.
+
+        `sticky` is a line nothing replaces: it stands until its own ✕ (#173, I1). What `app_log`
+        reports comes this way — a store set aside at launch was said, then written over in the
+        same `__init__` by the process's own lines, and its memo kept it from being said again.
+        Later lines do not replace it: the latest of them waits behind it, counted beside the ✕,
+        and comes when it is closed. Several stand in the order they came; the same sentence
+        stands once.
         """
-        self._timer.stop()
-        self._action = action[1] if action else None
-        self._on_dismiss = on_dismiss
-        dismissible = dismissible or level == "warn"
-        if level != "warn" and action is None:
-            self._timer.start(_INFO_SECONDS * 1000)
-        if action is None:
+        line = _Line(text, level, action, dismissible or level == "warn" or sticky, on_dismiss)
+        if sticky:
+            if any(standing.text == text for standing in self._standing):
+                return
+            self._standing.append(line)
+            if len(self._standing) > _STANDING_MAX:
+                del self._standing[1]  # the oldest of those waiting, never the one being read
+        else:
+            self._timer.stop()
+            self._line = line
+            if level != "warn" and action is None:
+                self._timer.start(_INFO_SECONDS * 1000)
+        self._show()
+
+    def _show(self) -> None:
+        """Put the line whose turn it is on screen — the first standing one, else the latest — and
+        the count of what waits behind it."""
+        line = self._standing[0] if self._standing else self._line
+        behind = len(self._standing) - 1 + (self._line is not None) if self._standing else 0
+        self._more.setText(i18n.t("stripMore").format(n=behind) if behind else "")
+        self._more.setToolTip(i18n.t("stripMoreTip") if behind else "")
+        self._more.setVisible(behind > 0)
+        if line is self._shown:
+            self._fit_height()
+            return
+        self._shown = line
+        if line is None:
+            self._label.setText("")
+            self._close.setVisible(False)
+            self.setVisible(False)
+            return
+        if line.action is None:
             self._label.setTextFormat(Qt.TextFormat.AutoText)
-            self._label.setText(text)
+            self._label.setText(line.text)
         else:
             self._label.setTextFormat(Qt.TextFormat.RichText)
             # Plain text, escaped — with its line breaks kept as breaks.
-            body = html.escape(text).replace("\n", "<br>")
-            self._label.setText(f'{body} &nbsp;<a href="action">{html.escape(action[0])}</a>')
-        self._close.setVisible(dismissible)
-        warn = " status-warn" if level == "warn" else ""
+            body = html.escape(line.text).replace("\n", "<br>")
+            self._label.setText(f'{body} &nbsp;<a href="action">{html.escape(line.action[0])}</a>')
+        self._close.setVisible(line.dismissible)
+        warn = " status-warn" if line.level == "warn" else ""
         self.setProperty("class", "status-strip" + warn)
         self._label.setProperty("class", "status-strip-text" + warn)
         for widget in (self, self._label):
@@ -142,23 +205,39 @@ class StatusStrip(QFrame):
         self.setVisible(True)
 
     def clear(self) -> None:
+        """Let go of the latest line, shown or waiting. A standing line stays until its own ✕: what
+        a caller clears is its own cause — the record that has now been written — not a report."""
         self._timer.stop()
-        self._action = None
-        self._on_dismiss = None
-        self._label.setText("")
-        self._close.setVisible(False)
-        self.setVisible(False)
+        self._line = None
+        self._show()
+
+    def waiting(self) -> list[str]:
+        """The lines behind the one shown, in the order its ✕ brings them — for the test, and for
+        anybody wondering what the count beside it counts."""
+        if not self._standing:
+            return []
+        rest = [line.text for line in self._standing[1:]]
+        return rest + ([self._line.text] if self._line is not None else [])
 
     def timer_is_running(self) -> bool:
         """For the test, and for anybody wondering whether this line is on a clock."""
         return self._timer.isActive()
 
     def _expire(self) -> None:
-        """The clock ran out. Nothing else changed, so nothing else is touched."""
-        self.clear()
+        """The latest line's clock ran out. Nothing else changed, so nothing else is touched."""
+        self._line = None
+        self._show()
 
     def _on_link(self, href: str) -> None:
-        callback = self._on_dismiss if href == "close" else self._action
-        self.clear()
+        line = self._shown
+        if line is None or (href != "close" and line.action is None):
+            return
+        if self._standing and line is self._standing[0]:
+            self._standing.pop(0)
+        else:
+            self._timer.stop()
+            self._line = None
+        self._show()
+        callback = line.on_dismiss if href == "close" else line.action[1]
         if callback is not None:
             callback()

@@ -101,6 +101,9 @@ _CORE: dict[Lang, dict[str, str]] = {
         "logError": "Something went wrong: {error} — the details are in {path}",
         # `app_log` tells the window even when it could not open a log file to point at.
         "logErrorNoFile": "Something went wrong: {error}",
+        # A line `app_log` reported stands until its ✕, and later lines wait behind it (#173, I1).
+        "stripMore": "+{n} more",
+        "stripMoreTip": "More lines wait behind this one — close it with ✕ to see the next.",
         "rewPort": "REW port",
         "mcpNoConfig": "TCC is running and reachable, but `.mcp.json` could not be written ({error}). A CLI started in the project folder will not find TCC, and neither will an omp session — omp reaches TCC only through that file; the window's Claude session is unaffected.",
         "mcpNoConfigOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and it could not be written ({error}). Make the project folder writable and start TCC again, or pick a Claude model.",
@@ -1416,6 +1419,8 @@ Choose sweeps (sw) above to read this.",
         "seriesItem": "серія {v}",
         "logError": "Щось пішло не так: {error} — деталі в {path}",
         "logErrorNoFile": "Щось пішло не так: {error}",
+        "stripMore": "ще {n}",
+        "stripMoreTip": "За цим рядком чекають інші — закрий його ✕, щоб побачити наступний.",
         "rewPort": "Порт REW",
         "mcpNoConfig": "TCC працює й доступний, але `.mcp.json` не записався ({error}). CLI, запущений у теці проєкту, TCC не знайде, і сесія omp теж — omp бачить TCC лише через цей файл; на сесію Claude у вікні це не впливає.",
         "mcpNoConfigOmp": "⚠️ Сесія omp не може стартувати: omp бачить TCC лише через `.mcp.json`, а його не вдалося записати ({error}). Зробіть теку проєкту доступною для запису й запустіть TCC знову або виберіть модель Claude.",
@@ -2629,6 +2634,10 @@ Choose sweeps (sw) above to read this.",
         "logError": 'Coś poszło nie tak: {error} — szczegóły w {path}',
         # #170: the English until the Advisor.
         "logErrorNoFile": "Something went wrong: {error}",
+        # #170: the English until the Advisor.
+        "stripMore": "+{n} more",
+        # #170: the English until the Advisor.
+        "stripMoreTip": "More lines wait behind this one — close it with ✕ to see the next.",
         "rewPort": 'Port REW',
         "mcpNoConfig": "TCC is running and reachable, but `.mcp.json` could not be written ({error}). A CLI started in the project folder will not find TCC, and neither will an omp session — omp reaches TCC only through that file; the window's Claude session is unaffected.",
         "mcpNoConfigOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and it could not be written ({error}). Make the project folder writable and start TCC again, or pick a Claude model.",
@@ -3921,6 +3930,10 @@ Choose sweeps (sw) above to read this.",
         "logError": 'Etwas ist schiefgelaufen: {error} — Details in {path}',
         # #170: the English until the Advisor.
         "logErrorNoFile": "Something went wrong: {error}",
+        # #170: the English until the Advisor.
+        "stripMore": "+{n} more",
+        # #170: the English until the Advisor.
+        "stripMoreTip": "More lines wait behind this one — close it with ✕ to see the next.",
         "rewPort": 'REW-Port',
         "mcpNoConfig": "TCC is running and reachable, but `.mcp.json` could not be written ({error}). A CLI started in the project folder will not find TCC, and neither will an omp session — omp reaches TCC only through that file; the window's Claude session is unaffected.",
         "mcpNoConfigOmp": "⚠️ An omp session cannot start: omp reaches TCC only through `.mcp.json`, and it could not be written ({error}). Make the project folder writable and start TCC again, or pick a Claude model.",

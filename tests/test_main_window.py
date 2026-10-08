@@ -700,10 +700,19 @@ def test_no_contract_subprocess_is_spawned_under_the_test_escape_hatch(monkeypat
 
 def test_a_config_change_reaches_the_status_strip(tmp_path, monkeypatch):
     """SCR-014 says "never silently". A tuner who hasn't opened the plan still has to learn that
-    the car changed under their measurements."""
-    from autosound_tcc.core import vendor_loader
+    the car changed under their measurements.
+
+    And a settings file broken by hand, set aside as the header is built, is said and stays said
+    (#173, I1): the process state's own lines come later in the same `__init__`, the contract
+    check's a few seconds after, and each replaced the store's sentence before anyone read it. It
+    stands until its ✕; the latest line waits behind it, counted, and comes when it is closed."""
+    from autosound_tcc.core import project_settings, vendor_loader
+    from autosound_tcc.core.contract_check import ContractReport
 
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    store = project_settings.path_for(config.tcc_dir())
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text('{"gate": "foreign",}', encoding="utf-8")
     # A real session reaches phase 2 through intake and phase 0, and both now hold: the machine
     # files have to exist (2026-08-12) and a target has to be recorded (SCR-036). This test starts
     # mid-tune, so it seeds what a real one would have produced by then.
@@ -719,9 +728,17 @@ def test_a_config_change_reaches_the_status_strip(tmp_path, monkeypatch):
     _app()
     window = MainWindow()
 
-    assert not window._status_strip.isHidden()
-    text = window._status_strip.text()
-    assert "driver replaced" in text and "w-L" in text and "w-R" in text
+    strip = window._status_strip
+    assert not strip.isHidden()
+    assert str(store) in strip.text() and ".corrupt-" in strip.text(), strip.text()
+    stale = strip.waiting()[-1]
+    assert "driver replaced" in stale and "w-L" in stale and "w-R" in stale, strip.waiting()
+
+    window._on_contract_result(ContractReport(ok=False, project_dir=str(tmp_path), files=(
+        {"file": "project.json", "exists": True, "valid": False, "issues": ["bad"]},)))
+    assert str(store) in strip.text(), "the contract check's line waits behind it too"
+    strip._close.click()
+    assert strip.text() == i18n.t("diagStripIssues").format(n=1), strip.text()
 
 
 # ---- the generator picker is also the harness picker ------------------------
@@ -2920,7 +2937,9 @@ def test_save_writes_tccs_own_settings_even_with_no_session(monkeypatch, tmp_pat
     And a Save whose writes did not land is not «on disk», and it still answers: on the strip and
     in the conversation, with what kept it off the disk — with no session, and with one that has
     nothing to save; also when the failure was said once already and the strip has moved on
-    since (the review of Task 17, N1, and its re-review)."""
+    since (the review of Task 17, N1, and its re-review). The first failure's own report — the
+    store, said by the Save's read — stands until its ✕, and the answer waits behind it (#173, I1).
+    """
     from autosound_tcc.core import project_settings
 
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
@@ -2941,8 +2960,12 @@ def test_save_writes_tccs_own_settings_even_with_no_session(monkeypatch, tmp_pat
     bubbles = len(window._dialog._bubbles)
     not_saved = i18n.t("savedTccFailed").split("{")[0]
     window._save_project_state()
-    said = window._status_strip.text()
-    assert said.startswith(not_saved) and str(store) in said, said
+    strip = window._status_strip
+    assert str(store) in strip.text() and not strip.text().startswith(not_saved), strip.text()
+    said = strip.waiting()[-1]
+    assert said.startswith(not_saved) and str(store) in said, strip.waiting()
+    strip._close.click()
+    assert strip.text() == said, "the Save's answer comes when the report is closed"
     window._status_strip.notify("something else")  # the failure was said, and the strip moved on
     worker = _HandoffWorker()
     worker.spoke = False  # a session with nothing to save: its handoff is skipped

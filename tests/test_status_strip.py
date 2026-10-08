@@ -128,3 +128,60 @@ def test_a_passing_fact_has_no_close_button():
     strip.notify("opened a terminal running claude")
     assert "<a " not in strip.text()
     assert not strip.can_close()
+
+
+def test_a_sticky_line_stands_until_its_close_and_later_lines_wait_behind_it():
+    """#173, I1: a store set aside at launch was said on the strip and, in the same `__init__`,
+    written over by the process's own lines before anyone could read it. A sticky line — what
+    `app_log` reports — stands until its ✕: the latest later line waits behind it, counted beside
+    it, and `clear()`, which answers its caller's own cause, leaves it."""
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    strip = StatusStrip()
+    strip.notify("the store was set aside", level="warn", sticky=True)
+    strip.notify("a channel went stale", level="warn")
+    strip.notify("opened a terminal")
+
+    assert strip.text() == "the store was set aside" and strip.can_close()
+    assert strip.waiting() == ["opened a terminal"], "the latest, as the strip always held"
+    assert not strip._more.isHidden() and strip._more.text() == i18n.t("stripMore").format(n=1)
+
+    strip.clear()
+    assert strip.text() == "the store was set aside", "clear() leaves a standing line"
+    assert strip.waiting() == [] and strip._more.isHidden()
+
+    strip.notify("Phase 2 is done", action=("Start the next", lambda: None))
+    strip._close.click()
+    assert strip.text().startswith("Phase 2 is done") and "<a " in strip.text(), \
+        "its ✕ brings the line that waited, offer and all"
+    assert strip._more.isHidden()
+
+
+def test_sticky_lines_stand_in_the_order_they_came_and_the_same_one_once():
+    """Two reports held for the window were replayed into one line, and the first was gone before
+    it was read (I1). Each stands until its own ✕, oldest first; a sentence already standing does
+    not stand twice — an exception raised on every refresh is one line, not a pile."""
+    _app()
+    strip = StatusStrip()
+    for text in ("first report", "second report", "first report"):
+        strip.notify(text, level="warn", sticky=True)
+
+    assert strip.text() == "first report" and strip.waiting() == ["second report"]
+    strip._close.click()
+    assert strip.text() == "second report" and strip.waiting() == []
+    strip._close.click()
+    assert strip.text() == "" and strip.isHidden()
+
+
+def test_a_fact_waiting_behind_a_sticky_line_keeps_its_own_clock():
+    """An event is words on the screen thirty seconds later, waiting or not: its clock runs behind
+    the standing line, and running out lets go of it alone."""
+    _app()
+    strip = StatusStrip()
+    strip.notify("the store could not be read", level="warn", sticky=True)
+    strip.notify("opened a terminal")
+
+    assert strip.timer_is_running()
+    strip._expire()
+    assert strip.text() == "the store could not be read" and strip.waiting() == []
