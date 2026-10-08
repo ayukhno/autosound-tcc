@@ -19,6 +19,15 @@ def _write(project_dir, data):
     (project_dir / "project.json").write_text(json.dumps(data), encoding="utf-8")
 
 
+@pytest.fixture
+def unhurried_git(monkeypatch):
+    """The product's bound on each git child, raised for a test that runs real git and is not about
+    the bound (the group review, W6): `_GIT_TIMEOUT_S` is 2 s, and on a loaded runner a child cut
+    short reads as other facts or another child count -- not a product bug. What holds the bound
+    holds it by name (`_bounded`), so it holds either way; the probe's test keeps the 2 s."""
+    monkeypatch.setattr(project_view, "_GIT_TIMEOUT_S", 30.0)
+
+
 def test_no_project_json_reads_as_empty_everywhere(tmp_path):
     assert project_view.has_project(tmp_path) is False
     assert project_view.load_system_params(tmp_path) == ()
@@ -228,7 +237,7 @@ def test_a_broken_profile_is_not_an_exception(tmp_path):
     assert project_view.load_system_params(tmp_path) == ()
 
 
-def test_git_facts_are_shown_for_a_repo_and_silent_for_anything_else(tmp_path):
+def test_git_facts_are_shown_for_a_repo_and_silent_for_anything_else(tmp_path, unhurried_git):
     """The skill makes a project a git repo on purpose — the tune's history is the point. Folders
     that are not repos say nothing: "not a git repo" would be noise on every one of them."""
     import subprocess
@@ -317,7 +326,7 @@ def test_open_questions_by_file_is_empty_when_there_is_no_project(tmp_path, monk
     assert project_view.open_questions_by_file(tmp_path) == frozenset()
 
 
-def test_git_status_says_whether_history_is_kept_and_backed_up(tmp_path):
+def test_git_status_says_whether_history_is_kept_and_backed_up(tmp_path, unhurried_git):
     """The Arbiter's live project had no repository — no history, no backup — and TCC said nothing
     (F-074). He asked to see whether there is a repository and whether there is git at all."""
     import subprocess
@@ -472,7 +481,8 @@ def _no_commits(tmp_path):
                                    _no_commits],
                          ids=["branch, dirty, ahead, remote", "detached", "no upstream",
                               "no remote", "no origin", "no commits yet"])
-def test_a_reload_asks_git_twice_and_hears_the_same_facts(tmp_path, monkeypatch, shape):
+def test_a_reload_asks_git_twice_and_hears_the_same_facts(tmp_path, monkeypatch, shape,
+                                                           unhurried_git):
     """#172: a reload's `git_status` started seven children on a Mac with `/usr/bin/git` — the
     probe, a `rev-parse` the `.git` check had answered, one call per fact — on the GUI thread; a
     detached head and a remote not named `origin` cost more. Two now: `status --porcelain=v2
@@ -490,7 +500,8 @@ def test_a_reload_asks_git_twice_and_hears_the_same_facts(tmp_path, monkeypatch,
     assert len(started) <= 2, started
 
 
-def test_reuse_answers_the_folders_last_read_and_asks_git_nothing(tmp_path, monkeypatch):
+def test_reuse_answers_the_folders_last_read_and_asks_git_nothing(tmp_path, monkeypatch,
+                                                                  unhurried_git):
     """The five window actions that are not about git — the reviewer, the Generator, the effort,
     the gate, the language — re-say the panel, and each paid the whole read (#172). `reuse=True`
     answers the folder's last read with no child; a folder not read yet is read."""
@@ -531,7 +542,8 @@ def _corrupt_index(project) -> None:
     (project / ".git" / "index").write_bytes(b"not an index")
 
 
-def test_a_status_git_cannot_give_still_counts_what_the_backup_lacks(tmp_path, monkeypatch):
+def test_a_status_git_cannot_give_still_counts_what_the_backup_lacks(tmp_path, monkeypatch,
+                                                                     unhurried_git):
     """Review of #172, I-1: the count of commits the backup lacks came from `git status`, so a
     status that failed — a corrupt index, the 2 s bound on a slow folder, a broken submodule, a
     git older than porcelain v2 — left it None, and None read as «backed up» with one commit not
@@ -553,7 +565,7 @@ def test_a_status_git_cannot_give_still_counts_what_the_backup_lacks(tmp_path, m
                                        (("status", "rev-list"), (None, "wait", False))],
                          ids=["status", "status and rev-list"])
 def test_a_child_cut_short_by_its_bound_is_never_read_as_backed_up(tmp_path, monkeypatch, cut,
-                                                                   read):
+                                                                   read, unhurried_git):
     """G4: I-1 names «the 2 s bound on a slow folder» among the ways the status fails, and only a
     corrupt index stood in for it. Here the bound itself: the children named run past it and are
     cut, as `subprocess.run` cuts one (`TimeoutExpired`). What the backup lacks is then counted by
@@ -599,7 +611,7 @@ def test_the_probe_s_children_carry_the_bound_too(monkeypatch):
     assert asked == ["xcode-select", "git"]
 
 
-def test_a_backup_git_cannot_count_is_never_called_backed_up(tmp_path):
+def test_a_backup_git_cannot_count_is_never_called_backed_up(tmp_path, unhurried_git):
     """...and when `rev-list` cannot count either — here no upstream to count against — the
     count is unknown, and an unknown count is not «backed up»."""
     project = _repo(tmp_path / "car")
@@ -612,7 +624,7 @@ def test_a_backup_git_cannot_count_is_never_called_backed_up(tmp_path):
     assert state.level == "wait" and not state.counted
 
 
-def test_the_project_header_shows_a_folder_with_no_history(tmp_path, monkeypatch):
+def test_the_project_header_shows_a_folder_with_no_history(tmp_path, monkeypatch, unhurried_git):
     """...and a language switch says the folder's last answer again in the new words without asking
     git (#172): it re-said the whole panel, probe and all, on the GUI thread. A reload still
     reads the folder afresh. A backup git could not count is «? not backed up», never «backed
