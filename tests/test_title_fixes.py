@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import threading
 import time
 
 import pytest
 
-from autosound_tcc.core import method_cli, process_writer, project_lock, title_fixes, vendor_loader
+from autosound_tcc.core import (
+    app_log, method_cli, process_writer, project_lock, title_fixes, vendor_loader,
+)
+
+from tests._method_copies import copy_of_the_method
 
 
 def test_a_grammar_difference_is_the_methods_rename_and_ticked():
@@ -35,11 +40,13 @@ def test_another_series_is_no_typo_and_the_closest_name_wins():
 
 
 def test_supersede_calls_the_method_and_a_round_without_the_title_is_fine(tmp_path, monkeypatch):
+    """Exit 1 with the method's own refusal — the `error: …` line `process.py`'s `_main` prints —
+    is the round that never took the title: done, the rename was the whole fix."""
     seen = []
 
     def fake_run(argv, **kwargs):
         seen.append(argv)
-        return subprocess.CompletedProcess(argv, 1, "", "the round never took 'sw_01 (sw)'")
+        return subprocess.CompletedProcess(argv, 1, "", "error: the round never took 'sw_01 (sw)'")
 
     monkeypatch.setattr(method_cli.child, "run_bounded", fake_run)
     done, said = title_fixes.supersede(tmp_path, "sw_01 (sw)", "sw_1 (sw)")
@@ -47,6 +54,50 @@ def test_supersede_calls_the_method_and_a_round_without_the_title_is_fine(tmp_pa
     argv = seen[0]
     assert argv[argv.index("capture-supersede"):] == [
         "capture-supersede", "sw_01 (sw)", "sw_1 (sw)", title_fixes.REASON]
+
+
+@pytest.fixture
+def warned():
+    """What TCC's own logger was warned about, heard on that logger itself (the idiom of
+    `test_method_cli.py`): after `app_log.setup()` it does not propagate to caplog's root."""
+    records: list[logging.LogRecord] = []
+
+    class _Keep(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    log = app_log.logger()
+    handler, level = _Keep(level=logging.WARNING), log.level
+    log.addHandler(handler)
+    if level == logging.NOTSET or level > logging.WARNING:
+        log.setLevel(logging.WARNING)
+    try:
+        yield records
+    finally:
+        log.removeHandler(handler)
+        log.setLevel(level)
+
+
+def test_a_crashed_supersede_is_a_failure_said_and_logged_never_done(tmp_path, monkeypatch, warned):
+    """#169 review I1: `process.py` exits 1 for its own refusal AND for an exception nothing caught
+    — Python's traceback. The two read alike by the exit code, so a crash read as «the round never
+    took it», done: the round kept the wrong title as taken, the ledger then took the right one,
+    and the ghost row S-039 exists to prevent stood unsaid. A crash is a failure now, said in its
+    own last line — the exception, not the traceback — and its traceback's tail is in the log."""
+    crashing = copy_of_the_method(tmp_path / "method", changes={
+        "rew_tool/state/process.py": lambda _text: "raise KeyError('taken')\n"})
+    monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, str(crashing))
+    car = tmp_path / "car"
+    car.mkdir()
+
+    refused, not_asked = title_fixes.supersede_each(car, [("sw_01 (sw)", "sw_1 (sw)")])
+
+    [(wrong, right, why)] = refused
+    assert (wrong, right, not_asked) == ("sw_01 (sw)", "sw_1 (sw)", []), refused
+    assert "KeyError: 'taken'" in why and "Traceback" not in why, why
+    assert title_fixes.supersede(car, "sw_01 (sw)", "sw_1 (sw)") == (False, why)
+    logged = "\n".join(record.getMessage() for record in warned)
+    assert "capture-supersede" in logged and "KeyError: 'taken'" in logged, logged
 
 
 def _bytes_of(folder) -> dict[str, bytes]:

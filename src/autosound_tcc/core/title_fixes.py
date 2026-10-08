@@ -16,8 +16,9 @@ Where the fix is made is the import form (the Arbiter, 2026-09-23): its New name
 the found name filled in and the row UNTICKED — an automatic match is his to accept. The strip
 only says there is something to fix and opens that form. The order is the method's (hub #201):
 the import renames in REW first; a title the open round had already taken under the wrong name is
-then superseded in the round (`supersede`). A round that never took it answers exit 1, which is
-not a failure here: the rename and the import were the whole fix.
+then superseded in the round (`supersede`). A round that never took it answers exit 1 with the
+method's refusal, which is not a failure here: the rename and the import were the whole fix. A crash
+exits 1 as well, with a traceback instead, and that is one.
 """
 
 from __future__ import annotations
@@ -62,10 +63,11 @@ def proposals(rew_titles: Iterable[str], expected: Iterable[str],
 
 
 def supersede(project_dir: Path, wrong: str, right: str) -> tuple[bool, str]:
-    """`capture-supersede` in the open round. `(done, what the method said)`; exit 1 — the round
-    never took the wrong title — counts as done: the REW rename was the whole fix. A call that got
-    no answer is `(False, why)` — busy behind another write, the project's copy refused, timed out,
-    a method without it."""
+    """`capture-supersede` in the open round. `(done, what the method said)`; exit 1 with the
+    method's refusal — the round never took the wrong title — counts as done: the REW rename was
+    the whole fix. A call that got no answer is `(False, why)` — busy behind another write, the
+    project's copy refused, timed out, a method without it, or a crash: Python exits 1 too, with a
+    traceback where the refusal would be (#169 review I1)."""
     try:
         return _supersede(project_dir, wrong, right)
     except _STOPS as exc:
@@ -102,7 +104,12 @@ def _supersede(project_dir: Path, wrong: str, right: str) -> tuple[bool, str]:
     except process_writer.ProcessWriterError as exc:
         return False, str(exc)
     app_log.logger().info("capture-supersede %r -> %r: exit %s", wrong, right, code)
-    return code in (0, 1), out or err
+    if code == 0:
+        return True, out or err
+    said = process_writer.refusal(code, err)
+    if said:  # the method's own «never took it»: nothing left to correct
+        return True, said
+    return False, str(process_writer.no_answer("capture-supersede", code, out, err))
 
 
 def glossary_for(project_dir: Path):

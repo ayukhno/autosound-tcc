@@ -191,6 +191,14 @@ def _refuse_a_flag_it_does_not_know(script: Path, args: Sequence[str]) -> None:
             raise UnknownFlag(flag)
 
 
+def tail(text, lines: int = 8) -> str:
+    """The last `lines` lines of what a child printed, for a log line: where a traceback ends in
+    the exception, and where a stuck child last said something. Bytes are decoded as UTF-8."""
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    return "\n".join((text or "").strip().splitlines()[-lines:])
+
+
 def _named(script: Path, args: Sequence[str], project_dir: Path) -> str:
     """What the busy and refused lines call the run: its first argument that is neither a flag nor
     a path in the project — for `process.py`, the command after its `<process-dir>`; for `state.py`,

@@ -35,10 +35,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
-from autosound_tcc.core import method_binding, method_cli
+from autosound_tcc.core import app_log, method_binding, method_cli
 
 # Local file I/O and a JSON rewrite; anything near this is a hang, not slowness.
 DEFAULT_TIMEOUT_S = 20.0
+
+#: The first line Python prints for an exception nothing caught. The interpreter then exits 1, as
+#: `process.py`'s `_main` does for its own refusal — so the exit code alone cannot tell the method's
+#: answer from a crash, where the code is the answer (`close_session`, `capture-supersede`). The
+#: stderr can (#169 review I1).
+_TRACEBACK = "Traceback (most recent call last):"
+#: How `_main` says a refusal (a `ProcessError`, an `IndexError`): this, then its sentence.
+_REFUSAL = "error: "
 
 #: The writer, relative to the method's `rew_tool/`: `method_cli`'s name for it, so the script
 #: whose flags `spawn` checks is the one these writers run (#169, N19).
@@ -399,12 +407,51 @@ def close_session(project_dir: Path) -> tuple[bool, str]:
     work, and it prints what is open instead. Passing that through `_run` would turn a report into
     an exception and lose it. `recorded` is False in that case and `report` holds the skill's own
     text; nothing is written to the journal, which is the honest record.
+
+    Exit 1 is that report only when it is one: the method's report on stdout, with no traceback.
+    Its own refusal (`error: …`) is raised in its words, as `_run` raises every other; a crash —
+    Python's traceback, exit 1 too — is raised in its last line and logged (`no_answer`). Handed
+    back as the report, a traceback sent the model after open work that does not exist (#169
+    review I1).
     """
     code, out, err = _spawn(project_dir, ["session-close"])
     _refuse_if_too_old("session-close", out, err)
-    if code not in (0, 1):
-        raise ProcessWriterError((err or out).strip() or f"process.py exited {code}")
-    return code == 0, out or err
+    if code == 0:
+        return True, out or err
+    said = refusal(code, err)
+    if said:
+        raise ProcessWriterError(said)
+    if code == 1 and out and _TRACEBACK not in err:
+        return False, out
+    raise no_answer("session-close", code, out, err)
+
+
+def refusal(code: int, err: str) -> str:
+    """The method's own refusal — its stderr from the `error: ` line on — or "" when exit `code`
+    with `err` is none: another exit, or exit 1 with Python's traceback, or with no such line at
+    all, which is a run that crashed rather than refused (#169 review I1)."""
+    if code != 1 or _TRACEBACK in err:
+        return ""
+    lines = err.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith(_REFUSAL):
+            return "\n".join(lines[index:]).strip()
+    return ""
+
+
+def no_answer(command: str, code: int, out: str, err: str) -> ProcessWriterError:
+    """The failure of a `command` whose exit code is its answer, and which gave none: a crash, or
+    an exit with neither its answer nor the method's refusal. Said in one line — the last it
+    printed, for a crash the exception's own — and logged at WARNING with its stderr's tail, as a
+    busy answer is: the caller may have nobody left to tell (`close_session` at quit). Returned,
+    for the caller to raise or to say."""
+    crashed = _TRACEBACK in err
+    lines = [line.strip() for line in (err or out).splitlines() if line.strip()]
+    last = lines[-1] if lines else f"process.py exited {code}"
+    sentence = f"`{command}` {'crashed' if crashed else 'gave no answer'} in the method: {last}"
+    app_log.logger().warning("%s (exit %s)%s", sentence, code,
+                             f"; its stderr ends:\n{method_cli.tail(err)}" if err else "")
+    return ProcessWriterError(sentence)
 
 
 #: The reason a title fix gives the round for superseding a row (A17).
@@ -415,10 +462,10 @@ def supersede_capture(project_dir: Path, wrong: str, right: str) -> tuple[int, s
     """The open round took a capture as `wrong`, and it is `right` (A17): `capture-supersede`.
     Returns `(exit code, stdout, stderr)`.
 
-    **The exit code is an answer**, as in `close_session`: 1 is the method's refusal — no round
-    open, or the round never took `wrong` — which `title_fixes.supersede` reads as nothing left to
-    correct. A write like any other, so it holds the lock: on the GUI thread, the short wait and
-    then `Busy`.
+    **The exit code is an answer**, as in `close_session`: 1 with the method's refusal (`refusal`)
+    — no round open, or the round never took `wrong` — which `title_fixes.supersede` reads as
+    nothing left to correct; 1 with a traceback is a crash, which it does not. A write like any
+    other, so it holds the lock: on the GUI thread, the short wait and then `Busy`.
     """
     args = ["capture-supersede", str(wrong), str(right), SUPERSEDE_REASON]
     code, out, err = _spawn(project_dir, args, timeout_s=30.0)

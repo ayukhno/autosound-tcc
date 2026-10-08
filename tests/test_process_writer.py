@@ -192,6 +192,41 @@ def test_a_stop_over_open_work_reports_instead_of_recording(project):
     assert _events(project, "session_closed") == []
 
 
+def test_a_crashed_stop_is_a_failure_and_not_a_report_of_open_work(tmp_path, monkeypatch):
+    """#169 review I1: `session-close` exits 1 over open work with its report on stdout — that is
+    its answer. Python exits 1 for an exception nothing caught as well, and the traceback went to
+    the model as «what is still open» (`recorded: false` with a report is the normal answer, the
+    MCP tool tells it), sending it after open work that does not exist — the 3.0.8 failure
+    `_refuse_if_too_old` was written against. A crash is raised now, in its own last line, even
+    when the report had begun on stdout before it."""
+    crashing = copy_of_the_method(tmp_path / "method", changes={
+        "rew_tool/state/process.py":
+            lambda _text: "print('nothing open in the process record')\nraise KeyError('closed_at')\n"})
+    monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, str(crashing))
+    car = tmp_path / "car"
+    car.mkdir()
+
+    with pytest.raises(process_writer.ProcessWriterError) as failed:
+        process_writer.close_session(car)
+
+    said = str(failed.value)
+    assert "KeyError: 'closed_at'" in said and "Traceback" not in said, said
+
+
+def test_a_stop_the_method_refuses_is_raised_in_its_words_not_reported_as_open_work(
+        tmp_path, monkeypatch):
+    """The method's own refusal — `error: …`, exit 1, nothing on stdout — is no report of open work
+    either: it is raised with the method's sentence, as `_run` raises every other refusal."""
+    monkeypatch.setattr(process_writer, "_spawn",
+                        lambda project_dir, args, timeout_s=None, **_kw:
+                        (1, "", "error: process-state.json is not a process record"))
+
+    with pytest.raises(process_writer.ProcessWriterError) as failed:
+        process_writer.close_session(tmp_path)
+
+    assert str(failed.value) == "error: process-state.json is not a process record"
+
+
 def test_a_method_too_old_for_a_command_says_so_instead_of_dumping_usage(project, monkeypatch):
     """Measured on the user's Windows VM, 2026-09-09: TCC ran `session_close`, the installed
     method was **3.0.8**, and `process.py` answered by printing its own usage text. What the model
