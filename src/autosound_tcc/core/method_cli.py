@@ -250,6 +250,8 @@ def spawn(
     killed and the answer is a `ProcessWriterError` saying it timed out — never `Busy`, because a
     child cut halfway may have written. An `OSError` — no interpreter, a lock the filesystem cannot
     take — is a `ProcessWriterError` in its words. Each of these is logged once, as a refusal is.
+    One raised giving the lock back, after the child ran, is logged too, and the child's answer
+    handed back: it ran, and may have written (MA2).
     """
     project_dir = Path(project_dir)
     args = [str(arg) for arg in args]
@@ -270,6 +272,7 @@ def spawn(
         lock_wait_s = GUI_LOCK_WAIT_S if on_gui_thread else LOCK_WAIT_S
     held = project_lock.hold(project_dir, lock_wait_s) if lock else contextlib.nullcontext()
     locking = lock  # until the lock is held: an OSError before that is the lock's
+    proc = None  # once the child has come back: an OSError after that is the lock's release
     try:
         with held:
             locking = False
@@ -308,10 +311,20 @@ def spawn(
             timeout_s, tail(exc.stderr) or "(nothing on stderr)")
         raise ProcessWriterError(f"{script.name} timed out after {timeout_s:g}s") from None
     except OSError as exc:
-        # An interpreter that would not start, or a lock this filesystem cannot take (ENOLCK on a
-        # network share): its words name no path, so the lock file is named beside them.
-        where = f" (taking the lock {project_lock.lock_file(project_dir)})" if locking else ""
-        app_log.logger().warning("failed: `%s` on %s was not run%s: %s",
-                                 _named(script, args, project_dir), project_dir, where, exc)
-        raise ProcessWriterError(str(exc)) from None
+        if proc is None:
+            # An interpreter that would not start, or a lock this filesystem cannot take (ENOLCK on
+            # a network share): its words name no path, so the lock file is named beside them.
+            where = f" (taking the lock {project_lock.lock_file(project_dir)})" if locking else ""
+            app_log.logger().warning("failed: `%s` on %s was not run%s: %s",
+                                     _named(script, args, project_dir), project_dir, where, exc)
+            raise ProcessWriterError(str(exc)) from None
+        # Giving the lock back failed after the child ran — the flock's unlock, or its handle's
+        # close (#171 review MA2). The child did what it did, and its answer is the truth about the
+        # write: told «failed», a caller might send the same `add-step` again. Nothing stays held
+        # for it: `_flock` closes the handle on its way out, and the flock goes with it, and `hold`
+        # gives the thread lock back on every path.
+        app_log.logger().warning(
+            "failed: `%s` on %s ran (exit %s, its answer kept), then releasing the lock %s failed: "
+            "%s", _named(script, args, project_dir), project_dir, proc.returncode,
+            project_lock.lock_file(project_dir), exc)
     return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()

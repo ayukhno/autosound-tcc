@@ -192,6 +192,43 @@ def test_a_timeout_or_a_run_that_could_not_start_leaves_one_warning_in_the_busy_
     }[fails], said[0]
 
 
+def test_an_oserror_giving_the_lock_back_after_the_child_ran_keeps_its_answer(
+        tmp_path, monkeypatch, app_log_warnings):
+    """#171 review MA2: `locking` is cleared once the lock is held, so an `OSError` raised giving it
+    back — the flock's unlock, or its handle's close — after the child ran was logged «was not
+    run» and answered as a failure, though the child had run and may have written: a caller told
+    so might send the same `add-step` again. The child's answer is handed back, and the one line
+    says what happened: it ran, with its exit, and then releasing the lock failed."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    if project_lock.fcntl is None:
+        pytest.skip("POSIX flock: with none, giving the lock back cannot fail")
+    car = tmp_path / "car"
+    car.mkdir()
+    real = project_lock.fcntl.flock
+
+    def flock(fd, op):
+        if op == project_lock.fcntl.LOCK_UN:
+            raise OSError(errno.EIO, "Input/output error")
+        return real(fd, op)
+
+    monkeypatch.setattr(project_lock.fcntl, "flock", flock)
+    monkeypatch.setattr(method_cli.child, "run_bounded", lambda argv, **_kw: (
+        subprocess.CompletedProcess(argv, 0, "shown\n", "a note\n")))
+    app_log_warnings.clear()
+
+    answer = method_cli.spawn(car, "state/process.py", [str(car / "process"), "show"], timeout_s=5)
+
+    assert answer == (0, "shown", "a note"), "the child's answer is kept"
+    said = [record.getMessage() for record in app_log_warnings]
+    assert said == [f"failed: `show` on {car} ran (exit 0, its answer kept), then releasing the "
+                    f"lock {project_lock.lock_file(car)} failed: [Errno {errno.EIO}] Input/output "
+                    f"error"], said
+    monkeypatch.setattr(project_lock.fcntl, "flock", real)
+    with project_lock.hold(car, timeout_s=0):  # both locks went back all the same
+        pass
+
+
 # ---- a flag the copy does not know (#169, N19) --------------------------------------------------
 
 
