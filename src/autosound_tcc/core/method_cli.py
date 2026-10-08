@@ -173,12 +173,15 @@ def _refuse_a_flag_it_does_not_know(script: Path, args: Sequence[str]) -> None:
     """`UnknownFlag` for the first flag in `args` that `script` — the bound copy's `process.py` —
     does not hold in its text (#169, N19). A flag is cut at its `=`: `--review=<x>` is `--review`.
 
-    `process.py` parses its flags by hand and takes one it does not know for data: an older copy
-    reads `capture-start 49 … --origin X` as two more expected titles and `skip 2.3 --superseded-by
-    2.4` as a reason, and prints no usage text that `process_writer._refuse_if_too_old` could read.
+    Up to v3.1.1 `process.py` parses its flags by hand and takes one it does not know for data: an
+    older copy reads `capture-start 49 … --origin X` as two more expected titles and `skip 2.3
+    --superseded-by 2.4` as a reason, and prints no usage text that
+    `process_writer._refuse_if_too_old` could read. From v3.1.2 a flag its verb does not list is the
+    copy's own usage error (exit 2, its `VERB_FLAGS`); the copy a project binds may be older.
 
-    A text check, and so a heuristic: a flag the copy names only in a message passes — `--hp` and
-    `--lp`, which v3.1.1 parses with `lstrip("-")` and names in its messages."""
+    A text check, and so a heuristic: a flag the copy names only in a message passes — as `--hp`
+    and `--lp` did in v3.1.1, which parsed them with `lstrip("-")` and named them only in its
+    messages; v3.1.2 lists them in `VERB_FLAGS`."""
     flags = [word for word in (arg.split("=", 1)[0] for arg in args) if _FLAG.fullmatch(word)]
     if not flags:
         return

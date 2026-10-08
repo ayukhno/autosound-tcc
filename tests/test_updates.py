@@ -565,11 +565,16 @@ def _tag_with_contract(origin, tag: str, text) -> None:
 #: Syntax this interpreter does not know: `except` without parentheses is Python 3.14's (PEP 758).
 _NEWER_SYNTAX = b"try:\n    pass\nexcept ValueError, TypeError:\n    pass\n"
 
+#: A contract above the newest this TCC drives: `KNOWN_CONTRACT + 1`, never a literal, so a release
+#: on it stays newer past the next bump.
+_NEWER = method_binding.KNOWN_CONTRACT + 1
+
 
 @pytest.mark.parametrize("text, said", [
-    pytest.param(b"CONTRACT_VERSION = 2\n", "CONTRACT_VERSION 2 > {known}", id="contract 2"),
-    pytest.param(b"\xef\xbb\xbfCONTRACT_VERSION = 2\n", "CONTRACT_VERSION 2 > {known}",
-                 id="contract 2 behind a BOM"),
+    pytest.param(f"CONTRACT_VERSION = {_NEWER}\n".encode(), f"CONTRACT_VERSION {_NEWER} > {{known}}",
+                 id=f"contract {_NEWER}"),
+    pytest.param(f"\ufeffCONTRACT_VERSION = {_NEWER}\n".encode(),
+                 f"CONTRACT_VERSION {_NEWER} > {{known}}", id=f"contract {_NEWER} behind a BOM"),
     pytest.param(_NEWER_SYNTAX, "rew_tool/contract.py: ", id="3.14 syntax",
                  marks=pytest.mark.skipif(sys.version_info >= (3, 14),
                                           reason="3.14 parses its own syntax")),
@@ -616,20 +621,20 @@ def test_a_method_this_tcc_cannot_drive_is_refused_before_anything_of_it_runs(mo
 
 @pytest.mark.parametrize("text", [
     None,
-    "v3.1.1",
+    "vendored",
     '"""The CLI contract."""\nSCHEMA = 3\n',
     f"CONTRACT_VERSION = {method_binding.KNOWN_CONTRACT}\n",
-], ids=["no contract.py", "v3.1.1's contract.py", "no number", "the number this TCC drives"])
+], ids=["no contract.py", "the vendored contract.py", "no number", "the number this TCC drives"])
 def test_a_method_that_names_no_newer_contract_installs_as_today(monkeypatch, tmp_path, text):
     """No number is not a newer one. Every v3 release has a `contract.py`, and up to v3.1.1 it
-    names no number — v3.1.1's own is one of the rows here — so those install as they always did.
-    So does a release on the contract this TCC drives, and a tag with no `contract.py` at all:
-    there is no contract in it to hold to the number."""
+    names no number, so those install as they always did. So does a release on the contract this
+    TCC drives — v3.1.2's own `contract.py`, on contract 1, is one of the rows here — and a tag
+    with no `contract.py` at all: there is no contract in it to hold to the number."""
     from autosound_tcc.core import vendor_loader
 
     clone, log, _temp = _skill_repos(monkeypatch, tmp_path)
     tag = "v3.0.11"  # upkeep.py, and no contract.py
-    if text == "v3.1.1":
+    if text == "vendored":
         shipped = vendor_loader._SUBMODULE_DIR / "rew_tool" / "contract.py"
         if not shipped.is_file():
             pytest.skip("the vendored method is not checked out (git submodule update --init)")

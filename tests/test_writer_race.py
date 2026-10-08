@@ -201,7 +201,7 @@ def test_the_journal_holds_both_writes_through_the_race(project, tmp_path):
 
 
 def test_only_a_copy_whose_write_lock_declares_protocol_1_locks_itself(tmp_path):
-    """The vendored v3.1.1 has no `rew_tool/write_lock.py`. A copy of it with one that declares
+    """The vendored v3.1.2 has no `rew_tool/write_lock.py`. A copy of it with one that declares
     `PROTOCOL = 1` locks itself; one that declares another protocol, or cannot be read as text,
     does not — and the answer is read from the text, never by importing the method."""
     vendored = vendor_loader._SUBMODULE_DIR

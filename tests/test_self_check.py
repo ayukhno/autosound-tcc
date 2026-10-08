@@ -587,7 +587,8 @@ def test_a_fix_that_cannot_be_made_raises_the_methods_sentence(project, other_co
 
 def test_the_method_row_reads_the_contract_number_through_the_cache(project, other_copy,
                                                                    monkeypatch):
-    """`run()` is on the GUI thread, at every render, and `contract.py` is 1800 lines of `ast`."""
+    """`run()` is on the GUI thread, at every render, and `contract.py` is 3400 lines of `ast`
+    (v3.1.2)."""
     linked(project, other_copy)
     monkeypatch.setattr(method_binding, "_CONTRACT_CACHE", {})
     parsed = []

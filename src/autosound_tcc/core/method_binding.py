@@ -50,10 +50,10 @@ from typing import Optional, Union
 
 from autosound_tcc.core import app_log, config, vendor_loader
 
-#: The newest contract this TCC drives. 0 in this build: no released copy carries a number yet
-#: (v3.1.1's `contract.py` has none), so a copy that names any number was written for a newer TCC.
-#: A copy that names none reads as allowed — every copy up to v3.1.1 is one.
-KNOWN_CONTRACT = 0
+#: The newest contract this TCC drives: 1, the v3.1.x surface the method writes down in its
+#: `rew_tool/CONTRACT.md`. v3.1.2 declares it; every copy up to v3.1.1 names no number, and such a
+#: copy stays allowed. A copy that names a number above 1 was written for a newer TCC.
+KNOWN_CONTRACT = 1
 
 SAME, KNOWN, APPROVED, REFUSED = "same", "known", "approved", "refused"
 
@@ -266,7 +266,8 @@ def _is_known(target: str, own: Path) -> bool:
 class Contract:
     """What a `contract.py` says (`contract_of`), one of three: no file (`present` False); read, its
     `number` the top-level `CONTRACT_VERSION` or None when it names none — every v3 release has the
-    file, and up to v3.1.1 it names none; or there and unreadable, `unreadable` saying why."""
+    file; up to v3.1.1 it names none, and from v3.1.2 it names 1; or there and unreadable,
+    `unreadable` saying why."""
 
     present: bool
     number: Optional[int] = None
@@ -323,9 +324,10 @@ def _number_in(tree: ast.Module) -> Contract:
     float, a bool, a name, an expression or a call; tuple-unpacked; imported; under an `if`, a
     `try`, a `with` or a loop; by a `def`, a `class`, an augmented assignment, a `global` — it is a
     number the file names that TCC cannot know without running it: `unreadable`, so newer, and
-    refused by the binding and at the press alike. No release names the number yet, so failing
-    closed costs nothing today; a method that writes `int(...)` is refused until it writes a
-    literal. A name inside a function or a class body, a string or a comment is not the module's.
+    refused by the binding and at the press alike. The method promises a literal (v3.1.2 writes
+    `CONTRACT_VERSION = 1`, «an int LITERAL» by its own comment), so failing closed costs nothing
+    today; a method that writes `int(...)` is refused until it writes a literal again. A name
+    inside a function or a class body, a string or a comment is not the module's.
     """
     number = None
     for node in tree.body:
@@ -379,8 +381,9 @@ def _binds(node: ast.AST) -> bool:
 def read_contract(skill_dir: Union[str, os.PathLike]) -> Contract:
     """What the copy at `skill_dir` says in its `rew_tool/contract.py`: the file's bytes through
     `contract_of`. Cached by path, mtime and size: diagnostics asks on the GUI thread, and
-    `contract.py` is 1800 lines of `ast` to walk. A file that is there and that the system will not
-    hand over is `unreadable` too, in its words — and not cached, so it is asked again."""
+    `contract.py` is 3400 lines of `ast` to walk (v3.1.2's). A file that is there and that the
+    system will not hand over is `unreadable` too, in its words — and not cached, so it is asked
+    again."""
     path = os.path.join(os.fspath(skill_dir), "rew_tool", "contract.py")
     try:
         info = os.stat(path)

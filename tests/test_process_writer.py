@@ -620,7 +620,7 @@ def test_every_flag_tcc_sends_is_pinned_and_the_vendored_copy_knows_each(
     `spawn` — the flag check included — to the vendored copy, and what reached the child read back.
     A scan of this module's source cannot do it: five of the flags are assembled when the call runs.
 
-    The flags sent are exactly `_FLAGS_TCC_SENDS`, and the check refused none: the vendored v3.1.1
+    The flags sent are exactly `_FLAGS_TCC_SENDS`, and the check refused none: the vendored v3.1.2
     knows every one. A writer added, or a flag, fails here until it is pinned."""
     import inspect
     import re

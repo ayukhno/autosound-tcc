@@ -66,7 +66,7 @@ def locks_itself(skill_dir: Path | str) -> bool:
     """Whether this copy of the method takes its own writer lock: `rew_tool/write_lock.py` there,
     declaring `PROTOCOL = 1` on a line of its own.
 
-    No copy up to v3.1.1 has the file, so today the skill's CLI, run bare, writes past `hold`, and
+    No copy up to v3.1.2 has the file, so today the skill's CLI, run bare, writes past `hold`, and
     `tests/test_writer_race.py` says so as an expected failure until a copy answers True. Never
     raises: a file that cannot be read as text is a copy that does not lock itself.
     """

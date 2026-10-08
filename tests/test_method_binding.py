@@ -27,7 +27,12 @@ import pytest
 
 from autosound_tcc.core import app_log, config, method_binding, vendor_loader
 
-from tests._method_copies import copy_of_the_method, entry as _entry, same_path as _same_path
+from tests._method_copies import (
+    copy_of_the_method,
+    entry as _entry,
+    no_contract_number,
+    same_path as _same_path,
+)
 
 #: TCC's own copy in a checkout. Every copy of the method is made from it.
 _SKILL = vendor_loader._SUBMODULE_DIR
@@ -340,14 +345,30 @@ def test_a_copy_on_a_newer_contract_is_refused_however_it_came(project, newer_co
     elif trusted_as == "known":
         _link(Path.home() / ".claude" / "skills" / vendor_loader.SKILL_NAME, newer_copy)
     entry = _link(_entry(project), newer_copy, kind)
-    assert method_binding.KNOWN_CONTRACT == 0, "Ruling 3: this build knows no contract number"
-    assert method_binding.read_contract_version(newer_copy) == 1
+    assert method_binding.read_contract_version(newer_copy) == method_binding.KNOWN_CONTRACT + 1
 
     binding = method_binding.for_project(project)
 
     assert (binding.state, binding.can_approve, binding.skill_dir) == ("refused", False, None)
     assert str(entry) in binding.reason
     assert "newer than this TCC — update TCC first" in binding.reason
+
+
+def test_a_copy_that_names_no_contract_number_is_allowed_as_every_copy_up_to_v3_1_1(project,
+                                                                                    tmp_path):
+    """No number is not a newer one: up to v3.1.1 a copy names none, and it binds as it always did
+    — here approved on this machine. The vendored copy names 1 since v3.1.2, so a copy of it has
+    the number taken out (`tests/_method_copies.py`)."""
+    copy = copy_of_the_method(tmp_path / "numberless-method",
+                              changes={"rew_tool/contract.py": no_contract_number})
+    assert method_binding.read_contract(copy) == method_binding.Contract(True, None)
+    assert config.approve_method(copy), "approved on this machine"
+    _link(_entry(project), copy)
+
+    binding = method_binding.for_project(project)
+
+    assert (binding.state, binding.skill_dir) == ("approved", Path(os.path.realpath(copy))), \
+        binding.reason
 
 
 def test_tccs_own_copy_is_not_held_to_the_contract_check(project, newer_copy, monkeypatch):
@@ -375,7 +396,7 @@ _UNREADABLE_ENDINGS = [_NEWER_SYNTAX,
 
 
 def _copy_ending_in(root: Path, ending: bytes) -> Path:
-    """A copy of the method whose `contract.py` is v3.1.1's, then `ending`, byte for byte."""
+    """A copy of the method whose `contract.py` is the vendored one, then `ending`, byte for byte."""
     copy = copy_of_the_method(root)
     contract = copy / "rew_tool" / "contract.py"
     contract.write_bytes(contract.read_bytes() + ending)
@@ -404,20 +425,21 @@ def test_a_copy_whose_contract_cannot_be_read_is_refused_like_a_newer_one(projec
 
 def test_a_copy_on_a_newer_contract_behind_a_bom_is_refused(project, tmp_path):
     """#170: the binding read `contract.py` as text, a BOM kept in front — what an editor on Windows
-    may write — and `ast` turned that into «no number»: a copy on contract 2, approved on this
+    may write — and `ast` turned that into «no number»: a copy on a newer contract, approved on this
     machine, ran. It reads the bytes now, through the press's own reader."""
+    newer = method_binding.KNOWN_CONTRACT + 1
     copy = copy_of_the_method(tmp_path / "bom-method", changes={
-        "rew_tool/contract.py": lambda text: "﻿" + text + "\nCONTRACT_VERSION = 2\n"})
+        "rew_tool/contract.py": lambda text: "﻿" + text + f"\nCONTRACT_VERSION = {newer}\n"})
     assert (copy / "rew_tool" / "contract.py").read_bytes().startswith(b"\xef\xbb\xbf")
     assert config.approve_method(copy), "approved on this machine"
     entry = _link(_entry(project), copy)
 
-    assert method_binding.read_contract_version(copy) == 2
+    assert method_binding.read_contract_version(copy) == newer
     binding = method_binding.for_project(project)
 
     assert (binding.state, binding.can_approve, binding.skill_dir) == ("refused", False, None)
     assert str(entry) in binding.reason
-    assert "contract 2, newer than this TCC — update TCC first" in binding.reason
+    assert f"contract {newer}, newer than this TCC — update TCC first" in binding.reason
 
 
 def test_tccs_own_copy_is_not_held_to_a_contract_it_cannot_read(project, tmp_path, monkeypatch):
@@ -469,7 +491,9 @@ def test_the_contract_number_is_read_without_importing_the_file():
         "the last top-level assignment is the value the module ends up with"
 
     shipped = (_SKILL / "rew_tool" / "contract.py").read_text(encoding="utf-8")
-    assert method_binding.contract_number(shipped) is None, "v3.1.1 carries no number"
+    assert method_binding.contract_number(shipped) == 1, "v3.1.2 declares contract 1"
+    assert method_binding.contract_number(no_contract_number(shipped)) is None, \
+        "up to v3.1.1 a copy carries no number"
 
 
 @pytest.mark.parametrize("text", [
@@ -528,11 +552,14 @@ def test_a_contract_version_that_is_not_a_plain_top_level_int_is_unreadable(text
 def test_one_reader_answers_no_file_a_number_or_none_or_unreadable():
     """#170: the press and the binding read a `contract.py` with one reader, and «no number» is not
     the answer for a file that could not be read. Every v3 release has the file; up to v3.1.1 it
-    names no number."""
+    names no number, and v3.1.2 names 1 — neither is newer than this TCC."""
     absent = method_binding.contract_of(None)
     assert (absent.present, absent.number, absent.unreadable) == (False, None, "")
-    legacy = method_binding.contract_of((_SKILL / "rew_tool" / "contract.py").read_bytes())
-    assert (legacy.present, legacy.number, legacy.unreadable) == (True, None, ""), "v3.1.1"
+    shipped = (_SKILL / "rew_tool" / "contract.py").read_bytes()
+    vendored = method_binding.contract_of(shipped)
+    assert (vendored.present, vendored.number, vendored.unreadable) == (True, 1, ""), "v3.1.2"
+    legacy = method_binding.contract_of(no_contract_number(shipped.decode("utf-8")).encode("utf-8"))
+    assert (legacy.present, legacy.number, legacy.unreadable) == (True, None, ""), "up to v3.1.1"
     two = method_binding.contract_of(b"CONTRACT_VERSION = 2\n")
     assert (two.present, two.number, two.unreadable) == (True, 2, "")
     broken = method_binding.contract_of(b"CONTRACT_VERSION = 2\n\x00\n")
@@ -542,6 +569,7 @@ def test_one_reader_answers_no_file_a_number_or_none_or_unreadable():
 
     known = method_binding.KNOWN_CONTRACT
     assert not absent.newer_than(known) and not legacy.newer_than(known)
+    assert not vendored.newer_than(known), "the vendored copy is on the contract this TCC drives"
     assert two.newer_than(1) and not two.newer_than(2)
     assert broken.newer_than(known), "unreadable is most likely newer"
     assert named.newer_than(known), "a number named and not read is the same unknown"
@@ -590,7 +618,8 @@ def test_a_contract_the_system_will_not_hand_over_is_unreadable(tmp_path, reques
 
 
 def test_the_contract_number_is_cached_by_path_mtime_and_size(tmp_path, monkeypatch):
-    """`for_project` runs on the GUI thread (diagnostics), and `contract.py` is 1800 lines."""
+    """`for_project` runs on the GUI thread (diagnostics), and `contract.py` is 3400 lines
+    (v3.1.2)."""
     skill = tmp_path / "copy"
     (skill / "rew_tool").mkdir(parents=True)
     contract = skill / "rew_tool" / "contract.py"

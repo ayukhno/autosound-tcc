@@ -968,7 +968,8 @@ def _extract_upkeep(repo: Path, tag: str, root: Path) -> Extracted:
     `method_binding.KNOWN_CONTRACT`, and for a `contract.py` that does not parse here — most likely
     a newer method; `read_failed` when git could not read the file at all, which another try may
     mend. Every v3 release has a `contract.py`; up to v3.1.1 it names no number, and those install
-    as they always did — as does a tag without the file, which holds no contract to the number.
+    as they always did — as does v3.1.2, on contract 1, the one this TCC drives, and a tag without
+    the file, which holds no contract to the number.
     """
     ok, said = _git("fetch", "--quiet", "--depth", "1", "origin",
                     f"+refs/tags/{tag}:refs/tags/{tag}", cwd=repo, timeout=_FETCH_TIMEOUT)

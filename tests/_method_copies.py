@@ -9,6 +9,7 @@ imported into a test module is a fixture of that module, and runs once for each 
     entry(project)                      where a project links its copy of the method
     same_path(a, b)                     one folder, however it is spelled
     copy_of_the_method(root, ...)       a copy of its own, changed as a test needs: made per test
+    no_contract_number(text)            `contract.py` naming no number, as every copy up to v3.1.1
     linked(project, skill)              the entry linked to `skill`; on `Path.home()`, an install
     linked_and_approved(project, skill) the entry linked to `skill`, approved on this machine
 
@@ -22,6 +23,7 @@ imported into a test module is a fixture of that module, and runs once for each 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Callable, Mapping, Optional
@@ -73,6 +75,15 @@ def copy_of_the_method(root: Path, *, changes: Optional[Mapping[str, Callable[[s
     if git:
         (root / ".git").mkdir()
     return skill
+
+
+def no_contract_number(text: str) -> str:
+    """`contract.py`'s text with its top-level `CONTRACT_VERSION = <n>` line taken out: what every
+    copy up to v3.1.1 says, which is no number — the vendored copy names 1 since v3.1.2. A change
+    for `copy_of_the_method`; a text with no such line, or two, fails rather than build another."""
+    bare, taken = re.subn(r"^CONTRACT_VERSION = \d+[ \t]*\r?\n", "", text, flags=re.MULTILINE)
+    assert taken == 1, f"one top-level CONTRACT_VERSION line expected, {taken} taken out"
+    return bare
 
 
 def linked(project: Path, skill: Path) -> Path:
@@ -131,7 +142,9 @@ def git_only_copy(tmp_path_factory) -> Path:
 
 @pytest.fixture(scope="session")
 def newer_copy(tmp_path_factory) -> Path:
-    """A copy whose `contract.py` speaks a contract this TCC does not. No released copy carries a
-    number yet (v3.1.1's `contract.py` has none), so the one file is changed by hand (Ruling 3)."""
+    """A copy whose `contract.py` speaks a contract this TCC does not. No released copy names one
+    above `KNOWN_CONTRACT` (v3.1.2 declares 1), so the one file is changed by hand: a last
+    `CONTRACT_VERSION = KNOWN_CONTRACT + 1`, never a literal, so it stays newer past a bump."""
     return copy_of_the_method(tmp_path_factory.mktemp("newer-method"), changes={
-        "rew_tool/contract.py": lambda text: text + "\nCONTRACT_VERSION = 1\n"})
+        "rew_tool/contract.py":
+            lambda text: text + f"\nCONTRACT_VERSION = {method_binding.KNOWN_CONTRACT + 1}\n"})
