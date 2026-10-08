@@ -343,9 +343,11 @@ class _LedgerWriteWorker(QThread):
                 except process_writer.ProcessWriterError as exc:
                     if not self._retries_without_plan(exc):
                         raise
-                    result["unplanned"] = self._why(exc)
                     process_writer.start_capture(
                         self._project_dir, str(self._version), [], origin=self._origin)
+                    # Only once the round opened: a retry refused too (a copy older than both
+                    # `--plan` and `--origin`) opened none, and is said as refused alone (M37).
+                    result["unplanned"] = self._why(exc)
                 round_ = process_view.capture_round(self._project_dir) or {}
                 result["round_id"] = str(round_.get("id") or "")
                 result["opened"] = result["round_id"]

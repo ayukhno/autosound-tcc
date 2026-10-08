@@ -1683,27 +1683,30 @@ def test_a_copy_older_than_plan_still_opens_the_pass_without_the_list_and_says_w
     assert ("protective", "w-L", "OFF", "user") in calls
 
 
-def test_a_copy_that_does_not_know_another_flag_of_the_pass_is_refused_whole(
-        tmp_path, monkeypatch):
-    """Only `--plan` is left off for a copy that does not know it. Any other flag of the call —
-    `--origin`, for measurements taken in another project — the retry would send again, to be
-    refused alike, with the sentence standing as the reason the method gave no list. Refused whole,
-    as a refused binding is: one `start_capture`, and the sentence where a refusal goes."""
-    from autosound_tcc.core import process_writer
-    from autosound_tcc.ui.tcc import measurement_panel as mp
+def test_a_copy_older_than_both_plan_and_origin_is_refused_whole_and_opens_no_unplanned_round(
+        tmp_path, monkeypatch, own_copy_is_the_submodule):
+    """#169 N19, M37: `--origin` landed in v3.0.59 and `--plan` in v3.0.62, so a copy that does
+    not know `--origin` does not know `--plan` either — the copy a second tune of the same car
+    meets, with measurements from another project. `capture-start` sends `--plan` first, so the
+    flag check names it first and the round is asked again without it — and that is refused for
+    `--origin`: no round opened, and the pass refused whole. It used to be said as «recorded as
+    unplanned» too, set before the retry had returned, for a round that never opened. The real
+    chain: the copy's own `process.py` text through the real `spawn`, and no child starts."""
+    from autosound_tcc.core import method_cli, process_writer
     from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
 
+    from tests._method_copies import copy_of_the_method, linked_and_approved
+
     _app()
-    calls = _ledger_calls(monkeypatch)
-    unknown = process_writer.UnknownFlag("--origin")
-
-    def _start(d, v, e, step="", origin="", plan=False, **_kw):
-        calls.append(("start", v, tuple(e), origin, plan))
-        raise unknown
-
-    monkeypatch.setattr(mp.process_writer, "start_capture", _start)
+    older = copy_of_the_method(tmp_path / "older", changes={
+        "rew_tool/state/process.py":
+            lambda text: text.replace("--plan", "").replace("--origin", "")})
+    project = tmp_path / "car"
+    linked_and_approved(project, older)
+    monkeypatch.setattr(method_cli.child, "run_bounded",
+                        lambda argv, **_k: pytest.fail(f"a child started: {argv}"))
     worker = _LedgerWriteWorker(
-        project_dir=tmp_path, round_id="", version=49,
+        project_dir=project, round_id="", version=49,
         expected=["m-L p1_49 (sw)"], titles=["m-L p1_49 (sw)"], protective={},
         origin="passat-b8-2026:49",
     )
@@ -1712,12 +1715,10 @@ def test_a_copy_that_does_not_know_another_flag_of_the_pass_is_refused_whole(
 
     worker.run()
 
-    assert [c for c in calls if c[0] == "start"] == [
-        ("start", "49", (), "passat-b8-2026:49", True)]
-    assert seen["refused"] == [str(unknown)]
-    assert seen["unplanned"] == ""
     assert seen["opened"] == ""
-    assert not [c for c in calls if c[0] == "taken"], "nothing recorded without a round"
+    assert seen["refused"] == [str(process_writer.UnknownFlag("--origin"))]
+    assert seen["unplanned"] == "", f"said for a round that never opened: {seen['unplanned']}"
+    assert seen["recorded"] == [], "nothing recorded without a round"
 
 
 def test_the_columns_scroll_sideways_on_tcc_s_own_bar(monkeypatch):
