@@ -942,6 +942,27 @@ def test_the_scan_leaves_the_reviewers_script_and_a_resolved_one_apart():
     assert starts == {"autosound_tcc/core/reviewer.py": [(9, frozenset({RESOLVED}))]}
 
 
+@pytest.mark.parametrize("folder, flagged", [("rew_tool", True), ("scripts", False)])
+def test_the_scan_reads_rew_tool_joined_onto_a_folder_as_tccs_own(folder, flagged):
+    """MB4: `process_writer.script_path()` is `own_copy() / "rew_tool" / _SCRIPT` — no
+    `REW_TOOL_DIR`, no `rew_tool_dir()` — so a `"rew_tool"` constant joined onto a folder is the one
+    thing that makes the scan read the main writer's revert as TCC's own copy. No case showed that
+    branch failing, and a scanner edit that dropped it left the revert unguarded with every test
+    green. The same start through `scripts/` is not the method's script."""
+    source = ("import subprocess, sys\n"
+              "from autosound_tcc.core import method_binding\n"
+              "_SCRIPT = 'state/process.py'\n"
+              "def script_path():\n"
+              f"    return method_binding.own_copy() / {folder!r} / _SCRIPT\n"
+              "def save():\n"
+              "    subprocess.run([sys.executable, str(script_path()), 'save'])\n")
+
+    starts = _method_script_starts({"autosound_tcc/core/writer.py": source})
+
+    assert [OWN in what for _line, what in starts.get("autosound_tcc/core/writer.py", [])] == \
+        ([True] if flagged else [])
+
+
 # ---- the fix-it words, for the copy the project runs (M28) --------------------------------------
 
 
