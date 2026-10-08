@@ -803,7 +803,7 @@ def test_a_git_too_old_to_check_is_not_called_a_bad_signature(monkeypatch, tmp_p
     monkeypatch.setattr(updates, "_run_upkeep", lambda argv, timeout: ran.append(argv))
     monkeypatch.setattr(updates, "_git_blob", lambda repo, spec: pytest.fail("nothing extracted"))
 
-    def fake_git(*args, cwd=None, timeout=None):
+    def fake_git(*args, cwd=None, timeout=None, extra_env=None):
         if "verify-tag" in args:
             return False, said
         if args == ("--version",):
@@ -822,7 +822,7 @@ def test_a_git_too_old_to_check_is_not_called_a_bad_signature(monkeypatch, tmp_p
 def test_a_signature_that_is_simply_wrong_stays_a_bad_signature(monkeypatch, tmp_path):
     _an_installed_clone(monkeypatch, tmp_path)
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
-    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, extra_env=None: (
         (False, 'Could not verify signature.\nerror: no principal matched') if "verify-tag" in args
         else (True, "")))
 
@@ -845,7 +845,7 @@ def test_a_text_that_merely_carries_a_word_of_git_s_sentences_stays_a_bad_signat
     so words like a signing helper's refusal read as a machine too old to check, and the row sent
     the person to update an OpenSSH or a git that was fine. Only git's own sentences say that."""
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
-    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, extra_env=None: (
         (False, said) if "verify-tag" in args else (True, "git version 2.51.0")))
 
     ok, line, reason = updates._verify_tag(tmp_path, "v3.0.64")
@@ -862,7 +862,7 @@ def test_the_signature_is_checked_by_ssh_keygen_whatever_program_git_is_set_to(m
     subcommand, where it outranks every config file."""
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
     asked = []
-    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, extra_env=None: (
         asked.append(args) or (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x')))
 
     ok, line, _why = updates._verify_tag(tmp_path, "v3.0.64")
@@ -871,6 +871,32 @@ def test_the_signature_is_checked_by_ssh_keygen_whatever_program_git_is_set_to(m
     verify = next(args for args in asked if "verify-tag" in args)
     options = verify[:verify.index("verify-tag")]
     assert ("-c", "gpg.ssh.program=ssh-keygen") in zip(options, options[1:]), verify
+
+
+def test_verify_tag_runs_git_in_the_c_locale_over_the_machine_s_own(monkeypatch, tmp_path):
+    """R-bd (#174). `_CANNOT_CHECK` reads git's sentences, and git ships translations — Ukrainian
+    among them, the language this app's people write. The verify-tag child gets `LC_ALL=C` over
+    whatever the machine set, and keeps `_NO_PROMPTING` as it is."""
+    monkeypatch.setenv("LC_ALL", "uk_UA.UTF-8")
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+    seen = []
+
+    def child_spy(argv, **kw):
+        seen.append((argv, kw.get("env") or {}))
+        return subprocess.CompletedProcess(argv, 0, stderr="", stdout=(
+            'Good "git" signature for ayukhno with ED25519 key SHA256:x'))
+
+    monkeypatch.setattr(updates.child, "run_bounded", child_spy)
+
+    ok, line, _why = updates._verify_tag(tmp_path, "v3.0.64")
+
+    assert ok, line
+    env = next(env for argv, env in seen if "verify-tag" in argv)
+    assert env.get("LC_ALL") == "C", env.get("LC_ALL")
+    assert {key: env.get(key) for key in updates._NO_PROMPTING} == updates._NO_PROMPTING
+
+    updates._git("--version")
+    assert seen[-1][1].get("LC_ALL") == "uk_UA.UTF-8", "that call alone: any other keeps its own"
 
 
 def test_tcc_s_own_signature_line_reaches_the_row_when_upkeep_gives_none(monkeypatch, tmp_path):
@@ -1331,6 +1357,25 @@ def test_the_newest_tcc_tag_is_ranked_over_release_shaped_names_only(monkeypatch
     assert updates.newest_tcc_tag(updates.BETA) == "v1.1.1"
 
 
+def test_the_method_s_newest_tag_is_ranked_over_release_shaped_names_only(monkeypatch, tmp_path):
+    """F10a's twin on the method's side (R-bc, #174): `v3.*` ranked by `_version_key` put a
+    `v3.2.0-wip` above `v3.1.1`, and `_verify_tag`, which takes release names only, would refuse it
+    as a bad signature. The press's question (`newest_tag`) and the row's (`check_skill`) both
+    answer the release."""
+    monkeypatch.setattr(updates, "_skill_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(updates, "_is_ours", lambda repo: (True, ("", "")))
+    _skill_at(monkeypatch, _HERE, "3.1.0")
+    _git_answers(monkeypatch, {"ls-remote": (True, "\n".join([
+        f"{_THERE}\trefs/tags/v3.1.1",
+        f"{'c' * 40}\trefs/tags/v3.2.0-wip",
+        f"{'d' * 40}\trefs/tags/v3.1.1.1",
+    ]))})
+
+    assert updates.newest_tag() == "v3.1.1"
+    status = updates.check_skill()
+    assert (status.latest, status.latest_sha) == ("3.1.1", _THERE)
+
+
 _RC1, _RC2, _REL = "1" * 40, "2" * 40, "3" * 40
 
 
@@ -1621,7 +1666,7 @@ def test_a_git_too_old_to_check_tcc_s_tag_installs_nothing(monkeypatch, tmp_path
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
     _offering(monkeypatch, "v0.1.45")
 
-    def fake_git(*args, cwd=None, timeout=None):
+    def fake_git(*args, cwd=None, timeout=None, extra_env=None):
         if "verify-tag" in args:
             return False, said
         if args == ("--version",):
@@ -1718,7 +1763,7 @@ def test_a_beta_candidate_of_tcc_is_ordered_on_its_channel_not_refused_as_no_rel
     checked like a release — not refused for not being named vX.Y.Z."""
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
     fetched = []
-    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None: (
+    monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, extra_env=None: (
         fetched.append(args) or ((True, "c" * 40) if "rev-parse" in args else
                                  (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x'))))
 

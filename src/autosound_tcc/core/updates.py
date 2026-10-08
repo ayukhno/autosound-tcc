@@ -357,13 +357,19 @@ class Status:
 #: is what it is supposed to be when offline anyway.
 _NO_PROMPTING = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never", "GIT_ASKPASS": ""}
 
+#: git in English whatever the machine speaks, for the one call whose answer is read by its words:
+#: `verify-tag` (`_CANNOT_CHECK`). git ships translations — Ukrainian among them, the language
+#: this app's people write (R-bd, #174). Added for that call alone; `_NO_PROMPTING` is every call's.
+_C_LOCALE = {"LC_ALL": "C"}
+
 
 _log = logging.getLogger("autosound_tcc")
 
 
-def _git(*args: str, cwd: Optional[Path] = None,
-         timeout: float = _ASK_TIMEOUT) -> tuple[bool, str]:
+def _git(*args: str, cwd: Optional[Path] = None, timeout: float = _ASK_TIMEOUT,
+         extra_env: Optional[dict[str, str]] = None) -> tuple[bool, str]:
     """Run git, return `(ok, output)`. Never raises — a failed probe is an answer, not a crash.
+    `extra_env` is added over the environment for this call alone (`_C_LOCALE`).
 
     Bounded with the tree killed (`child.run_bounded`): git runs https as a child of its own,
     `git-remote-https`, on git's stderr, and `subprocess.run` killed git alone at the timeout and
@@ -373,7 +379,7 @@ def _git(*args: str, cwd: Optional[Path] = None,
             ["git", *args], text=True, timeout=timeout,
             encoding="utf-8",
             errors="replace",
-            env={**os.environ, **_NO_PROMPTING},
+            env={**os.environ, **_NO_PROMPTING, **(extra_env or {})},
             # Plain `quiet()`. This used to merge in a console of its own, on the theory that
             # `ls-remote` spawns `git-remote-https` and a grandchild with no console allocates
             # one. Watched on the machine that has the problem (2026-09-11), it does not: across
@@ -478,7 +484,7 @@ def last_probe_error() -> str:
     return _last_probe_error
 
 
-def _newest_tag_in(repo: str, *globs: str, key=_version_key) -> tuple[str, str]:
+def _newest_tag_in(repo: str, *globs: str, key) -> tuple[str, str]:
     """The newest tag matching any of `globs` in `repo`, and the COMMIT it names. `("", "")` if unaskable.
 
     **No `--refs`, and that is the whole point of this function.** `--refs` drops the peeled `^{}`
@@ -496,9 +502,9 @@ def _newest_tag_in(repo: str, *globs: str, key=_version_key) -> tuple[str, str]:
     again, silently, and bring back the very bug above.
 
     Several globs are one `ls-remote`, each with its own peel pattern, for the same reason. `key`
-    orders the names and drops the ones it answers None for — the beta channel passes
-    `channel_key`, TCC's stable `_release_key`; the method's `newest_tag` keeps `_version_key`,
-    which drops nothing.
+    orders the names and drops the ones it answers None for: `_release_key` for the method's tags
+    and TCC's stable ones, `channel_key` on TCC's beta channel. No default: the one it had,
+    `_version_key`, kept every name, and `v1.2.0-wip` outranked the release (F10a, R-bc, #174).
     """
     global _last_probe_error
     patterns = [pattern for glob in globs for pattern in (glob, f"{glob}^{{}}")]
@@ -531,8 +537,9 @@ def _newest_tag_in(repo: str, *globs: str, key=_version_key) -> tuple[str, str]:
 
 
 def newest_tag() -> str:
-    """The newest `v3.*` tag in the method's repository, or "" if it cannot be asked."""
-    return _newest_tag_in(SKILL_REPO, SKILL_TAG_GLOB)[0]
+    """The newest `v3.*` release, a `vX.Y.Z` name (R-bc, #174), in the method's repository, or ""
+    if it cannot be asked."""
+    return _newest_tag_in(SKILL_REPO, SKILL_TAG_GLOB, key=_release_key)[0]
 
 
 def newest_tcc_tag(channel: str = STABLE) -> str:
@@ -608,7 +615,7 @@ def check_skill() -> Status:
     installed = install_report.skill_version()
     sha = install_report.skill_sha()
     repo = _skill_repo_dir()
-    latest, latest_sha = _newest_tag_in(SKILL_REPO, SKILL_TAG_GLOB)
+    latest, latest_sha = _newest_tag_in(SKILL_REPO, SKILL_TAG_GLOB, key=_release_key)
     latest_version = latest.lstrip("v")
     if repo is None:
         return Status("skill", installed, latest_version, False, "not_found", updatable=False,
@@ -777,11 +784,12 @@ _FETCH_TIMEOUT = 300.0
 #: refusal was called an old OpenSSH. A git before 2.34 does not know `gpg.format=ssh`
 #: ("unsupported value for gpg.format: ssh"). From 2.34 git says itself when ssh-keygen predates
 #: 8.2p1, naming `ssh-keygen -Y find-principals/verify` — matched on that command, which git's
-#: translations keep; an ssh-keygen with no `-Y` at all answers "unknown option -- Y". Plus no
-#: ssh-keygen at all — "cannot run" on macOS and Linux, "cannot spawn" in Git for Windows. Not a
-#: bad signature — a machine that cannot look — and on the VM, with an older git, it read as a
-#: forged release. install.sh v3.0.64 `verify_tag` matches the words
-#: (`*gpg.format*|*"unknown option"*|*"-Y"*`, "this git may be too old"); this is narrower.
+#: translations keep, though the check runs git in the C locale anyway (`_C_LOCALE`, R-bd); an
+#: ssh-keygen with no `-Y` at all answers "unknown option -- Y". Plus no ssh-keygen at all —
+#: "cannot run" on macOS and Linux, "cannot spawn" in Git for Windows. Not a bad signature — a
+#: machine that cannot look — and on the VM, with an older git, it read as a forged release.
+#: install.sh v3.0.64 `verify_tag` matches the words (`*gpg.format*|*"unknown option"*|*"-Y"*`,
+#: "this git may be too old"); this is narrower.
 _GIT_CANNOT = "unsupported value for gpg.format"
 _CANNOT_CHECK = (_GIT_CANNOT, "unknown option -- Y", "ssh-keygen -Y find-principals/verify",
                  "cannot run ssh-keygen", "cannot spawn ssh-keygen")
@@ -849,9 +857,11 @@ def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM,
         signers.write_text(allowed_signers_line(principal, signing_key) + "\n", encoding="utf-8")
         # `gpg.ssh.program` pinned to git's own default (T-35, #174): somebody who signs through a
         # helper (1Password's) has it set to that helper, and through it a good release was
-        # refused. On the command line it outranks every config file.
+        # refused. On the command line it outranks every config file. And git in the C locale
+        # (`_C_LOCALE`, R-bd): `_CANNOT_CHECK` reads git's English sentences.
         ok, said = _git("-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={signers}",
-                        "-c", "gpg.ssh.program=ssh-keygen", "verify-tag", tag, cwd=repo)
+                        "-c", "gpg.ssh.program=ssh-keygen", "verify-tag", tag, cwd=repo,
+                        extra_env=_C_LOCALE)
     if ok and 'Good "git" signature' in said:
         return True, f"{tag}: signature good ({principal})", ""
     last = (said.splitlines() or ["git verify-tag failed"])[-1]

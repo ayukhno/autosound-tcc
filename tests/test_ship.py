@@ -1250,6 +1250,31 @@ def test_the_release_tag_is_signed_and_verifies_against_allowed_signers(repo):
         f"ship's own check of the tag went unsaid: {lines}"
 
 
+def test_ship_checks_its_tag_with_ssh_keygen_and_in_the_c_locale(tmp_path, monkeypatch):
+    """R-bc, R-bd (#174): ship's check of the tag it made, held to the updater's
+    (`core/updates._verify_tag`). `gpg.ssh.program` pinned, so a signing helper in this machine's
+    git config is not what verifies; `LC_ALL=C` over the machine's own, so the reason a Stop
+    quotes is git's English sentence."""
+    (tmp_path / ship_mod.SIGNERS).write_text("author ssh-ed25519 AAAA\n", encoding="utf-8")
+    monkeypatch.setenv("LC_ALL", "uk_UA.UTF-8")
+    seen = []
+
+    def run_spy(argv, **kw):
+        seen.append((argv, kw.get("env") or {}))
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr=(
+            'Good "git" signature for author with ED25519 key SHA256:x'))
+
+    monkeypatch.setattr(ship_mod, "subprocess", SimpleNamespace(run=run_spy))
+
+    good = ship_mod.verify_signed_tag(tmp_path, "v0.1.25")
+
+    assert good.startswith('Good "git" signature for author'), good
+    argv, env = next((argv, env) for argv, env in seen if "verify-tag" in argv)
+    options = argv[1:argv.index("verify-tag")]
+    pinned = ("-c", "gpg.ssh.program=ssh-keygen") in zip(options, options[1:])
+    assert (pinned, env.get("LC_ALL")) == (True, "C"), argv
+
+
 def test_a_tag_that_does_not_verify_is_deleted_and_nothing_is_pushed(repo, signing_keys):
     """Git signed, but with a key `allowed_signers` does not list — the carrier's check before the
     tag would refuse this, so what is under test is the belt after it: ship verifies the tag it

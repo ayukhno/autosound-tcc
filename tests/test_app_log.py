@@ -191,7 +191,8 @@ def test_a_probe_that_matched_nothing_is_not_reported_as_a_dead_network(caplog):
     from autosound_tcc.core import updates
 
     with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
-        tag, sha = updates._newest_tag_in(updates.TCC_REPO, "no-such-prefix-*")
+        tag, sha = updates._newest_tag_in(updates.TCC_REPO, "no-such-prefix-*",
+                                          key=updates._release_key)
 
     assert (tag, sha) == ("", "")
     said = " ".join(r.getMessage() for r in caplog.records)

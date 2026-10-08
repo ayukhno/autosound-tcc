@@ -507,9 +507,13 @@ def verify_signed_tag(root: Path, tag: str) -> str:
         raise Stop(f"{tag} was signed, but there is no {SIGNERS} in this tree to verify it "
                    f"against. {drop_tag(root, tag)}: TCC's updater refuses a release tag that "
                    f"does not verify (tcc#102). Put {SIGNERS} back at the repository root")
-    done = subprocess.run(["git", "-c", f"gpg.ssh.allowedSignersFile={signers}", "verify-tag", tag],
+    # Held to the updater's own check (`core/updates._verify_tag`, R-bc and R-bd, #174):
+    # `gpg.ssh.program` pinned, so a signing helper in this machine's git config is not what
+    # verifies, and git in the C locale, so the reason quoted below is git's English sentence.
+    done = subprocess.run(["git", "-c", f"gpg.ssh.allowedSignersFile={signers}",
+                           "-c", "gpg.ssh.program=ssh-keygen", "verify-tag", tag],
                           cwd=str(root), capture_output=True, text=True, encoding="utf-8",
-                          errors="replace")
+                          errors="replace", env={**os.environ, "LC_ALL": "C"})
     said = [line.strip() for line in f"{done.stderr}\n{done.stdout}".splitlines() if line.strip()]
     good = next((line for line in said if line.startswith('Good "git" signature')), "")
     if done.returncode == 0 and good:
