@@ -4,6 +4,7 @@ served form, which the new window opens (hub #194) -- this dialog starts no inte
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -23,13 +24,11 @@ def _app() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
-@pytest.fixture(autouse=True)
-def _no_preview_outlives_its_test(monkeypatch):
-    """The preview timer of every dialog a test here built is stopped when the test ends (review of
-    #172, M-4). A dialog arms it while it is built -- `_on_profile_selected` writes vendor and model
-    -- and one left waiting fired in whichever later test turned the event loop, through that test's
-    `_seeder`: a stub's count one too many, or with nothing patched the real seed and its git
-    children, on another test's time. Only the timer: what a test leaves is not deleted (F-053)."""
+@contextlib.contextmanager
+def _previews_stopped_at_the_end():
+    """Every dialog built inside the block, as a list, each with its preview timer stopped when
+    the block ends -- what `_no_preview_outlives_its_test` wraps each test here in, and what the
+    test of it runs. Only the timer: what a test leaves is not deleted (F-053)."""
     built: list = []
     build = npd.NewProjectDialog.__init__
 
@@ -37,13 +36,27 @@ def _no_preview_outlives_its_test(monkeypatch):
         build(self, *args, **kwargs)
         built.append(self)
 
-    monkeypatch.setattr(npd.NewProjectDialog, "__init__", registered)
-    yield
-    for dlg in built:
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(npd.NewProjectDialog, "__init__", registered)
         try:
-            dlg._seed_note_timer.stop()
-        except RuntimeError:  # its C++ half is gone already, and the timer with it
-            pass
+            yield built
+        finally:
+            for dlg in built:
+                try:
+                    dlg._seed_note_timer.stop()
+                except RuntimeError:  # its C++ half is gone already, and the timer with it
+                    pass
+
+
+@pytest.fixture(autouse=True)
+def _no_preview_outlives_its_test():
+    """The preview timer of every dialog a test here built is stopped when the test ends (review of
+    #172, M-4); the dialogs are the fixture's value. A dialog arms the timer while it is built --
+    `_on_profile_selected` writes vendor and model -- and one left waiting fired in whichever later
+    test turned the event loop, through that test's `_seeder`: a stub's count one too many, or with
+    nothing patched the real seed and its git children, on another test's time."""
+    with _previews_stopped_at_the_end() as built:
+        yield built
 
 
 @pytest.fixture(autouse=True)
@@ -613,29 +626,22 @@ def test_every_trigger_waits_for_the_pause_then_seeds_once(tmp_path, monkeypatch
     assert seeds() == seeded + 1, f"one seed for the {trigger}, once the pause is over"
 
 
-#: The dialog the first test of the pair below leaves with its preview waiting.
-_LEFT_WAITING: list = []
-
-
-def test_a_test_may_end_with_its_preview_still_waiting():
-    """First of a pair (review of #172, M-4): the dialog is built, a field asks for the note, and
-    the test ends inside the pause -- as most tests here do."""
+def test_a_preview_still_waiting_when_its_test_ends_is_stopped(_no_preview_outlives_its_test):
+    """Review of #172, M-4: a dialog is built, a field asks for the note, and the test ends inside
+    the pause -- as most tests here do. What every test here is wrapped in stops that timer at its
+    end; a timer left running fires in whichever test next turns the event loop, through that
+    test's `_seeder`. One test, in any order (the group review, W1): it was a pair, and the second
+    half looked at nothing when it ran alone, under `-k` or `--lf`, or on another worker -- it
+    passed with the stop taken out."""
     _app()
-    dlg = npd.NewProjectDialog(seed_first=True)
-    dlg._vendor_edit.setText("Mosconi")
-    assert dlg._seed_note_timer.isActive()
-    _LEFT_WAITING.append(dlg)
+    with _previews_stopped_at_the_end() as built:
+        dlg = npd.NewProjectDialog(seed_first=True)
+        dlg._vendor_edit.setText("Mosconi")
+        assert dlg._seed_note_timer.isActive(), "the test ends inside the pause"
 
-
-def test_the_next_test_finds_that_preview_stopped():
-    """Second of the pair, and a check only when both run in one process -- a serial run, or the
-    file's shard on one worker; split across workers it has nothing to look at. A timer left
-    running fires in whichever test next turns the event loop, through that test's `_seeder`."""
-    try:
-        assert not any(dlg._seed_note_timer.isActive() for dlg in _LEFT_WAITING), \
-            "a preview outlived its test"
-    finally:
-        _LEFT_WAITING.clear()
+    assert built == [dlg]
+    assert not dlg._seed_note_timer.isActive(), "a preview outlived its test"
+    assert dlg in _no_preview_outlives_its_test, "the wrapping every test here has, this one's too"
 
 
 @pytest.mark.parametrize("name", ["project.json", "dsp_profile.json", "autosound_context.md"])
