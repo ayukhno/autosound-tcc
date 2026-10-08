@@ -1671,7 +1671,19 @@ def _read_config(project_dir: Path) -> dict:
     and git ignores `.tcc/` whole but `.mcp.json` by that exact name only (`_IGNORE_LINES`), so a
     `.mcp.json.corrupt-…` beside it would travel with the project."""
     return own_store.read_json(config.mcp_config_path(project_dir),
+                               misshapen=_misshapen_config,
                                aside_dir=config.tcc_dir(Path(project_dir)))
+
+
+def _misshapen_config(data: dict) -> str:
+    """Why `.mcp.json` is not one TCC can merge its entry into, or "" when it is (`own_store`).
+
+    An `"mcpServers"` that is there, not null and not an object was replaced by the write:
+    whatever it held gone from the user's file, with no copy and nothing on the strip (the review
+    of Task 19, M3; the R-bm class). Such a file now goes the broken way. Null holds nothing to
+    lose, and is taken for absent."""
+    servers = data.get("mcpServers")
+    return "" if servers is None or isinstance(servers, dict) else '"mcpServers" is not an object'
 
 
 def _names_this_instance(entry: Any, port: Optional[int], token: Optional[str]) -> bool:
@@ -1725,13 +1737,14 @@ def forget_mcp_config(project_dir: Path, port: Optional[int] = None,
         # `utf-8-sig` as the write reads it: a file TCC could write its entry into is a file it
         # can take the entry back out of, a byte-order mark from Notepad included.
         data = json.loads(path.read_bytes().decode("utf-8-sig"))
-        if not isinstance(data, dict):
-            raise ValueError("not a JSON object")
+        wrong = "not a JSON object" if not isinstance(data, dict) else _misshapen_config(data)
+        if wrong:
+            raise ValueError(wrong)
     except FileNotFoundError:
         return  # nothing advertised here
     except (OSError, ValueError, RecursionError) as exc:
-        app_log.logger().warning("%s could not be read to withdraw %s from it (%s); left as it is",
-                                 path, SERVER_NAME, exc)
+        app_log.logger().warning("could not withdraw %s from %s (%s); the file is left as it is",
+                                 SERVER_NAME, path, exc)
         return
     servers = data.get("mcpServers")
     if not isinstance(servers, dict) or SERVER_NAME not in servers:
@@ -1752,8 +1765,8 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
     disconnect whatever other MCP servers they had configured for this project. So it is read the
     store's way (`_read_config`): a file that is there and cannot be read raises
     `own_store.StoreUnreadable` and is never written over — `start()` keeps that as `config_error`,
-    with the server up — and a broken one is set aside into `.tcc/` and said before a fresh file
-    takes its place (#173, F16-6).
+    with the server up — and a broken one, or one whose `"mcpServers"` is not an object, is set
+    aside into `.tcc/` and said before a fresh file takes its place (#173, F16-6; M3).
 
     **Retried, and the read-only bit is cleared** before the last try. On Windows a file marked
     read-only refuses `open(..., "w")` with the same `PermissionError` a transient lock gives, and
@@ -1765,9 +1778,7 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
     _teach_git_to_ignore(Path(project_dir))
     data = _read_config(project_dir)
     servers = data.get("mcpServers")
-    if not isinstance(servers, dict):
-        if servers is not None:
-            app_log.logger().warning("%s: mcpServers is not an object; replaced", path)
+    if servers is None:  # absent or null; any other shape that is not an object was set aside
         servers = data["mcpServers"] = {}
     servers[SERVER_NAME] = {
         "type": "http",

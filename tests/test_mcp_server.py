@@ -2971,23 +2971,46 @@ def test_a_tool_s_confirmation_that_fails_is_logged_and_writes_nothing(tmp_path,
 
 @pytest.mark.parametrize("text", ["[]", "null", "3", '{"mcpServers": [], "other": 1}'])
 def test_an_mcp_json_of_the_wrong_shape_neither_raises_nor_stops_the_server(
-        tmp_path, text, app_log_warnings):
+        tmp_path, text, app_log_told):
     """F16-5: `forget_mcp_config` never raises; `write_mcp_config` raising anything but OSError
-    escaped `start()` and took the server down with it. What it rewrote is said, and the user's
-    other keys stay."""
+    escaped `start()` and took the server down with it.
+
+    And none of them is replaced (#173, the review of Task 19, M3). An `"mcpServers"` that is
+    there, not null and not an object was replaced by the write — whatever it held gone from the
+    user's file, with no copy and nothing on the strip. Like a file that is not an object, it is
+    now the write's to set aside into `.tcc/`, with its bytes, and to say. The withdrawal before it
+    leaves the file as it is and says nothing (I1)."""
     from autosound_tcc.core import config
 
     path = config.mcp_config_path(tmp_path)
     path.write_text(text, encoding="utf-8")
 
     mcp_server.forget_mcp_config(tmp_path)
+    assert path.read_text(encoding="utf-8") == text and app_log_told == [], (
+        "the withdrawal leaves it as it is, and says nothing")
+    write_mcp_config(tmp_path, 8765, "tok")
+
+    kept = list((tmp_path / ".tcc").glob(".mcp.json.corrupt-*"))
+    assert len(kept) == 1 and kept[0].read_text(encoding="utf-8") == text, kept
+    assert len(app_log_told) == 1, app_log_told
+    assert str(path) in app_log_told[0] and str(kept[0]) in app_log_told[0], app_log_told
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert set(data) == {"mcpServers"} and set(data["mcpServers"]) == {"tcc"}, data
+    assert data["mcpServers"]["tcc"]["url"] == "http://127.0.0.1:8765/mcp"
+
+
+def test_an_mcp_servers_of_null_is_taken_for_absent(tmp_path, monkeypatch, app_log_told):
+    """Null holds nothing to lose, so it is not a wrong shape: the write puts TCC's entry in its
+    place, keeps the user's other keys, and sets nothing aside."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    path = tmp_path / ".mcp.json"
+    path.write_text('{"mcpServers": null, "other": 1}', encoding="utf-8")
+
     write_mcp_config(tmp_path, 8765, "tok")
 
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["mcpServers"][mcp_server.SERVER_NAME]["url"] == "http://127.0.0.1:8765/mcp"
-    assert any(str(path) in r.getMessage() for r in app_log_warnings)
-    if "other" in text:
-        assert data["other"] == 1
+    assert data["other"] == 1 and set(data["mcpServers"]) == {"tcc"}
+    assert not list(tmp_path.rglob("*.corrupt-*")) and app_log_told == []
 
 
 # ---- F16-6 (#173): `.mcp.json` read the store's way, and withdrawn by its own instance only ----
