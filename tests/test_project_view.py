@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -393,12 +395,24 @@ def _backup(tmp_path, project, name: str = "origin", upstream: bool = True) -> s
     return project_view._remote_label(str(backup))
 
 
+def _bounded(argv, kwargs) -> None:
+    """A child `project_view` starts carries its time bound, by the module's name for it: the
+    reload's children run on the GUI thread (#172), and one with no bound waits as long as a
+    stalled network folder or a cloud placeholder being fetched does (the group review, G4)."""
+    assert kwargs.get("timeout") == project_view._GIT_TIMEOUT_S, \
+        f"{list(argv)} started without the {project_view._GIT_TIMEOUT_S} s bound: {kwargs}"
+
+
 def _children(monkeypatch) -> list:
     """The argv of every child started from here on: `project_view` has one door,
-    `subprocess.run`, and so has its probe."""
+    `subprocess.run`, and so has its probe. Each child `project_view` starts is held to its bound
+    here (`_bounded`), so every test that counts children holds the bound too, as the osascript
+    spy does in `test_terminal_launcher.py`."""
     started, run = [], subprocess.run
 
     def spy(argv, *args, **kwargs):
+        if sys._getframe(1).f_globals.get("__name__") == project_view.__name__:
+            _bounded(argv, kwargs)
         started.append(list(argv) if isinstance(argv, (list, tuple)) else [argv])
         return run(argv, *args, **kwargs)
 
@@ -533,6 +547,56 @@ def test_a_status_git_cannot_give_still_counts_what_the_backup_lacks(tmp_path, m
     assert state.changed is None, "the status failed: this is the path under test"
     assert (state.unpushed, state.level) == (1, "wait"), "one commit is not backed up"
     assert [argv[3:] for argv in started][2:] == [["rev-list", "--count", "@{u}..HEAD"]]
+
+
+@pytest.mark.parametrize("cut, read", [(("status",), (1, "wait", True)),
+                                       (("status", "rev-list"), (None, "wait", False))],
+                         ids=["status", "status and rev-list"])
+def test_a_child_cut_short_by_its_bound_is_never_read_as_backed_up(tmp_path, monkeypatch, cut,
+                                                                   read):
+    """G4: I-1 names «the 2 s bound on a slow folder» among the ways the status fails, and only a
+    corrupt index stood in for it. Here the bound itself: the children named run past it and are
+    cut, as `subprocess.run` cuts one (`TimeoutExpired`). What the backup lacks is then counted by
+    `rev-list`; with that cut too it is unknown, and unknown is never «backed up»."""
+    project, _ = _ahead(tmp_path)
+    project_view._git_works()  # primes the probe: once per process and `git` path
+    run = subprocess.run
+
+    def past_the_bound(argv, *args, **kwargs):
+        _bounded(argv, kwargs)
+        if argv[3] in cut:  # git -C <folder> <verb>
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(project_view.subprocess, "run", past_the_bound)
+
+    state = project_view.git_status(project)
+
+    assert state.changed is None, "the status was cut: this is the path under test"
+    assert (state.unpushed, state.level, state.counted) == read
+
+
+def test_the_probe_s_children_carry_the_bound_too(monkeypatch):
+    """G4: on a Mac whose `git` is `/usr/bin/git` -- a shim that opens an installer when the tools
+    are missing -- the probe is `xcode-select -p`, then `git --version`, on the GUI thread at a
+    process's first reload (#172). Each carries the bound. Played as that Mac on every platform,
+    and nothing runs."""
+    asked: list = []
+
+    def answered(argv, *args, **kwargs):
+        _bounded(argv, kwargs)
+        asked.append(argv[0])
+        return subprocess.CompletedProcess(argv, 0, stdout="git version 2.50.1\n", stderr="")
+
+    monkeypatch.setattr(project_view, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(project_view, "os", SimpleNamespace(path=SimpleNamespace(
+        realpath=lambda path: path)))
+    monkeypatch.setattr(project_view, "shutil", SimpleNamespace(which=lambda name: "/usr/bin/git"))
+    monkeypatch.setattr(project_view, "_git_runs", set())
+    monkeypatch.setattr(project_view.subprocess, "run", answered)
+
+    assert project_view._git_works()
+    assert asked == ["xcode-select", "git"]
 
 
 def test_a_backup_git_cannot_count_is_never_called_backed_up(tmp_path):
