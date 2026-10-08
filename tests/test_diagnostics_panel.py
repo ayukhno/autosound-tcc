@@ -2934,6 +2934,46 @@ def test_a_second_re_link_press_keeps_the_note_saying_where_the_old_entry_went(
     assert all(button.isEnabled() for button in row.findChildren(QPushButton))
 
 
+@pytest.mark.parametrize("check_id, fix, raised, why", [
+    pytest.param("aliases", "selfAliasFix", PermissionError("read-only"),
+                 "PermissionError: read-only", id="aliases"),
+    pytest.param("catalogue", "selfCatalogueFix", TimeoutError("agy models did not answer"),
+                 "TimeoutError: agy models did not answer", id="catalogue"),
+])
+def test_a_fix_that_fails_with_any_error_is_said_on_its_row_and_the_row_stays(
+        monkeypatch, check_id, fix, raised, why):
+    """M64: the other way a repair fails — not the method's `MethodRefused`, which is pinned above,
+    but whatever TCC's own fixes raise: a config folder that will not be written, a catalogue that
+    did not answer. That went out as the receipt «Fixed: PermissionError: …», with the panel
+    redrawn under it. It is the row's to say, by the error's type and words, and the row stays
+    with its buttons back."""
+    from autosound_tcc.core import model_choices, model_overrides
+
+    def cannot(*_args):
+        raise raised
+
+    if check_id == "aliases":
+        model_overrides.set_alias("agy:gemini-3.1-pro-high", "sdk:claude-opus-5", "gone")
+        monkeypatch.setattr(model_overrides, "clear_alias", cannot)
+    else:
+        monkeypatch.setattr(model_choices, "cli_routes_without_models", lambda: ["agy"])
+        monkeypatch.setattr(model_choices, "refresh_cli_catalogue", cannot)
+    _app()
+    dialog = DiagnosticsDialog()
+    asked: list = []
+    dialog.refreshRequested.connect(lambda: asked.append(1))
+    _deliver(dialog, _report())
+    [row] = _check_rows(dialog, check_id)
+    verdict = dialog._verdict.text()
+
+    _press(row, i18n.t(fix))
+
+    assert _check_rows(dialog, check_id) == [row], "the row stays"
+    assert i18n.t("selfActionFailed").format(why=why) in _said(row)
+    assert all(button.isEnabled() for button in row.findChildren(QPushButton))
+    assert (asked, dialog._verdict.text()) == ([], verdict), "no receipt, no re-check"
+
+
 def test_a_receipt_stays_through_its_reports_redraws_until_a_newer_report_or_a_re_check(
         tmp_path, monkeypatch):
     """Fix round 1 of #169's row, I1. The receipt was said once and dropped, and the window draws
