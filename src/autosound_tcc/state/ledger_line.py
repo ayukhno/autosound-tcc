@@ -89,14 +89,31 @@ def versions(root, preset: str) -> list[str]:
     return sorted(names, key=_number)
 
 
+#: `_made_for`'s answers, one slot per version file: `{path: ((path, st_mtime_ns, st_size),
+#: preset)}` (#172). A slot is replaced when its file changes — and a version file is written once.
+_MADE_FOR: dict = {}
+
+
 def _made_for(root, version: str) -> Optional[str]:
-    """The preset a project-line version was proposed for, as its own file says."""
+    """The preset a project-line version was proposed for, as its own file says.
+
+    Remembered per file by its path, mtime and size (#172): every reload asks this of every
+    version, on the GUI thread, and each one is a whole DSP state read for this one field."""
+    path = version_path(root, "", version)
     try:
-        data = json.loads(version_path(root, "", version).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        stat = path.stat()
+    except OSError:
         return None
-    preset = data.get("preset") if isinstance(data, dict) else None
-    return preset if isinstance(preset, str) and preset else None
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    held = _MADE_FOR.get(key[0])
+    if held is None or held[0] != key:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        preset = data.get("preset") if isinstance(data, dict) else None
+        held = _MADE_FOR[key[0]] = (key, preset if isinstance(preset, str) and preset else None)
+    return held[1]
 
 
 def compare_groups(root, preset: str, current: Optional[str]) -> list[tuple[str, list[str]]]:

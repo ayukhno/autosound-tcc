@@ -8,12 +8,14 @@ an empty plan that looks like a finished one.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from autosound_tcc.core import vendor_loader
 from autosound_tcc.state import process_view
 
-from tests import _intake
+from tests import _intake, _reads
 
 pytestmark = pytest.mark.skipif(
     not vendor_loader.is_available(), reason="rew_tool submodule not checked out"
@@ -446,6 +448,56 @@ def test_full_rebaseline_flags_every_active_channel(project, process):
     stale = process_view.stale_channels(project)
 
     assert set(stale) == {"w-L", "w-R"}  # the inactive centre is not a capture anyone owes
+
+
+@pytest.mark.parametrize("changed", ["process/journal.jsonl", "project.json", "glossary.json"])
+def test_what_went_stale_is_remembered_until_a_file_it_reads_changes(project, process,
+                                                                      monkeypatch, changed):
+    """#172: the window asks this at least twice a refresh, on the GUI thread, and each call read
+    the whole journal again, `project.json` with it, and the glossary for a full rebaseline. The
+    answer is remembered by the path, mtime and size of each of the three: a second call reads
+    nothing and hands out a copy of its own, and any one of them touched — the same size, a new
+    mtime — is read again."""
+    import json
+
+    (project / "glossary.json").write_text(json.dumps({
+        "channels": [{"code": "w-L", "active": True}, {"code": "w-R", "active": True}],
+    }), encoding="utf-8")
+    process.enter_phase("2")
+    _record_change(project, process, "full_rebaseline", what="mic recalibrated")
+    first = process_view.stale_channels(project)
+    opened = _reads.opened_under(monkeypatch, project)
+
+    first["w-L"]["what"] = "changed by its caller"
+    del first["w-R"]
+    again = process_view.stale_channels(project)
+    assert set(again) == {"w-L", "w-R"} and again["w-L"]["what"] == "mic recalibrated"
+    assert opened == []
+
+    path = project / changed
+    was = path.stat()
+    os.utime(path, ns=(was.st_atime_ns, was.st_mtime_ns + 1_000_000_000))
+    assert process_view.stale_channels(project) == again
+    assert str(path) in opened, opened
+
+
+def test_what_went_stale_is_read_again_by_a_method_read_again(project, process, monkeypatch):
+    """#172 beside #126: an in-app update reads the method again (`vendor_loader.reload_loaded`),
+    and what went stale is the method's reading of the journal — so the answer remembered from the
+    method before is not handed out once the method has been read again."""
+    import types
+
+    process.enter_phase("2")
+    _record_change(project, process, "remeasure: [w-L]")
+    process_view.stale_channels(project)
+    before = vendor_loader.load_process()
+    read_again = types.ModuleType(before.__name__)
+    read_again.__dict__.update(before.__dict__)
+    monkeypatch.setattr(vendor_loader, "load_process", lambda: read_again)
+    opened = _reads.opened_under(monkeypatch, project)
+
+    assert set(process_view.stale_channels(project)) == {"w-L"}
+    assert str(project / "process" / "journal.jsonl") in opened, opened
 
 
 def test_an_impact_the_parser_cannot_act_on_flags_nothing(project, process):

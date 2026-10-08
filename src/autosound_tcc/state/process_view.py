@@ -15,6 +15,7 @@ the mock rather than showing an empty plan that looks like a finished one.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -362,6 +363,22 @@ def config_changes(project_dir: Optional[Path] = None) -> tuple[dict, ...]:
     return tuple(out)
 
 
+#: `stale_channels`' answer, one slot per project: `{root: (key, stale)}` (#172). A slot is
+#: replaced when a file it was read from changes or the method is read again, so a caller on
+#: another thread never finds it emptied.
+_STALE: dict = {}
+
+
+def _stamp(path: Path) -> tuple:
+    """`(path, st_mtime_ns, st_size)`, what a memo here is keyed by (#172); `(path, None, None)`
+    for a file that is not there."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), None, None)
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
 def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
     """`{channel_code: the change that invalidated it}` — what needs re-measuring, and why.
 
@@ -386,10 +403,28 @@ def stale_channels(project_dir: Optional[Path] = None) -> dict[str, dict]:
     the session was calling the channel, while the evidence that clears it is a REW title typed
     under whichever name was current the day of the capture. Matching the two literally would let a
     rename either hide a real invalidation or leave one that no capture can ever clear.
+
+    Remembered by the path, mtime and size of each file it reads — the journal, `project.json`, the
+    glossary — and handed out as a copy (#172): the window asks this at least twice a refresh, on
+    the GUI thread, and the journal only grows. The method it was read with is in the key too: the
+    reading is the method's, and an update reads the method again (`vendor_loader.reload_loaded`).
     """
     process = _process_module()
-    if process is None or not (process_dir(project_dir) / "journal.jsonl").is_file():
+    if process is None:
         return {}
+    root = Path(project_dir or config.project_dir())
+    if not journal_file(root).is_file():
+        return {}
+    files = (journal_file(root), config.project_path(root), root / "glossary.json")
+    key = (process, *(_stamp(path) for path in files))
+    held = _STALE.get(str(root))
+    if held is None or held[0] != key:
+        held = _STALE[str(root)] = (key, _stale_in(root, process))
+    return copy.deepcopy(held[1])
+
+
+def _stale_in(project_dir: Path, process) -> dict[str, dict]:
+    """`stale_channels`, read from the files: one ordered pass over the journal."""
     proc = process.Process(str(process_dir(project_dir)))
     parse = _impact_parser()
     aliases = _channel_aliases(project_dir)

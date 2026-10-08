@@ -18,6 +18,8 @@ import pytest
 
 from autosound_tcc.core import critic, vendor_loader
 
+from tests import _reads
+
 
 def _project(tmp_path: Path) -> Path:
     """A project folder complete enough to pass preflight."""
@@ -302,6 +304,36 @@ def test_calls_are_logged_append_only_and_the_last_one_is_readable(stubbed, tmp_
 
 def test_last_call_is_none_before_any_call(tmp_path):
     assert critic.last_call(tmp_path) is None
+
+
+def _logged(project: Path, model: str) -> Path:
+    """The log as one call to `model` left it."""
+    path = critic.log_path(project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"mode": critic.MODE_API_OR_CLI, "model": model}) + "\n",
+                    encoding="utf-8")
+    return path
+
+
+def test_the_last_call_is_remembered_until_the_log_changes(tmp_path, monkeypatch):
+    """#172: the footer asks for the last review each time its reviewer status is refreshed, on
+    the GUI thread, and the log holds every review whole and is never rotated. The answer is
+    remembered by the log's path, mtime and size: a second call reads nothing and hands out a copy
+    of its own, and a log rewritten to the same size under a new mtime is read again."""
+    path = _logged(tmp_path, "gemini-a")
+    first = critic.last_call(tmp_path)
+    opened = _reads.opened_under(monkeypatch, tmp_path)
+
+    first["model"] = "changed by its caller"
+    assert critic.last_call(tmp_path)["model"] == "gemini-a"
+    assert opened == []
+
+    was = path.stat()
+    _logged(tmp_path, "gemini-b")
+    os.utime(path, ns=(was.st_atime_ns, was.st_mtime_ns + 1_000_000_000))
+    assert path.stat().st_size == was.st_size
+    assert critic.last_call(tmp_path)["model"] == "gemini-b"
+    assert opened == [str(path)]
 
 
 # --- "choose a model" is a QUESTION, not a failure (SKL-023) --------------------------------

@@ -21,6 +21,7 @@ never as an answer.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -902,15 +903,36 @@ def log_call(result: CriticResult, package_path: Optional[Path], project_dir: Op
         pass  # the log is a convenience; losing it must not fail the call that succeeded
 
 
-def last_call(project_dir: Optional[Path] = None) -> Optional[dict]:
-    """The most recent reviewer call, for the footer's advisor status. None if never called."""
-    import json
+#: `last_call`'s answer, one slot per log: `{path: ((path, st_mtime_ns, st_size), entry)}` (#172).
+#: A slot is replaced when its log changes, so a caller on another thread never finds it emptied.
+_LAST_CALL: dict = {}
 
+
+def last_call(project_dir: Optional[Path] = None) -> Optional[dict]:
+    """The most recent reviewer call, for the footer's advisor status. None if never called.
+
+    Remembered by the log's path, mtime and size, and handed out as a copy (#172): the footer asks
+    this each time its reviewer status is refreshed, on the GUI thread, and the log holds every
+    review whole and is never rotated. A call logged since has grown the log, so the next call
+    reads it."""
     path = log_path(project_dir)
     try:
-        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        stat = path.stat()
     except OSError:
         return None
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    held = _LAST_CALL.get(key[0])
+    if held is None or held[0] != key:
+        try:
+            lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        except OSError:
+            return None
+        held = _LAST_CALL[key[0]] = (key, _newest_entry(lines))
+    return copy.deepcopy(held[1])
+
+
+def _newest_entry(lines: list) -> Optional[dict]:
+    """The last of the log's lines that reads as an entry; None when none does."""
     for line in reversed(lines):
         try:
             return json.loads(line)

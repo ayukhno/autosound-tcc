@@ -15,6 +15,8 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from autosound_tcc.core import config_writer, method_binding, method_cli, vendor_loader  # noqa: E402
 from autosound_tcc.state import ledger_line  # noqa: E402
 
+from tests import _reads  # noqa: E402
+
 
 def _arbiter_example(root):
     """The Arbiter's own example (2026-09-23): v_003 saved into preset 1 as SQ-1; FULL-1 into
@@ -233,6 +235,29 @@ def test_compare_groups_the_project_line_by_the_preset_each_version_was_made_for
     _arbiter_example(tmp_path)
     assert ledger_line.compare_groups(tmp_path, "SQ", "v_006") == [
         ("SQ", ["v_006", "v_003", "v_002", "v_001"]), ("FULL", ["v_005", "v_004"])]
+
+
+def test_the_preset_a_version_was_made_for_is_read_once_per_file(tmp_path, monkeypatch):
+    """#172: every reload offers «порівняти з», and that asks each version which preset it was
+    made for — a whole DSP state read for one field, on the GUI thread. The answer is remembered
+    per file by its path, mtime and size: the groups read a second time open no version, and a
+    version rewritten to the same size under a new mtime is read again."""
+    _arbiter_example(tmp_path)
+    groups = ledger_line.compare_groups(tmp_path, "SQ", "v_006")
+    opened = _reads.opened_under(monkeypatch, tmp_path)
+
+    assert ledger_line.compare_groups(tmp_path, "SQ", "v_006") == groups
+    assert opened == []
+
+    v_004 = tmp_path / "versions" / "v_004.json"
+    was = v_004.stat()
+    v_004.write_text(json.dumps({"version": "v_004", "preset": "LOUD", "parent": "v_003"}),
+                     encoding="utf-8")
+    os.utime(v_004, ns=(was.st_atime_ns, was.st_mtime_ns + 1_000_000_000))
+    assert v_004.stat().st_size == was.st_size
+    assert ledger_line.compare_groups(tmp_path, "SQ", "v_006") == [
+        ("SQ", ["v_006", "v_003", "v_002", "v_001"]), ("FULL", ["v_005"]), ("LOUD", ["v_004"])]
+    assert opened == [str(v_004)]
 
 
 def test_compare_groups_keeps_the_current_version_even_with_nothing_else_to_offer(tmp_path):
