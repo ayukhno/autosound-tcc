@@ -1667,7 +1667,14 @@ def test_a_project_mid_interview_keeps_its_plan(tmp_path, monkeypatch):
 def test_a_half_written_process_file_does_not_erase_the_plan(tmp_path, monkeypatch):
     """The skill rewrites `process-state.json` on every step, and the watcher can read it mid-
     write. Blanking then turns half a second of writing into "the phases disappeared" — reported
-    exactly that way, with them coming back on the next turn."""
+    exactly that way, with them coming back on the next turn.
+
+    #176: a plan on screen proved nothing — seven empty phases are a plan too, and they are what
+    the method reads such a file as. The step is what must stay. And the file stays watched: an
+    atomic replace drops the path, and a refresh that stopped at the guard before re-adding it
+    left the plan frozen through every write after."""
+    from autosound_tcc.state import process_view
+
     process = tmp_path / "process"
     process.mkdir()
     (process / "process-state.json").write_text(
@@ -1682,12 +1689,16 @@ def test_a_half_written_process_file_does_not_erase_the_plan(tmp_path, monkeypat
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     _app()
     window = MainWindow()
-    assert window._plan_panel.plan
+    path = str(process_view.state_file())
+    assert window._plan_panel.plan and path in window._process_watcher.files()
 
+    window._process_watcher.removePath(path)  # what an atomic replace does; no event loop runs here
     (process / "process-state.json").write_text("{ half-writ", encoding="utf-8")
     window._refresh_process()
 
     assert window._plan_panel.plan  # the last thing known to be true stays on screen
+    assert "xo" in [s.id for p in window._plan_panel.plan for s in p.steps]
+    assert path in window._process_watcher.files()  # so the write that completes it is seen
 
 
 def test_a_phase_closed_on_prose_is_flagged_in_the_panel(tmp_path, monkeypatch):

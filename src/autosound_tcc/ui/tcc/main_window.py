@@ -3667,6 +3667,16 @@ class MainWindow(QMainWindow):
         self._check_intake_gate()
 
     def _refresh_process(self, *_args) -> None:
+        # Re-arm first, before any return below (#176): an atomic write replaces the inode, so the
+        # watcher silently drops the path it was watching, and re-adding it on every change is what
+        # keeps this from firing exactly once. Left after the guard, a file that did not read as a
+        # state left the path dropped and the plan frozen through every write after it. A window
+        # still being built (`_show_left_status`) has no watcher yet: the refresh is worth doing
+        # then, the re-arming is not. A file not there yet is not watched.
+        watcher = getattr(self, "_process_watcher", None)
+        path = str(process_view.state_file())
+        if watcher is not None and path not in watcher.files() and Path(path).is_file():
+            watcher.addPath(path)
         # The round is in the process state, so «Готово» follows every write to it (finding 31).
         self._sync_capture_ready()
         state = process_view.load_state()
@@ -3711,16 +3721,6 @@ class MainWindow(QMainWindow):
         review = process_view.reviewer(state)
         if review:
             self._show_process_reviewer(review)
-
-        # Re-arm: an atomic write replaces the inode, so the watcher silently drops the path it
-        # was watching. Re-adding after every change is what keeps this from firing exactly once.
-        # `_show_left_status` can reach here while the window is still being built, before the
-        # watcher exists; the refresh itself is still worth doing, the re-arming is not.
-        if getattr(self, "_process_watcher", None) is None:
-            return
-        path = str(process_view.state_file())
-        if path not in self._process_watcher.files():
-            self._process_watcher.addPath(path)
 
     def _on_channel_toggle(self, group_id: str, channel: str, on: bool) -> None:
         """The Arbiter asked for a channel to be switched on or off.

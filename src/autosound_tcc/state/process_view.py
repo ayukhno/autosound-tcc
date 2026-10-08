@@ -69,9 +69,29 @@ def state_file(project_dir: Optional[Path] = None) -> Path:
     return process_dir(project_dir) / "process-state.json"
 
 
+def read_state_text(project_dir: Optional[Path] = None) -> Optional[dict]:
+    """`process-state.json` as the JSON object it holds, or None: no file, one that cannot be
+    opened, one that is not UTF-8 or not JSON (cut off mid-write, empty), and JSON that is not an
+    object (`null`, a list) (#176).
+
+    Read before the method is asked, because the method reads each of those as the EMPTY process
+    (`Process.load()`, lenient), and that is an answer: seven phases with nothing in them, «no
+    active phase». `strict=True` would refuse instead, but only from the method's v3.1.2: a copy up
+    to v3.1.1 has no `strict`, and every copy `method_binding` admits must read the same way. A BOM
+    is read, as the method reads it: refused here, a state the method reads would freeze the plan.
+    """
+    try:
+        with open(state_file(project_dir), "rb") as handle:
+            data = json.loads(handle.read().decode("utf-8-sig"))
+    except (OSError, ValueError):  # `UnicodeDecodeError` and `JSONDecodeError` are ValueErrors
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def load_state(project_dir: Optional[Path] = None) -> Optional[dict]:
-    """The raw process-state dict, or None if this project has none / the skill isn't vendored."""
-    if not has_process_state(project_dir):
+    """The raw process-state dict, or None if this project has none / the skill isn't vendored /
+    the file is there and does not read as a state (`read_state_text`, #176)."""
+    if read_state_text(project_dir) is None:
         return None
     try:
         process = vendor_loader.load_process()

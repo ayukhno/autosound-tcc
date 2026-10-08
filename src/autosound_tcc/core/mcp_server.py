@@ -85,6 +85,7 @@ from autosound_tcc.core import (
 )
 from autosound_tcc.core.session_registry import SessionRegistry
 from autosound_tcc.core.signal_bus import SignalBus
+from autosound_tcc.state import process_view
 
 SERVER_NAME = "tcc"
 DEFAULT_PORT = 8765
@@ -580,12 +581,17 @@ def build_server(
 
         The one authority on where the tune stands (D-6): TCC reads this, never writes it. Returns
         `(state, None)` or `(None, reason)` — a project with no process yet reads as an empty
-        state, which is not an error.
+        state, which is not an error. A file that is there and does not read as a state is: the
+        method reads it as the empty process too, and «no active phase» from it sent the agent to
+        record a move it may well have recorded (#176). Read first as the window reads it.
         """
         try:
             process = vendor_loader.load_process()
         except vendor_loader.VendorNotInitializedError as exc:
             return None, str(exc)
+        if (process_view.read_state_text(project_dir) is None
+                and process_view.has_process_state(project_dir)):
+            return None, "process-state.json could not be read"
         return process.Process(str(project_dir / "process")).load(), None
 
     async def _confirm(request: ConfirmRequest) -> bool:

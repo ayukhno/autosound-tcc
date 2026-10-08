@@ -534,6 +534,22 @@ def test_report_phase_writes_nothing_when_the_skill_has_no_phase(tmp_path):
     assert not (tmp_path / "process").exists()
 
 
+def test_report_phase_on_a_file_that_is_not_a_state_says_it_could_not_be_read(tmp_path):
+    """#176: the method reads a cut-off `process-state.json` as the empty process, so the answer
+    was «no active_phase -- call enter_phase», sending the agent to record a move it may well have
+    recorded. What is true is that the file did not read, and that is the answer."""
+    bridge = RecordingBridge(allow=True)
+    bridge.refreshes = 0
+    mcp, _, registry = _server(tmp_path, bridge)
+    (tmp_path / "process").mkdir()
+    (tmp_path / "process" / "process-state.json").write_text("{ half", encoding="utf-8")
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool("report_phase", {"phase": "2"}))))
+
+    assert result == {"refreshed": False, "error": "process-state.json could not be read"}
+    assert registry.current_phase() is None
+
+
 def test_write_mcp_config_merges_instead_of_clobbering(tmp_path, monkeypatch):
     """`.mcp.json` is the user's file -- other servers they configured must survive."""
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))

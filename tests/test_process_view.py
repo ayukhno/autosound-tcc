@@ -8,6 +8,7 @@ an empty plan that looks like a finished one.
 
 from __future__ import annotations
 
+import builtins
 import os
 
 import pytest
@@ -55,6 +56,43 @@ def test_no_process_state_reads_as_none_so_the_mock_stays(project):
     assert process_view.has_process_state(project) is False
     assert process_view.load_state(project) is None
     assert process_view.load_plan(project) is None
+
+
+@pytest.mark.parametrize("written", [b"{ half", b"", b"null", b"[]", b"\xff\xfe{}"],
+                         ids=["cut-off", "empty", "null", "a-list", "not-utf8"])
+def test_a_state_file_that_is_not_a_state_reads_as_none(project, written):
+    """#176: there and not a state -- cut off mid-write, empty, JSON that is no object, not UTF-8 --
+    reads as None, as no file does, and the window keeps the plan it has. The method reads each as
+    the EMPTY process, and the plan blanked to seven empty phases."""
+    path = process_view.state_file(project)
+    path.parent.mkdir()
+    path.write_bytes(written)
+
+    assert process_view.load_state(project) is None
+    assert process_view.load_plan(project) is None
+    assert process_view.read_state_text(project) is None
+    assert process_view.has_process_state(project)  # there: how the window's guard tells them apart
+
+
+def test_a_state_file_that_cannot_be_opened_reads_as_none(project, process, monkeypatch):
+    """#176's last case: a whole state that no reader can open -- held by another program, as a
+    sharing violation holds it on Windows. The method reads it as the empty process; it is None."""
+    process.enter_phase("2")
+    _held(monkeypatch, builtins, "process-state.json")
+
+    assert process_view.load_state(project) is None
+    assert process_view.read_state_text(project) is None
+
+
+def test_a_state_with_a_bom_still_reads(project, process):
+    """The read before the method's refuses only what the method cannot read: a BOM is an editor's
+    marker, not damage, and the method reads past it -- refused here, the plan would freeze."""
+    process.enter_phase("2")
+    path = process_view.state_file(project)
+    path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
+
+    assert process_view.load_state(project)["active_phase"] == "2"
+    assert process_view.read_state_text(project)["active_phase"] == "2"
 
 
 def test_every_phase_appears_even_the_ones_never_entered(process, project):
@@ -522,13 +560,16 @@ def test_what_went_stale_is_read_again_by_a_method_read_again(project, process, 
 def _held(monkeypatch, module, name: str) -> dict:
     """`name` held as another program holds a file: the method's reader in `module` meets the
     refusal Windows gives a sharing violation, EACCES, and reads the file as empty, as it reads
-    every file it cannot open (#134, R53). Nothing on disk moves. Returns the switch that ends it."""
+    every file it cannot open (#134, R53). Nothing on disk moves. Returns the switch that ends it.
+    `builtins` for `module` holds it for every reader, TCC's own and the method's (#176)."""
     hold = {"on": True}
+    real = builtins.open  # held in `builtins`, the name `open` would be this function itself
 
     def opening(file, *args, **kwargs):
-        if hold["on"] and os.path.basename(os.fspath(file)) == name:
+        if (hold["on"] and isinstance(file, (str, os.PathLike))
+                and os.path.basename(os.fspath(file)) == name):
             raise PermissionError(13, "held by another program", os.fspath(file))
-        return open(file, *args, **kwargs)
+        return real(file, *args, **kwargs)
 
     monkeypatch.setitem(vars(module), "open", opening)
     return hold
