@@ -444,6 +444,34 @@ def test_a_message_with_no_time_of_its_own_shows_none():
     assert bare._time_label.isHidden() and not bare._time_label.text()
 
 
+def test_a_start_the_method_binding_refuses_shows_the_bindings_sentence(tmp_path, monkeypatch):
+    """#169 F3d, the whole way: a project whose copy of the method TCC will not run ends the SDK
+    session's start with the binding's own sentence, before any client is built, and the worker's
+    failed start reaches the transcript as a failed bubble that carries the sentence whole."""
+    import pytest
+
+    from autosound_tcc.core import claude_sdk, method_binding, tuning_session
+    from autosound_tcc.core.signal_bus import SignalBus
+    from autosound_tcc.ui.tcc.agent_worker import AgentWorker
+
+    _app()
+    project = tmp_path / "car"
+    (project / ".claude" / "skills" / "autosound-tuning").mkdir(parents=True)  # a folder: refused
+    binding = method_binding.for_project(project)
+    assert binding.state == "refused" and binding.reason, binding
+    claude_sdk.bind(tuning_session.SDK_NAMES, vars(tuning_session))
+    monkeypatch.setattr(tuning_session, "ClaudeSDKClient",
+                        lambda **_kw: pytest.fail("a client was built for a refused copy"))
+    panel = DialogPanel()
+    worker = AgentWorker(session_factory=lambda: tuning_session.TuningSession(project_dir=project))
+    panel.attach_agent(worker, SignalBus(project))
+
+    worker.run()  # the worker's own body, on this thread: the start ends before it needs one
+
+    assert binding.reason in panel._bubbles[-1].plain_text()
+    assert not panel._send_btn.isHidden(), "usable again, not wedged in busy"
+
+
 def test_an_answer_to_a_plain_question_is_labelled_ask_not_critic():
     """tcc#116: a question to the reviewer is not a review, and its answer must not read as one."""
     _app()

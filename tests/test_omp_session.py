@@ -785,6 +785,26 @@ def test_never_ask_says_nothing_about_an_ordinary_command(tmp_path):
     assert events == []
 
 
+def test_omp_reads_the_roots_the_binding_gives_not_wherever_the_link_points(tmp_path):
+    """#169: omp's gate asks `tuning_session._read_roots_for` too, so the roots follow the project's
+    binding on this route as well. A link to a folder that is not the method is refused, names no
+    root, and a `cat` in that folder is put to the Arbiter instead of passing as a read."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "notes.md").write_text("x", encoding="utf-8")
+    project = tmp_path / "car"
+    link = project / ".claude" / "skills" / "autosound-tuning"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(elsewhere, target_is_directory=True)
+    session = _session(project, allow=False)
+    command = f"cat {elsewhere / 'notes.md'}"
+
+    asyncio.run(session._gate({**PERMISSION_FRAME, "title": f"Allow tool: bash\nCommand: {command}"}))
+
+    assert len(session.bridge.requests) == 1, "asked, not let through as a read"
+    assert session.sent[0]["value"] == "Deny"
+
+
 def test_a_remembered_tool_stops_asking_without_turning_the_gate_off(tmp_path):
     session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(False),
                          always_allowed=frozenset({"write"}))

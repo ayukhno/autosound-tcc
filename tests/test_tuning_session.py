@@ -8,13 +8,16 @@ testing it directly is what keeps the security-relevant half of this module fast
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
 from concurrent.futures import Future
 from pathlib import Path
 
 import pytest
 
+from autosound_tcc.core import critic, method_binding, vendor_loader
 from autosound_tcc.core.mcp_server import ConfirmRequest
-from autosound_tcc.core.tuning_session import TuningSession, bash_is_read_only
+from autosound_tcc.core.tuning_session import SKILL_NAME, TuningSession, bash_is_read_only
 
 # The project the commands below are judged against: reads are bounded by the same roots as
 # `Read`/`Grep`/`Glob`, so a bare command is not a question the allowlist can answer any more.
@@ -101,16 +104,23 @@ def test_reads_inside_the_project_need_no_confirmation(tmp_path):
     assert arbiter.asked == []
 
 
-def test_skill_files_are_readable_even_though_they_live_outside_the_project(tmp_path):
+@pytest.mark.parametrize("linked", [
+    pytest.param(True, id="through-the-link-tcc-makes"),
+    # A project's first session: `__init__` read the roots before `start` made the link, so the
+    # method TCC was about to install was a folder to ask about (#169).
+    pytest.param(False, id="before-any-link"),
+])
+def test_skill_files_are_readable_even_though_they_live_outside_the_project(
+        tmp_path, own_copy_is_the_submodule, linked):
     """The skill is a symlink out of the project, and its method reads phase references on demand
-    -- gating those would put a permission click in front of content TCC installed itself."""
-    skill_home = tmp_path / "elsewhere" / "autosound-tuning"
-    (skill_home / "references" / "phases").mkdir(parents=True)
-    phase_doc = skill_home / "references" / "phases" / "phase_2_eq.md"
-    phase_doc.write_text("EQ phase", encoding="utf-8")
-    project = tmp_path / "project"
-    (project / ".claude" / "skills").mkdir(parents=True)
-    (project / ".claude" / "skills" / "autosound-tuning").symlink_to(skill_home)
+    -- gating those would put a permission click in front of content TCC installed itself. Which
+    copy that is, is the project's binding (#169), not wherever the link points: here TCC's own."""
+    project = tmp_path / "car"
+    project.mkdir()
+    if linked:
+        assert vendor_loader.link_skill_into(project) == _entry(project)
+    phase_doc = vendor_loader.skill_dir() / "references" / "phases" / "phase_2_eq.md"
+    assert phase_doc.is_file()
 
     session, arbiter = _session(project, allow=False)
 
@@ -700,6 +710,214 @@ def test_the_skill_is_asked_for_by_its_plugin_qualified_name(tmp_path):
     options = session._options()
 
     assert options.skills == ["autosound-tuning:autosound-tuning"]
+
+
+# --- which copy the session loads (#169, F3d) -------------------------------------------------
+# `plugins` named TCC's own checkout whatever the project linked — and the string "None" when that
+# checkout is in no repository — and the read roots were wherever the link pointed, while every
+# writer runs the project's bound copy (`method_cli.spawn`). The session loads that copy now, or its
+# start says why it cannot. The SDK client is a stand-in: nothing here connects or sends anything.
+
+
+def _entry(project: Path) -> Path:
+    return project / ".claude" / "skills" / SKILL_NAME
+
+
+def _same_path(a, b) -> bool:
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+@pytest.fixture
+def own_copy_is_the_submodule(monkeypatch):
+    """TCC's own copy is the vendored one, whatever the developer's shell points the override at."""
+    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
+    if not vendor_loader._looks_like_the_skill(vendor_loader._SUBMODULE_DIR):
+        pytest.skip("skill submodule not checked out")
+    assert vendor_loader.skill_dir() == vendor_loader._SUBMODULE_DIR
+
+
+def _method_copy(root: Path, *, manifest: bool) -> Path:
+    """The vendored method copied to `root/skills/autosound-tuning`, the layout of its own
+    repository: with the plugin manifest beside `skills/`, or with no manifest and no `.git` above
+    it — a skill folder unpacked on its own. `vendor/` itself is never touched."""
+    if not vendor_loader._looks_like_the_skill(vendor_loader._SUBMODULE_DIR):
+        pytest.skip("skill submodule not checked out")
+    skill = root / "skills" / SKILL_NAME
+    shutil.copytree(vendor_loader._SUBMODULE_DIR, skill,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    if manifest:
+        (root / ".claude-plugin").mkdir()
+        shutil.copy2(vendor_loader._SUBMODULE_DIR.parents[1] / ".claude-plugin" / "plugin.json",
+                     root / ".claude-plugin" / "plugin.json")
+    return skill
+
+
+@pytest.fixture(scope="session")
+def second_copy(tmp_path_factory) -> Path:
+    """A second copy of the method in a repository of its own."""
+    return _method_copy(tmp_path_factory.mktemp("second-method") / "autosound-tuning-skill",
+                        manifest=True)
+
+
+@pytest.fixture(scope="session")
+def bare_copy(tmp_path_factory) -> Path:
+    """A copy of the method in no repository: no plugin manifest, no `.git`."""
+    return _method_copy(tmp_path_factory.mktemp("bare-method"), manifest=False)
+
+
+def _linked_and_approved(project: Path, skill: Path) -> method_binding.Binding:
+    """`project`'s entry linked to `skill`, and the link approved on this machine: the real
+    `method_binding.approve`, on the settings store each test is given its own of."""
+    _entry(project).parent.mkdir(parents=True)
+    _entry(project).symlink_to(skill, target_is_directory=True)
+    binding = method_binding.approve(method_binding.for_project(project))
+    assert binding.state == "approved", binding.reason
+    return binding
+
+
+@pytest.fixture
+def sdk_client(monkeypatch) -> list:
+    """`ClaudeSDKClient` as far as `start` reaches it: the options each one was built with, and
+    nothing connected or sent. The SDK's names are bound first, so `start`'s own bind finds them
+    there and leaves this stand-in in place."""
+    from autosound_tcc.core import claude_sdk, tuning_session
+
+    claude_sdk.bind(tuning_session.SDK_NAMES, vars(tuning_session))
+    built: list = []
+
+    class _Client:
+        def __init__(self, options) -> None:
+            built.append(options)
+
+        async def connect(self) -> None: ...
+
+        async def query(self, text: str) -> None: ...
+
+        async def receive_response(self):
+            return
+            yield  # an async generator that yields nothing
+
+        async def disconnect(self) -> None: ...
+
+    monkeypatch.setattr(tuning_session, "ClaudeSDKClient", _Client)
+    return built
+
+
+def _start(session: TuningSession) -> list:
+    async def run():
+        return [event async for event in session.start()]
+
+    return asyncio.run(run())
+
+
+def test_a_project_bound_to_an_approved_copy_loads_that_copy(
+        tmp_path, monkeypatch, sdk_client, second_copy, own_copy_is_the_submodule):
+    """The issue's first: the session loads the copy the project is bound to, as the writers run it
+    — that copy's repository as the plugin, its skill folder named to the session's shell in
+    `AUTOSOUND_SKILL_ROOT` beside the reviewer's variables, and its files read without asking."""
+    monkeypatch.setattr(critic, "session_env", lambda project_dir: {"AUTOSOUND_CRITIC_MODEL": "m"})
+    project = tmp_path / "car"
+    binding = _linked_and_approved(project, second_copy)
+    session = TuningSession(project_dir=project, bridge=Arbiter(allow=False))
+
+    _start(session)
+
+    [options] = sdk_client
+    assert options.plugins == [{"type": "local", "path": str(binding.plugin_root())}]
+    assert _same_path(binding.plugin_root(), second_copy.parents[1]), "the copy's own repository"
+    assert options.skills == [f"{SKILL_NAME}:{SKILL_NAME}"]
+    assert options.env == {"AUTOSOUND_CRITIC_MODEL": "m",
+                           method_binding.SKILL_ROOT_ENV: str(binding.skill_dir)}
+    assert _decide(session, "Read", {"file_path": str(second_copy / "SKILL.md")}) == "allow"
+    assert session.bridge.asked == []
+
+
+@pytest.mark.parametrize("whose", ["an approved copy", "tccs own copy"])
+def test_a_copy_with_no_plugin_manifest_is_refused_by_name_never_sent_as_None(
+        tmp_path, monkeypatch, sdk_client, bare_copy, own_copy_is_the_submodule, whose):
+    """The SDK loads the method as a plugin, and a skill folder unpacked on its own is in no
+    repository: `skill_repo_root()` answered None, and the session was handed the plugin path
+    "None" — a session with no method, improvising one. The start says which copy and why now,
+    before anything is built or linked."""
+    project = tmp_path / "car"
+    if whose == "an approved copy":
+        _linked_and_approved(project, bare_copy)
+    else:
+        monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, str(bare_copy))
+        project.mkdir()
+    binding = method_binding.for_project(project)
+    assert binding.state == ("approved" if whose == "an approved copy" else "same"), binding.reason
+    assert binding.plugin_root() is None
+    session = TuningSession(project_dir=project)
+
+    with pytest.raises(method_binding.MethodRefused) as refused:
+        _start(session)
+
+    said = str(refused.value)
+    assert "this method copy has no plugin manifest" in said, said
+    assert str(binding.skill_dir) in said, said
+    assert sdk_client == [], "no client was built, so no plugin path reached the SDK at all"
+    assert os.path.lexists(_entry(project)) == (whose == "an approved copy"), "nothing linked"
+    with pytest.raises(method_binding.MethodRefused):
+        session._options()
+
+
+def test_a_refused_binding_ends_the_start_with_its_sentence(tmp_path, sdk_client):
+    """A project whose copy TCC will not run — a real folder at the entry: a copy inside the project
+    travels with it, from a backup or a clone (HUB-050) — is not a session to start. `start` raises
+    the binding's own sentence before anything is built; constructing the session never refuses,
+    because the window builds one only to read the registry (`main_window._launch_session`)."""
+    project = tmp_path / "car"
+    _entry(project).mkdir(parents=True)
+    binding = method_binding.for_project(project)
+    assert binding.state == "refused" and binding.reason, binding
+
+    session = TuningSession(project_dir=project)
+
+    with pytest.raises(method_binding.MethodRefused) as refused:
+        _start(session)
+    assert str(refused.value) == binding.reason
+    assert sdk_client == [], "no client was built"
+
+
+def test_a_project_with_no_link_loads_tccs_own_copy_as_before(
+        tmp_path, monkeypatch, sdk_client, own_copy_is_the_submodule):
+    """No entry is `same`: the plugin is TCC's own checkout as before #169, and the project still
+    gets TCC's link, for omp. What is new is that the session's shell is told which copy it runs,
+    as a bound copy's is — the writers' children have been told so since `method_cli.spawn`."""
+    monkeypatch.setattr(critic, "session_env", lambda project_dir: {"AUTOSOUND_CRITIC_MODEL": "m"})
+    project = tmp_path / "car"
+    project.mkdir()
+
+    _start(TuningSession(project_dir=project))
+
+    [options] = sdk_client
+    assert options.plugins == [{"type": "local", "path": str(vendor_loader.skill_repo_root())}]
+    assert options.setting_sources == []
+    assert options.skills == [f"{SKILL_NAME}:{SKILL_NAME}"]
+    assert options.env == {"AUTOSOUND_CRITIC_MODEL": "m",
+                           method_binding.SKILL_ROOT_ENV: str(vendor_loader.skill_dir())}
+    assert _entry(project).is_symlink() and _same_path(_entry(project), vendor_loader.skill_dir())
+
+
+def test_a_link_to_a_folder_that_is_not_the_method_grants_no_reads(tmp_path):
+    """The read roots were wherever the link pointed, so a project that arrived with its entry
+    linked to, say, `~/.ssh` made that folder readable unasked. They are the binding's now: a
+    refused link names no root, and beside the project only TCC's own copy is read freely."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    secret = elsewhere / "id_rsa"
+    secret.write_text("key", encoding="utf-8")
+    project = tmp_path / "car"
+    _entry(project).parent.mkdir(parents=True)
+    _entry(project).symlink_to(elsewhere, target_is_directory=True)
+    assert method_binding.for_project(project).state == "refused"
+
+    session, arbiter = _session(project, allow=False)
+
+    assert _decide(session, "Read", {"file_path": str(secret)}) == "deny"
+    assert [request.tool for request in arbiter.asked] == ["Read"]
+    assert not bash_is_read_only(f"cat {secret}", session._read_roots)
 
 
 # --- "don't ask" must not mean "don't look" (HUB-028 ask 3) ---------------------------------

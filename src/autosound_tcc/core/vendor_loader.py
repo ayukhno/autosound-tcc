@@ -215,9 +215,9 @@ def is_available() -> bool:
 def link_skill_into(project_dir: Path) -> Optional[Path]:
     """Make sure this project has the skill, and that it is *this* skill.
 
-    Both adapters assume `<project>/.claude/skills/autosound-tuning` — the SDK reads it as its
-    only setting source, omp as its only enabled skill — and until now nothing created it. A
-    project without it does not fail: whatever happens to be in `~/.claude/skills` gets used
+    Both adapters assumed `<project>/.claude/skills/autosound-tuning` — omp reads it as its only
+    enabled skill, the SDK read it as its only setting source until HUB-050 — and nothing created
+    it. A project without it does not fail: whatever happens to be in `~/.claude/skills` gets used
     instead, or nothing does, and the session improvises a tuning method of its own. That is how
     a real run came to follow a dead reference out of an old checkout, hunt the disk for three
     globs and an eight-minute `grep`, and then invent an intake.
@@ -227,12 +227,23 @@ def link_skill_into(project_dir: Path) -> Optional[Path]:
     alone whatever it points at — the user may have wired a working tree there on purpose, and
     replacing it under them would be worse than the problem this solves.
 
-    Returns the link, or None when there is nothing to link (no submodule) or the filesystem
-    refuses. Both are reported by the caller rather than raised: a session with a warning beats no
-    session.
+    Nothing is written where `.claude/skills` — or `.claude` — leads out of the project, to
+    `~/.claude` say (R-ak, #169): what sits there is not the project's, and a link made there
+    would land in every project that reads that folder, written by opening one. «Out of» is
+    `method_binding`'s test, the folder a path IS rather than how a link spells it.
+
+    Returns the link, or None when there is nothing to link (no submodule), when `.claude/skills`
+    leads out of the project, or when the filesystem refuses — answered, never raised: a session
+    with a warning beats no session. omp says so before its turn (`OmpSession.skill_warning`); the
+    SDK route loads the method as a plugin and does not read this link.
     """
+    # Here and not at the top: `method_binding` imports this module.
+    from autosound_tcc.core.method_binding import _inside
+
     link = project_dir / ".claude" / "skills" / SKILL_NAME
     try:
+        if not _inside(os.path.realpath(link.parent), os.path.realpath(project_dir)):
+            return None
         if link.exists() or link.is_symlink():
             return link
         if not is_available():

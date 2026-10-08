@@ -19,12 +19,13 @@ no opinion about auth at all.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from autosound_tcc.core import openers
-from autosound_tcc.core import (app_log, claude_sdk, config, critic, model_choices, signal_bus,
-                                vendor_loader)
+from autosound_tcc.core import (app_log, claude_sdk, config, critic, method_binding, model_choices,
+                                signal_bus, vendor_loader)
 from autosound_tcc.core.agent_events import (
     AgentEvent,
     Notice,
@@ -173,25 +174,54 @@ def system_prompt_append(language: str = "en") -> str:
     return SYSTEM_PROMPT_APPEND + language_rule(language)
 
 
-def _read_roots_for(project_dir: Path) -> tuple[Path, ...]:
-    """Directories the agent may read from without asking: the project, and the skill itself.
+def _read_roots_for(project_dir: Path,
+                    binding: Optional[method_binding.Binding] = None) -> tuple[Path, ...]:
+    """Directories the agent may read from without asking: the project, and the method it runs.
 
-    The skill has to be in here. `.claude/skills/autosound-tuning` is a symlink out to the skill
-    worktree, so it resolves *outside* the project — and the method is built on loading the active
-    phase's reference file on demand (`SKILL.md`, "Phase Sliding Window"). Gating those reads
-    turns every phase transition into a permission click for content TCC itself installed.
+    The method has to be in here. Its copy lives outside the project — the project's
+    `.claude/skills/autosound-tuning` is a link out to it — and the method is built on loading the
+    active phase's reference file on demand (`SKILL.md`, "Phase Sliding Window"). Gating those
+    reads turns every phase transition into a permission click for content TCC itself installed.
 
-    Both roots are resolved through symlinks, so this grants the skill's real location rather than
-    the link, and a path that merely *looks* like it is under the project doesn't slip through.
+    Which copy is the project's binding (#169), not wherever the link points: the bound copy when
+    TCC trusts it, TCC's own otherwise. A refused copy starts no SDK session, and the folder a
+    refused link names is not one to read unasked — a project that came from someone else can link
+    anything there. The omp gate asks this too, so both routes grant the same reads.
+
+    The copy is resolved through symlinks, so this grants its real location rather than a link to
+    it; `shell_gate._is_within` resolves what is read, so a path that merely *looks* like it is
+    under a root doesn't slip through.
     """
+    if binding is None:
+        binding = method_binding.for_project(project_dir)
     roots = [project_dir]
-    skill_link = project_dir / ".claude" / "skills" / SKILL_NAME
     try:
-        if skill_link.exists():
-            roots.append(skill_link.resolve())
+        copy = binding.skill_dir or method_binding.own_copy()  # None exactly when refused
+        if os.path.isdir(copy):
+            roots.append(Path(os.path.realpath(copy)))
     except OSError:
         pass
     return tuple(roots)
+
+
+def _plugin_root(binding: method_binding.Binding) -> Path:
+    """The repository the SDK loads the bound copy from, as a plugin (`--plugin-dir`).
+
+    `MethodRefused` for a refused copy, with the binding's own sentence, and for a copy in no
+    repository: a skill folder unpacked on its own has no `.claude-plugin/plugin.json` for the CLI
+    to load, and `str(None)` handed over as its path started a session with no method at all.
+    """
+    skill = binding.require()
+    root = binding.plugin_root()
+    if root is None:
+        remedy = (f"install the method from its repository, or point {vendor_loader.SKILL_DIR_ENV} "
+                  f"at a checkout of it" if binding.state == method_binding.SAME else
+                  f"re-link {binding.entry} to TCC's copy, or to a copy in a repository of its own")
+        raise method_binding.MethodRefused(
+            f"The session loads the method as a plugin, and this method copy has no plugin "
+            f"manifest: {skill} has no .claude-plugin/plugin.json or .git in its folder or the "
+            f"three above it; {remedy}.")
+    return root
 
 
 class TuningSession:
@@ -333,19 +363,24 @@ class TuningSession:
 
     # ---- lifecycle ---------------------------------------------------------
 
-    def _options(self) -> "ClaudeAgentOptions":
+    def _options(self, binding: Optional[method_binding.Binding] = None) -> "ClaudeAgentOptions":
         # NOT in `__init__`. `main_window._launch_session` constructs a TuningSession
         # unconditionally as a cheap probe — "only reads the registry" — before it knows whether
         # the session will be Claude or omp, so binding in the constructor would have made the
         # Claude SDK a requirement for starting a GEMINI session. Bound where it is used instead,
         # which is here and in `start()` (caught by reading the caller, 2026-08-12).
         claude_sdk.bind(SDK_NAMES, globals())
+        if binding is None:
+            binding = method_binding.for_project(self.project_dir)
+        plugin = _plugin_root(binding)  # `MethodRefused` rather than a copy that cannot load
         return ClaudeAgentOptions(
             cwd=str(self.project_dir),
             model=self.model,
             # The reviewer the Arbiter picked, for a direct call from the session's shell — the
-            # route the method still documents (findings 17, 21; `#45`).
-            env=critic.session_env(self.project_dir),
+            # route the method still documents (findings 17, 21; `#45`) — and which copy of the
+            # method this session runs, the one its writers run (`AUTOSOUND_SKILL_ROOT`, #169).
+            # Merged here, not in `critic.session_env`: that answers for the reviewer alone.
+            env={**critic.session_env(self.project_dir), **binding.session_env()},
             # Set here and only here: the SDK takes effort at client construction, so this is the
             # session's level for its whole life. Raising it mid-tune would mean reconnecting, and
             # the session is the thing being preserved -- which is why `max` is offered where the
@@ -353,8 +388,9 @@ class TuningSession:
             effort=self.effort,
             system_prompt={"type": "preset", "preset": "claude_code",
                            "append": system_prompt_append(self.language)},
-            # NOTHING from the project folder, and the method comes from our own checkout as a
-            # PLUGIN instead (HUB-050).
+            # NOTHING from the project folder, and the method comes as a PLUGIN instead (HUB-050):
+            # the repository of the copy the project is bound to (#169) — TCC's own checkout
+            # unless the project links another copy TCC trusts.
             #
             # `setting_sources=["project"]` used to be here for one reason: the project's own
             # `.claude/skills/autosound-tuning` was the only place the skill could come from. The
@@ -380,7 +416,7 @@ class TuningSession:
             # The project link stays installed anyway — `omp` reads the project's own skills
             # folder and has no plugin flag, so `link_skill_into` is still what feeds that half.
             setting_sources=[],
-            plugins=[{"type": "local", "path": str(vendor_loader.skill_repo_root())}],
+            plugins=[{"type": "local", "path": str(plugin)}],
             skills=[f"{SKILL_NAME}:{SKILL_NAME}"],
             allowed_tools=ALLOWED_TOOLS,
             disallowed_tools=DISALLOWED_TOOLS,
@@ -399,14 +435,24 @@ class TuningSession:
         )
 
     async def start(self, prompt: Optional[str] = None) -> AsyncIterator[AgentEvent]:
-        """Open (or resume) the session and yield `agent_events` for the caller to render."""
-        # `setting_sources=["project"]` means the project's own `.claude/skills` is the *only*
-        # place the skill can come from, and nothing used to put it there -- so a project without
-        # the link ran with no method at all. TCC installs the version it ships; an existing link
-        # is left alone.
+        """Open (or resume) the session and yield `agent_events` for the caller to render.
+
+        The method is the copy the project is bound to (#169), the one its writers run. A copy TCC
+        will not run, or cannot load as a plugin, ends the start here with `MethodRefused` and the
+        sentence that says why, before anything is linked or built; `AgentWorker` shows a failed
+        start as a failed bubble.
+        """
+        binding = method_binding.for_project(self.project_dir)
+        binding.require()
+        options = self._options(binding)
+        # What the gate lets the session read follows what the session loads: one answer for both.
+        self._read_roots = _read_roots_for(self.project_dir, binding)
+        # omp reads the project's own `.claude/skills` and has no plugin flag, so TCC's link is
+        # still installed for that half. An existing entry is left alone, and none is made where
+        # `.claude/skills` leads out of the project.
         vendor_loader.link_skill_into(self.project_dir)
         claude_sdk.bind(SDK_NAMES, globals())  # everything downstream of the client is bound now
-        self._client = ClaudeSDKClient(options=self._options())
+        self._client = ClaudeSDKClient(options=options)
         await self._client.connect()
         self._started = True
         opener = self._opener(resumed=bool(self.resumed_from), prompt=prompt or "")

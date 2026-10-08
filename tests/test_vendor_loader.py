@@ -122,6 +122,45 @@ def test_linking_reports_rather_than_raises_when_it_cannot(tmp_path, monkeypatch
     assert vendor_loader.link_skill_into(tmp_path) is None
 
 
+@pytest.mark.parametrize("where", [
+    pytest.param("skills", id="skills-linked-out-of-the-project"),
+    pytest.param("claude", id="claude-linked-out-of-the-project"),
+    # The boundary's other side: «out of the project» is the folder `.claude/skills` IS, so a
+    # project that keeps its skills in another folder of its own, linked in, still gets the link.
+    pytest.param("own-folder", id="skills-linked-to-a-folder-of-the-project"),
+])
+def test_skills_that_lead_out_of_the_project_get_no_link_there(tmp_path, where):
+    """R-ak (#169): with `.claude/skills` — or `.claude` itself — a link out of the project, to
+    `~/.claude` say, a session start made TCC's link THERE: in a folder every other project that
+    reads it shares, written by opening one. Nothing is written now, and the answer is None, which
+    both adapters already handle as «no link could be made»."""
+    import os
+
+    outside = tmp_path / "home" / ".claude"
+    (outside / "skills").mkdir(parents=True)
+    project = tmp_path / "car"
+    project.mkdir()
+    if where == "skills":
+        (project / ".claude").mkdir()
+        (project / ".claude" / "skills").symlink_to(outside / "skills", target_is_directory=True)
+    elif where == "claude":
+        (project / ".claude").symlink_to(outside, target_is_directory=True)
+    else:
+        (project / "shared-skills").mkdir()
+        (project / ".claude").mkdir()
+        (project / ".claude" / "skills").symlink_to(project / "shared-skills",
+                                                    target_is_directory=True)
+
+    link = vendor_loader.link_skill_into(project)
+
+    assert os.listdir(outside / "skills") == [], "nothing linked out of the project"
+    if where == "own-folder":
+        assert link == project / ".claude" / "skills" / vendor_loader.SKILL_NAME
+        assert (project / "shared-skills" / vendor_loader.SKILL_NAME / "SKILL.md").is_file()
+    else:
+        assert link is None
+
+
 def test_the_rew_row_names_the_endpoint_it_actually_reaches(monkeypatch):
     """The System-params row printed the constant `4735` until the method gave `rew_api.BASE_URL`
     a `REW_API_URL` override (2026-08-26). A row reading "4735" beside a green dot that had just
