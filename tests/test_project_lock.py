@@ -235,6 +235,28 @@ def test_a_disk_that_numbers_every_folder_zero_keys_the_lock_by_the_resolved_pat
     assert project_lock._thread_lock(tmp_path / "other") is not lock, "two folders, one lock"
 
 
+def test_a_project_path_through_a_symlink_loop_raises_an_oserror_never_a_runtime_error(tmp_path):
+    """Fable m3 on G5+G8: on Python 3.12 `Path.resolve()` answers a symlink loop with
+    `RuntimeError` («Symlink loop») — neither the `LockTimeout` `hold` promises nor the `OSError`
+    `spawn` answers in its own words, so it went up through the writer as a crash. Such a path is
+    keyed as it was given, made absolute. On POSIX the flock's folder cannot be made through the
+    loop: an `OSError`, as itself. With no flock (Windows) the lock is taken by that path."""
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop)  # a link to itself
+    car = loop / "car"
+
+    if project_lock.fcntl is None:
+        with project_lock.hold(car, timeout_s=0.2):
+            pass
+    else:
+        with pytest.raises(OSError) as failed:
+            with project_lock.hold(car, timeout_s=0.2):
+                pass
+        assert type(failed.value) is OSError, repr(failed.value)
+        assert failed.value.errno == errno.ELOOP, repr(failed.value)
+    assert project_lock._folder(car) == Path(os.path.abspath(car))
+
+
 @posix_only
 def test_a_lock_another_process_holds_answers_busy_within_the_same_deadline(
     project, holder_process, monkeypatch

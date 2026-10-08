@@ -107,8 +107,13 @@ def _folder(project_dir: Path | str) -> tuple[int, int] | Path:
 
     The resolved path where there is no identity to read: a folder not made yet, one that cannot be
     read, or a disk that numbers every folder 0 (a network share, a FUSE mount), where by number
-    every folder on it would be one project (`method_binding._inside`, M24)."""
-    resolved = Path(project_dir).resolve()
+    every folder on it would be one project (`method_binding._inside`, M24). And the path as given,
+    made absolute, where it cannot even be resolved: a symlink loop, which Python 3.12's `resolve()`
+    answers with `RuntimeError` — not an error `hold` may raise (Fable m3)."""
+    try:
+        resolved = Path(project_dir).resolve()
+    except (OSError, RuntimeError):
+        resolved = Path(os.path.abspath(project_dir))
     try:
         info = os.stat(resolved)
     except OSError:
@@ -123,7 +128,9 @@ def hold(project_dir: Path | str, timeout_s: float) -> Iterator[None]:
     The thread lock first, then (POSIX) the flock, under one deadline: what the first wait spent
     comes off the second. A free lock is taken at once, even with `timeout_s=0`. Past the deadline
     nothing is left held, and `process/` is made only when the flock is about to be taken — a
-    timeout on a project that has no `process/` creates nothing.
+    timeout on a project that has no `process/` creates nothing. Of its own it raises two things
+    only, both answered by `method_cli.spawn`: `LockTimeout`, and the `OSError` itself of a lock the
+    filesystem cannot take or a `process/` that cannot be made — the thread lock given back.
 
     Not re-entrant: a thread that holds it and asks again waits out its own deadline.
     """
