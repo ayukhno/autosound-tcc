@@ -429,3 +429,235 @@ def test_the_next_test_starts_with_the_logging_a_fresh_process_has():
     assert app_log.log_path() is None
     assert "_install_excepthooks" not in getattr(threading.excepthook, "__qualname__", ""), \
         "app_log's thread hook is still in pytest's place"
+
+
+def _on_a_thread(target, name: str) -> None:
+    """`target` run on a thread of its own, as a worker runs it; back once it has finished."""
+    worker = threading.Thread(target=target, name=name, daemon=True)
+    worker.start()
+    worker.join(10)
+    assert not worker.is_alive(), f"{name} did not finish"
+
+
+def test_an_import_tcc_runs_off_the_main_thread_fails_the_test_at_its_end(
+        _no_import_on_a_worker_thread, tmp_path, monkeypatch):
+    """#172, §5.1: `install_report.py`'s rule -- every import at the top of its module -- was held
+    by reading alone. PySide6's import hook works on every import a program executes, and on a
+    worker that contends with the GUI thread (measured 2026-08-19: a report that takes 2.7 s from
+    a shell never finished inside the dialog's thread). The guard wraps `builtins.__import__`, so
+    an `import` statement TCC's own code runs on any thread but the main one is written down by
+    its file and line, and the test fails when it is over.
+
+    Written down, not raised in the worker (R-r): a worker's broad `except` would take a raise for
+    its own error and go on, and the test would pass. This worker swallows everything, and still
+    does its job as it does in the app."""
+    import sys
+
+    from autosound_tcc.core import app_log
+
+    conftest = sys.modules["tests.conftest"]
+    monkeypatch.delitem(conftest._WORKER_IMPORTS_ALLOWED,
+                        ("src/autosound_tcc/core/app_log.py", "dump_threads"))
+    monkeypatch.setattr(app_log, "_log_path", tmp_path / "tcc.log")
+    guard = _no_import_on_a_worker_thread
+
+    app_log.dump_threads("asked on the main thread")
+    guard.verdict()  # the main thread imports where it likes
+
+    def watchdog() -> None:  # where the app runs it: the slow-tool watchdog's Timer thread
+        try:
+            app_log.dump_threads("asked by the watchdog")
+        except BaseException:  # noqa: BLE001 — what a worker's own code might do
+            pass
+
+    _on_a_thread(watchdog, "tcc-test-watchdog")
+
+    assert "asked by the watchdog" in (tmp_path / "tcc.log").read_text(encoding="utf-8"), \
+        "the guard changed nothing the worker does"
+    with pytest.raises(pytest.fail.Exception,
+                       match=r"(?s)src/autosound_tcc/core/app_log\.py:\d+ in dump_threads: "
+                             r"import faulthandler.*'tcc-test-watchdog'"):
+        guard.verdict()
+    guard.verdict()  # said once; this test's own end has nothing left to fail on
+
+
+def test_an_import_on_the_allowlist_does_not_fail_the_test(
+        _no_import_on_a_worker_thread, tmp_path, monkeypatch):
+    """Today's sites are on an allowlist, by file and function, each with where it runs off the
+    main thread and why its import is still inside the function. One of them, run where the app
+    runs it -- `app_log.dump_threads` on the watchdog's `threading.Timer` -- fails nothing."""
+    from autosound_tcc.core import app_log
+
+    monkeypatch.setattr(app_log, "_log_path", tmp_path / "tcc.log")
+    watchdog = threading.Timer(0, app_log.dump_threads, args=("a tool is slow",))
+    watchdog.start()
+    watchdog.join(10)
+
+    assert "a tool is slow" in (tmp_path / "tcc.log").read_text(encoding="utf-8")
+    _no_import_on_a_worker_thread.verdict()
+
+
+def test_what_is_not_an_import_statement_in_tcc_s_own_code_is_not_counted(
+        _no_import_on_a_worker_thread, tmp_path):
+    """The rule is TCC's, for lines TCC can move. Not counted: a module C code asks for --
+    `datetime.strftime` asks for `time` through the same `builtins.__import__` on every call, from
+    `critic.write_package` on an MCP call's thread -- and an import in code that is not TCC's: the
+    standard library's, a package's, the method's, a test's own."""
+    from autosound_tcc.core import critic
+
+    written: list = []
+
+    def foreign() -> None:
+        import json  # noqa: F401 — the test's own code, not TCC's
+
+    _on_a_thread(lambda: written.append(critic.write_package("# package", tmp_path)), "tcc-test-call")
+    _on_a_thread(foreign, "tcc-test-foreign")
+
+    assert written and written[0].is_file()
+    _no_import_on_a_worker_thread.verdict()
+
+
+def _spin_until(done, seconds: float = 5.0) -> None:
+    """The event loop turned, as a test that waits for a timer turns it, until `done()`."""
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
+    deadline = time.monotonic() + seconds
+    while not done() and time.monotonic() < deadline:
+        QApplication.processEvents()
+    assert done(), "the slot never ran"
+
+
+def test_a_modal_opened_from_a_timer_slot_fails_the_test_though_the_test_answered_it(
+        _no_modal_waits_for_nobody, monkeypatch):
+    """TA-6, #172: a modal opened from a callback -- a timer's slot, a worker's queued signal -- is
+    a nested event loop inside one, the unbounded wait on the GUI thread #172 is about. A test
+    that is about a modal answers it by patching its `exec`, so the guard above never saw it.
+
+    The guard counts how deep the main thread is in Qt's dispatch -- `processEvents`,
+    `sendPostedEvents`, the event loops' `exec` -- and a modal opened from inside it fails the
+    test at its end, answered or not, named with the code that opened it."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Ok)
+    answered: list = []
+
+    def offer_replacement() -> None:  # stands for a window's slot
+        box = QMessageBox()
+        box.setText("This project is set to a model nothing here can run")
+        answered.append(box.exec())
+
+    QTimer.singleShot(0, offer_replacement)
+    _spin_until(lambda: answered)
+
+    assert answered == [QMessageBox.StandardButton.Ok], "the test's own answer reached the slot"
+    assert _no_modal_waits_for_nobody.opened == [], "answered: not a modal that waits for nobody"
+    with pytest.raises(pytest.fail.Exception,
+                       match=r"(?s)opened while the event loop dispatches.*QMessageBox\.exec at "
+                             r"tests/test_conftest_guards\.py:\d+ \(.*offer_replacement\)"):
+        _no_modal_waits_for_nobody.verdict()
+    _no_modal_waits_for_nobody.verdict()  # said once
+
+
+def test_a_modal_the_test_opens_itself_is_not_from_a_callback(
+        _no_modal_waits_for_nobody, monkeypatch):
+    """The other side of the line: a test that calls the opener itself is a person's click, not a
+    callback -- also right after the loop was turned, which leaves the count where it found it."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Ok)
+    turned: list = []
+    QTimer.singleShot(0, lambda: turned.append(True))
+    _spin_until(lambda: turned)
+
+    box = QMessageBox()
+    box.setText("Open the other folder?")
+    assert box.exec() == QMessageBox.StandardButton.Ok
+
+    _no_modal_waits_for_nobody.verdict()
+
+
+def test_a_modal_from_a_callback_on_the_allowlist_does_not_fail_the_test(
+        _no_modal_waits_for_nobody, monkeypatch):
+    """Today's sites are on an allowlist by file and function, as the imports' are; one on it --
+    here the test's own slot, put there for the test -- fails nothing."""
+    import sys
+
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    conftest = sys.modules["tests.conftest"]
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Ok)
+    answered: list = []
+
+    def offer_replacement() -> None:
+        answered.append(QMessageBox().exec())
+
+    monkeypatch.setitem(conftest._MODALS_FROM_A_CALLBACK_ALLOWED,
+                        ("tests/test_conftest_guards.py", offer_replacement.__qualname__),
+                        "stands for a site that is on the list today")
+    QTimer.singleShot(0, offer_replacement)
+    _spin_until(lambda: answered)
+
+    _no_modal_waits_for_nobody.verdict()
+
+
+def _functions_in(path: Path) -> dict:
+    """The functions in `path` by qualified name (as `co_qualname` spells them), each with whether
+    its own body -- not a function nested in it -- holds an `import` statement."""
+    import ast
+
+    found: dict = {}
+
+    def visit(node, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                visit(child, f"{prefix}{child.name}.")
+            elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                name = prefix + child.name
+                found[name] = any(isinstance(inner, (ast.Import, ast.ImportFrom))
+                                  for inner in _own_statements(child))
+                visit(child, f"{name}.<locals>.")
+            else:
+                visit(child, prefix)
+
+    visit(ast.parse(path.read_text(encoding="utf-8")), "")
+    return found
+
+
+def _own_statements(function):
+    """Every node of `function`'s body that is not inside a function or class nested in it."""
+    import ast
+
+    stack = list(function.body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            stack.extend(ast.iter_child_nodes(node))
+
+
+def test_the_allowlists_may_only_shrink():
+    """#172: each allowlist holds the sites that exist today, found by running the suite, each with
+    its reason -- and neither may grow. A site moved to the top of its module leaves its entry
+    stale: delete the entry and lower its number here, in the same commit."""
+    import sys
+
+    conftest = sys.modules["tests.conftest"]
+    root = Path(conftest.__file__).resolve().parents[1]
+
+    assert len(conftest._WORKER_IMPORTS_ALLOWED) == 15
+    assert len(conftest._MODALS_FROM_A_CALLBACK_ALLOWED) == 0
+    for (path, function), reason in conftest._WORKER_IMPORTS_ALLOWED.items():
+        assert reason.strip(), f"{path} {function}: an entry says why"
+        assert _functions_in(root / path).get(function), \
+            f"{path} {function} is gone or imports nothing inside any more: the entry is stale"
+    for (path, function), reason in conftest._MODALS_FROM_A_CALLBACK_ALLOWED.items():
+        assert reason.strip(), f"{path} {function}: an entry says why"
+        assert function in _functions_in(root / path), f"{path} {function} is gone: the entry is stale"

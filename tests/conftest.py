@@ -11,11 +11,15 @@ a per-test-session tmp .ini file makes every test's settings writes disappear wi
 
 from __future__ import annotations
 
+import builtins
+import dis
 import gc
 import logging
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import autosound_tcc
 
 # Captured at import, before any fixture can patch it: `real_critic_reaches` hands this back to
 # the tests that examine the probe rather than live with its answer.
@@ -24,7 +28,9 @@ from autosound_tcc.core import model_choices as _model_choices_at_import
 _REAL_CRITIC_REACHES = _model_choices_at_import.critic_reaches
 
 import sys  # noqa: E402
+import threading  # noqa: E402
 import traceback  # noqa: E402
+import types  # noqa: E402
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QSettings  # noqa: E402
@@ -429,12 +435,29 @@ _MODAL_CAP = 20
 
 
 class _ModalLog:
-    """The modals a test reached, by name, for its end to fail on (`_no_modal_waits_for_nobody`)."""
+    """The modals a test reached, by name, for its end to fail on (`_no_modal_waits_for_nobody`);
+    and those opened from a callback, answered by the test or not (`_no_modal_from_a_callback`)."""
 
     def __init__(self) -> None:
         self.opened: list = []
+        self.from_a_callback: list = []
+
+    def note_if_from_a_callback(self, what: str) -> None:
+        """`what` was opened while the main thread is inside Qt's dispatch (`_Dispatch`): written
+        down with the code that opened it, unless that site is on `_MODALS_FROM_A_CALLBACK_ALLOWED`."""
+        if _Dispatch.depth == 0 or threading.get_ident() != _MAIN_THREAD:
+            return
+        opener = sys._getframe(1)
+        while opener is not None and opener.f_code.co_filename == __file__:
+            opener = opener.f_back  # this file's answers and wrappers: the opener is past them
+        if opener is None:
+            return
+        path, function = _repo_path(opener.f_code.co_filename), opener.f_code.co_qualname
+        if (path, function) not in _MODALS_FROM_A_CALLBACK_ALLOWED:
+            self.from_a_callback.append(f"{what} at {path}:{opener.f_lineno} ({function})")
 
     def record(self, what: str, answer):
+        self.note_if_from_a_callback(what)
         if len(self.opened) >= _MODAL_CAP:
             # `pytest.fail` raises a BaseException: a broad `except Exception` around the
             # question does not swallow it and ask again.
@@ -446,11 +469,20 @@ class _ModalLog:
         return answer
 
     def verdict(self) -> None:
+        said = []
         if self.opened:
             opened, self.opened = self.opened, []
-            pytest.fail(f"a test opened a modal: {'; '.join(opened)} -- nobody answers it in a "
-                        f"test; patch its exec, or the call that opens it, in the test",
-                        pytrace=False)
+            said.append(f"a test opened a modal: {'; '.join(opened)} -- nobody answers it in a "
+                        f"test; patch its exec, or the call that opens it, in the test")
+        if self.from_a_callback:
+            deep, self.from_a_callback = self.from_a_callback, []
+            said.append(f"a modal opened while the event loop dispatches -- from a timer's slot "
+                        f"or a queued signal, a nested event loop inside a callback (TA-6, #172), "
+                        f"answered by the test or not: {'; '.join(deep)} -- open it where the "
+                        f"person asked for it; `_MODALS_FROM_A_CALLBACK_ALLOWED` in "
+                        f"tests/conftest.py holds today's sites and may only shrink")
+        if said:
+            pytest.fail("\n".join(said), pytrace=False)
 
 
 def _dialog_statics() -> tuple:
@@ -727,6 +759,299 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
 
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *_a, **_k: ("", "")))
     yield
+
+
+# #172 S1 (§5.1): two waits on the GUI thread nobody bounded -- an import TCC's own code runs on a
+# worker, and a modal a callback opens. Each guard writes the site down where it happens and fails
+# the test at its end (R-r): raised where it happens, a worker's or a window's broad `except` would
+# take it for its own error and go on, and the test would pass.
+
+#: The main thread: the tests', and Qt's GUI thread -- in an xdist worker too.
+_MAIN_THREAD = threading.main_thread().ident
+#: The repository's root. The allowlists and the messages spell a file from here, with `/`.
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+#: TCC's own package: the import guard counts the `import` statements in these files only.
+_TCC_SOURCE = os.path.normcase(os.path.join(os.path.dirname(os.path.abspath(autosound_tcc.__file__)),
+                                            ""))
+_IMPORT_NAME = dis.opmap["IMPORT_NAME"]
+
+#: The imports TCC's own code runs off the main thread today, by file and function (`co_qualname`):
+#: the map's first hits and what running the tests found, each with where it runs off the main
+#: thread and why it is still inside its function. Hoisted, `model_choices` would close a cycle in
+#: the four that name it from `availability` or `reviewer_key` (`model_choices` imports
+#: `reviewer_key`, which imports `availability`); the rest can move. It may only shrink:
+#: `test_the_allowlists_may_only_shrink` pins its length, and an entry whose function imports
+#: nothing inside any more is stale there.
+_WORKER_IMPORTS_ALLOWED: dict = {
+    ("src/autosound_tcc/core/app_log.py", "dump_threads"):
+        "`import faulthandler`, on the slow-tool watchdog's threading.Timer (`logged_tool`); "
+        "standard library, no cycle",
+    ("src/autosound_tcc/core/availability.py", "status"):
+        "`claude_sdk`, `model_choices`, on the MCP loop's thread (`mcp_server._reviewer_state`); "
+        "a cycle through `model_choices`",
+    ("src/autosound_tcc/core/availability.py", "record_reviewer_outcome"):
+        "`critic`, `model_choices`, on the MCP loop's thread (`call_critic`); a cycle through "
+        "`model_choices`",
+    ("src/autosound_tcc/core/availability.py", "read_catalogues"):
+        "`claude_sdk`, `model_choices`, on StartupReading's thread (`tcc-read-models`); a cycle "
+        "through `model_choices`",
+    ("src/autosound_tcc/core/child.py", "_note_spawn"):
+        "`app_log`, on any thread that starts a child (`run_bounded`: the installation report's "
+        "version asks, the MCP calls); late on purpose (its comment), no cycle",
+    ("src/autosound_tcc/core/critic.py", "configured"):
+        "`model_choices`, `project_settings`, on the MCP loop's thread (`configured_critic_harness` "
+        "in `call_critic`); no cycle",
+    ("src/autosound_tcc/core/critic.py", "log_call"):
+        "`import json`, on the thread `call_critic` writes its journal from; standard library, "
+        "no cycle",
+    ("src/autosound_tcc/core/model_choices.py", "_agy_env"):
+        "`critic_env`, wherever agy is asked for its models (the catalogue reads, off the GUI "
+        "thread); no cycle",
+    ("src/autosound_tcc/core/model_choices.py", "agy_on_adc"):
+        "`critic_env`, under `not_a_reviewer` on the MCP loop's thread; no cycle",
+    ("src/autosound_tcc/core/model_choices.py", "not_a_reviewer"):
+        "`critic` for the omp route, on the MCP loop's thread (`_reviewer_state`); no cycle",
+    ("src/autosound_tcc/core/model_choices.py", "critic_reaches"):
+        "`critic` for the omp route, on the MCP loop's thread (`_reviewer_state`, "
+        "`record_reviewer_outcome`); no cycle",
+    ("src/autosound_tcc/core/reviewer_key.py", "_api_rows_of"):
+        "`model_choices`, a cycle (it imports this module); a first hit of the map, but read today "
+        "it runs on the GUI thread (`remove_key` from the reviewer-key dialog)",
+    ("src/autosound_tcc/core/rew_bridge.py", "RewBridge.api"):
+        "`vendor_loader`, on every worker that talks to REW (`_RewPingWorker`, the scans); "
+        "no cycle",
+    ("src/autosound_tcc/ui/tcc/curve_dialog.py", "_title_facts"):
+        "`vendor_loader`, on `_CurveWorker`, once for every title it reads; no cycle",
+    ("src/autosound_tcc/ui/tcc/workers.py", "_ReviewerProbeWorker.run"):
+        "`import tempfile`, on the reviewer probe's QThread; standard library, no cycle",
+}
+
+#: The modals opened from a callback today, by the file and function of the code that opens them,
+#: each with its reason: none that a test reaches. Pinned and may only shrink, as the imports' list.
+_MODALS_FROM_A_CALLBACK_ALLOWED: dict = {}
+
+
+def _repo_path(filename: str) -> str:
+    """`filename` from the repository's root, with `/`; a file outside it as it is. It runs inside
+    `__import__` on a worker too, so it imports nothing."""
+    try:
+        relative = os.path.relpath(filename, _REPO)
+    except ValueError:  # another drive, on Windows
+        relative = os.pardir
+    if relative == os.pardir or relative.startswith(os.pardir + os.sep):
+        relative = filename
+    return relative.replace(os.sep, "/")
+
+
+def _thread_name() -> str:
+    ident = threading.get_ident()
+    return next((thread.name for thread in threading.enumerate() if thread.ident == ident),
+                "a QThread, or another thread Python did not start")
+
+
+class _WorkerImports:
+    """`builtins.__import__` while a test runs: what `_no_import_on_a_worker_thread` counts is
+    written down here by site, for the test's end. On any thread but the main one, nothing it runs
+    may import -- an import there would be its own."""
+
+    def __init__(self, previous) -> None:
+        self.previous = previous
+        self.found: dict = {}  # (file, function) -> [what is said, how many times]
+        self.on = True
+        self._thread = threading.local()  # `.inside`: an import is running on this thread
+
+    def __call__(self, name, globals=None, locals=None, fromlist=(), level=0):
+        if (not self.on or threading.get_ident() == _MAIN_THREAD
+                or getattr(self._thread, "inside", False)):
+            return self.previous(name, globals, locals, fromlist, level)
+        self._thread.inside = True  # what this import runs -- a module's body -- is part of it
+        try:
+            try:
+                self._look(sys._getframe(1), name, fromlist, level)
+            except Exception as exc:  # noqa: BLE001 — the guard must not break the import it watches
+                self.found[("tests/conftest.py", "_WorkerImports")] = [
+                    f"the import guard itself failed: {exc!r}", 1]
+            return self.previous(name, globals, locals, fromlist, level)
+        finally:
+            self._thread.inside = False
+
+    def _look(self, frame, name: str, fromlist, level: int) -> None:
+        code = frame.f_code
+        if not os.path.normcase(code.co_filename).startswith(_TCC_SOURCE):
+            return  # the standard library's, a package's, the method's, a test's own: not TCC's lines
+        if code.co_code[frame.f_lasti] != _IMPORT_NAME:
+            return  # C asking for a module (`datetime.strftime` asks for `time`): no line to move
+        site = (_repo_path(code.co_filename), code.co_qualname)
+        if site in _WORKER_IMPORTS_ALLOWED:
+            return
+        if site in self.found:
+            self.found[site][1] += 1
+            return
+        module = "." * level + name
+        statement = f"from {module} import {', '.join(fromlist)}" if fromlist else f"import {module}"
+        callers, caller = [], frame.f_back
+        while caller is not None and len(callers) < 4:
+            callers.append(f"{_repo_path(caller.f_code.co_filename)}:{caller.f_lineno} "
+                           f"{caller.f_code.co_qualname}")
+            caller = caller.f_back
+        self.found[site] = [f"{site[0]}:{frame.f_lineno} in {site[1]}: {statement} -- thread "
+                            f"{_thread_name()!r}, called from {' <- '.join(callers)}", 1]
+
+    def stop(self) -> None:
+        """Off; and out of `builtins`, unless something since wrapped it -- then a pass-through."""
+        self.on = False
+        if builtins.__import__ is self:
+            builtins.__import__ = self.previous
+
+    def verdict(self) -> None:
+        if not self.found:
+            return
+        found, self.found = self.found, {}
+        sites = "\n".join(f"  {said}" + (f" ({times} times)" if times > 1 else "")
+                          for said, times in found.values())
+        pytest.fail(f"{len(found)} import(s) in TCC's own code ran on a thread that is not the "
+                    f"main one. PySide6's import hook works on every import a program executes, "
+                    f"and on a worker that contends with the GUI thread (core/install_report.py): "
+                    f"move each to the top of its module.\n{sites}\n`_WORKER_IMPORTS_ALLOWED` in "
+                    f"tests/conftest.py holds the sites that cannot move yet, each with its "
+                    f"reason; it may only shrink.", pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_import_on_a_worker_thread():
+    """An `import` statement TCC's own code runs on a thread that is not the main one fails the
+    test, named by its file and line (#172, §5.1).
+
+    `core/install_report.py` states the rule -- every import at the top of its module -- and why:
+    PySide6's import hook works on every import a program executes, and on a worker that contends
+    with the GUI thread; the same report that takes 2.7 s from a shell never finished inside the
+    dialog's thread (2026-08-19). Until now only reading held the rule.
+
+    `builtins.__import__` sees every executed `import`, where `sys.meta_path` sees a module's first
+    load only. Counted: a statement (`IMPORT_NAME`) in a file of TCC's package, run off the main
+    thread and not inside an import already running on that thread (a module's body loaded there
+    belongs to the import that loaded it). Not counted: C asking for a module through the same door
+    (`datetime.strftime` asks for `time`), and the imports of the standard library, a package, the
+    method or a test -- no line TCC could move. Today's sites are on `_WORKER_IMPORTS_ALLOWED`.
+
+    Written down, and the test failed at its end, not raised in the worker (R-r): the import goes
+    ahead, the worker does what it does in the app, and nothing its `except` could swallow decides
+    the test. Named to set up after `_no_hover_filter_left_on_the_app` and before
+    `_no_mcp_call_outlives_its_test`, so it is torn down after that drain, and after
+    `_quiet_windows_left_behind` stops the windows' workers: an import those make on their way out
+    is still this test's. Yields the guard, for the test of this guard."""
+    previous = builtins.__import__
+    while isinstance(previous, _WorkerImports) and not previous.on:
+        previous = previous.previous  # a stopped guard a test's own patch of `__import__` put back
+    guard = _WorkerImports(previous)
+    builtins.__import__ = guard
+    try:
+        yield guard
+    finally:
+        guard.stop()
+    guard.verdict()
+
+
+class _Dispatch:
+    """How deep the main thread is in Qt's dispatch -- `processEvents`, `sendPostedEvents`,
+    `QTest.qWait`, the event loops' `exec` -- while `_no_modal_from_a_callback` counts. Above zero,
+    what runs is a callback: a timer's slot, a queued signal, a posted event."""
+
+    depth = 0
+
+
+def _dispatching(dispatch):
+    """`dispatch`, counted in `_Dispatch.depth` while it runs on the main thread."""
+
+    def counted(*args, **kwargs):
+        if threading.get_ident() != _MAIN_THREAD:
+            return dispatch(*args, **kwargs)
+        _Dispatch.depth += 1
+        try:
+            return dispatch(*args, **kwargs)
+        finally:
+            _Dispatch.depth -= 1
+
+    return counted
+
+
+def _noted(answer, what: str, log: _ModalLog):
+    """`answer` -- a modal's `exec` or static, as patched -- noting first where it was opened from."""
+
+    def noted(*args, **kwargs):
+        log.note_if_from_a_callback(what)
+        return answer(*args, **kwargs)
+
+    return noted
+
+
+def _noted_if_a_modal(target, name, value, log: _ModalLog, statics: set):
+    """`value` through `_noted` when it patches a modal: a dialog's `exec` or one of its statics.
+    A plain function only, or a static one: a mock or a class set on a class is called without the
+    instance, and wrapped in a function it would be handed it."""
+    from PySide6.QtWidgets import QDialog
+
+    owner = target if isinstance(target, type) else type(target)
+    if not (issubclass(owner, QDialog) and (name == "exec" or name in statics)):
+        return value
+    what = f"{owner.__name__}.{name}"
+    if isinstance(value, staticmethod) and isinstance(value.__func__, types.FunctionType):
+        return staticmethod(_noted(value.__func__, what, log))
+    if isinstance(value, types.FunctionType):
+        return _noted(value, what, log)
+    return value
+
+
+@pytest.fixture(autouse=True)
+def _no_modal_from_a_callback(_no_modal_waits_for_nobody, monkeypatch):
+    """A modal opened from a callback fails the test at its end, answered by the test or not
+    (TA-6, #172, §5.1).
+
+    A modal opened from a timer's slot or a worker's queued signal runs a nested event loop inside
+    a callback: the GUI thread waits for a person from inside code that was meant to return. The
+    guard above fails a modal nobody answers; a test ABOUT a modal answers it by patching its
+    `exec`, and then nothing saw where it was opened from.
+
+    So the main thread's depth in Qt's dispatch is counted (`_Dispatch`). A modal opened at depth 0
+    is the test's own line -- a person's click; deeper, a callback opened it, and `_ModalLog` writes
+    it down with the code that opened it. Seen: the guard's own answers (`_ModalLog.record`), the
+    two questions `_isolated_machine_config` cancels quietly, and an `exec` or a static the test
+    patches itself through `monkeypatch.setattr` -- its answer stands, and where it was opened from
+    is noted first. Not seen: a patch made another way (`unittest.mock`, an assignment, a string
+    target), and an opener patched instead of its modal. Today's sites are on
+    `_MODALS_FROM_A_CALLBACK_ALLOWED`; the test fails in `_no_modal_waits_for_nobody`'s verdict."""
+    from PySide6.QtCore import QCoreApplication, QEventLoop
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog
+
+    log = _no_modal_waits_for_nobody
+    for owner, name in ((QCoreApplication, "processEvents"), (QCoreApplication, "sendPostedEvents"),
+                        (QCoreApplication, "exec"), (QGuiApplication, "exec"),
+                        (QApplication, "exec"), (QTest, "qWait")):
+        monkeypatch.setattr(owner, name, staticmethod(_dispatching(getattr(owner, name))))
+    for name in ("exec", "processEvents"):
+        monkeypatch.setattr(QEventLoop, name, _dispatching(getattr(QEventLoop, name)))
+    for owner, name in ((QInputDialog, "getInt"), (QFileDialog, "getSaveFileName")):
+        monkeypatch.setattr(owner, name, staticmethod(
+            _noted(getattr(owner, name), f"{owner.__name__}.{name}", log)))
+    statics = ({"question", "warning", "information", "critical", "getInt", "getSaveFileName"}
+               | {name for _owner, name, _cancel in _dialog_statics()})
+    patch = monkeypatch.setattr
+
+    def patch_noting(target, name, *value, **kwargs):
+        if not isinstance(target, str):
+            if value:
+                value = (_noted_if_a_modal(target, name, value[0], log, statics), *value[1:])
+            elif "value" in kwargs:
+                kwargs["value"] = _noted_if_a_modal(target, name, kwargs["value"], log, statics)
+        return patch(target, name, *value, **kwargs)
+
+    monkeypatch.setattr = patch_noting
+    try:
+        yield
+    finally:
+        del monkeypatch.setattr
 
 
 @pytest.fixture
