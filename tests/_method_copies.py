@@ -9,6 +9,7 @@ imported into a test module is a fixture of that module, and runs once for each 
     entry(project)                      where a project links its copy of the method
     same_path(a, b)                     one folder, however it is spelled
     copy_of_the_method(root, ...)       a copy of its own, changed as a test needs: made per test
+    linked(project, skill)              the entry linked to `skill`; on `Path.home()`, an install
     linked_and_approved(project, skill) the entry linked to `skill`, approved on this machine
 
     own_copy_is_the_submodule           TCC's own copy is the vendored one, whatever the shell says
@@ -74,11 +75,20 @@ def copy_of_the_method(root: Path, *, changes: Optional[Mapping[str, Callable[[s
     return skill
 
 
+def linked(project: Path, skill: Path) -> Path:
+    """`project`'s entry made a link to `skill`, and answered. On `Path.home()` it is the personal
+    install for Claude Code, a copy TCC finds itself (`vendor_loader._candidates()`): a project
+    linked to the same copy is `known`."""
+    link = entry(project)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(skill, target_is_directory=True)
+    return link
+
+
 def linked_and_approved(project: Path, skill: Path) -> method_binding.Binding:
     """`project`'s entry linked to `skill`, and the link approved on this machine: the real
     `method_binding.approve`, on the settings store each test is given its own of (conftest)."""
-    entry(project).parent.mkdir(parents=True)
-    entry(project).symlink_to(skill, target_is_directory=True)
+    linked(project, skill)
     binding = method_binding.approve(method_binding.for_project(project))
     assert binding.state == method_binding.APPROVED, binding.reason
     return binding

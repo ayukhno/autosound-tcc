@@ -9,6 +9,7 @@ own model.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -16,7 +17,17 @@ import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.core import critic as _critic_at_import  # noqa: E402
-from autosound_tcc.core import model_choices, model_overrides, self_check  # noqa: E402
+from autosound_tcc.core import (  # noqa: E402
+    config,
+    method_binding,
+    model_choices,
+    model_overrides,
+    self_check,
+    vendor_loader,
+)
+from autosound_tcc.ui.tcc import i18n  # noqa: E402
+
+from tests._method_copies import entry, linked, linked_and_approved, same_path  # noqa: E402
 
 #: Taken at import, before `conftest` makes it answer nothing: the test that the panel starts no
 #: child needs the real one to be able to see a child start.
@@ -66,7 +77,8 @@ def test_the_fix_removes_them_and_says_how_many():
     model_overrides.set_alias("agy:gemini-3.1-pro-high", "sdk:claude-opus-5", "gone")
     model_overrides.set_alias("agy:gemini-3.5-flash-high", "sdk:claude-opus-5", "gone")
 
-    message = _find(self_check.run(), "aliases").fix()
+    [fix] = _find(self_check.run(), "aliases").actions
+    message = fix.run()
 
     assert "2" in message
     assert model_overrides.load()["aliases"] == {}
@@ -76,12 +88,20 @@ def test_the_fix_removes_them_and_says_how_many():
 def test_the_fix_is_offered_only_for_what_tcc_owns():
     """D-6: the skill writes the project, TCC reads it. Every fixable check must touch TCC's own
     config and nothing under the project — a button here that edited `project.json` would make two
-    writers of a file with one owner."""
+    writers of a file with one owner.
+
+    One row reaches past that line, the method's (#169), and its two buttons are the Arbiter's to
+    press, never run by a check: «approve on this machine» writes TCC's own settings and nothing in
+    the project, which must not be able to approve itself; «re-link to TCC's copy» moves the
+    project's `.claude/skills/autosound-tuning` aside to `.tcc/method-aside/` and links TCC's copy in
+    its place. That entry is no file the method writes — it is where TCC makes its own link
+    (`vendor_loader.link_skill_into`) — and the move deletes nothing. Which buttons the row carries,
+    and that drawing it presses neither: `test_a_refused_copy_says_the_methods_sentence_…` below."""
     model_overrides.set_alias("a:b", "c:d", "gone")
 
     fixable = [c.id for c in self_check.run() if c.fixable]
 
-    assert set(fixable) <= {"aliases", "catalogue"}
+    assert set(fixable) <= {"aliases", "catalogue", "method"}
 
 
 def test_a_probe_that_raises_becomes_a_row_not_a_dead_dialog(monkeypatch):
@@ -278,7 +298,7 @@ def test_a_pin_behind_a_released_tag_is_said_out_loud(monkeypatch, tmp_path):
 
     assert check.status == self_check.WARN
     assert "v3.0.34" in check.title and "3" in check.title
-    assert check.fix is None, "a bump is a decision, not a deterministic repair — no button"
+    assert check.actions == (), "a bump is a decision, not a deterministic repair — no button"
     assert "checkout v3.0.34" in check.detail, "the command is named, since we cannot press it"
 
 
@@ -432,3 +452,150 @@ def test_the_self_check_starts_no_python_child(monkeypatch):
     # The pin row's own `git` is not this finding's, and it is not Python.
     assert [argv for argv in spawned if argv[0] != "git"] == []
     assert "agy_sign_in" not in {c.id for c in checks}
+
+
+# ---- which copy of the method the project runs (#169, G5 S1) ----------------------------------
+# What TCC reads itself stays on TCC's own copy (the plan's decision 1), while every writer, check
+# and session runs the copy the project is bound to (`method_binding`) — so a project that runs
+# another copy says so here, and a copy TCC refuses carries the two fixes its sentence names.
+
+
+@pytest.fixture
+def project(own_copy_is_the_submodule):
+    """This test's project — conftest's `AUTOSOUND_PROJECT_DIR`, which `run()` reads — with TCC's
+    own copy the vendored one."""
+    return config.project_dir()
+
+
+def _method(checks):
+    """The method row of a self-check, or None."""
+    return next((check for check in checks if check.id == "method"), None)
+
+
+def test_a_project_on_tccs_own_copy_has_no_method_row(project):
+    assert _method(self_check.run()) is None, "no entry: TCC's copy runs, as it always did"
+
+    vendor_loader.link_skill_into(project)
+    assert method_binding.for_project(project).state == "same"
+
+    assert _method(self_check.run()) is None, "the link TCC makes itself"
+
+
+def test_an_installed_copy_tcc_finds_is_named_with_no_button(project, other_copy):
+    linked(Path.home(), other_copy)  # the personal install for Claude Code
+    linked(project, other_copy)
+    binding = method_binding.for_project(project)
+    assert binding.state == "known", binding.reason
+
+    row = _method(self_check.run())
+
+    assert row.title == i18n.t("selfMethodOtherTitle").format(path=binding.skill_dir)
+    assert i18n.t("selfMethodKnown") in row.detail
+    assert i18n.t("selfMethodOwnReads").format(own=vendor_loader.skill_dir()) in row.detail
+    assert row.status == self_check.OK, "a copy TCC trusts is a fact, not a defect"
+    assert row.actions == ()
+
+
+def test_a_copy_approved_on_this_machine_is_named_as_approved(project, other_copy):
+    binding = linked_and_approved(project, other_copy)
+
+    row = _method(self_check.run())
+
+    assert row.title == i18n.t("selfMethodOtherTitle").format(path=binding.skill_dir)
+    assert i18n.t("selfMethodApproved") in row.detail
+    assert i18n.t("selfMethodKnown") not in row.detail
+    assert (row.status, row.actions) == (self_check.OK, ())
+
+
+def test_a_refused_copy_says_the_methods_sentence_and_offers_both_fixes(project, other_copy):
+    link = linked(project, other_copy)  # a 3.x copy outside the project that TCC does not know
+    binding = method_binding.for_project(project)
+    assert binding.can_approve, binding.reason
+
+    checks = self_check.run()
+    self_check.run()  # the panel draws again: each open, Re-check, fix and language switch
+
+    row = _method(checks)
+    assert (row.status, row.title) == (self_check.BAD, i18n.t("selfMethodRefusedTitle"))
+    assert row.detail == binding.reason, "the binding's own sentence, as core wrote it"
+    assert [action.label for action in row.actions] == [
+        i18n.t("selfMethodApprove"), i18n.t("selfMethodRelink")]
+    # D-6's exception is a press, never a look (`test_the_fix_is_offered_only_for_what_tcc_owns`).
+    assert config.approved_methods() == (), "nothing approved by drawing the row"
+    assert same_path(link, other_copy) and not (project / ".tcc").exists(), "nothing moved either"
+
+
+def test_a_refused_folder_is_offered_the_re_link_alone(project):
+    """A copy inside the project travels with the project: approving it is no remedy."""
+    entry(project).mkdir(parents=True)
+    binding = method_binding.for_project(project)
+    assert (binding.state, binding.can_approve) == ("refused", False)
+
+    row = _method(self_check.run())
+
+    assert (row.status, row.detail) == (self_check.BAD, binding.reason)
+    assert [action.label for action in row.actions] == [i18n.t("selfMethodRelink")]
+
+
+def test_approve_is_the_methods_approve_and_the_row_then_says_approved(project, other_copy,
+                                                                     monkeypatch):
+    linked(project, other_copy)
+    shown = method_binding.for_project(project)
+    asked = []
+    real = method_binding.approve
+    monkeypatch.setattr(method_binding, "approve",
+                        lambda binding: asked.append(binding) or real(binding))
+    approve = _method(self_check.run()).actions[0]
+
+    said = approve.run()
+
+    assert asked == [shown], "the binding the row was drawn from: the copy its sentence named"
+    copy = os.path.realpath(other_copy)
+    assert config.approved_methods() == (copy,)
+    assert said == i18n.t("selfMethodApproveDone").format(path=copy)
+    row = _method(self_check.run())
+    assert i18n.t("selfMethodApproved") in row.detail and row.actions == ()
+
+
+def test_re_link_moves_the_entry_aside_and_the_row_goes(project, other_copy):
+    link = linked(project, other_copy)
+    relink = _method(self_check.run()).actions[-1]
+
+    said = relink.run()
+
+    aside = project / ".tcc" / "method-aside"
+    [stamp] = os.listdir(aside)
+    moved = aside / stamp / vendor_loader.SKILL_NAME
+    assert os.path.islink(moved) and same_path(moved, other_copy), "moved as a link, not followed"
+    assert same_path(link, vendor_loader.skill_dir()), "TCC's own copy linked in its place"
+    assert _method(self_check.run()) is None
+    assert said == i18n.t("selfMethodRelinkDone").format(entry=link, aside=aside)
+
+
+def test_a_fix_that_cannot_be_made_raises_the_methods_sentence(project, other_copy, monkeypatch):
+    """Never swallowed into a receipt: the panel's row says it (`test_diagnostics_panel.py`)."""
+    linked(project, other_copy)
+    approve = _method(self_check.run()).actions[0]
+    monkeypatch.setattr(config, "_settings_provider", None)  # a store that keeps nothing
+
+    with pytest.raises(method_binding.MethodRefused) as caught:
+        approve.run()
+
+    assert os.path.realpath(other_copy) in str(caught.value)
+    assert _method(self_check.run()).status == self_check.BAD, "and the copy is refused still"
+
+
+def test_the_method_row_reads_the_contract_number_through_the_cache(project, other_copy,
+                                                                   monkeypatch):
+    """`run()` is on the GUI thread, at every render, and `contract.py` is 1800 lines of `ast`."""
+    linked(project, other_copy)
+    monkeypatch.setattr(method_binding, "_CONTRACT_CACHE", {})
+    parsed = []
+    real = method_binding.contract_number
+    monkeypatch.setattr(method_binding, "contract_number",
+                        lambda text: parsed.append(len(text)) or real(text))
+
+    for _ in range(3):
+        assert _method(self_check.run()).status == self_check.BAD
+
+    assert len(parsed) == 1, "an unchanged contract.py is not parsed again"

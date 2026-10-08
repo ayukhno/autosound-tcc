@@ -7,9 +7,12 @@ report from the skill's own checker (`rew_tool/contract.py`, run via `core/contr
 rendered rather than re-derived. TCC does not decide here what "valid" means: the skill owns the
 schemas and the checker, so every verdict on screen is quoted from it.
 
-Read-only by construction — there is no control on this panel that writes anything. What it shows
-is one snapshot; `refreshRequested` asks the window to run the check again (off the GUI thread),
-and `set_report()` brings the answer back.
+Read-only toward the method's files by construction — no control on this panel writes them. The
+buttons in TCC's own section repair TCC's own setup, and the one that reaches into the project,
+«re-link to TCC's copy» (#169), moves aside what sits where TCC links its own copy, deleting
+nothing (`core/self_check.py` draws that line). What it shows is one snapshot; `refreshRequested`
+asks the window to run the check again (off the GUI thread), and `set_report()` brings the answer
+back.
 """
 
 from __future__ import annotations
@@ -47,6 +50,7 @@ from autosound_tcc.core import (
     config,
     form_report,
     install_report,
+    method_binding,
     self_check,
     session_export,
     terminal_launcher,
@@ -278,17 +282,24 @@ def _section_title(text: str) -> QLabel:
 
 
 class _CheckRow(QWidget):
-    """One of TCC's own checks, with its Fix button when the repair is TCC's to make.
+    """One of TCC's own checks, with a button for each repair that is TCC's to make.
 
-    The button is the whole point of the section. A diagnostic that describes a problem and leaves
-    the remedy in a file the Arbiter has no reason to open is a diagnostic that gets read once —
-    which is how three model aliases sat redirecting every reviewer call for five days.
+    The buttons are the whole point of the section. A diagnostic that describes a problem and
+    leaves the remedy in a file the Arbiter has no reason to open is a diagnostic that gets read
+    once — which is how three model aliases sat redirecting every reviewer call for five days.
+
+    A repair that cannot be made says why on its own row, and the row stays (#169). It used to go
+    out as the receipt — «Fixed: RuntimeError: …» — with the panel redrawn under it; and a re-link
+    that moved the project's entry and then could make no link leaves the project reading TCC's
+    copy, so a redrawn panel would show no method row at all, nor the sentence saying where the
+    entry went.
     """
 
     fixed = Signal(str)
 
     def __init__(self, check: self_check.Check) -> None:
         super().__init__()
+        self.check = check
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 3, 0, 3)
         layout.setSpacing(2)
@@ -299,25 +310,41 @@ class _CheckRow(QWidget):
         title = QLabel(check.title)
         title.setWordWrap(True)
         head.addWidget(title, stretch=1)
-        if check.fixable:
-            self._btn = QPushButton(check.fix_label)
-            self._btn.setProperty("class", "reason-btn")
-            self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._btn.clicked.connect(lambda: self._run(check))
-            head.addWidget(self._btn)
+        self._buttons: list[QPushButton] = []
+        for action in check.actions:
+            button = QPushButton(action.label)
+            button.setProperty("class", "reason-btn")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, action=action: self._run(action))
+            head.addWidget(button)
+            self._buttons.append(button)
         layout.addLayout(head)
 
         for line in (check.detail or "").splitlines():
             if line.strip():
                 layout.addWidget(_note(line))
+        self._failed: Optional[QLabel] = None
 
-    def _run(self, check: self_check.Check) -> None:
-        self._btn.setEnabled(False)
+    def _run(self, action: self_check.Action) -> None:
+        for button in self._buttons:
+            button.setEnabled(False)
         try:
-            message = check.fix() or ""
+            message = action.run() or ""
+        except method_binding.MethodRefused as exc:  # one sentence, the method's: said as it is
+            self._say_failed(str(exc))
         except Exception as exc:  # noqa: BLE001 — a failed repair is a sentence, not a crash
-            message = f"{type(exc).__name__}: {exc}"
-        self.fixed.emit(message)
+            self._say_failed(f"{type(exc).__name__}: {exc}")
+        else:
+            self.fixed.emit(message)
+
+    def _say_failed(self, why: str) -> None:
+        if self._failed is None:
+            self._failed = _note("")
+            self._failed.setProperty("class", "kv-warn")
+            self.layout().addWidget(self._failed)
+        self._failed.setText(i18n.t("selfActionFailed").format(why=why))
+        for button in self._buttons:
+            button.setEnabled(True)
 
 
 #: Where a beta report goes. The repository's own form, not a blank issue: a form has fields, and
@@ -467,6 +494,8 @@ class DiagnosticsDialog(QDialog):
         #: record of the ask is the message in the transcript, and this only decides whether the
         #: row says "still here, asked N minutes ago".
         self._asked: dict[str, float] = {}
+        #: A fix's receipt, said above the verdict the next time a report is drawn (`_on_fixed`).
+        self._receipt = ""
         self.setModal(False)
         self.setMinimumSize(560, 420)
         self.setProperty("class", "fb-card")
@@ -1602,10 +1631,24 @@ class DiagnosticsDialog(QDialog):
 
     def _on_fixed(self, message: str) -> None:
         """Re-render so the row that was fixed says so itself, rather than only a banner claiming
-        it. A panel whose contents disagree with its own message is a panel nobody believes."""
-        self._verdict.setText(i18n.t("diagFixDone").format(what=message))
+        it. A panel whose contents disagree with its own message is a panel nobody believes.
+
+        The receipt goes above the verdict (`_say`). Over a check that could not run, the check is
+        asked for again first, and the receipt waits for its answer (#169): the fix may be what it
+        lacked — a project on a copy TCC refuses fails the check with the binding's sentence, and
+        that sentence would stand over a row that says the copy is approved now."""
+        self._receipt = i18n.t("diagFixDone").format(what=message)
+        if self._report is not None and not self._report.available:
+            self.set_report(None)
+            self.refreshRequested.emit()
+            return
         self._render()
-        self._verdict.setText(i18n.t("diagFixDone").format(what=message))
+
+    def _say(self, verdict: str) -> None:
+        """The verdict, under the receipt of a fix made since the last report was drawn."""
+        if self._receipt:
+            verdict, self._receipt = f"{self._receipt}\n{verdict}", ""
+        self._verdict.setText(verdict)
 
     def _on_refresh(self) -> None:
         """Re-check means everything this window shows, not only the project.
@@ -1702,18 +1745,22 @@ class DiagnosticsDialog(QDialog):
         )
 
         if not report.available:
-            self._verdict.setText(f"{i18n.t('diagUnavailable')} — {report.error}")
+            self._say(f"{i18n.t('diagUnavailable')} — {report.error}")
+            # TCC's own setup does not wait on the project's check. It was drawn only under a check
+            # that ran — and a project on a copy TCC refuses fails that check with the binding's
+            # sentence (#169), so the row with the two fixes for it could never be seen.
+            self._own_checks(self_check.run())
+            self._body_layout.addStretch(1)
             return
 
         # The headline counts BOTH halves. It read `report.ok` alone, so the panel could say
         # "OK — nothing to fix" directly above a red row of its own making, which is the exact
         # shape of thing this section was added to stop.
         checks = self_check.run()
-        self._checks = checks
         own = [c for c in checks if c.status != self_check.OK]
         issues = report.issues()
         total = len(issues) + len(own)
-        self._verdict.setText(
+        self._say(
             i18n.t("diagOk") if report.ok and not own else i18n.t("diagIssues").format(n=total)
         )
 
@@ -1759,14 +1806,7 @@ class DiagnosticsDialog(QDialog):
             for path in report.sources_gone:
                 self._body_layout.addWidget(_note(i18n.t("diagSourceGone").format(path=path)))
 
-        # TCC's own setup, after the project's. Separate section because it is a different
-        # question with a different owner: these are things TCC did to itself, and the ones it may
-        # undo carry a button (see `core/self_check.py` for where that line is drawn).
-        self._body_layout.addWidget(_section_title(i18n.t("selfSection")))
-        for check in checks:
-            row = _CheckRow(check)
-            row.fixed.connect(self._on_fixed)
-            self._body_layout.addWidget(row)
+        self._own_checks(checks)
 
         open_questions = report.open_questions()
         if open_questions:
@@ -1775,6 +1815,17 @@ class DiagnosticsDialog(QDialog):
                 self._body_layout.addWidget(_note(question))
 
         self._body_layout.addStretch(1)
+
+    def _own_checks(self, checks: list) -> None:
+        """TCC's own setup, after the project's. Separate section because it is a different
+        question with a different owner: these are things TCC did to itself, and the ones it may
+        undo carry a button (see `core/self_check.py` for where that line is drawn)."""
+        self._checks = checks
+        self._body_layout.addWidget(_section_title(i18n.t("selfSection")))
+        for check in checks:
+            row = _CheckRow(check)
+            row.fixed.connect(self._on_fixed)
+            self._body_layout.addWidget(row)
 
 
 def _continue_head_line(drift: dict) -> Optional[str]:

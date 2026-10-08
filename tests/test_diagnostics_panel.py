@@ -19,9 +19,12 @@ import pytest
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
+from autosound_tcc.core import config, contract_check, method_binding, vendor_loader  # noqa: E402
 from autosound_tcc.core.contract_check import ContractReport  # noqa: E402
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog  # noqa: E402
+
+from tests._method_copies import entry, linked, linked_and_approved, same_path  # noqa: E402
 
 
 def _app() -> QApplication:
@@ -2648,3 +2651,180 @@ def test_a_close_just_before_agys_child_exists_still_ends_it(monkeypatch, tmp_pa
         go.set()
         child.kill()
         worker.wait(10_000)
+
+
+# ---- which copy of the method the project runs (#169, G5 S1) ----------------------------------
+
+
+@pytest.fixture
+def project(own_copy_is_the_submodule):
+    """This test's project — conftest's `AUTOSOUND_PROJECT_DIR`, which the self-check reads — with
+    TCC's own copy the vendored one."""
+    return config.project_dir()
+
+
+def _method_rows(dialog) -> list:
+    from autosound_tcc.ui.tcc.diagnostics_panel import _CheckRow
+
+    return [row for row in dialog.findChildren(_CheckRow) if row.check.id == "method"]
+
+
+def _said(widget) -> str:
+    return "\n".join(label.text() for label in widget.findChildren(QLabel))
+
+
+def _buttons(row) -> list:
+    return [button.text() for button in row.findChildren(QPushButton)]
+
+
+def _press(row, label: str) -> None:
+    next(button for button in row.findChildren(QPushButton) if button.text() == label).click()
+
+
+def _as_the_window_checks(project):
+    """The panel on the report the window gets for `project` from `contract_check.run` — which,
+    for a copy TCC refuses, starts nothing and answers the binding's sentence as its error — and
+    the window's Re-check: asked again, a report comes back (hand-built; the project's files are
+    not these tests' business). Answers the dialog and the list of times it asked."""
+    _app()
+    dialog = DiagnosticsDialog()
+    asked: list = []
+    dialog.refreshRequested.connect(lambda: (asked.append(1), dialog.set_report(_report())))
+    report = contract_check.run(project)
+    assert not report.available, "a refused copy: the check could not run"
+    dialog.set_report(report)
+    return dialog, asked
+
+
+def test_a_project_on_tccs_own_copy_shows_no_method_row(project):
+    vendor_loader.link_skill_into(project)
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog.set_report(_report())
+
+    assert _method_rows(dialog) == []
+
+
+@pytest.mark.parametrize("bound, how", [("known", "selfMethodKnown"),
+                                        ("approved", "selfMethodApproved")])
+def test_a_trusted_copy_that_is_not_tccs_own_is_named_with_no_button(project, other_copy, bound,
+                                                                     how):
+    """Decision 1: what TCC reads itself stays on its own copy, so the Arbiter has to be able to
+    see that the project runs another."""
+    if bound == "known":
+        linked(Path.home(), other_copy)  # the personal install TCC finds
+        linked(project, other_copy)
+    else:
+        linked_and_approved(project, other_copy)
+    binding = method_binding.for_project(project)
+    assert binding.state == bound, binding.reason
+    _app()
+    dialog = DiagnosticsDialog()
+
+    dialog.set_report(_report())
+
+    [row] = _method_rows(dialog)
+    assert i18n.t("selfMethodOtherTitle").format(path=binding.skill_dir) in _said(row)
+    assert i18n.t(how) in _said(row)
+    assert _buttons(row) == []
+
+
+def test_a_refused_copy_is_shown_with_both_fixes_though_the_check_could_not_run(project,
+                                                                              other_copy):
+    """For a copy TCC refuses, the project's check is the binding's sentence and nothing more
+    (`contract_check.run`), and the panel stopped there: TCC's own section was drawn only under a
+    check that ran, so the row with the two fixes would never have been seen."""
+    link = linked(project, other_copy)
+    binding = method_binding.for_project(project)
+
+    dialog, asked = _as_the_window_checks(project)
+
+    assert i18n.t("diagUnavailable") in dialog._verdict.text()
+    [row] = _method_rows(dialog)
+    assert binding.reason in _said(row)
+    assert _buttons(row) == [i18n.t("selfMethodApprove"), i18n.t("selfMethodRelink")]
+    assert asked == [] and config.approved_methods() == () and same_path(link, other_copy), \
+        "shown, and nothing pressed"
+
+
+def test_a_refused_folder_is_offered_no_approval(project):
+    entry(project).mkdir(parents=True)
+
+    dialog, _asked = _as_the_window_checks(project)
+
+    [row] = _method_rows(dialog)
+    assert _buttons(row) == [i18n.t("selfMethodRelink")]
+
+
+def test_approve_approves_the_copy_and_the_row_then_says_so(project, other_copy, monkeypatch):
+    linked(project, other_copy)
+    shown = method_binding.for_project(project)
+    approved: list = []
+    real = method_binding.approve
+    monkeypatch.setattr(method_binding, "approve",
+                        lambda binding: approved.append(binding) or real(binding))
+    dialog, asked = _as_the_window_checks(project)
+
+    _press(_method_rows(dialog)[0], i18n.t("selfMethodApprove"))
+
+    copy = os.path.realpath(other_copy)
+    assert approved == [shown] and config.approved_methods() == (copy,)
+    assert asked == [1], "the check is asked again: the report on screen was the refusal"
+    [row] = _method_rows(dialog)
+    assert i18n.t("selfMethodApproved") in _said(row) and _buttons(row) == []
+    receipt = i18n.t("diagFixDone").format(what=i18n.t("selfMethodApproveDone").format(path=copy))
+    assert receipt in dialog._verdict.text()
+    assert i18n.t("diagUnavailable") not in dialog._verdict.text(), "the refusal is not said again"
+
+
+def test_re_link_moves_the_old_entry_aside_and_the_row_goes(project, other_copy):
+    link = linked(project, other_copy)
+    dialog, asked = _as_the_window_checks(project)
+
+    _press(_method_rows(dialog)[0], i18n.t("selfMethodRelink"))
+
+    aside = project / ".tcc" / "method-aside"
+    [stamp] = os.listdir(aside)
+    assert same_path(aside / stamp / vendor_loader.SKILL_NAME, other_copy), "kept, not deleted"
+    assert same_path(link, vendor_loader.skill_dir())
+    assert _method_rows(dialog) == []
+    assert asked == [1]
+    assert str(aside) in dialog._verdict.text(), "the receipt says where the old entry went"
+
+
+def _recording(real, raised: list):
+    def call(binding):
+        try:
+            return real(binding)
+        except method_binding.MethodRefused as exc:
+            raised.append(str(exc))
+            raise
+    return call
+
+
+@pytest.mark.parametrize("fix", ["approve", "relink"])
+def test_a_fix_that_fails_says_why_on_its_row_and_the_row_stays(project, other_copy, monkeypatch,
+                                                               fix):
+    """`MethodRefused` carries one sentence naming the entry and what to do, and that sentence is
+    the row's to say — not «Fixed:» over it, and not a redraw that drops it: a re-link that moved
+    the entry and could make no link leaves the project reading `same`, and a redrawn panel would
+    show no method row at all, with no word of where the entry went."""
+    linked(project, other_copy)
+    dialog, asked = _as_the_window_checks(project)
+    [row] = _method_rows(dialog)
+    verdict = dialog._verdict.text()
+    if fix == "approve":
+        monkeypatch.setattr(config, "_settings_provider", None)  # a store that keeps nothing
+    else:
+        monkeypatch.setattr(vendor_loader, "link_skill_into", lambda project_dir: None)
+    raised: list = []
+    monkeypatch.setattr(method_binding, fix, _recording(getattr(method_binding, fix), raised))
+
+    _press(row, i18n.t({"approve": "selfMethodApprove", "relink": "selfMethodRelink"}[fix]))
+
+    [sentence] = raised
+    assert _method_rows(dialog) == [row], "the row stays"
+    assert i18n.t("selfActionFailed").format(why=sentence) in _said(row)
+    assert all(button.isEnabled() for button in row.findChildren(QPushButton))
+    assert (asked, dialog._verdict.text()) == ([], verdict), "no receipt, no re-check"

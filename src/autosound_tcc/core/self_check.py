@@ -17,6 +17,16 @@ two writers of a file with one owner.
 The second rule is narrower and comes from the same place: a fix must be *deterministic*. "Remove
 this alias" is one outcome. "Repair the ledger" is a judgement, and a judgement behind a button is
 a judgement nobody made.
+
+**One row reaches past the first rule, and its two buttons are pressed, never run** (#169, G5 S1).
+A project runs the copy of the method its `.claude/skills/autosound-tuning` links, and a copy TCC
+will not run stops every writer and session of it. «Approve on this machine» writes TCC's own
+settings and nothing in the project — a project must not be able to approve itself. «Re-link to
+TCC's copy» does touch the project: it moves that entry aside, to `.tcc/method-aside/`, and links
+TCC's own copy in its place. The entry is no file the method writes — it is where TCC makes its
+own link (`vendor_loader.link_skill_into`) — and the move deletes nothing, so putting it back is a
+move too. Each has one outcome, and the judgement behind «approve» is the Arbiter's, made by
+pressing it on the copy the row names.
 """
 
 from __future__ import annotations
@@ -24,7 +34,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from autosound_tcc.core import config, critic, model_choices, model_overrides, project_settings
+from autosound_tcc.core import (
+    config,
+    critic,
+    method_binding,
+    model_choices,
+    model_overrides,
+    project_settings,
+)
 
 #: Severity, in the same vocabulary the traffic lights already use.
 BAD = "bad"
@@ -33,23 +50,31 @@ OK = "done"
 
 
 @dataclass(frozen=True)
+class Action:
+    """One button on a check's row. `run` makes the repair and answers its receipt, a sentence of
+    what was done; one that cannot be made raises, and the row says why instead."""
+
+    label: str
+    run: Callable[[], str] = field(compare=False)
+
+
+@dataclass(frozen=True)
 class Check:
     """One thing TCC knows about its own setup.
 
-    `fix` is present only when the repair is TCC's to make and has exactly one outcome. `detail`
-    is what the Arbiter needs in order to decide, not a restatement of the title.
+    `actions` are present only when the repair is TCC's to make and each has exactly one outcome.
+    `detail` is what the Arbiter needs in order to decide, not a restatement of the title.
     """
 
     id: str
     status: str
     title: str
     detail: str = ""
-    fix_label: str = ""
-    fix: Optional[Callable[[], str]] = field(default=None, compare=False)
+    actions: tuple[Action, ...] = ()
 
     @property
     def fixable(self) -> bool:
-        return self.fix is not None
+        return bool(self.actions)
 
 
 def _alias_check() -> Check:
@@ -102,8 +127,7 @@ def _alias_check() -> Check:
         BAD if collapsing else WARN,
         _t("selfAliasTitle").format(n=len(aliases)),
         detail,
-        fix_label=_t("selfAliasFix"),
-        fix=_clear_all_aliases,
+        actions=(Action(_t("selfAliasFix"), _clear_all_aliases),),
     )
 
 
@@ -148,8 +172,7 @@ def _catalogue_check() -> Check:
         WARN,
         _t("selfCatalogueTitle").format(clis=", ".join(silent)),
         _t("selfCatalogueDetail"),
-        fix_label=_t("selfCatalogueFix"),
-        fix=_refresh_catalogue,
+        actions=(Action(_t("selfCatalogueFix"), _refresh_catalogue),),
     )
 
 
@@ -346,12 +369,69 @@ def _agy_sign_in_check() -> Optional[Check]:
                  _t(_AGY_SIGN_IN_TITLE[route]), line)
 
 
+def _method_check() -> Optional[Check]:
+    """Which copy of the method this project runs, when it is not TCC's own (#169, G5 S1).
+
+    Every writer, check and session runs the copy the project is bound to (`method_binding`), while
+    what TCC reads itself stays on TCC's own copy (the plan's decision 1) — so a project on another
+    copy is said here, where the Arbiter can see it. On TCC's own copy there is nothing to say, and
+    no row.
+
+    A copy TCC trusts — one it finds installed, or one approved on this machine — is a fact, not a
+    defect: OK and no button, since a warning in the headline would be one nothing on this panel
+    clears, about a copy the Arbiter installed or approved (the agy row's M6, for the same reason).
+    A refused copy is red, in the binding's own sentence (English: `core` does not import the ui),
+    with the fixes that sentence names: «approve on this machine» only where approving is the
+    remedy, «re-link to TCC's copy» always. Each acts on the binding the row was drawn from — the
+    copy its sentence named — and only when pressed (the module's docstring).
+
+    On the GUI thread like every probe here: `for_project` is a few `lstat`s, and it reads a copy's
+    contract number through `read_contract_version`'s cache.
+    """
+    binding = method_binding.for_project(config.project_dir())
+    if binding.state == method_binding.SAME:
+        return None
+    if binding.state != method_binding.REFUSED:
+        how = "selfMethodKnown" if binding.state == method_binding.KNOWN else "selfMethodApproved"
+        return Check("method", OK, _t("selfMethodOtherTitle").format(path=binding.skill_dir),
+                     f"{_t(how)}\n{_t('selfMethodOwnReads').format(own=method_binding.own_copy())}")
+    approve = (Action(_t("selfMethodApprove"), lambda: _approve_method(binding)),)
+    relink = (Action(_t("selfMethodRelink"), lambda: _relink_method(binding)),)
+    return Check("method", BAD, _t("selfMethodRefusedTitle"), binding.reason,
+                 actions=(approve if binding.can_approve else ()) + relink)
+
+
+def _approve_method(binding: method_binding.Binding) -> str:
+    """«Approve on this machine»: `method_binding.approve`, of the copy the row named."""
+    now = method_binding.approve(binding)
+    if now.state == method_binding.APPROVED:
+        return _t("selfMethodApproveDone").format(path=now.skill_dir)
+    return _now_runs(now)
+
+
+def _relink_method(binding: method_binding.Binding) -> str:
+    """«Re-link to TCC's copy»: `method_binding.relink`. Its receipt says where the old entry went,
+    since the row goes with the refusal."""
+    now = method_binding.relink(binding)
+    if now.state == method_binding.SAME:
+        return _t("selfMethodRelinkDone").format(
+            entry=binding.entry, aside=config.tcc_dir(binding.project_dir) / "method-aside")
+    return _now_runs(now)
+
+
+def _now_runs(binding: method_binding.Binding) -> str:
+    """The receipt of a fix that left the project elsewhere than it meant to — the link changed
+    under it. A refusal still standing is the fix's failure, raised with the binding's own sentence
+    (`require`); a copy TCC trusts all the same is what the project runs now."""
+    return _t("selfMethodNowRuns").format(path=binding.require())
+
+
 def run() -> list[Check]:
     """Every self-check, worst first. Never raises: a diagnostics panel that crashes is worse than
     one that is missing a row."""
     checks = []
-    for probe in (_alias_check, _catalogue_check, _pin_check, _reviewer_actual_check,
-                  _recommendation_check, _agy_sign_in_check):
+    for probe in (_method_check, _alias_check, _catalogue_check, _pin_check,
+                  _reviewer_actual_check, _recommendation_check, _agy_sign_in_check):
         try:
             found = probe()
             if found is not None:  # a probe with nothing to say leaves no row (tcc#135)
