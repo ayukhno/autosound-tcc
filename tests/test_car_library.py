@@ -2,7 +2,8 @@
 
 The matching rule is the method's and is exercised here through it, not re-implemented: a cabin is
 `make / model / generation / body`, the year takes no part, and a platform sibling is never named.
-What this module owns is the half the method cannot have — which project folders to look in.
+What this module owns is the half the method cannot have — which project folders to look in. The
+car itself is written by the method's own `intake.py set-car` (#169, N9), and its rule wins.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import car_library
+from autosound_tcc.core import car_library, method_cli, vendor_loader
 
 pytestmark = pytest.mark.skipif(
     not car_library.available(), reason="the car library arrived with method v3.0.40"
@@ -99,22 +100,68 @@ def test_recording_a_car_is_what_makes_the_next_project_findable(tmp_path):
 
     car = car_library.record(folder, "VW", "Passat", "B8", "sedan", year=2018)
 
+    # The year travels as text on the method's argv, and the method keeps what it is given.
     assert car == {"make": "VW", "model": "Passat", "generation": "B8",
-                   "body": "sedan", "year": 2018}
+                   "body": "sedan", "year": "2018"}
     after = car_library.look_up("VW", "Passat", "B8", "sedan", dirs=[folder])
     assert [m["path"] for m in after["prior_projects"]] == [str(folder)]
 
 
-def test_an_empty_part_is_absent_rather_than_blank(tmp_path):
-    """A blank `body` is the state the library calls "no body recorded"; storing `""` would make
-    it read as a body named nothing, which is the kind of value that looks settled."""
+def test_the_car_goes_to_the_method_s_set_car_as_four_parts_and_a_year(tmp_path, monkeypatch):
+    """`record` composes the call and the method writes (#169, N9): `intake.py set-car <project>
+    <make> <model> <generation> <body> [--year Y]` of the copy the project is bound to. The four
+    parts go as they were given — blank ones too, since refusing them is the method's — and the
+    year as text, only when there is one. No lock: `project.json` is not the journal the lock
+    guards, and taking it would make the lock's `process/` in a project still being described."""
+    folder = _project(tmp_path, "new", {})
+    calls = []
+
+    def spawn(project_dir, script_rel, args, **kwargs):
+        calls.append((Path(project_dir), script_rel, list(args), kwargs.get("lock")))
+        return 0, "", ""
+
+    monkeypatch.setattr(method_cli, "spawn", spawn)
+
+    car_library.record(folder, "VW", "Passat", "B8", "sedan", year=2018)
+    car_library.record(folder, "VW", "Passat", "B8", "")
+
+    assert calls == [
+        (folder, "intake.py",
+         ["set-car", str(folder), "VW", "Passat", "B8", "sedan", "--year", "2018"], False),
+        (folder, "intake.py", ["set-car", str(folder), "VW", "Passat", "B8", ""], False),
+    ]
+
+
+def test_a_blank_body_is_the_method_s_refusal_in_its_own_words_and_nothing_is_written(tmp_path):
+    """The method's rule wins (#169, N9). TCC dropped a blank `body` and wrote the rest — a car the
+    library reads as "no body recorded" for the rest of its life — where the method's `set-car`
+    refuses it and writes nothing. Its sentence comes back as it is, without the class name Python
+    prints in front of it, so a session reads which part to ask for; `project.json` is untouched."""
     folder = _project(tmp_path, "half", {})
+    before = (folder / "project.json").read_bytes()
 
-    car = car_library.record(folder, "VW", "Passat", "B8")
+    with pytest.raises(car_library.CarLibraryError) as refused:
+        car_library.record(folder, "VW", "Passat", "B8")
 
-    assert "body" not in car and car["generation"] == "B8"
+    said = str(refused.value)
+    assert said.startswith("the car is four parts and body is blank"), said
+    assert said.endswith("Nothing was written"), said
+    assert (folder / "project.json").read_bytes() == before
+
+
+def test_a_good_car_lands_in_project_json_written_by_the_method(tmp_path, monkeypatch):
+    """A real child on the vendored copy writes it; TCC's own copy of `Project` only reads it back,
+    so what `record` answers is the car as the method stored it."""
+    folder = _project(tmp_path, "new", {})
+    monkeypatch.setattr(vendor_loader.load_project().Project, "save",
+                        lambda self, data: pytest.fail("TCC wrote project.json in-process"))
+
+    car = car_library.record(folder, "VW", "Passat", "B8", "sedan", year=2018)
+
     saved = json.loads((folder / "project.json").read_text(encoding="utf-8"))
-    assert saved["car"] == car and saved["project_rev"] >= 1, "written through the method's writer"
+    assert saved["car"] == car == {"make": "VW", "model": "Passat", "generation": "B8",
+                                   "body": "sedan", "year": "2018"}
+    assert saved["project_rev"] >= 1
 
 
 def test_the_answer_says_where_it_looked(tmp_path):

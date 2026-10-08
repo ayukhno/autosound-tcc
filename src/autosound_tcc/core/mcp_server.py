@@ -887,12 +887,19 @@ def build_server(
         this build nor any later one can be matched against the cabin library or against the
         earlier builds. That is a silent loss: nothing breaks today, and the material is simply
         not there tomorrow.
+
+        The method writes it, and refuses a car with a blank part or a body outside its list:
+        nothing is written, and `error` is the method's own sentence -- it names what to ask the
+        person for.
         """
         try:
             car = car_library.record(
                 config.project_dir(), make, model, generation, body, year
             )
-        except Exception as exc:  # noqa: BLE001 — the writer's refusal is an answer
+        except car_library.CarLibraryError as exc:
+            # The sentence itself (#169, N9): the part to ask for, or why the copy did not run.
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        except Exception as exc:  # noqa: BLE001 — any other failure is an answer too, by its class
             return json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False)
         return json.dumps({"recorded": True, "car": car}, ensure_ascii=False)
 

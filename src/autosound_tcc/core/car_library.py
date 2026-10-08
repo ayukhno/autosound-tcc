@@ -21,20 +21,39 @@ back separately and the tool's instructions say to show it.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional, Sequence
 
-from autosound_tcc.core import config, vendor_loader
+from autosound_tcc.core import config, method_cli, vendor_loader
 
 #: The method's module. Arrived in v3.0.40; `available()` asks for it rather than assuming, the
 #: same posture `core/issue_assets.py` and `core/eq_export.py` keep.
 _MODULE = "car_profile.py"
+
+#: The car's writer, relative to the method's `rew_tool/`: its `set-car` verb, there since v3.0.59
+#: (the file arrived with it, so an older copy answers `method_cli.ScriptMissing`).
+_WRITER = "intake.py"
+
+#: Local file I/O and a JSON rewrite, as for the method's other writers; anything near this is a
+#: hang, not slowness.
+_TIMEOUT_S = 20.0
+
+#: What Python prints in front of the sentence of an exception nobody caught. `set-car` refuses by
+#: raising its `IntakeError` uncaught, so its sentence arrives behind this on stderr's last line.
+_REFUSAL_PREFIX = re.compile(r"^(?:\w+\.)*IntakeError: ")
 
 #: The four parts that identify a CABIN. `year` is deliberately not among them: a generation is
 #: already the span of years where the acoustics are counted the same, so two builds of one
 #: generation and body are one cabin whether 2017 or 2018, and the same year in another shell is
 #: another cabin. The year describes THIS car and never classifies (owner, 2026-09-03).
 IDENTITY = ("make", "model", "generation", "body")
+
+
+class CarLibraryError(RuntimeError):
+    """The car was not recorded. Carries the sentence that says why, verbatim: the method's own
+    refusal (a blank part, a body outside its list), or why its copy did not run — a binding TCC
+    will not run (`method_cli.Refused`'s sentence), a script that copy does not have, a timeout."""
 
 
 def _module():
@@ -129,23 +148,41 @@ def record(
     body: str = "",
     year=None,
 ) -> dict:
-    """Write the four parts into `project.json.car`, through the METHOD'S writer.
+    """Write the car into `project.json` by the METHOD's own verb — `intake.py set-car` of the copy
+    the project is bound to (#169, N9) — and answer the car as the method stored it, read back.
 
-    Load-modify-save with `Project`, never a JSON dump of our own: that writer validates, writes
-    atomically, and refuses to treat an unreadable file as an empty project — a rule bought by an
-    audit that watched a whole project get replaced by a skeleton.
+    The method's rule wins, so TCC fills nothing and drops nothing: the four parts go as given.
+    `set-car` refuses a blank part — a build recorded without its body answers "no body recorded"
+    forever — and a body outside its list, and writes nothing; that is a `CarLibraryError` with
+    the method's sentence (`_sentence`). This was a load-modify-save through TCC's own copy of
+    `Project`, which dropped a blank part and wrote the rest: the refusal skipped one floor up.
 
-    `year` is kept when given because it describes this car; it takes no part in identity.
+    `year` describes this car and takes no part in identity; it travels as text and is kept as
+    the method keeps it. No lock: `project.json` is not the journal the project's lock guards.
     """
+    args = ["set-car", str(project_dir), make, model, generation, body,
+            *(["--year", str(year)] if year is not None else [])]
+    try:
+        code, out, err = method_cli.spawn(project_dir, _WRITER, args, timeout_s=_TIMEOUT_S,
+                                          lock=False)
+    except method_cli.ProcessWriterError as exc:
+        raise CarLibraryError(str(exc)) from exc
+    if code != 0:
+        raise CarLibraryError(_sentence(code, out, err))
+    # A read, so through TCC's own copy: what the method stored, not what was sent.
     project = vendor_loader.load_project()
-    handle = project.Project(str(project_dir))
-    data = handle.load()
-    car = dict(data.get("car") or {})
-    car.update({"make": make, "model": model, "generation": generation, "body": body})
-    if year is not None:
-        car["year"] = year
-    # Empty parts are dropped rather than stored as "": a blank `body` is the state the library
-    # calls "no body recorded", and it should read that way rather than as a body named nothing.
-    data["car"] = {k: v for k, v in car.items() if v not in ("", None)}
-    handle.save(data)
-    return data["car"]
+    return dict(project.Project(str(project_dir)).load().get("car") or {})
+
+
+def _sentence(code: int, out: str, err: str) -> str:
+    """The method's own words for a car it did not write: the last line it printed to stderr.
+
+    Its refusal of the car is an `IntakeError` it does not catch, so stderr is a traceback and the
+    sentence is its last line, behind the class name Python prints — dropped, because the session
+    reads the sentence to know which part to ask for. Any other exception the method lets out (its
+    `ProjectError` on an unreadable `project.json`, a crash) keeps its class: there the class is
+    part of what happened."""
+    lines = [line.strip() for line in err.splitlines() if line.strip()]
+    if lines:
+        return _REFUSAL_PREFIX.sub("", lines[-1], count=1)
+    return out or f"{_WRITER} set-car exited {code}"

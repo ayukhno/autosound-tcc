@@ -1687,6 +1687,27 @@ def test_the_interview_can_record_a_body_because_it_has_no_other_way_to(tmp_path
     assert saved["car"]["make"] == "VW", "written through the method's own writer"
 
 
+def test_a_car_the_method_refuses_comes_back_as_its_own_sentence(tmp_path, monkeypatch):
+    """The tool defaults `generation` and `body` to "", and the method's `set-car` refuses a blank
+    part (#169, N9). The answer is that sentence itself — no class name in front of it — so the
+    session reads which part to ask the person for; nothing is recorded, nothing is written."""
+    from autosound_tcc.core import car_library
+
+    if not car_library.available():
+        pytest.skip("the car library arrived with method v3.0.40")
+
+    monkeypatch.setattr(mcp_server.config, "project_dir", lambda: tmp_path)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    said = json.loads(_text(asyncio.run(mcp.call_tool(
+        "save_car", {"make": "VW", "model": "Passat", "generation": "B8"},
+    ))))
+
+    assert "recorded" not in said, said
+    assert said["error"].startswith("the car is four parts and body is blank"), said
+    assert not (tmp_path / "project.json").exists(), "nothing was written"
+
+
 def test_an_unwritable_advertisement_does_not_take_the_server_down(tmp_path, monkeypatch, caplog):
     """From the user's own log (2026-09-06): `PermissionError` on `.mcp.json` escaped `start()`,
     the window said "the MCP server did not start" — about a server that was SERVING — and the

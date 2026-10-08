@@ -5,7 +5,7 @@ What is tested here is what its callers no longer do for themselves: a child tha
 is cut and said to have timed out — never «busy», which promises that nothing was written — and a
 lock wait the caller names is the one spent. The lock itself is `test_project_lock.py`'s, a read
 that takes none is `test_handoff.py`'s, a write that takes it is `test_title_fixes.py`'s. And the
-five launchers that are not `process.py`'s run the copy the project is bound to, or say why not.
+six launchers that are not `process.py`'s run the copy the project is bound to, or say why not.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 
 from autosound_tcc.core import (
-    app_log, config, config_writer, contract_check, intake_form, method_binding, method_cli,
-    process_writer, profile_writer, project_lock, project_repo, vendor_loader,
+    app_log, car_library, config, config_writer, contract_check, intake_form, method_binding,
+    method_cli, process_writer, profile_writer, project_lock, project_repo, vendor_loader,
 )
 
 
@@ -243,6 +243,8 @@ def test_only_process_py_is_held_to_the_flags_in_its_text(tmp_path, method_copy,
 # script of TCC's own copy with a bare `subprocess.run` or `Popen`, whatever the project linked. They
 # run the copy the project is bound to now: the first three through `spawn`, and the two whose child
 # a bounded run cannot be — a check a caller cancels, a server — through `resolve`, its resolver.
+# `car_library` wrote `project.json` in-process with TCC's own `Project`; it runs the bound copy's
+# `intake.py set-car` through `spawn` now (N9).
 
 
 def _entry(project: Path) -> Path:
@@ -299,7 +301,7 @@ class _Answered:
 
 
 class _Launches:
-    """Every child the five launchers start, as `(argv, env)`, and none of them run. Every door is
+    """Every child the six launchers start, as `(argv, env)`, and none of them run. Every door is
     watched: `method_cli`'s bounded run, `contract_check`'s cancellable `Popen`, the bare
     `subprocess.run` each of them used before #169 — so a launcher still on it is caught, not run —
     and `popen`, which `intake_form` is handed."""
@@ -365,6 +367,14 @@ def _intake_form(project: Path, launches: _Launches):
     return None
 
 
+def _car_library(project: Path, launches: _Launches):
+    try:
+        car_library.record(project, "VW", "Passat", "B8", "sedan")
+    except car_library.CarLibraryError as exc:
+        return str(exc)
+    return None
+
+
 #: `(launcher, its script under rew_tool/, what the refused line calls the run)`.
 LAUNCHERS = [
     pytest.param(_profile_writer, "dsp_profile.py", "draft", id="profile_writer"),
@@ -372,13 +382,14 @@ LAUNCHERS = [
     pytest.param(_project_repo, "project_repo.py", "init", id="project_repo"),
     pytest.param(_contract_check, "contract.py", "check", id="contract_check"),
     pytest.param(_intake_form, "intake_form.py", "serve", id="intake_form"),
+    pytest.param(_car_library, "intake.py", "set-car", id="car_library"),
 ]
 
 
 @pytest.mark.parametrize("launch, script, named", LAUNCHERS)
 def test_every_other_launcher_runs_the_copy_the_project_is_bound_to(
         monkeypatch, second_copy, launch, script, named):
-    """The issue's first, for the five that are not `process.py`: the current project linked to a
+    """The issue's first, for the six that are not `process.py`: the current project linked to a
     copy approved on this machine has the script of THAT copy started, and the child is told which
     copy it runs (`AUTOSOUND_SKILL_ROOT`) — not TCC's own, whatever the project linked."""
     monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
