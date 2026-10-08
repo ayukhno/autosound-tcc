@@ -590,6 +590,60 @@ def test_a_rename_batch_that_stopped_halfway_supersedes_what_went_through_and_sa
     assert i18n.t("capImportSupersedeNotAsked").format(pairs="m-L_01 (sw) → m-L_02 (sw)") in said
 
 
+#: What the method's `_require_capture` says to any write into a round that is closed, `capture-supersede`
+#: among them — on stderr, exit 1, its `error: ` line (`process.py` `_main`).
+_NO_ROUND_OPEN = ("error: no capture round is open: `capture-start <version> [expected ...]` first. "
+                  "A round says which pass these measurements belong to -- without one they are "
+                  "loose titles that only REW remembers.")
+
+
+def test_a_rename_batch_that_stopped_over_a_closed_round_says_nothing_reached_the_round(
+        tmp_path, monkeypatch):
+    """MA1 (the re-review of G5+G8's fix A): the last round was CLOSED — the method keeps it in its
+    state with `closed` set, and `process_view.capture_round` hands it back as it stands — when a
+    rename batch stopped halfway. The round was asked to supersede what it had taken under the old
+    title, the method refused (a closed round takes no write), `title_fixes` read the refusal as
+    «never took it», done, and the status said «The round now has the new title» about a round
+    nothing had changed. A closed round is none here, as it is everywhere else in this panel
+    (finding 147): it is asked nothing, and nothing is counted or said done."""
+    from autosound_tcc.core import config, process_writer, vendor_loader
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                           encoding="utf-8")
+    process = vendor_loader.load_process().Process(str(tmp_path / "process"))
+    process.start_capture("1", ["w-L_01 (sw)", "w-R_01 (sw)"])
+    process.record_capture("w-L_01 (sw)")
+    process.close_capture("done")
+    asked = []
+
+    def supersede_capture(project_dir, wrong, right):
+        asked.append((wrong, right))
+        return 1, "", _NO_ROUND_OPEN
+
+    monkeypatch.setattr(process_writer, "supersede_capture", supersede_capture)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    monkeypatch.setattr(panel, "_write_ledger", lambda rows, titles: None)
+    answer = {"1": {"title": "w-L_01 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:10:00"},
+              "2": {"title": "w-R_01 (sw)", "uuid": "u2", "date": "2026-Aug-25 20:10:10"}}
+    panel._taking = capture_import.candidates(answer, tmp_path)
+    panel._renaming = [("u1", "w-L_02 (sw)"), ("u2", "w-R_02 (sw)")]
+
+    panel._on_import_rename_failed("REW rejected the rename", [("u1", "w-L_02 (sw)")])
+
+    said = panel._status_label.text()
+    assert i18n.t("capImportSupersedeDone").format(pairs="w-L_01 (sw) → w-L_02 (sw)") not in said, said
+    assert i18n.t("capImportRenameFail").format(
+        n=1, error="REW rejected the rename", taken=1) in said, "the lead is as it was"
+    assert asked == [], "a closed round is asked nothing"
+    done, refused, not_asked = panel._supersede_renamed(panel._taking[:1], {"u1": "w-L_02 (sw)"})
+    assert (done, refused, not_asked) == ([], [], []), "and nothing is counted done"
+
+
 def test_method_channel_pairs_uses_meas_order_by_default():
     _app()
     panel = MeasurementPanel()

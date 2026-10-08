@@ -1396,8 +1396,14 @@ class MeasurementPanel(QWidget):
         A title the round never took needs nothing more — the import records the right one.
 
         Returns `(done, refused, not_asked)`: the `(wrong, right)` the round took, and
-        `title_fixes.supersede_each`'s two, for the status to name."""
-        taken = set(process_view.standing(process_view.capture_round()))
+        `title_fixes.supersede_each`'s two, for the status to name.
+
+        A CLOSED round is none, as in `_on_import_offer` (finding 147): `capture_round` hands back
+        the last round as it stands, the method refuses any write into a closed one, and
+        `title_fixes` reads that refusal as «never took it» — done — so the status said «The round
+        now has the new title» about a round nothing changed (MA1). It is asked nothing."""
+        round_ = process_view.capture_round() or {}
+        taken = set() if round_.get("closed") else set(process_view.standing(round_))
         fixes = [(row.title, (titles or {}).get(row.uuid)) for row in rows]
         fixes = [(wrong, right) for wrong, right in fixes
                  if right and wrong != right and wrong in taken]
