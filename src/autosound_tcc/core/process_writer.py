@@ -37,8 +37,9 @@ from autosound_tcc.core import method_binding, method_cli
 # Local file I/O and a JSON rewrite; anything near this is a hang, not slowness.
 DEFAULT_TIMEOUT_S = 20.0
 
-#: The writer, relative to the method's `rew_tool/`.
-_SCRIPT = "state/process.py"
+#: The writer, relative to the method's `rew_tool/`: `method_cli`'s name for it, so the script
+#: whose flags `spawn` checks is the one these writers run (#169, N19).
+_SCRIPT = method_cli.PROCESS_SCRIPT
 
 #: Every command TCC sends, and the first method tag whose `process.py` has it — read from the
 #: skill's history (2026-09-14), never guessed. `2.8.0` is the oldest tag with the file at this

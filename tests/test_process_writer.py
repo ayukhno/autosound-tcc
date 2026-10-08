@@ -363,21 +363,39 @@ def own_copy_is_the_submodule(monkeypatch):
     assert vendor_loader.skill_dir() == vendor_loader._SUBMODULE_DIR
 
 
-def _second_copy(root: Path, marker: Path) -> Path:
+def _method_copy(root: Path, change) -> Path:
     """The vendored method copied to `root/skills/autosound-tuning`, the layout of its own repository,
-    with one change: its `process.py`, run as a CLI, also appends one line to `marker` — the
-    `AUTOSOUND_SKILL_ROOT` it was started with. `vendor/` itself is never touched."""
+    with its `process.py`'s text passed through `change`. `vendor/` itself is never touched."""
     skill = root / "skills" / vendor_loader.SKILL_NAME
     shutil.copytree(vendor_loader._SUBMODULE_DIR, skill,
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     script = skill / "rew_tool" / "state" / "process.py"
-    text = script.read_text(encoding="utf-8")
+    script.write_text(change(script.read_text(encoding="utf-8")), encoding="utf-8")
+    return skill
+
+
+def _second_copy(root: Path, marker: Path) -> Path:
+    """`_method_copy` whose `process.py`, run as a CLI, also appends one line to `marker` — the
+    `AUTOSOUND_SKILL_ROOT` it was started with."""
     guard = 'if __name__ == "__main__":\n'
-    assert text.count(guard) == 1, "the CLI's guard moved: the marker has nowhere to go"
     marked = (f"    with open({str(marker)!r}, 'a', encoding='utf-8') as _marker:\n"
               f"        _marker.write(os.environ.get({method_binding.SKILL_ROOT_ENV!r}, '-') + '\\n')\n")
-    script.write_text(text.replace(guard, guard + marked), encoding="utf-8")
-    return skill
+
+    def mark(text: str) -> str:
+        assert text.count(guard) == 1, "the CLI's guard moved: the marker has nowhere to go"
+        return text.replace(guard, guard + marked)
+
+    return _method_copy(root, mark)
+
+
+def _linked_and_approved(project: Path, skill: Path) -> method_binding.Binding:
+    """`project`'s entry linked to `skill`, and the link approved on this machine: the real
+    `method_binding.approve`, on the settings store each test is given its own of."""
+    _entry(project).parent.mkdir(parents=True)
+    _entry(project).symlink_to(skill, target_is_directory=True)
+    binding = method_binding.approve(method_binding.for_project(project))
+    assert binding.state == "approved", binding.reason
+    return binding
 
 
 def test_a_write_runs_the_copy_the_project_is_bound_to(tmp_path, own_copy_is_the_submodule):
@@ -387,10 +405,7 @@ def test_a_write_runs_the_copy_the_project_is_bound_to(tmp_path, own_copy_is_the
     marker = tmp_path / "second-copy-ran.txt"
     second = _second_copy(tmp_path / "second-method", marker)
     project = tmp_path / "car"
-    _entry(project).parent.mkdir(parents=True)
-    _entry(project).symlink_to(second, target_is_directory=True)
-    binding = method_binding.approve(method_binding.for_project(project))
-    assert binding.state == "approved", binding.reason
+    binding = _linked_and_approved(project, second)
 
     process_writer.enter_phase(project, "-1")
 
@@ -464,3 +479,147 @@ def test_the_copy_with_no_project_is_the_one_a_project_with_no_entry_runs(tmp_pa
     script.parent.mkdir(parents=True)
     script.write_text("", encoding="utf-8")
     assert process_writer.is_available() is True
+
+
+# ---- a flag the bound copy does not know (#169, N19) -------------------------------------------
+# `process.py` parses its flags by hand and takes one it does not know for data: an older copy reads
+# `capture-start 49 … --origin X` as two more expected titles, `skip 2.3 --superseded-by 2.4` as a
+# reason. Nothing comes back as usage text, so `_refuse_if_too_old` cannot see it; the flag is
+# refused before the copy is started instead.
+
+
+def test_a_flag_the_bound_copy_does_not_know_is_refused_before_anything_starts(
+        tmp_path, monkeypatch, own_copy_is_the_submodule):
+    """The issue's: a project bound to an approved copy that predates `--origin` — the vendored
+    method with every `--origin` taken out of its `process.py` — is refused `start_capture(…,
+    origin=…)` with a sentence that names the flag, before the lock and before any child. Started,
+    that copy opens the round with `--origin` and its value as two more expected titles."""
+    older = _method_copy(tmp_path / "older-method", lambda text: text.replace("--origin", ""))
+    project = tmp_path / "car"
+    _linked_and_approved(project, older)
+    started, locked = [], []
+    monkeypatch.setattr(method_cli.child, "run_bounded",
+                        lambda argv, **_kw: started.append(argv) or pytest.fail("a child started"))
+    monkeypatch.setattr(project_lock, "hold",
+                        lambda *a, **_k: locked.append(a) or contextlib.nullcontext())
+
+    with pytest.raises(process_writer.Refused) as refused:
+        process_writer.start_capture(project, "49", ["m-L p1_49 (sw)"], origin="import")
+
+    assert str(refused.value) == ("this project's method does not know --origin; update it, or "
+                                  "re-link the project to TCC's copy")
+    assert (started, locked) == ([], []), "nothing started and no lock taken"
+    assert not (project / "process").exists(), "nothing written either"
+
+
+#: Every flag TCC sends to `process.py`: the 23 the map lists (W-9, #169 N19), and `--json`.
+_FLAGS_TCC_SENDS = {
+    "--project",                         # add_step(situational=True)
+    "--superseded-by",                   # skip_step
+    # record_reviewer, assembled when the call runs: f"--review={review}", f"--mode={mode}"
+    "--review", "--mode",
+    # set_protective and amend_protective, assembled in `_protective_legs`: f"--{kind}"
+    "--hp", "--lp",
+    "--source",                          # set_protective, amend_protective: a source not "user"
+    "--amend", "--reason",               # amend_protective
+    "--pair", "--text", "--route", "--note",  # record_listening_verdict
+    "--ledger-version",                  # record_listening_verdict, listening_verdicts
+    "--track", "--characteristic",       # listening_verdicts
+    # record_decision, assembled when the call runs: f"--invalidates={invalidates}"
+    "--invalidates",
+    "--plan", "--optional", "--start", "--step", "--origin",  # start_capture
+    "--session",                         # check_captures
+    # handoff_json: `handoff --json`, sent from here since #169 N1 — the one the map's 23 left out
+    "--json",
+}
+
+
+def _every_writer_with_every_option() -> list:
+    """`(writer, args, kwargs)` for every function here that runs `process.py`, each optional
+    argument given a value other than its default — so whatever flag a writer can send, it sends."""
+    legs = {"hp": {"f": 100, "type": "LR", "slope": 24},
+            "lp": {"f": 1000, "type": "LR", "slope": 24}}
+    pw = process_writer
+    return [
+        (pw.enter_phase, ("2",), {}),
+        (pw.add_step, ("2.9", "a step this car needed"), {"situational": True}),
+        (pw.start_step, ("2.9",), {}),
+        (pw.finish_step, ("2.9", ["m-L p1_49 (sw)"]), {}),
+        (pw.skip_step, ("2.9",), {"reason": "the car left", "superseded_by": "2.10"}),
+        (pw.block_step, ("2.9", "no REW on this machine"), {}),
+        (pw.record_reviewer, ("gemini", "flash"),
+         {"step": "2.9", "review": "critiques/2.9.md", "mode": "clipboard"}),
+        (pw.set_protective, ("m-L", legs), {"source": "front_end"}),
+        (pw.amend_protective, ("cap-1", "m-L", legs, "filed OFF by mistake"),
+         {"source": "default"}),
+        (pw.record_listening_verdict, ([("t1", "bass", True)],),
+         {"text": "tight", "route": "car", "ledger_version": "v_003", "note": "first pass"}),
+        (pw.listening_verdicts, (),
+         {"track": "t1", "characteristic": "bass", "ledger_version": "v_003"}),
+        (pw.set_target, ("P1", "harman"), {}),
+        (pw.record_decision, ("which slope?", "LR24"), {"step": "2.9", "invalidates": "2.3"}),
+        (pw.record_session, ("claude", "opus"), {"resumed": True}),
+        (pw.close_session, (), {}),
+        (pw.supersede_capture, ("m-L p1_49 (sw)", "m-R p1_49 (sw)"), {}),
+        (pw.handoff_json, (), {}),
+        (pw.start_capture, ("49", ["m-L p1_49 (sw)"]),
+         {"step": "2.9", "origin": "passat-b8-2026:49", "plan": True, "optional": ["Ws_49 (sw)"],
+          "start_method": "rta"}),
+        (pw.capture_knobs, ({"SubRC": "4/4"},), {}),
+        (pw.check_captures, (), {"titles": ["m-L p1_49 (sw)"], "session": True}),
+        (pw.record_capture, ("m-L p1_49 (sw)",), {}),
+        (pw.skip_capture, ("m-R p1_49 (sw)", "the tweeter is out"), {}),
+        (pw.close_capture, (), {"reason": "done"}),
+        (pw.check, (), {}),
+        (pw.plan, (), {"phase": "2"}),
+        (pw.state, (), {}),
+    ]
+
+
+def test_every_flag_tcc_sends_is_pinned_and_the_vendored_copy_knows_each(
+        tmp_path, monkeypatch, own_copy_is_the_submodule):
+    """N19's behaviour pin. Every writer here, called with every optional argument, through the real
+    `spawn` — the flag check included — to the vendored copy, and what reached the child read back.
+    A scan of this module's source cannot do it: five of the flags are assembled when the call runs.
+
+    The flags sent are exactly `_FLAGS_TCC_SENDS`, and the check refused none: the vendored v3.1.1
+    knows every one. A writer added, or a flag, fails here until it is pinned."""
+    import inspect
+    import re
+
+    project = tmp_path / "car"
+    project.mkdir()
+    sent = []
+
+    def run(argv, **_kw):
+        sent.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "{}", "")  # `state` reads JSON back
+
+    monkeypatch.setattr(method_cli.child, "run_bounded", run)
+    calls = _every_writer_with_every_option()
+    writers = {name for name, fn in vars(process_writer).items()
+               if inspect.isfunction(fn) and fn.__module__ == process_writer.__name__
+               and not name.startswith("_")
+               and next(iter(inspect.signature(fn).parameters), "") == "project_dir"}
+    assert sorted(fn.__name__ for fn, _args, _kw in calls) == sorted(writers), "a writer left out"
+
+    for fn, args, kwargs in calls:
+        optional = {name for name, param in inspect.signature(fn).parameters.items()
+                    if param.default is not inspect.Parameter.empty}
+        assert optional <= set(kwargs), f"{fn.__name__}: {sorted(optional - set(kwargs))} not set"
+        fn(project, *args, **kwargs)
+
+    assert len(sent) == len(calls), "every writer reached its child: the check refused none"
+    assert {argv[1] for argv in sent} == {str(process_writer.script_path())}, "the vendored copy"
+    words = {word.split("=", 1)[0] for argv in sent for word in argv[2:]}
+    assert {word for word in words if re.fullmatch(r"--[a-z][a-z0-9-]*", word)} == _FLAGS_TCC_SENDS
+
+
+def test_a_free_text_value_that_starts_with_dashes_is_a_value_not_a_flag(
+        own_copy_is_the_submodule, project):
+    """A word is a flag when what comes before any `=` is `--` and a lowercase name. A reason, a
+    note or a title that happens to start with `--` is a value — not checked, and the method is
+    started and takes it as it was typed."""
+    process_writer.skip_step(project, "2.5", reason="-- not needed")
+
+    assert _skips(project)[-1]["reason"] == "-- not needed"
