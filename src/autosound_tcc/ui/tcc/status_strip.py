@@ -92,8 +92,8 @@ class StatusStrip(QFrame):
         self._timer.timeout.connect(self._expire)
         #: The lines that stand until their ✕, oldest first; the first is the one shown.
         self._standing: list[_Line] = []
-        #: The latest of every other line: shown, or waiting behind a standing one. The clock is
-        #: its own, running either way.
+        #: The latest of every other line: shown, or waiting behind a standing one. Its clock runs
+        #: only while it is shown (the re-review, N2).
         self._line: Optional[_Line] = None
         self._shown: Optional[_Line] = None
         self.linkActivated.connect(self._on_link)
@@ -152,7 +152,8 @@ class StatusStrip(QFrame):
         same `__init__` by the process's own lines, and its memo kept it from being said again.
         Later lines do not replace it: the latest of them waits behind it, counted beside the ✕,
         and comes when it is closed. Several stand in the order they came; the same sentence
-        stands once.
+        stands once. A fact's thirty seconds start when it is shown, not while it waits: one said
+        once — «Not written down: …» — ran out behind the report unseen (the re-review, N2).
         """
         line = _Line(text, level, action, dismissible or level == "warn" or sticky, on_dismiss)
         if sticky:
@@ -164,14 +165,14 @@ class StatusStrip(QFrame):
         else:
             self._timer.stop()
             self._line = line
-            if level != "warn" and action is None:
-                self._timer.start(_INFO_SECONDS * 1000)
         self._show()
 
     def _show(self) -> None:
         """Put the line whose turn it is on screen — the first standing one, else the latest — and
         the count of what waits behind it."""
         line = self._standing[0] if self._standing else self._line
+        if line is not self._line:
+            self._timer.stop()  # waiting behind a standing line, a fact is off its clock (N2)
         behind = len(self._standing) - 1 + (self._line is not None) if self._standing else 0
         self._more.setText(i18n.t("stripMore").format(n=behind) if behind else "")
         self._more.setToolTip(i18n.t("stripMoreTip") if behind else "")
@@ -203,6 +204,8 @@ class StatusStrip(QFrame):
         self._fit_height()
         self._scroll.verticalScrollBar().setValue(0)
         self.setVisible(True)
+        if line is self._line and line.level != "warn" and line.action is None:
+            self._timer.start(_INFO_SECONDS * 1000)  # shown now: its thirty seconds start
 
     def clear(self) -> None:
         """Let go of the latest line, shown or waiting. A standing line stays until its own ✕: what

@@ -174,14 +174,24 @@ def test_sticky_lines_stand_in_the_order_they_came_and_the_same_one_once():
     assert strip.text() == "" and strip.isHidden()
 
 
-def test_a_fact_waiting_behind_a_sticky_line_keeps_its_own_clock():
-    """An event is words on the screen thirty seconds later, waiting or not: its clock runs behind
-    the standing line, and running out lets go of it alone."""
+def test_a_fact_waiting_behind_a_sticky_line_starts_its_clock_when_it_is_shown():
+    """The re-review, N2: the clock ran while the line waited, so a fact said once — «Not written
+    down: …» is said once per fact, and only here — ran out its thirty seconds behind the standing
+    report and was never seen. Its clock starts when it is shown: not while it waits, and in full
+    again when a new standing line covers it and is closed."""
     _app()
     strip = StatusStrip()
     strip.notify("the store could not be read", level="warn", sticky=True)
-    strip.notify("opened a terminal")
+    strip.notify("Not written down: the target curve")
 
-    assert strip.timer_is_running()
+    assert not strip.timer_is_running(), "waiting, it is not on its clock"
+    strip._close.click()
+    assert strip.text() == "Not written down: the target curve" and strip.timer_is_running()
+
+    strip.notify("a second report", level="warn", sticky=True)
+    assert not strip.timer_is_running(), "covered, its clock stops"
+    assert strip.waiting() == ["Not written down: the target curve"]
+    strip._close.click()
+    assert strip.timer_is_running(), "shown again, on its clock again"
     strip._expire()
-    assert strip.text() == "the store could not be read" and strip.waiting() == []
+    assert strip.text() == "" and strip.isHidden()
