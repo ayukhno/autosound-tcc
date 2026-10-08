@@ -138,7 +138,7 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
     """One call, and a non-zero exit is a failure. Every command here works that way except
     `session-close`, whose exit code is an ANSWER — see `close_session`."""
     code, out, err = _spawn(project_dir, args, timeout_s)
-    _refuse_if_too_old(args[0], out, err)
+    _refuse_if_too_old(project_dir, args[0], out, err)
     if code != 0:
         raise ProcessWriterError((err or out).strip() or f"process.py exited {code}")
     return out
@@ -422,7 +422,7 @@ def close_session(project_dir: Path) -> tuple[bool, str]:
     review I1).
     """
     code, out, err = _spawn(project_dir, ["session-close"])
-    _refuse_if_too_old("session-close", out, err)
+    _refuse_if_too_old(project_dir, "session-close", out, err)
     if code == 0:
         return True, out or err
     said = refusal(code, err)
@@ -486,7 +486,7 @@ def supersede_capture(project_dir: Path, wrong: str, right: str) -> tuple[int, s
     """
     args = ["capture-supersede", str(wrong), str(right), SUPERSEDE_REASON]
     code, out, err = _spawn(project_dir, args, timeout_s=30.0)
-    _refuse_if_too_old("capture-supersede", out, err)
+    _refuse_if_too_old(project_dir, "capture-supersede", out, err)
     return code, out, err
 
 
@@ -500,11 +500,11 @@ def handoff_json(project_dir: Path) -> tuple[int, str, str]:
     project that has none.
     """
     code, out, err = _spawn(project_dir, ["handoff", "--json"], timeout_s=30.0, lock=False)
-    _refuse_if_too_old("handoff", out, err)
+    _refuse_if_too_old(project_dir, "handoff", out, err)
     return code, out, err
 
 
-def _refuse_if_too_old(command: str, out: str, err: str) -> None:
+def _refuse_if_too_old(project_dir: Path, command: str, out: str, err: str) -> None:
     """Turn "process.py printed its usage" into a sentence about the machine.
 
     An unknown command makes `process.py` dump its usage text, and that text travels back to the
@@ -517,17 +517,24 @@ def _refuse_if_too_old(command: str, out: str, err: str) -> None:
     knowable (`install_report.skill_version`), but the ANSWER is not: a method can be new enough
     by number and still be a checkout without that command, and the usage dump is the thing that
     actually happened.
+
+    The remedy is the copy's the project runs (M28): TCC's own update row updates TCC's own copy
+    alone, so a copy TCC finds installed, or one approved on this machine, is named, with its own.
     """
     said = f"{out}\n{err}"
     if "usage: process.py" not in said:
         return
     since = LANDED_IN.get(command)
     has_it = f" — the method has it by v{since}" if since else ""
-    raise TooOld(
-        f"this project's method does not have `{command}`{has_it}. "
-        "Update the method (TCC's own update row offers it), or do this step by hand; nothing "
-        "here is broken on TCC's side."
-    )
+    binding = method_binding.for_project(project_dir)
+    if binding.state in (method_binding.KNOWN, method_binding.APPROVED):
+        remedy = (f"This project runs the copy at {binding.skill_dir}, which TCC's update row does "
+                  f"not update: update that copy, or re-link {binding.entry} to TCC's copy, or do "
+                  f"this step by hand")
+    else:
+        remedy = "Update the method (TCC's own update row offers it), or do this step by hand"
+    raise TooOld(f"this project's method does not have `{command}`{has_it}. {remedy}; nothing here "
+                 f"is broken on TCC's side.")
 
 
 def start_capture(

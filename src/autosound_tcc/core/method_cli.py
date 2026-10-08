@@ -191,6 +191,18 @@ def _refuse_a_flag_it_does_not_know(script: Path, args: Sequence[str]) -> None:
             raise UnknownFlag(flag)
 
 
+def _missing(project_dir: Path, script: Path) -> str:
+    """What `ScriptMissing` says: the script, and the remedy for the copy that lacks it (M28). TCC's
+    own is put back by `git submodule update` in a checkout; a copy TCC finds installed, or one
+    approved on this machine, is mended where it is — updated, or the project re-linked to TCC's
+    copy — since nothing in TCC updates it. Asked of the binding again, on this path alone."""
+    binding = method_binding.for_project(project_dir)
+    if binding.state in (method_binding.KNOWN, method_binding.APPROVED):
+        return (f"{script.name} not found at {script}, in the copy of the method this project runs "
+                f"({binding.skill_dir}); update that copy, or re-link {binding.entry} to TCC's copy.")
+    return f"{script.name} not found at {script}. Run: git submodule update --init --recursive"
+
+
 def tail(text, lines: int = 8) -> str:
     """The last `lines` lines of what a child printed, for a log line: where a traceback ends in
     the exception, and where a stuck child last said something. Bytes are decoded as UTF-8."""
@@ -240,9 +252,7 @@ def spawn(
     args = [str(arg) for arg in args]
     script, env = resolve(project_dir, script_rel, args)
     if not script.is_file():
-        raise ScriptMissing(
-            f"{script.name} not found at {script}. Run: git submodule update --init --recursive"
-        )
+        raise ScriptMissing(_missing(project_dir, script))
     # `process.py`'s alone (#169, N19): its parser takes a flag it does not know for data.
     if script_rel == PROCESS_SCRIPT:
         try:

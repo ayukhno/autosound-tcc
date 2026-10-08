@@ -272,6 +272,28 @@ def test_every_command_on_a_method_too_old_for_it_says_so(project, monkeypatch, 
     assert "usage: process.py" not in said, "the dump itself is what misled the model"
 
 
+def test_a_bound_copy_too_old_for_a_command_is_told_to_update_that_copy(tmp_path, monkeypatch):
+    """M28: «Update the method (TCC's own update row offers it)» is the remedy for TCC's own copy.
+    For a copy approved on this machine that row updates nothing of it: the sentence names the
+    copy the project runs, and its two remedies."""
+    other = copy_of_the_method(tmp_path / "other")
+    car = tmp_path / "car"
+    _linked_and_approved(car, other)
+
+    def _usage(project_dir, args, timeout_s=None, **_kw):
+        return 2, "usage: process.py <process-dir> <command> [args]\n  show\n  plan [phase]", ""
+
+    monkeypatch.setattr(process_writer, "_spawn", _usage)
+
+    with pytest.raises(process_writer.TooOld) as stopped:
+        process_writer.enter_phase(car, "0")
+
+    said = str(stopped.value)
+    assert "`enter-phase`" in said and "v2.8.0" in said, said
+    assert str(other) in said and str(_entry(car)) in said and "re-link" in said, said
+    assert "update row offers it" not in said, said
+
+
 def test_every_command_tcc_sends_has_the_method_version_that_has_it():
     """A command added to `process_writer` without its version would answer an old method with the
     usage dump again. The versions are the first method tags whose `process.py` carries the command,

@@ -26,7 +26,8 @@ from autosound_tcc.core import (
     method_cli, process_writer, profile_writer, project_lock, project_repo, vendor_loader,
 )
 
-from tests._method_copies import entry as _entry, linked_and_approved as _linked_and_approved
+from tests._method_copies import copy_of_the_method, entry as _entry
+from tests._method_copies import linked_and_approved as _linked_and_approved
 
 
 @pytest.fixture
@@ -486,3 +487,24 @@ def test_spawn_runs_what_resolve_answers(tmp_path, monkeypatch):
 
     assert asked == [(car, "contract.py", ["check", str(car)])]
     assert started == [([str(script), "check", str(car)], {"FROM": "resolve"})]
+
+
+# ---- the fix-it words, for the copy the project runs (M28) --------------------------------------
+
+
+def test_a_script_missing_from_a_bound_copy_names_that_copy_and_its_remedy(tmp_path):
+    """M28: `ScriptMissing` said «Run: git submodule update --init --recursive» — TCC's own checkout's
+    remedy — for whichever copy the project runs. For a copy approved on this machine, a submodule
+    update in TCC's tree mends nothing: the sentence names that copy, and its remedies."""
+    other = copy_of_the_method(tmp_path / "other")
+    (other / "rew_tool" / "state" / "process.py").unlink()  # a copy with files missing
+    car = tmp_path / "car"
+    _linked_and_approved(car, other)
+
+    with pytest.raises(method_cli.ScriptMissing) as missing:
+        process_writer.enter_phase(car, "-1")
+
+    said = str(missing.value)
+    assert str(other) in said and "re-link" in said and str(_entry(car)) in said, said
+    assert "submodule" not in said, said
+
