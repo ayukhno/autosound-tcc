@@ -1,6 +1,6 @@
-"""The one place TCC starts a script of the method's `rew_tool/` (#169, #171): the project's lock, a
-child that comes back, and the environment the method runs in — and the one place that says which
-script that is.
+"""The one place that says which script of the method's `rew_tool/` runs, and in what environment
+(#169, #171) — and where all but two of them are started: as a child that comes back, under the
+project's lock when the caller asks for it.
 
 `process_writer` drove `process.py` through a path like this one, but not every caller took it:
 `title_fixes.supersede` and `handoff.check` started `process.py` with a bare `subprocess.run` of
@@ -18,11 +18,13 @@ keep a `Popen` of their own. Outside `rew_tool/`, two scripts run TCC's own copy
 started where they are: the reviewer's `scripts/autosound_ai.py` (`critic`, `reviewer_key`), and an
 update's `scripts/upkeep.py`, taken from the tag being applied (`updates`).
 
-A write takes the lock (`project_lock.hold`) and, past the wait, answers `Busy` having started
-nothing. A read takes none (`lock=False`): it has nothing to guard, and a read on the GUI thread
-waiting behind a 120 s `capture-check` — or the lock's own `process/`, made in a project that has
-none — would be the bug. `timeout_s` bounds the child alone, under `child.run_bounded`: the child's
-whole tree is killed at the timeout, and the wait for its pipes after that is bounded too.
+A write to the process journal takes the lock (`project_lock.hold`) and, past the wait, answers
+`Busy` having started nothing. A read takes none (`lock=False`): it has nothing to guard, and a read
+on the GUI thread waiting behind a 120 s `capture-check` — or the lock's own `process/`, made in a
+project that has none — would be the bug. Nor does a write the lock does not guard: the profile
+draft, `slots.json`, a folder being made a repository. `timeout_s` bounds the child alone, under
+`child.run_bounded`: the child's whole tree is killed at the timeout, and the wait for its pipes
+after that is bounded too.
 
 Which copy of the method runs, and in what environment, is `resolve`'s alone: the copy the
 project is bound to (`method_binding`), or `Refused` with the binding's sentence and nothing

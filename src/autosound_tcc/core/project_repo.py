@@ -44,8 +44,9 @@ def script_path() -> Path:
 
 
 def available() -> bool:
-    """Whether TCC's own copy has the command. A project bound to another copy is answered for by
-    that copy when the command runs: too old there, or refused."""
+    """Whether TCC's own copy has the command, for a caller with no project. A project is answered
+    for by the copy it is bound to, when a command runs on it: `init`'s `too_old`, and for the
+    backup's second step `backup_status` — too old there, or refused, with nothing run."""
     return script_path().is_file()
 
 
@@ -76,19 +77,36 @@ def init(project: Path) -> RepoResult:
     return RepoResult(code == 0, out or err)
 
 
-def status(project: Path) -> Optional[dict]:
-    """`{repo, remote, gh, init, offer}` as the method reports it, or None when it cannot — a
-    method older than the command, a copy TCC will not run, a run that did not answer."""
+def backup_status(project: Path) -> dict | RepoResult:
+    """What the backup's second step reads: `{repo, remote, gh, init, offer}` as the method reports
+    it — or, when there is none, the failed `RepoResult` that says why, for the window to say as it
+    says `init`'s. `too_old` for a copy without `project_repo.py`; the binding's sentence for a copy
+    TCC will not run (#169); the method's own words for a run that failed or did not answer with a
+    status. So «gh is not signed in» follows only from the method saying so: a failure read as an
+    empty status said it."""
     try:
-        code, out, _err = _run(project, ["status", str(project), "--json"])
-    except method_cli.ProcessWriterError:
-        return None
+        code, out, err = _run(project, ["status", str(project), "--json"])
+    except method_cli.ScriptMissing:
+        return RepoResult(False, "", too_old=True)
+    except method_cli.ProcessWriterError as exc:
+        return RepoResult(False, str(exc))
     if code != 0:
-        return None
+        return RepoResult(False, err or out or f"{_SCRIPT} status exited {code}")
     try:
         answer = json.loads(out)
     except ValueError:
-        return None
+        answer = None
+    if not isinstance(answer, dict):
+        return RepoResult(False, f"{_SCRIPT} status did not answer with a status"
+                                 + (f": {out[:200]}" if out else ""))
+    return answer
+
+
+def status(project: Path) -> Optional[dict]:
+    """`{repo, remote, gh, init, offer}` as the method reports it, or None when it cannot — a
+    method older than the command, a copy TCC will not run, a run that did not answer;
+    `backup_status` says which."""
+    answer = backup_status(project)
     return answer if isinstance(answer, dict) else None
 
 

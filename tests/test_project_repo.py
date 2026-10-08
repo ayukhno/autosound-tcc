@@ -49,14 +49,42 @@ def test_init_runs_the_methods_command_on_the_project(tmp_path, monkeypatch):
     assert result.ok and "init" in result.said and "car" in result.said
 
 
-def test_a_copy_tcc_will_not_run_has_no_status_and_starts_nothing(tmp_path, monkeypatch):
-    """`status` has one answer for «the method cannot say», None, and a project whose copy TCC will
-    not run is one (#169): nothing is started, and `method_cli` says the refusal in the log."""
+def test_a_copy_tcc_will_not_run_answers_the_backup_with_its_sentence(tmp_path, monkeypatch):
+    """The backup's second step reads `backup_status`, and for a project whose copy TCC will not run
+    (#169) that is a failed answer carrying the binding's sentence — not a status with no `gh` in
+    it, which the window read as «gh is not signed in». `status` keeps its one «cannot say», None.
+    Nothing is started either way."""
     project = tmp_path / "car"
     (project / ".claude" / "skills" / vendor_loader.SKILL_NAME).mkdir(parents=True)
     _nothing_starts(monkeypatch)
+    reason = method_binding.for_project(project).reason
 
+    assert project_repo.backup_status(project) == project_repo.RepoResult(False, reason)
     assert project_repo.status(project) is None
+
+
+def test_an_approved_copy_without_the_command_is_too_old_for_the_backup(tmp_path, monkeypatch):
+    """A copy the project is bound to and TCC trusts, older than `project_repo.py` — the vendored
+    method with that one file taken out, approved on this machine — is «update the method» for both
+    steps of the backup, as TCC's own copy without it always was. Nothing is started."""
+    import shutil
+
+    if not vendor_loader._looks_like_the_skill(vendor_loader._SUBMODULE_DIR):
+        pytest.skip("skill submodule not checked out")
+    older = tmp_path / "older-method" / "skills" / vendor_loader.SKILL_NAME
+    shutil.copytree(vendor_loader._SUBMODULE_DIR, older,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    (older / "rew_tool" / "project_repo.py").unlink()
+    project = tmp_path / "car"
+    entry = project / ".claude" / "skills" / vendor_loader.SKILL_NAME
+    entry.parent.mkdir(parents=True)
+    entry.symlink_to(older, target_is_directory=True)
+    binding = method_binding.approve(method_binding.for_project(project))
+    assert binding.state == method_binding.APPROVED, binding.reason
+    _nothing_starts(monkeypatch)
+
+    assert project_repo.backup_status(project) == project_repo.RepoResult(False, "", too_old=True)
+    assert project_repo.init(project).too_old
 
 
 def test_only_a_gh_line_is_ever_run(tmp_path):
@@ -151,8 +179,8 @@ def test_the_second_step_does_not_say_there_is_a_next(tmp_path, monkeypatch):
     window = _window(tmp_path, monkeypatch)
     window._set_project_params(None)
     offer = "gh repo create car --private --source . --push"
-    monkeypatch.setattr(project_repo, "available", lambda: True)
-    monkeypatch.setattr(project_repo, "status", lambda project: {"gh": "signed-in", "offer": offer})
+    monkeypatch.setattr(project_repo, "backup_status",
+                        lambda project: {"gh": "signed-in", "offer": offer})
 
     def made(o, project):
         subprocess.run(["git", "-C", str(project), "remote", "add", "origin",
@@ -167,12 +195,20 @@ def test_the_second_step_does_not_say_there_is_a_next(tmp_path, monkeypatch):
 
 
 def test_the_backup_runs_only_after_yes(tmp_path, monkeypatch):
+    """...and not at all for a project whose copy TCC will not run (#169): the press says the
+    binding's sentence — it read «gh is not signed in» — and asks nothing."""
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     window = _window(tmp_path, monkeypatch)
     window._set_project_params(None)
+    entry = tmp_path / ".claude" / "skills" / vendor_loader.SKILL_NAME
+    entry.mkdir(parents=True)
+    _button(window, "Back up to GitHub (1/2)").click()
+    assert window._status_strip.text() == (
+        f"Did not work: {method_binding.for_project(tmp_path).reason}")
+    entry.rmdir()
     offer = f'gh repo create car --private --source "{tmp_path}" --push'
-    monkeypatch.setattr(project_repo, "available", lambda: True)
-    monkeypatch.setattr(project_repo, "status", lambda project: {"gh": "signed-in", "offer": offer})
+    monkeypatch.setattr(project_repo, "backup_status",
+                        lambda project: {"gh": "signed-in", "offer": offer})
     ran = []
     monkeypatch.setattr(project_repo, "run_offer", lambda o, p: ran.append(o) or
                         project_repo.RepoResult(True, "created"))

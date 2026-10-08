@@ -3000,10 +3000,10 @@ class MainWindow(QMainWindow):
         project = config.chosen_project_dir()
         if project is None:
             return
-        if not project_repo.available():
-            self._after_git(False, "", too_old=True)
+        state = project_repo.backup_status(project)
+        if isinstance(state, project_repo.RepoResult):  # too old, refused (#169), or no answer
+            self._after_git(False, state.said, state.too_old)
             return
-        state = project_repo.status(project) or {}
         offer = state.get("offer")
         if not offer:
             key = "gitNoGh" if state.get("gh") == "absent" else "gitGhSignedOut"

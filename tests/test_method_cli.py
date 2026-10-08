@@ -1,5 +1,5 @@
-"""`core.method_cli` — the one place a method script is started (#169, #171), and the one resolver
-every launcher asks which script that is.
+"""`core.method_cli` — the one place that says which script of the method runs and in what
+environment (#169, #171), and where all but two launchers start theirs.
 
 What is tested here is what its callers no longer do for themselves: a child that runs out of time
 is cut and said to have timed out — never «busy», which promises that nothing was written — and a
