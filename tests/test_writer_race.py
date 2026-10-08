@@ -47,8 +47,14 @@ TCC_LANDS_S = 5.0
 _TCC_RETURNS_S = method_cli.LOCK_WAIT_S + process_writer.DEFAULT_TIMEOUT_S + 10.0
 
 #: The bare CLI as a person or another agent runs it — `python process.py <process-dir> add-step
-#: <id> <name>`, from the copy TCC runs — held at the one point that decides the race: its first
-#: `Process.load` has read the state, says «loaded», and waits for «go» before handing it back.
+#: <id> <name>`, from the copy TCC runs — held at the one point that decides the race: the load
+#: whose state its write saves has read the state, says «loaded», and waits for «go» before
+#: handing it back. That is the first `Process.load` inside `Process.add_step`, which appends the
+#: step to what it read and writes that back — not the run's first load: from v3.1.2 `_main` reads
+#: the state strictly once before any verb runs (#136's read rule) and keeps nothing of it. Held
+#: there, TCC's write lands before the writer's own read, which then carries TCC's step into the
+#: save, and the race is not run at all (a strict XPASS). So `add_step` arms the hold, and `load`
+#: takes whatever the copy passes it (`strict=True` from v3.1.2; v3.1.1 passes nothing).
 #: Imported by path, because `runpy` leaves no moment between the module's definitions and its
 #: `__main__` guard to wrap `load` in; the guard's own lines are repeated at the end instead. A
 #: «go» that never comes ends it with nothing written, so a broken harness cannot hang a run.
@@ -60,11 +66,12 @@ spec = importlib.util.spec_from_file_location("bare_process", script)
 process = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(process)
 load = process.Process.load
+add_step = process.Process.add_step
 
 
-def load_then_wait(self):
-    state = load(self)
-    process.Process.load = load  # only the first load is held
+def load_then_wait(self, *args, **kwargs):
+    state = load(self, *args, **kwargs)
+    process.Process.load = load  # only the writer's own read is held
     pathlib.Path(loaded).touch()
     deadline = time.monotonic() + 30
     while not os.path.exists(go):
@@ -74,7 +81,12 @@ def load_then_wait(self):
     return state
 
 
-process.Process.load = load_then_wait
+def add_step_holding_its_read(self, *args, **kwargs):
+    process.Process.load = load_then_wait  # armed here: a load before the writer's passes
+    return add_step(self, *args, **kwargs)
+
+
+process.Process.add_step = add_step_holding_its_read
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(script))))
 import console
 console.install()
