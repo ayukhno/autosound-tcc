@@ -335,7 +335,7 @@ class _CheckRow(QWidget):
         for line in (check.detail or "").splitlines():
             if line.strip():
                 layout.addWidget(_note(line))
-        self._failed: Optional[QLabel] = None
+        self._failed: list[QLabel] = []
 
     def _run(self, action: self_check.Action) -> None:
         for button in self._buttons:
@@ -350,11 +350,17 @@ class _CheckRow(QWidget):
             self.fixed.emit(message)
 
     def _say_failed(self, why: str) -> None:
-        if self._failed is None:
-            self._failed = _note("")
-            self._failed.setProperty("class", "kv-warn")
-            self.layout().addWidget(self._failed)
-        self._failed.setText(i18n.t("selfActionFailed").format(why=why))
+        """The failure under the row, after the ones before it — appended, not in their place
+        (M65). A re-link that moved the entry and could make no link says where the entry went;
+        pressed again it reads the project as `same`, moves nothing and fails with no word of the
+        entry, and that sentence used to replace the only one saying where it is. One said already
+        is not said again. The buttons come back: the next press may still mend it."""
+        text = i18n.t("selfActionFailed").format(why=why)
+        if text not in (label.text() for label in self._failed):
+            label = _note(text)
+            label.setProperty("class", "kv-warn")
+            self.layout().addWidget(label)
+            self._failed.append(label)
         for button in self._buttons:
             button.setEnabled(True)
 

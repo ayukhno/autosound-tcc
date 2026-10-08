@@ -2907,6 +2907,32 @@ def test_a_fix_that_fails_says_why_on_its_row_and_the_row_stays(project, other_c
     assert (asked, dialog._verdict.text()) == ([], verdict), "no receipt, no re-check"
 
 
+def test_a_second_re_link_press_keeps_the_note_saying_where_the_old_entry_went(
+        project, other_copy, monkeypatch):
+    """M65: a re-link that moved the entry aside and could then make no link says where the entry
+    went, and gives its buttons back. A second press reads the project as `same` — no entry now —
+    moves nothing, fails again and says only that no link could be made; that sentence replaced
+    the first, and the one line saying where the project's entry went left the screen. Each
+    failure is kept under the row now, appended, and one said already is not said again."""
+    linked(project, other_copy)
+    dialog, _asked = _as_the_window_checks(project)
+    [row] = _method_rows(dialog)
+    monkeypatch.setattr(vendor_loader, "link_skill_into", lambda project_dir: None)
+    raised: list = []
+    monkeypatch.setattr(method_binding, "relink", _recording(method_binding.relink, raised))
+
+    for _ in range(3):
+        _press(row, i18n.t("selfMethodRelink"))
+
+    first, second, third = raised
+    assert str(project / ".tcc" / "method-aside") in first, first
+    assert second == third and second != first
+    said = _said(row)
+    assert i18n.t("selfActionFailed").format(why=first) in said, "where the old entry went stays"
+    assert said.count(i18n.t("selfActionFailed").format(why=second)) == 1, said
+    assert all(button.isEnabled() for button in row.findChildren(QPushButton))
+
+
 def test_a_receipt_stays_through_its_reports_redraws_until_a_newer_report_or_a_re_check(
         tmp_path, monkeypatch):
     """Fix round 1 of #169's row, I1. The receipt was said once and dropped, and the window draws
