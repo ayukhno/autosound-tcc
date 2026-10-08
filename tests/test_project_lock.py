@@ -192,7 +192,7 @@ def test_a_project_reached_through_a_link_waits_on_the_same_thread_lock(tmp_path
     alias.symlink_to(tmp_path / "real", target_is_directory=True)
 
     with _held_by_another_thread(project_lock._thread_lock(real)):
-        assert _waits_on_the_thread_lock(alias / "car"), "the linked spelling took a lock of its own"
+        assert _waits_on_the_thread_lock(alias / "car"), "the link took a lock of its own"
 
 
 @pytest.mark.xfail(sys.platform == "darwin", strict=True, raises=AssertionError,

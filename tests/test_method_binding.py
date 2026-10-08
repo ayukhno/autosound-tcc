@@ -679,7 +679,8 @@ def test_approving_stores_the_copys_realpath_and_binds_it(project, tmp_path, oth
 
 def _on_disk(folder: Path) -> dict[str, tuple]:
     """Every entry under `folder` as it lies on disk — a file by its bytes, a link by what it says,
-    a folder as one — and no link followed: the project's entry is one link, not the copy it names."""
+    a folder as one — and no link followed: the project's entry is one link, not the copy it
+    names."""
     found: dict[str, tuple] = {}
     for root, folders, files in os.walk(folder):
         for name in folders + files:
@@ -701,7 +702,8 @@ def test_an_approval_is_this_machines_and_never_travels_with_the_project(project
     link — and the same project read where the settings are empty, as on another machine, is refused
     again and approvable again: a project from a backup, a customer or a clone cannot vouch for a
     copy beside it. Nothing failed before if `approve` began to write into the project, or the
-    binding to read an approval there — the «remember it per project» a refactor reaches for first."""
+    binding to read an approval there — the «remember it per project» a refactor reaches for
+    first."""
     from PySide6.QtCore import QSettings
 
     _link(_entry(project), other_copy)  # a 3.x copy outside the project that TCC does not know

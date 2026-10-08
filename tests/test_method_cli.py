@@ -468,10 +468,10 @@ def test_spawn_runs_what_resolve_answers(tmp_path, monkeypatch):
 
 
 # ---- the one door, as a rule (#169) -------------------------------------------------------------
-# The launchers above are pinned one by one, and `LAUNCHERS` knows only today's six. A seventh — a new
-# writer, or a revert of one of these — that put TCC's own script in an argv would write with TCC's
-# copy while the session runs the project's: the split #169 closed. So the rule is read off the
-# source, the way `test_model_choices.py` reads where a model id may be written.
+# The launchers above are pinned one by one, and `LAUNCHERS` knows only today's six. A seventh — a
+# new writer, or a revert of one of these — that put TCC's own script in an argv would write with
+# TCC's copy while the session runs the project's: the split #169 closed. So the rule is read off
+# the source, the way `test_model_choices.py` reads where a model id may be written.
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
 
@@ -609,7 +609,8 @@ class _Scan:
                     scopes.append((node, function))
             self.aliases[rel], self.popen_classes[rel], self.functions[rel] = \
                 aliases, classes, functions
-            self.scopes[rel] = [(scope, function, *self._sorted(scope)) for scope, function in scopes]
+            self.scopes[rel] = [(scope, function, *self._sorted(scope))
+                                for scope, function in scopes]
         for _ in range(50):
             self.starts: dict[str, list[tuple[int, frozenset]]] = {}
             self.grew = False
@@ -625,7 +626,8 @@ class _Scan:
         binds = [node for node in nodes if isinstance(node, _BINDS) or (
             isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and node.func.attr in ("append", "extend", "insert"))]
-        answers = [node for node in nodes if isinstance(node, ast.Return) and node.value is not None]
+        answers = [node for node in nodes
+                   if isinstance(node, ast.Return) and node.value is not None]
         calls = [node for node in nodes if isinstance(node, ast.Call)]
         return binds, answers, calls
 
@@ -689,7 +691,8 @@ class _Scan:
         if isinstance(call.func, ast.Name):
             return self._module_of(rel, name) == ("subprocess", name)
         owner = getattr(call.func, "value", None)
-        return isinstance(owner, ast.Name) and self._module_of(rel, owner.id) == ("subprocess", None)
+        return (isinstance(owner, ast.Name)
+                and self._module_of(rel, owner.id) == ("subprocess", None))
 
     def _read_module(self, rel: str) -> None:
         top = None
