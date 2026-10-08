@@ -16,7 +16,8 @@ import threading
 import time
 from pathlib import Path
 
-from autosound_tcc.core import app_log, availability, child, config, macos_identity, windows_identity
+from autosound_tcc.core import (app_log, availability, child, config, macos_identity, updates,
+                                windows_identity)
 
 #: What a person sees this called: the Dock, the menu bar, window titles. Not the package name —
 #: `autosound-tcc` is what you type, "Autosound TCC" is what it is.
@@ -40,14 +41,18 @@ APP_ICO = APP_ICON.with_suffix(".ico")
 #: `uv tool install 'autosound-tcc[gui]'` fails with "no such package" — a message that sends its
 #: reader looking for a typo in their own command (caught by running it, 2026-08-12). Whatever is
 #: printed here has to be a line somebody can paste.
-_NO_GUI = """\
-autosound-tcc: the graphical window is not installed.
-
-    uv tool install --upgrade \
-      'autosound-tcc[gui] @ git+https://github.com/ayukhno/autosound-tcc'
-
-(The CLI half — `tuning-session`, `dsp-profile-interview` — works without it.)
-Missing: {error}"""
+#: And the line is the installer's own command, not one of this file's (tcc#174): the literal that
+#: stood here asked for `[gui]` alone and named no `--python 3.12`, where the install is
+#: `[gui,claude]` on 3.12. This text is a `str.format` template whose one placeholder is `{error}`,
+#: so a brace in the command is doubled on the way in rather than read as a second placeholder.
+_NO_GUI = (
+    "autosound-tcc: the graphical window is not installed.\n"
+    "\n"
+    "    " + updates.tcc_install_command().replace("{", "{{").replace("}", "}}") + "\n"
+    "\n"
+    "(The CLI half — `tuning-session`, `dsp-profile-interview` — works without it.)\n"
+    "Missing: {error}"
+)
 
 
 def _make_splash(QtCore, QtGui, QtWidgets):

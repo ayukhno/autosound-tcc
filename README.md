@@ -183,7 +183,7 @@ Install the app. Name the Python version explicitly: without it, `uv` may pick o
 needs, and the error message will look as if the package is broken.
 
 ```sh
-uv tool install --python 3.12 'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc'
+uv tool install --python 3.12 'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc@v1.1.2'
 ```
 
 Install Claude Code, if you do not have it:

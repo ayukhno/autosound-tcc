@@ -34,7 +34,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from autosound_tcc.core import app_log, child
+from autosound_tcc.core import app_log, child, updates
 
 # Every spawn here goes through `child.quiet()`, like the other twelve modules that spawn. It was
 # the one exception (tcc#14) and got away with it only because `app.py` installs a process-wide
@@ -143,6 +143,26 @@ def _plist(display_name: str, icon_name: str) -> str:
 """
 
 
+def _applescript_string(text: str) -> str:
+    """`text` as an AppleScript string literal, where a double quote ends it and a backslash
+    escapes — so both are escaped."""
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _not_installed_alert() -> str:
+    """The launcher's line for a bundle with nothing to start: an alert that says what to type.
+
+    What to type is the installer's own command (tcc#174) — the literal that stood here named no
+    git URL and no `--python 3.12`, so it could not have worked. That command carries double
+    quotes of its own, so AppleScript's string is escaped for them, and the whole script goes to
+    `osascript -e` as one shell word.
+    """
+    title = _applescript_string("Autosound TCC is not installed")
+    message = _applescript_string(
+        "Run the installer again, or: " + updates.tcc_install_command())
+    return "/usr/bin/osascript -e " + shlex.quote(f"display alert {title} message {message}")
+
+
 def _launcher_script(launcher: Path) -> str:
     """The tiny shell script inside the bundle.
 
@@ -156,8 +176,7 @@ def _launcher_script(launcher: Path) -> str:
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 BIN="$(command -v autosound-tcc || echo {shlex.quote(str(launcher))})"
 if [ ! -x "$BIN" ]; then
-  /usr/bin/osascript -e 'display alert "Autosound TCC is not installed" \
-message "Run the installer again, or: uv tool install autosound-tcc[gui,claude]"'
+  {_not_installed_alert()}
   exit 1
 fi
 # No --project-dir: TCC asks which project to open, and remembers the answer. A bundle cannot know

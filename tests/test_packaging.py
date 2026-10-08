@@ -11,6 +11,8 @@ Decision and reasoning: `docs/ARCHITECTURE-NOTES.md` §3 (2026-08-12).
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -135,12 +137,66 @@ def test_asking_for_the_window_without_it_prints_what_to_type():
     )
 
     assert proc.returncode == 2, "a refusal, not a crash and not a success"
-    assert "uv tool install" in proc.stderr and "[gui]" in proc.stderr
+    assert "uv tool install" in proc.stderr and "[gui,claude]" in proc.stderr
     assert "Traceback" not in proc.stderr
     # A command that fails with "no such package" sends its reader hunting for a typo of their
     # own. `autosound-tcc` is not on PyPI, so the line printed here has to carry the git URL —
     # caught by actually running it (2026-08-12).
     assert "git+https://" in proc.stderr, "the printed command must be one that works"
+
+
+def _hint_no_window(monkeypatch) -> str:
+    from autosound_tcc import app
+
+    return app._NO_GUI.format(error=ImportError("No module named 'PySide6'"))
+
+
+def _hint_no_claude(monkeypatch) -> str:
+    from autosound_tcc.core import claude_sdk
+
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)  # what an install without it has
+    with pytest.raises(claude_sdk.ClaudeSdkMissing) as refused:
+        claude_sdk.bind(["query"], {})
+    return str(refused.value)
+
+
+def _hint_bundle_with_nothing_installed(monkeypatch) -> str:
+    """What the macOS alert SAYS: the launcher's `osascript -e` argument, read back through the
+    shell's quoting and then AppleScript's escapes."""
+    from autosound_tcc.core import desktop_entry
+
+    script = desktop_entry._launcher_script(Path("/opt/bin/autosound-tcc"))
+    line = next(line for line in script.splitlines() if "osascript" in line)
+    return re.sub(r"\\(.)", r"\1", shlex.split(line)[-1])
+
+
+def _hint_no_scipy(monkeypatch) -> str:
+    from autosound_tcc.core import protective
+
+    monkeypatch.setattr(protective, "_module", lambda: object())  # the method's half is there
+    monkeypatch.setitem(sys.modules, "scipy", None)
+    return protective.reason()
+
+
+@pytest.mark.parametrize(
+    "hint",
+    [_hint_no_window, _hint_no_claude, _hint_bundle_with_nothing_installed, _hint_no_scipy],
+    ids=["no-window", "no-claude-sdk", "macos-bundle-nothing-installed", "no-scipy"])
+def test_every_install_hint_is_the_install_command(hint, monkeypatch):
+    """tcc#174: four places told a person what to type, each a literal of its own, and none was
+    the command the installer runs. The window and scipy ones asked for `[gui]` alone and the
+    Claude one for `[claude]` alone, where the install is `[gui,claude]`; none named
+    `--python 3.12` (`updates.TCC_INSTALL_COMMAND` says what went wrong without it); and the
+    bundle's alert had no git URL either, which for a package that is not on PyPI is "no such
+    package"."""
+    from autosound_tcc.core import updates
+
+    said = hint(monkeypatch)
+
+    assert "--python 3.12" in said, said
+    assert "git+https://" in said, said
+    assert "[gui,claude]" in said, said
+    assert updates.tcc_install_command() in said, said
 
 
 def test_the_two_sizes_are_declared_the_way_the_split_assumes():
@@ -436,7 +492,7 @@ def test_asking_for_claude_without_the_extra_names_the_command():
         "    print(exc)"
     )
 
-    assert "[claude]" in proc.stdout and "git+https://" in proc.stdout, proc.stderr[-2000:]
+    assert "[gui,claude]" in proc.stdout and "git+https://" in proc.stdout, proc.stderr[-2000:]
     assert "omp" in proc.stdout, "and it says the other models need nothing installed"
 
 

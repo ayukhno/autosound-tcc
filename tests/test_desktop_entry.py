@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import os
 import plistlib
+import re
+import shlex
 import stat
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from autosound_tcc.core import desktop_entry
+from autosound_tcc.core import desktop_entry, updates
 from tests import _hung_child
 
 
@@ -88,6 +90,26 @@ def test_a_launcher_path_with_a_space_stays_one_word(tmp_path):
     body = (bundle / "Contents" / "MacOS" / "autosound-tcc").read_text()
 
     assert "'/Users/o'\"'\"'brien/My Apps/autosound-tcc'" in body
+
+
+def test_the_not_installed_alert_says_the_install_command_through_both_quotings(tmp_path):
+    """tcc#174: the alert is AppleScript inside the shell's single quotes, and the install command
+    carries double quotes of its own. Put in bare, its first quote would end AppleScript's string
+    in the middle of the command, and the alert would not compile at all.
+
+    Read back the way the two readers read it: the shell's words first, then AppleScript's string
+    literal, which a double quote may only end and a backslash escapes."""
+    bundle, _ = _bundle(tmp_path)
+    body = (bundle / "Contents" / "MacOS" / "autosound-tcc").read_text(encoding="utf-8")
+    line = next(line for line in body.splitlines() if "osascript" in line)
+
+    argv = shlex.split(line)
+    assert argv[:2] == ["/usr/bin/osascript", "-e"] and len(argv) == 3, argv
+    literal = re.fullmatch(r'display alert "[^"\\]*" message "((?:[^"\\]|\\.)*)"', argv[2])
+    assert literal, f"not one AppleScript string after `message`: {argv[2]}"
+    said = re.sub(r"\\(.)", r"\1", literal.group(1))
+
+    assert said == "Run the installer again, or: " + updates.tcc_install_command()
 
 
 def test_building_twice_over_the_same_bundle_is_fine(tmp_path):

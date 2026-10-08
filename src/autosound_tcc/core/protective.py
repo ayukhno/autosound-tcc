@@ -45,7 +45,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from autosound_tcc.core import vendor_loader
+from autosound_tcc.core import updates, vendor_loader
 
 _MODULE = "protective.py"
 
@@ -108,10 +108,11 @@ def reason() -> str:
         import numpy  # noqa: F401
         from scipy import signal  # noqa: F401
     except ImportError:
+        # scipy is in the `gui` extra, so the installer's own command brings it — that command,
+        # not a literal of this file's, which asked for `[gui]` alone (tcc#174).
         return (
             "taking a protective filter out of a curve needs scipy, and this installation does "
-            "not have it: uv tool install --upgrade 'autosound-tcc[gui] @ "
-            "git+https://github.com/ayukhno/autosound-tcc'"
+            f"not have it: {updates.tcc_install_command()}"
         )
     return "" if hasattr(module, "de_embed") else "this skill's protective module has no de_embed"
 

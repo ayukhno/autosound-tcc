@@ -27,13 +27,12 @@ import subprocess
 from pathlib import Path
 from typing import Iterable, Optional
 
-from autosound_tcc.core import child
+from autosound_tcc.core import child, updates
 
-#: The command that installs it, kept in one place so the message never drifts from the README.
-INSTALL_HINT = (
-    "uv tool install --upgrade "
-    "'autosound-tcc[claude] @ git+https://github.com/ayukhno/autosound-tcc'"
-)
+#: The command that installs it, kept in one place so the message never drifts: the installer's own.
+#: It was a literal here that asked for `[claude]` alone and named no `--python 3.12`, where the
+#: install is `[gui,claude]` on 3.12 (tcc#174).
+INSTALL_HINT = updates.tcc_install_command()
 #: What a person types to fix a logged-out CLI. Same reasoning as `INSTALL_HINT`.
 LOGIN_HINT = "claude auth login"
 #: Short on purpose: this runs on a worker thread at launch, and a CLI that does not answer in
