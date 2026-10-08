@@ -142,3 +142,27 @@ def test_the_window_s_writer_says_a_store_it_cannot_read_once_and_returns(tmp_pa
     readable = tmp_path / "readable"
     assert project_settings.set_value_or_say(readable, "effort", "high") is True
     assert project_settings.get(readable, "effort") == "high"
+
+
+def test_the_window_s_writer_says_a_write_that_fails_once_and_returns(tmp_path, monkeypatch,
+                                                                     app_log_told):
+    """R-bl: a read-only `.tcc/` or a full disk fails the write itself, and on the close path that
+    broke the quit the same way an unreadable store did. Said once for this state of the file —
+    though every call reads the store fine before it writes — and the writer returns; `set_value`
+    still raises."""
+    path = project_settings.path_for(tmp_path)
+    path.write_text('{"generator": "sdk:claude-opus-5"}', encoding="utf-8")
+
+    def full(_target, _data):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(own_store, "write_json", full)
+
+    assert project_settings.set_value_or_say(tmp_path, "effort", "high") is False
+    assert project_settings.set_value_or_say(tmp_path, "critic", "sdk:claude-opus-5") is False
+
+    assert len(app_log_told) == 1, app_log_told
+    assert str(path) in app_log_told[0] and "No space left on device" in app_log_told[0]
+    with pytest.raises(OSError) as refused:
+        project_settings.set_value(tmp_path, "effort", "high")
+    assert refused.type is OSError, "the write's own failure, as it was"

@@ -78,15 +78,19 @@ def set_value(tcc_dir: Path, key: str, value: Any = None) -> None:
 def set_value_or_say(tcc_dir: Path, key: str, value: Any = None) -> bool:
     """`set_value` for the window, which must not be stopped by its own settings file.
 
-    A store that is there and cannot be read has been said by `own_store` when it was read —
-    once for this state of the file — and here the write is skipped: True when written, False
-    when not. The window writes from slots and from `closeEvent`, and `StoreUnreadable` raised
-    there skipped the rest of the slot, or the whole orderly quit — the session's stop, the
-    workers, the agent's thread — on every quit while the file stayed unreadable (the review of
-    Task 17). `set_value` itself still raises (R-l): a caller outside the window decides.
+    True when written, False when not — and then said, once for this state of the file:
+    a store that is there and cannot be read has been said by `own_store` when it was read, and
+    a write that failed (a read-only `.tcc/`, a full disk) is said here (R-bl). The window writes
+    from slots and from `closeEvent`, and either failure raised there skipped the rest of the
+    slot, or the whole orderly quit — the session's stop, the workers, the agent's thread — on
+    every quit while it lasted (the review of Task 17). `set_value` itself still raises (R-l): a
+    caller outside the window decides.
     """
     try:
         set_value(tcc_dir, key, value)
     except own_store.StoreUnreadable:
+        return False
+    except OSError as exc:
+        own_store.say_unwritten(path_for(tcc_dir), exc)
         return False
     return True

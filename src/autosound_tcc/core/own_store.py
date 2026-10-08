@@ -45,8 +45,10 @@ class StoreUnreadable(OSError):
     """
 
 
-#: What has been said about each store: `{absolute path: (the file's state, the sentence)}`.
-_said: dict[str, tuple] = {}
+#: What has been said about each store: `{(absolute path, "read" | "write"): (the file's state,
+#: the sentence)}`. Reading and writing apart: every best-effort write reads the store fine first,
+#: and a good read forgetting a failed write would say that write again on every call.
+_said: dict[tuple[str, str], tuple] = {}
 _said_lock = threading.Lock()
 
 
@@ -143,9 +145,19 @@ def _stamp() -> str:
     return time.strftime("%Y%m%d-%H%M%S")
 
 
-def _say_once(path: Path, message: str) -> None:
+def say_unwritten(path: Path, exc: OSError) -> None:
+    """Say that a write to the store failed — once for this state of the file, naming it and why.
+
+    For a writer that carries on without the write (`project_settings.set_value_or_say`, R-bl):
+    a read-only folder or a full disk fails every write the same way, and the window writes on
+    every pick. `write_json` itself raises, and says nothing."""
+    _say_once(Path(path), f"{path} could not be written ({_why(exc)}); the change was not saved",
+              kind="write")
+
+
+def _say_once(path: Path, message: str, kind: str = "read") -> None:
     """Report `message` unless it was already said about this same state of the file."""
-    key = os.path.abspath(path)
+    key = (os.path.abspath(path), kind)
     said = (_state(path), message)
     with _said_lock:
         if _said.get(key) == said:
@@ -159,7 +171,7 @@ def _forget(path: Path) -> None:
     again is the same state twice, and the second time is news (the review of Task 17)."""
     if _said:
         with _said_lock:
-            _said.pop(os.path.abspath(path), None)
+            _said.pop((os.path.abspath(path), "read"), None)
 
 
 def _state(path: Path) -> tuple:
