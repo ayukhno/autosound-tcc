@@ -1339,7 +1339,7 @@ class MeasurementPanel(QWidget):
         simply comes back on the next ⤓ — untouched, and still unprocessed.
         """
         rows = self._taking if only is None else [r for r in self._taking if r.uuid in only]
-        refused, not_asked = self._supersede_renamed(rows, titles)
+        _done, refused, not_asked = self._supersede_renamed(rows, titles)
         written = capture_import.record_imported(
             rows, round_id=self._round_id, project_dir=config.project_dir(), titles=titles)
         # A rename in the import window can be what settled a pair the answer still shows.
@@ -1348,30 +1348,36 @@ class MeasurementPanel(QWidget):
             self._set_status("capImportRenamed", n=written, renamed=len(titles))
         else:
             self._set_status("capImportDone", n=written)
-        # What the round did not take is said (#169, #171): it keeps the OLD title as taken while
-        # the store and the ledger take the new one. One sentence per answer, so a method that
-        # refuses every rename the same way says it once.
-        for why in dict.fromkeys(said for _wrong, _right, said in refused):
-            pairs = [(wrong, right) for wrong, right, said in refused if said == why]
-            self._add_status("capImportSupersedeRefused", pairs=_arrows(pairs), why=why)
-        if not_asked:
-            self._add_status("capImportSupersedeNotAsked", pairs=_arrows(not_asked))
+        self._say_supersedes_refused(refused, not_asked)
         # The store changed, so what this project holds changed: the window rebuilds the checklist
         # off it (`main_window._on_rew_titles_changed`).
         self.titlesChanged.emit()
         self._write_ledger(rows, titles)
 
-    def _supersede_renamed(self, rows: list, titles: dict) -> tuple[list, list]:
+    def _say_supersedes_refused(self, refused: list, not_asked: list) -> None:
+        """What the round did not take is said (#169, #171): it keeps the OLD title as taken while
+        the store and the ledger take the new one. One sentence per answer, so a method that
+        refuses every rename the same way says it once."""
+        for why in dict.fromkeys(said for _wrong, _right, said in refused):
+            pairs = [(wrong, right) for wrong, right, said in refused if said == why]
+            self._add_status("capImportSupersedeRefused", pairs=_arrows(pairs), why=why)
+        if not_asked:
+            self._add_status("capImportSupersedeNotAsked", pairs=_arrows(not_asked))
+
+    def _supersede_renamed(self, rows: list, titles: dict) -> tuple[list, list, list]:
         """A rename of a title the open round had ALREADY taken: the round learns the right one
         through the method's `capture-supersede`, after REW was renamed (A17, hub #201's order).
         A title the round never took needs nothing more — the import records the right one.
 
-        Returns `title_fixes.supersede_each`'s `(refused, not_asked)`, for the status to name."""
+        Returns `(done, refused, not_asked)`: the `(wrong, right)` the round took, and
+        `title_fixes.supersede_each`'s two, for the status to name."""
         taken = set(((process_view.capture_round() or {}).get("taken") or {}))
         fixes = [(row.title, (titles or {}).get(row.uuid)) for row in rows]
         fixes = [(wrong, right) for wrong, right in fixes
                  if right and wrong != right and wrong in taken]
-        return title_fixes.supersede_each(config.project_dir(), fixes)
+        refused, not_asked = title_fixes.supersede_each(config.project_dir(), fixes)
+        failed = {(wrong, right) for wrong, right, _said in refused} | set(not_asked)
+        return [fix for fix in fixes if fix not in failed], refused, not_asked
 
     def _write_ledger(self, rows: list, titles: dict) -> None:
         """Tell the ledger about the pass: open the round if there is none, record each capture
@@ -1508,10 +1514,19 @@ class MeasurementPanel(QWidget):
         asked = {uuid for uuid, _title in self._renaming}
         keep = {row.uuid for row in self._taking if row.uuid in titles or row.uuid not in asked}
         rows = [row for row in self._taking if row.uuid in keep]
+        # The renames that went through are renames like any other (#169 review I3): the round
+        # learns each one it had taken under the old title before the ledger takes the new one —
+        # left out, it held both, the ghost row S-039 exists to prevent.
+        done, refused, not_asked = self._supersede_renamed(rows, titles)
         written = capture_import.record_imported(
             rows, round_id=self._round_id, project_dir=config.project_dir(), titles=titles)
         self._dup_titles = capture_import.duplicate_titles(self._rew_answer, renamed=titles)
         self._set_status("capImportRenameFail", n=len(renamed), error=message, taken=written)
+        # What reached the round is said too: the lead says the batch stopped, and silence would
+        # leave the round in doubt where a batch that went through leaves none.
+        if done:
+            self._add_status("capImportSupersedeDone", pairs=_arrows(done))
+        self._say_supersedes_refused(refused, not_asked)
         self.titlesChanged.emit()
         # Half a batch is still a pass: what did come in is recorded, under the names it answers
         # to now. What did not is untouched and comes back on the next ⤓.

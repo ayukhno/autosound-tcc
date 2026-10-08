@@ -535,6 +535,61 @@ def test_a_rename_the_open_round_did_not_take_is_said_and_none_is_asked_behind_b
     assert ledger == [(["u1", "u2"], dict(renamed))]
 
 
+def test_a_rename_batch_that_stopped_halfway_supersedes_what_went_through_and_says_so(
+        tmp_path, monkeypatch):
+    """#169 review I3: REW refused one rename mid-batch, and of the renames that DID go through,
+    the ones the open round had already taken under the wrong title were never superseded — the
+    ledger then took the right title too, and the round held both, the ghost row S-039 exists to
+    prevent. The status said «Renamed N before it stopped» and nothing about the round. Now the
+    renamed rows are superseded before the ledger write, as a batch that went through is, and the
+    status says what the round took and what it did not."""
+    from autosound_tcc.core import capture_import, config, process_writer
+    from autosound_tcc.state import process_view
+
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(process_view, "capture_round", lambda *_a, **_k: {
+        "id": "r1", "taken": {"w-L_01 (sw)": {}, "w-R_01 (sw)": {}, "m-L_01 (sw)": {}}})
+    busy = "busy: another write to this project is still running — nothing was written, try again"
+    answers = iter([(0, "'w-L_01 (sw)' superseded by 'w-L_02 (sw)'", ""), process_writer.Busy(busy)])
+    order = []
+
+    def supersede_capture(project_dir, wrong, right):
+        order.append(("supersede", wrong, right))
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(process_writer, "supersede_capture", supersede_capture)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    monkeypatch.setattr(panel, "_write_ledger",
+                        lambda rows, titles: order.append(("ledger", [r.uuid for r in rows])))
+    answer = {"1": {"title": "w-L_01 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:10:00"},
+              "2": {"title": "w-R_01 (sw)", "uuid": "u2", "date": "2026-Aug-25 20:10:10"},
+              "3": {"title": "m-L_01 (sw)", "uuid": "u3", "date": "2026-Aug-25 20:10:20"},
+              "4": {"title": "m-R_01 (sw)", "uuid": "u4", "date": "2026-Aug-25 20:10:30"}}
+    panel._taking = capture_import.candidates(answer, tmp_path)
+    panel._renaming = [("u1", "w-L_02 (sw)"), ("u2", "w-R_02 (sw)"), ("u3", "m-L_02 (sw)"),
+                       ("u4", "m-R_02 (sw)")]
+    renamed = [("u1", "w-L_02 (sw)"), ("u2", "w-R_02 (sw)"), ("u3", "m-L_02 (sw)")]
+
+    panel._on_import_rename_failed("REW rejected the rename", renamed)
+
+    assert order == [("supersede", "w-L_01 (sw)", "w-L_02 (sw)"),
+                     ("supersede", "w-R_01 (sw)", "w-R_02 (sw)"),
+                     ("ledger", ["u1", "u2", "u3"])], \
+        "the round learns the renames before the ledger takes the new titles; none behind busy"
+    said = panel._status_label.text()
+    assert i18n.t("capImportRenameFail").format(
+        n=3, error="REW rejected the rename", taken=3) in said, said
+    assert i18n.t("capImportSupersedeDone").format(pairs="w-L_01 (sw) → w-L_02 (sw)") in said
+    assert i18n.t("capImportSupersedeRefused").format(
+        pairs="w-R_01 (sw) → w-R_02 (sw)", why=busy) in said
+    assert i18n.t("capImportSupersedeNotAsked").format(pairs="m-L_01 (sw) → m-L_02 (sw)") in said
+
+
 def test_method_channel_pairs_uses_meas_order_by_default():
     _app()
     panel = MeasurementPanel()
