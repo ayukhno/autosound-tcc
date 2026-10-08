@@ -411,15 +411,26 @@ def _remote_label(url: str) -> str:
     return text[:-4] if text.endswith(".git") else text
 
 
+#: The `git` paths known to run: the probe is asked once per process and path (#172).
+_git_runs: set[str] = set()
+#: The last `git_status` read and the folder it was of, for `reuse` (#172).
+_last_read: Optional[tuple[Path, GitStatus]] = None
+
+
 def _git_works() -> bool:
     """Does `git` run here — asked without setting off the Mac's "install the developer tools" window.
 
     On a Mac `/usr/bin/git` is a shim: with the Command Line Tools missing it does not run git, it
     opens an installer dialog. `xcode-select -p` answers the same question with no window.
+
+    A yes is kept for the process and that `git` path: the probe ran on every reload (#172). A no
+    is asked again, so the tools installed as the panel's tip says are seen on the next reload.
     """
     exe = shutil.which("git")
     if not exe:
         return False
+    if exe in _git_runs:
+        return True
     if sys.platform == "darwin" and os.path.realpath(exe) == "/usr/bin/git":
         try:
             probe = subprocess.run(["xcode-select", "-p"], capture_output=True,
@@ -428,40 +439,81 @@ def _git_works() -> bool:
             return False
         if probe.returncode != 0:
             return False
-    return _git(Path.home(), "--version") is not None
+    if _git(Path.home(), "--version") is None:
+        return False
+    _git_runs.add(exe)
+    return True
 
 
-def git_status(project_dir_: Optional[Path] = None) -> GitStatus:
+def git_status(project_dir: Optional[Path] = None, *, reuse: bool = False) -> GitStatus:
     """What the project's git says, never raising and never blocking for long.
 
     It used to say NOTHING for a folder that is not a repository — "not a git repo would be noise
     on the ones that are not". The Arbiter's live project turned out to be exactly that, with no
     history and no backup, and nothing told him (TCC F-074, 2026-09-23); he asked to see whether
     there is a repository and whether there is git at all.
+
+    Two children once the probe is kept (#172): it was seven on a Mac, on the GUI thread, on every
+    reload. `reuse` answers the last read when it was of this folder, with no child — for the
+    window's actions that are not about git; a reload never passes it.
     """
-    project = Path(project_dir_ or config.project_dir())
-    works = _git_works()
-    if not works:
+    global _last_read
+    project = Path(project_dir or config.project_dir())
+    if reuse and _last_read is not None and _last_read[0] == project:
+        return _last_read[1]
+    state = _read_git(project)
+    _last_read = (project, state)
+    return state
+
+
+def _read_git(project: Path) -> GitStatus:
+    if not _git_works():
         return GitStatus(works=False, repo=(project / ".git").exists())
-    if not (project / ".git").exists() or _git(project, "rev-parse", "--git-dir") is None:
+    if not (project / ".git").exists():
         return GitStatus(works=True, repo=False)
-    # `rev-parse HEAD` fails on a repo with no commits yet -- which a project is for its whole
-    # first session -- so the branch comes from the ref itself, with rev-parse as the fallback for
-    # a detached head.
-    branch = _git(project, "symbolic-ref", "--short", "HEAD") or _git(
-        project, "rev-parse", "--short", "HEAD"
-    ) or ""
-    status = _git(project, "status", "--porcelain")
-    changed = (len([line for line in status.splitlines() if line.strip()])
-               if status is not None else None)
-    url = _git(project, "remote", "get-url", "origin") or ""
-    if not url:
-        remotes = (_git(project, "remote") or "").split()
-        url = _git(project, "remote", "get-url", remotes[0]) or "" if remotes else ""
-    ahead = _git(project, "rev-list", "--count", "@{u}..HEAD") if url else None
+    # The branch, the changes and the commits the backup lacks in one call; where the backup goes
+    # in another. `rev-parse --git-dir` said alone what these two say when neither answers: a
+    # `.git` that git cannot read (a stray file, a folder another user owns).
+    status = _git(project, "status", "--porcelain=v2", "--branch")
+    remotes = _git(project, "remote", "-v")
+    if status is None and remotes is None:
+        return GitStatus(works=True, repo=False)
+    head, oid, ahead, changed = "", "", None, None
+    if status is not None:
+        changed = 0
+        for line in status.splitlines():
+            if line.startswith("# branch.head "):
+                head = line[len("# branch.head "):]
+            elif line.startswith("# branch.oid "):
+                oid = line[len("# branch.oid "):]
+            elif line.startswith("# branch.ab "):
+                counts = re.fullmatch(r"\+(\d+) -\d+", line[len("# branch.ab "):])
+                ahead = int(counts.group(1)) if counts else None
+            elif line.strip() and not line.startswith("#"):
+                changed += 1
+    # `branch.head` names the branch of a repo with no commits yet too -- which a project is for its
+    # whole first session. A detached head is named by its commit's first seven digits, what
+    # `rev-parse --short` gave below 16384 objects and no `core.abbrev`; it has no upstream.
+    detached = head == "(detached)"
+    branch = oid[:7] if detached else ("" if head == "(unknown)" else head)
+    url = _backup_url(remotes or "")
     return GitStatus(works=True, repo=True, branch=branch, changed=changed,
                      remote=_remote_label(url) if url else "",
-                     unpushed=int(ahead) if ahead and ahead.isdigit() else None)
+                     unpushed=ahead if url and not detached else None)
+
+
+def _backup_url(remotes: str) -> str:
+    """Where the backup goes, from `git remote -v`: `origin`'s fetch URL, else the first remote's
+    by name — what `remote get-url` answered. git answers a remote with no URL by its name."""
+    urls: dict[str, str] = {}
+    for line in remotes.splitlines():
+        name, _, rest = line.partition("\t")
+        fetch = re.fullmatch(r"(.*) \(fetch\)(?: \[[^\]]*\])?", rest)
+        urls[name] = urls.get(name) or (fetch.group(1) if fetch else "")
+    if not urls:
+        return ""
+    name = "origin" if "origin" in urls else min(urls)
+    return urls[name] or name
 
 
 def git_facts(project_dir_: Optional[Path] = None) -> tuple[tuple[str, str], ...]:

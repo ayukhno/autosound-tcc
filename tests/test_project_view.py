@@ -6,6 +6,9 @@ except the channel map `load_channels` takes from the method (#126, hub #233), t
 from __future__ import annotations
 
 import json
+import subprocess
+
+import pytest
 
 from autosound_tcc.state import project_view
 
@@ -360,7 +363,158 @@ def test_a_remote_is_named_the_way_a_person_reads_it():
     assert project_view._remote_label("https://github.com/ayukhno/EPY") == "github.com/ayukhno/EPY"
 
 
+def _git(*args: str) -> str:
+    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _repo(project, commit: bool = True):
+    """A project folder under git on a branch named `tune`, with one commit unless `commit` is
+    False — a project's whole first session."""
+    project.mkdir(exist_ok=True)
+    _git("init", "-q", str(project))
+    _git("-C", str(project), "symbolic-ref", "HEAD", "refs/heads/tune")
+    for key, value in (("user.email", "t@t"), ("user.name", "t")):
+        _git("-C", str(project), "config", key, value)
+    if commit:
+        (project / "note.md").write_text("hi")
+        _git("-C", str(project), "add", "-A")
+        _git("-C", str(project), "commit", "-qm", "first")
+    return project
+
+
+def _backup(tmp_path, project, name: str = "origin", upstream: bool = True) -> str:
+    """A bare folder next to the project as its remote `name`, pushed to with an upstream unless
+    `upstream` is False; what the panel calls it. Nothing leaves the machine."""
+    backup = tmp_path / f"{name}.git"
+    _git("init", "-q", "--bare", str(backup))
+    _git("-C", str(project), "remote", "add", name, str(backup))
+    if upstream:
+        _git("-C", str(project), "push", "-q", "-u", name, "HEAD")
+    return project_view._remote_label(str(backup))
+
+
+def _children(monkeypatch) -> list:
+    """The argv of every child started from here on: `project_view` has one door,
+    `subprocess.run`, and so has its probe."""
+    started, run = [], subprocess.run
+
+    def spy(argv, *args, **kwargs):
+        started.append(list(argv) if isinstance(argv, (list, tuple)) else [argv])
+        return run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(project_view.subprocess, "run", spy)
+    return started
+
+
+def _ahead(tmp_path):
+    project = _repo(tmp_path / "car")
+    remote = _backup(tmp_path, project)
+    (project / "note.md").write_text("more")
+    _git("-C", str(project), "commit", "-qam", "second")
+    (project / "draft.md").write_text("x")
+    return project, dict(branch="tune", changed=1, remote=remote, unpushed=1)
+
+
+def _detached(tmp_path):
+    project = _repo(tmp_path / "car")
+    remote = _backup(tmp_path, project)
+    (project / "note.md").write_text("more")
+    _git("-C", str(project), "commit", "-qam", "second")
+    _git("-C", str(project), "checkout", "-q", "--detach", "HEAD~1")
+    # The old `rev-parse --short HEAD`: git's own length, seven digits in a repository this small.
+    head = _git("-C", str(project), "rev-parse", "HEAD")[:7]
+    return project, dict(branch=head, changed=0, remote=remote, unpushed=None)
+
+
+def _no_upstream(tmp_path):
+    project = _repo(tmp_path / "car")
+    remote = _backup(tmp_path, project, upstream=False)
+    return project, dict(branch="tune", changed=0, remote=remote, unpushed=None)
+
+
+def _no_remote(tmp_path):
+    project = _repo(tmp_path / "car")
+    (project / "draft.md").write_text("x")
+    return project, dict(branch="tune", changed=1, remote="", unpushed=None)
+
+
+def _another_name(tmp_path):
+    """No `origin`: the first remote by name is the backup, as `git remote`'s first line was."""
+    project = _repo(tmp_path / "car")
+    remote = _backup(tmp_path, project, name="backup")
+    _backup(tmp_path, project, name="mirror", upstream=False)
+    (project / "note.md").write_text("more")
+    _git("-C", str(project), "commit", "-qam", "second")
+    return project, dict(branch="tune", changed=0, remote=remote, unpushed=1)
+
+
+def _no_commits(tmp_path):
+    project = _repo(tmp_path / "car", commit=False)
+    (project / "note.md").write_text("hi")
+    return project, dict(branch="tune", changed=1, remote="", unpushed=None)
+
+
+@pytest.mark.parametrize("shape", [_ahead, _detached, _no_upstream, _no_remote, _another_name,
+                                   _no_commits],
+                         ids=["branch, dirty, ahead, remote", "detached", "no upstream",
+                              "no remote", "no origin", "no commits yet"])
+def test_a_reload_asks_git_twice_and_hears_the_same_facts(tmp_path, monkeypatch, shape):
+    """#172: a reload's `git_status` started seven children on a Mac with `/usr/bin/git` — the
+    probe, a `rev-parse` the `.git` check had answered, one call per fact — on the GUI thread; a
+    detached head and a remote not named `origin` cost more. Two now: `status --porcelain=v2
+    --branch` and `remote -v`. Counted once the probe is remembered (R-q): it runs once per
+    process and `git` path, so the call before the count primes it, and only a process's first
+    reload pays it. Each shape's facts are what the old calls answered on it (recorded at
+    0a7cc94), and they are checked before the count."""
+    project, today = shape(tmp_path)
+    project_view._git_works()  # primes the probe: once per process and `git` path
+    started = _children(monkeypatch)
+
+    state = project_view.git_status(project)
+
+    assert state == project_view.GitStatus(works=True, repo=True, **today)
+    assert len(started) <= 2, started
+
+
+def test_reuse_answers_the_folders_last_read_and_asks_git_nothing(tmp_path, monkeypatch):
+    """The five window actions that are not about git — the reviewer, the Generator, the effort,
+    the gate, the language — re-say the panel, and each paid the whole read (#172). `reuse=True`
+    answers the folder's last read with no child; a folder not read yet is read."""
+    project, _ = _ahead(tmp_path)
+    other = _repo(tmp_path / "other")
+    read = project_view.git_status(project)
+    started = _children(monkeypatch)
+
+    assert project_view.git_status(project, reuse=True) == read
+    assert started == [], "the folder was read: nothing to ask"
+    assert project_view.git_status(other, reuse=True).branch == "tune"
+    assert started, "a folder not read yet is read"
+
+
+def test_git_is_asked_whether_it_runs_until_it_does(tmp_path, monkeypatch):
+    """The probe — `xcode-select -p` and `git --version` on a Mac — ran on every reload (#172). A
+    yes is kept for the process and that `git`; a no is asked again, so the Command Line Tools
+    installed as the panel's tip says are seen on the next reload, not after a restart."""
+    asked = []
+
+    def git(project, *args):
+        asked.append(args)
+        return None if len(asked) == 1 else "git version 2.50.1"
+
+    monkeypatch.setattr(project_view.shutil, "which", lambda name: str(tmp_path / "bin" / "git"))
+    monkeypatch.setattr(project_view, "_git", git)
+    monkeypatch.setattr(project_view, "_git_runs", set())
+
+    assert not project_view._git_works()
+    assert project_view._git_works(), "installed since the no"
+    assert project_view._git_works()
+    assert asked == [("--version",), ("--version",)], "a yes is kept: no third question"
+
+
 def test_the_project_header_shows_a_folder_with_no_history(tmp_path, monkeypatch):
+    """...and a language switch says the folder's last answer again in the new words without asking
+    git (#172): it re-said the whole panel, probe and all, on the GUI thread. A reload still
+    reads the folder afresh."""
     from PySide6.QtWidgets import QApplication
 
     from autosound_tcc.core import config
@@ -374,3 +528,15 @@ def test_the_project_header_shows_a_folder_with_no_history(tmp_path, monkeypatch
     window._set_project_params(None)
     assert window._project_section.sub_text() == i18n.t("gitSubNoRepo")
     assert window._project_section.dot_status() == "bad"
+
+    _git("init", "-q", str(tmp_path))
+    window._set_project_params(None)
+    assert window._project_section.sub_text() == i18n.t("gitSubNoRemote"), "a reload reads"
+    started = _children(monkeypatch)
+    try:
+        window._on_language_selected("uk")
+        assert window._project_section.sub_text() == i18n.t("gitSubNoRemote")
+        assert window._project_section.dot_status() == "wait"
+    finally:
+        window._on_language_selected("en")
+    assert [argv for argv in started if argv[0] in ("git", "xcode-select")] == []

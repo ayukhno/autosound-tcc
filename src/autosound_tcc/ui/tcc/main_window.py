@@ -2905,7 +2905,7 @@ class MainWindow(QMainWindow):
         self._dialog.clear_for_no_project()
         self._refresh_process()
 
-    def _show_git_state(self) -> None:
+    def _show_git_state(self, reuse: bool = False) -> None:
         section = self._project_section
         self._backup_step = None
         if config.chosen_project_dir() is None:
@@ -2913,7 +2913,7 @@ class MainWindow(QMainWindow):
             section.set_dot(None)
             section.set_sub_tip("")
             return
-        git = project_view.git_status()
+        git = project_view.git_status(reuse=reuse)
         if not git.works:
             sub, tip = i18n.t("gitSubBroken"), i18n.t("gitTipBroken")
         elif not git.repo:
@@ -3024,7 +3024,7 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
         self._after_git(result.ok, result.said)
 
-    def _set_project_params(self, view: ProjectView | None) -> None:
+    def _set_project_params(self, view: ProjectView | None, reuse_git: bool = False) -> None:
         """(Re)builds the "Project params" section body from `project.json`'s channel-tier summary
         (SCR-016, e.g. "8 virtual channels (1 off)") and any `_open_questions` as onboarding TODO
         chips (`state.project_view`). Moved out of the DSP tree into its own top-level section
@@ -3050,7 +3050,7 @@ class MainWindow(QMainWindow):
         # (the Arbiter, 2026-09-23: «добре бачити чи є репо для проекту, чи є гіт взагалі»), and
         # the facts as rows. The folder was silent when it was not a repository — and the live
         # project was exactly that, with no history and no backup (F-074).
-        self._show_git_state()
+        self._show_git_state(reuse=reuse_git)
         # The channel-tier summary used to render here; it is a fact about the rig, so it moved to
         # System params (`_rebuild_system_params`, 2026-09-06).
         open_questions = project_view.load_open_questions() if view else ()
@@ -4562,7 +4562,7 @@ class MainWindow(QMainWindow):
         self._bridge.set_snapshot(critic_model=model_choices.reviewer_model(choice))
         # The panel names the reviewer, so it must not lag the picker (finding 59): the Generator,
         # the effort and the gate refreshed it, the reviewer did not.
-        QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None)))
+        QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None), reuse_git=True))
         if before != choice.key:
             self._tell_session_reviewer(choice)
             # Asked now, not at the next session start (the Arbiter: «було б добре з'ясовувати це
@@ -5529,7 +5529,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._drop_model_placeholder)
         self._update_session_button()
         # The panel names the model, so it must not lag the picker.
-        QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None)))
+        QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None), reuse_git=True))
 
     def _on_effort_changed(self, _index: int) -> None:
         """The Arbiter changed how hard the Generator thinks.
@@ -5542,7 +5542,7 @@ class MainWindow(QMainWindow):
         self._set_project_setting(_EFFORT_KEY, level)
         if self._agent_worker is not None:
             self._dialog._add_system_message(i18n.t("effortNextSession"))
-        QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None)))
+        QTimer.singleShot(0, lambda: self._set_project_params(getattr(self, "_view", None), reuse_git=True))
 
     def _drop_model_placeholder(self) -> None:
         try:
@@ -5769,7 +5769,7 @@ class MainWindow(QMainWindow):
         self._push_gate_to_session()
         # The panel shows the mode, so it must not lag the menu. `None` is the honest argument:
         # the config rows do not depend on the DSP view, and the project facts are re-read anyway.
-        self._set_project_params(getattr(self, "_view", None))
+        self._set_project_params(getattr(self, "_view", None), reuse_git=True)
 
     def _sync_menu_state(self) -> None:
         """The menu's ticks and greyed lines: the gate, the EQ order, the language, and what a
@@ -6215,7 +6215,7 @@ class MainWindow(QMainWindow):
         self._cfg_btn.setText(i18n.t("cfgButton"))
         self._show_external_session()
         self._cfg_tip.set_text(i18n.t("cfgButtonTip"))
-        self._set_project_params(self._view)
+        self._set_project_params(self._view, reuse_git=True)
         self._plan_title.setText(i18n.t("planTitle"))
         self._plan_sub.setText(i18n.t("planSub"))
         self._meas_title.setText(i18n.t("focus"))

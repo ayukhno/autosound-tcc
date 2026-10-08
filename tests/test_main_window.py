@@ -6344,19 +6344,22 @@ def test_a_model_not_checked_yet_is_grey_in_the_list_not_red(monkeypatch):
 
 def test_picking_a_reviewer_puts_it_in_the_project_params_at_once(monkeypatch):
     """Finding 59: the footer read one critic, «PROJECT PARAMS» another. The Generator, the effort
-    and the gate refreshed the panel; the reviewer did not."""
+    and the gate refreshed the panel; the reviewer did not. The pick is not about git, so the
+    refresh says git's last answer again rather than asking it (#172)."""
     from autosound_tcc.core import model_choices
 
     pro = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro")
     flash = model_choices.Choice(harness="agy", model="gemini-3.1-flash", label="Gemini 3.1 Flash")
     window = _reviewer_window(monkeypatch, pro, flash)
     refreshed = []
-    monkeypatch.setattr(window, "_set_project_params", lambda view: refreshed.append(view))
+    monkeypatch.setattr(window, "_set_project_params",
+                        lambda view, reuse_git=False: refreshed.append(reuse_git))
 
     window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData(flash.key))
     QApplication.processEvents()
 
     assert refreshed, "the panel names the reviewer, so it must not lag the picker"
+    assert all(refreshed), "git's last answer, not a new read"
 
 
 def test_a_picker_refill_after_a_pick_keeps_it_without_asking(monkeypatch):
