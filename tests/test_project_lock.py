@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from autosound_tcc.core import app_log, method_cli, process_writer, project_lock
+from autosound_tcc.core import method_cli, process_writer, project_lock
 
 from tests import _intake
 
@@ -83,30 +83,6 @@ def holder_process(tmp_path):
     finally:
         let_go()
         child.stdout.close()
-
-
-@pytest.fixture
-def app_log_warnings():
-    """What TCC's own logger was warned about, heard on that logger itself (the idiom of
-    `test_mcp_server.py`): after `app_log.setup()` it does not propagate, so caplog on the root
-    would hear nothing."""
-    records: list[logging.LogRecord] = []
-
-    class _Keep(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(record)
-
-    log = app_log.logger()
-    handler = _Keep(level=logging.WARNING)
-    level = log.level
-    log.addHandler(handler)
-    if level == logging.NOTSET or level > logging.WARNING:
-        log.setLevel(logging.WARNING)
-    try:
-        yield records
-    finally:
-        log.removeHandler(handler)
-        log.setLevel(level)
 
 
 @contextmanager

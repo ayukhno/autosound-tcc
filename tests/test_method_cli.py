@@ -24,8 +24,8 @@ from pathlib import Path
 import pytest
 
 from autosound_tcc.core import (
-    app_log, car_library, config, config_writer, contract_check, intake_form, method_binding,
-    method_cli, process_writer, profile_writer, project_lock, project_repo, vendor_loader,
+    car_library, config, config_writer, contract_check, intake_form, method_binding, method_cli,
+    process_writer, profile_writer, project_lock, project_repo, vendor_loader,
 )
 
 from tests._method_copies import copy_of_the_method, entry as _entry
@@ -109,30 +109,6 @@ def test_the_lock_wait_a_caller_names_is_the_one_spent(tmp_path, monkeypatch):
 
     assert [type(exc) for exc in answered] == [method_cli.Busy], answered
     assert time.monotonic() - started < 2.0
-
-
-@pytest.fixture
-def app_log_warnings():
-    """What TCC's own logger was warned about, heard on that logger itself (the idiom of
-    `test_mcp_server.py`): after `app_log.setup()` it does not propagate, so caplog on the root
-    would hear nothing."""
-    records: list[logging.LogRecord] = []
-
-    class _Keep(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(record)
-
-    log = app_log.logger()
-    handler = _Keep(level=logging.WARNING)
-    level = log.level
-    log.addHandler(handler)
-    if level == logging.NOTSET or level > logging.WARNING:
-        log.setLevel(logging.WARNING)
-    try:
-        yield records
-    finally:
-        log.removeHandler(handler)
-        log.setLevel(level)
 
 
 def test_a_refused_binding_leaves_one_warning_naming_the_command_and_the_sentence(

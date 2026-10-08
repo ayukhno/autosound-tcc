@@ -12,6 +12,7 @@ a per-test-session tmp .ini file makes every test's settings writes disappear wi
 from __future__ import annotations
 
 import gc
+import logging
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -188,6 +189,52 @@ def real_critic_reaches(monkeypatch):
         _model_choices_at_import, "critic_reaches", _REAL_CRITIC_REACHES, raising=False
     )
     return _REAL_CRITIC_REACHES
+
+
+@pytest.fixture
+def app_log_heard():
+    """What TCC's own logger says, heard on that logger itself: after `app_log.setup()` it does
+    not propagate, so caplog on the root hears nothing. The one such handler for every test (M77:
+    five files kept a copy each). `app_log_heard(level)` hears from `level` up and answers the
+    list the records land in. The logger is lowered to `level` where it would drop them, never
+    raised, and set outright rather than left to follow the root; all of it is put back at the
+    test's end. `app_log_warnings` and `app_log_errors` are the levels the tests ask for."""
+    from autosound_tcc.core import app_log
+
+    log = app_log.logger()
+    level_before = log.level
+    handlers: list[logging.Handler] = []
+
+    def hear(level: int) -> list[logging.LogRecord]:
+        records: list[logging.LogRecord] = []
+
+        class _Keep(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        handlers.append(_Keep(level=level))
+        log.addHandler(handlers[-1])
+        log.setLevel(min(level, log.getEffectiveLevel()))
+        return records
+
+    try:
+        yield hear
+    finally:
+        for handler in handlers:
+            log.removeHandler(handler)
+        log.setLevel(level_before)
+
+
+@pytest.fixture
+def app_log_warnings(app_log_heard):
+    """What TCC's own logger was warned about: WARNING and above (`app_log_heard`)."""
+    return app_log_heard(logging.WARNING)
+
+
+@pytest.fixture
+def app_log_errors(app_log_heard):
+    """What TCC's own logger said at ERROR and above (`app_log_heard`)."""
+    return app_log_heard(logging.ERROR)
 
 
 @pytest.fixture(scope="session", autouse=True)

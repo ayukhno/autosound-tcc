@@ -632,33 +632,6 @@ def test_the_ignore_lines_are_not_added_twice(tmp_path, monkeypatch):
     assert said.count(".tcc/") == 1
 
 
-@pytest.fixture
-def app_log_warnings():
-    """What TCC's own logger was warned about. The handler goes on that logger itself: after
-    `app_log.setup()` it does not propagate, so pytest's caplog on the root would hear nothing."""
-    import logging
-
-    from autosound_tcc.core import app_log
-
-    records: list[logging.LogRecord] = []
-
-    class _Keep(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(record)
-
-    log = app_log.logger()
-    handler = _Keep(level=logging.WARNING)
-    level = log.level
-    log.addHandler(handler)
-    if level == logging.NOTSET or level > logging.WARNING:
-        log.setLevel(logging.WARNING)
-    try:
-        yield records
-    finally:
-        log.removeHandler(handler)
-        log.setLevel(level)
-
-
 def test_a_gitignore_that_cannot_be_written_is_logged_not_raised(
     tmp_path, monkeypatch, app_log_warnings
 ):

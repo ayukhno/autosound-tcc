@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import subprocess
 import threading
 import time
@@ -10,7 +9,7 @@ import time
 import pytest
 
 from autosound_tcc.core import (
-    app_log, method_cli, process_writer, project_lock, title_fixes, vendor_loader,
+    method_cli, process_writer, project_lock, title_fixes, vendor_loader,
 )
 
 from tests._method_copies import copy_of_the_method
@@ -58,29 +57,8 @@ def test_supersede_calls_the_method_and_a_round_without_the_title_is_fine(tmp_pa
         "capture-supersede", "sw_01 (sw)", "sw_1 (sw)", title_fixes.REASON]
 
 
-@pytest.fixture
-def warned():
-    """What TCC's own logger was warned about, heard on that logger itself (the idiom of
-    `test_method_cli.py`): after `app_log.setup()` it does not propagate to caplog's root."""
-    records: list[logging.LogRecord] = []
-
-    class _Keep(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(record)
-
-    log = app_log.logger()
-    handler, level = _Keep(level=logging.WARNING), log.level
-    log.addHandler(handler)
-    if level == logging.NOTSET or level > logging.WARNING:
-        log.setLevel(logging.WARNING)
-    try:
-        yield records
-    finally:
-        log.removeHandler(handler)
-        log.setLevel(level)
-
-
-def test_a_crashed_supersede_is_a_failure_said_and_logged_never_done(tmp_path, monkeypatch, warned):
+def test_a_crashed_supersede_is_a_failure_said_and_logged_never_done(tmp_path, monkeypatch,
+                                                                    app_log_warnings):
     """#169 review I1: `process.py` exits 1 for its own refusal AND for an exception nothing caught
     — Python's traceback. The two read alike by the exit code, so a crash read as «the round never
     took it», done: the round kept the wrong title as taken, the ledger then took the right one,
@@ -98,7 +76,7 @@ def test_a_crashed_supersede_is_a_failure_said_and_logged_never_done(tmp_path, m
     assert (wrong, right, not_asked) == ("sw_01 (sw)", "sw_1 (sw)", []), refused
     assert "KeyError: 'taken'" in why and "Traceback" not in why, why
     assert title_fixes.supersede(car, "sw_01 (sw)", "sw_1 (sw)") == (False, why)
-    logged = "\n".join(record.getMessage() for record in warned)
+    logged = "\n".join(record.getMessage() for record in app_log_warnings)
     assert "capture-supersede" in logged and "KeyError: 'taken'" in logged, logged
 
 

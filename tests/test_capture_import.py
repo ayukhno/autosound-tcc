@@ -682,30 +682,6 @@ def test_a_sweep_rew_no_longer_shows_gets_no_verdict():
     assert asked == []
 
 
-@pytest.fixture
-def app_log_errors():
-    """What TCC's own logger said at ERROR, heard on that logger itself (the idiom of
-    `test_method_cli.py`): after `app_log.setup()` it does not propagate, so caplog on the root
-    would hear nothing."""
-    import logging
-
-    from autosound_tcc.core import app_log
-
-    records: list[logging.LogRecord] = []
-
-    class _Keep(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(record)
-
-    log = app_log.logger()
-    handler = _Keep(level=logging.ERROR)
-    log.addHandler(handler)
-    try:
-        yield records
-    finally:
-        log.removeHandler(handler)
-
-
 def test_a_verdict_that_raises_is_logged_and_its_sweep_says_it_could_not_be_judged(
         tmp_path, app_log_errors):
     """#170 F16-3: the method's verdict «never raises»; one that did dropped its sweep from the
