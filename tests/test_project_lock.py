@@ -184,8 +184,9 @@ def _waits_on_the_thread_lock(project_dir: Path) -> bool:
 def test_a_project_reached_through_a_link_waits_on_the_same_thread_lock(tmp_path):
     """#171 on Windows, where the thread lock is the whole lock (no flock in phase 0): a project
     opened by two spellings — a linked folder, a mapped parent — must be one lock, or two writes to
-    it run at once. `_thread_lock` keys by the resolved path, so a link and its target are one key;
-    the holder takes the thread lock alone, so only that can make the second spelling wait."""
+    it run at once. `_thread_lock` keys by the folder's identity, its device and inode (R-bb), so a
+    link and its target are one key; the holder takes the thread lock alone, so only that can make
+    the second spelling wait."""
     real = tmp_path / "real" / "car"
     real.mkdir(parents=True)
     alias = tmp_path / "alias"
@@ -233,6 +234,25 @@ def test_a_disk_that_numbers_every_folder_zero_keys_the_lock_by_the_resolved_pat
     assert asked, "the folder's identity was never asked"
     assert project_lock._thread_lock(alias / "car") is lock, "one folder by two spellings, two locks"
     assert project_lock._thread_lock(tmp_path / "other") is not lock, "two folders, one lock"
+
+
+def test_a_project_folder_not_made_yet_is_keyed_by_its_path_and_still_locks(tmp_path):
+    """R-bb's other fallback (MB3): a folder with no identity to read yet — not made, or not
+    readable — is keyed by its resolved path, so two spellings of it still share one lock, and a
+    write to it still takes the lock. Without the fallback such a write failed on the stat."""
+    (tmp_path / "real").mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(tmp_path / "real", target_is_directory=True)
+    car, spelled = tmp_path / "real" / "car", alias / "car"  # neither made yet
+
+    lock = project_lock._thread_lock(car)
+
+    assert project_lock._folder(car) == car.resolve(), "no folder yet, so its path is the key"
+    assert project_lock._thread_lock(spelled) is lock, "one folder by two spellings, two locks"
+    with _held_by_another_thread(lock):
+        assert _waits_on_the_thread_lock(spelled), "the second spelling took a lock of its own"
+    with project_lock.hold(spelled, timeout_s=0):
+        pass
 
 
 def test_a_project_path_through_a_symlink_loop_raises_an_oserror_never_a_runtime_error(tmp_path):
@@ -350,8 +370,8 @@ def test_a_filesystem_that_cannot_flock_fails_at_once_and_gives_the_thread_lock_
             pass
     elapsed = time.monotonic() - started
 
-    assert not isinstance(failed.value, project_lock.LockTimeout), repr(failed.value)
-    assert failed.value.errno == errno.ENOLCK, repr(failed.value)
+    assert type(failed.value) is OSError, f"not the error itself: {failed.value!r}"
+    assert str(failed.value) == f"[Errno {errno.ENOLCK}] No locks available", repr(failed.value)
     assert elapsed < 1.0, f"{elapsed:.2f}s of a 3 s budget: it waited for a lock nobody holds"
     thread_lock = project_lock._thread_lock(tmp_path)
     assert thread_lock.acquire(blocking=False), "the thread lock was left held"
