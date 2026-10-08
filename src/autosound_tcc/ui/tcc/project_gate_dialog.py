@@ -236,8 +236,11 @@ class ProjectGateDialog(QDialog):
             # they typed and fix it, which is more useful than a dialog on top of a dialog.
             return
         config.set_project_dir(folder)
-        project_settings.set_value(config.tcc_dir(folder), "generator", self._generator.currentData())
-        project_settings.set_value(config.tcc_dir(folder), "critic", self._critic.currentData())
+        # Picks, as the window's are (#173, I2): a store that cannot be read or written keeps
+        # them for the run rather than raise out of OK, which then did nothing and said nothing
+        # (the group review, M1). Why is said by the store itself, and handed to the window.
+        project_settings.pick(config.tcc_dir(folder), "generator", self._generator.currentData())
+        project_settings.pick(config.tcc_dir(folder), "critic", self._critic.currentData())
         self.folder = folder
         self.accept()
 

@@ -89,6 +89,34 @@ def test_an_unwritable_path_does_not_accept(tmp_path, monkeypatch):
     assert dialog.result() != QDialog.DialogCode.Accepted
 
 
+def test_ok_over_a_settings_file_that_cannot_be_read_opens_the_project_and_says_why(
+        tmp_path, monkeypatch):
+    """The group review, M1: `set_value` raised out of OK, so the dialog stayed open — OK did
+    nothing and said nothing — and Cancel ended the process with the store's sentence held for a
+    window never built. OK opens the project now: the models chosen here hold for the run, as any
+    pick that did not land does (I2), and the sentence is handed to the window when it is built."""
+    from autosound_tcc.core import app_log
+
+    monkeypatch.setattr(app_log, "_ui_sink", None)  # no window yet: what is reported is held
+    monkeypatch.setattr(app_log, "_held", [])
+    folder = tmp_path / "car"
+    store = project_settings.path_for(config.tcc_dir(folder))
+    store.mkdir(parents=True)  # a folder in the file's place: refused on every platform
+    dialog = ProjectGateDialog()
+    dialog._folder_edit.setText(str(folder))
+    dialog._generator.setCurrentIndex(dialog._generator.findData("sdk:claude-sonnet-5"))
+
+    dialog._accept()
+
+    assert dialog.folder == folder and dialog.result() == QDialog.DialogCode.Accepted
+    tcc_dir = config.tcc_dir(folder)
+    assert project_settings.get(tcc_dir, "generator") == "sdk:claude-sonnet-5"
+    assert project_settings.get(tcc_dir, "critic") == dialog._critic.currentData()
+    told = []
+    app_log.set_ui_sink(lambda message, _path: told.append(message))
+    assert len(told) == 1 and str(store) in told[0], told
+
+
 def test_backing_out_of_the_gate_stops_the_launch(monkeypatch):
     """An unanswered gate must stop the launch rather than fall through to a folder nobody
     picked -- which is what used to happen, silently, on every fresh install."""
