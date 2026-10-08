@@ -677,6 +677,58 @@ def test_approving_stores_the_copys_realpath_and_binds_it(project, tmp_path, oth
     assert method_binding.for_project(project).state == "approved", "and it stays approved"
 
 
+def _on_disk(folder: Path) -> dict[str, tuple]:
+    """Every entry under `folder` as it lies on disk — a file by its bytes, a link by what it says,
+    a folder as one — and no link followed: the project's entry is one link, not the copy it names."""
+    found: dict[str, tuple] = {}
+    for root, folders, files in os.walk(folder):
+        for name in folders + files:
+            path = Path(root, name)
+            key = path.relative_to(folder).as_posix()
+            if os.path.islink(path):
+                found[key] = ("link", os.readlink(path))
+            elif path.is_dir():
+                found[key] = ("folder",)
+            else:
+                found[key] = ("file", path.read_bytes())
+    return found
+
+
+def test_an_approval_is_this_machines_and_never_travels_with_the_project(project, tmp_path,
+                                                                          other_copy, _machine_dir):
+    """Decision 2's premise (HUB-050): an approval is kept in TCC's own settings on this machine and
+    never in the project. Approving writes nothing under the project — no file, no folder, not the
+    link — and the same project read where the settings are empty, as on another machine, is refused
+    again and approvable again: a project from a backup, a customer or a clone cannot vouch for a
+    copy beside it. Nothing failed before if `approve` began to write into the project, or the
+    binding to read an approval there — the «remember it per project» a refactor reaches for first."""
+    from PySide6.QtCore import QSettings
+
+    _link(_entry(project), other_copy)  # a 3.x copy outside the project that TCC does not know
+    refused = method_binding.for_project(project)
+    assert refused.can_approve, refused.reason
+    before = _on_disk(project)
+
+    approved = method_binding.approve(refused)
+
+    assert approved.state == "approved", approved.reason
+    assert _on_disk(project) == before, "approving wrote into the project"
+    travelled = tmp_path / "car-elsewhere"
+    shutil.copytree(project, travelled, symlinks=True)  # what a backup or a clone brings along
+    # Another machine: the settings store the app itself opens (`app_settings.get_settings`), in a
+    # folder nothing was ever approved in. conftest points it back for the next test; so does this.
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope,
+                      str(tmp_path / "another-machine"))
+    try:
+        assert config.approved_methods() == (), "another machine's settings start empty"
+        for spelled in (project, travelled):
+            again = method_binding.for_project(spelled)
+            assert (again.state, again.can_approve) == ("refused", True), (spelled, again.reason)
+    finally:
+        QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(_machine_dir))
+    assert method_binding.for_project(project).state == "approved", "this machine still trusts it"
+
+
 def test_approving_and_re_linking_each_leave_one_line_in_the_log(project, other_copy, monkeypatch,
                                                                  caplog):
     """#169 review m2: approving a copy is a trust decision, and a re-link moves the project's
