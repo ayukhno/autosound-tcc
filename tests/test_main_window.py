@@ -2898,8 +2898,10 @@ def test_save_writes_tccs_own_settings_even_with_no_session(monkeypatch, tmp_pat
     """Save used to be nothing but the model handoff, so with no session running it did nothing at
     all — no write, no message, no way to tell "saved" from "ignored" (user, 2026-08-07).
 
-    And a Save whose writes did not land is not «on disk»: the failure's own line stays on the
-    strip — with no session, and with one that has nothing to save (the review of Task 17, N1)."""
+    And a Save whose writes did not land is not «on disk», and it still answers: on the strip and
+    in the conversation, with what kept it off the disk — with no session, and with one that has
+    nothing to save; also when the failure was said once already and the strip has moved on
+    since (the review of Task 17, N1, and its re-review)."""
     from autosound_tcc.core import project_settings
 
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
@@ -2918,8 +2920,11 @@ def test_save_writes_tccs_own_settings_even_with_no_session(monkeypatch, tmp_pat
     store.unlink()
     store.mkdir()  # a folder in the file's place: no write lands
     bubbles = len(window._dialog._bubbles)
+    not_saved = i18n.t("savedTccFailed").split("{")[0]
     window._save_project_state()
-    assert str(store) in window._status_strip.text(), window._status_strip.text()
+    said = window._status_strip.text()
+    assert said.startswith(not_saved) and str(store) in said, said
+    window._status_strip.notify("something else")  # the failure was said, and the strip moved on
     worker = _HandoffWorker()
     worker.spoke = False  # a session with nothing to save: its handoff is skipped
     window._agent_worker = worker
@@ -2927,8 +2932,9 @@ def test_save_writes_tccs_own_settings_even_with_no_session(monkeypatch, tmp_pat
         window._save_project_state()
     finally:
         window._agent_worker = None
-    assert str(store) in window._status_strip.text(), window._status_strip.text()
-    assert len(window._dialog._bubbles) == bubbles, "and the conversation is never told «on disk»"
+    said = window._status_strip.text()
+    assert said.startswith(not_saved) and str(store) in said, said
+    assert len(window._dialog._bubbles) == bubbles + 2, "each failed Save answers there too"
 
 
 def test_save_does_not_record_a_model_nobody_picked(monkeypatch, tmp_path):

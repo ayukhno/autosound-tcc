@@ -94,3 +94,11 @@ def set_value_or_say(tcc_dir: Path, key: str, value: Any = None) -> bool:
         own_store.say_unwritten(path_for(tcc_dir), exc)
         return False
     return True
+
+
+def why_not_saved(tcc_dir: Path) -> str:
+    """What keeps this project's settings off the disk, for a Save that did not land: the
+    sentence said about the file, said again because a Save is the person asking (the re-review
+    of Task 17) — or, when nothing stands, just the file's path."""
+    path = path_for(tcc_dir)
+    return own_store.said_about(path) or str(path)

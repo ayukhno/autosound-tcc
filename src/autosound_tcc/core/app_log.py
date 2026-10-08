@@ -251,6 +251,18 @@ def set_ui_sink(sink: Optional[Callable[[str, Optional[Path]], None]]) -> None:
         _tell(message)
 
 
+def clear_ui_sink(sink: Callable[[str, Optional[Path]], None]) -> None:
+    """Clear the sink only if it is still `sink`: a window going away takes its own sink with it,
+    not the next window's. In the new-project hand-off the new window registers in `__init__`
+    and the old one's `close()` came after, and from then on every report reached the log alone
+    (Task 19's review, M6). Equality, not identity: a window hands over a bound method, a new
+    object on every access. Held reports stay held, as with `set_ui_sink(None)`."""
+    global _ui_sink
+    with _sink_lock:
+        if _ui_sink == sink:
+            _ui_sink = None
+
+
 def _notify(message: str) -> None:
     """Tell the sink, with the log file to point at — or None when `setup` could not open one:
     the machine whose log cannot hold the sentence is no reason for the strip not to."""

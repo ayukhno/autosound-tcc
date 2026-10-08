@@ -4980,9 +4980,7 @@ class MainWindow(QMainWindow):
         save. The handoff only waited behind «Зберігаю стан…». What the Arbiter asked for happens
         at once; a Save keeps a live session, the rest close it."""
         if mode == "save":
-            if wrote:  # a flush that wrote nothing has said so itself, and stays said (N1)
-                self._dialog._add_system_message(i18n.t("savedTccOnly"))
-                self._status_strip.notify(i18n.t("savedTccOnly"))
+            self._say_saved(wrote)
             if not _ended(worker):
                 return
         elif mode == "quit":
@@ -5867,16 +5865,18 @@ class MainWindow(QMainWindow):
         message, no way to tell the difference between "saved" and "ignored" — and with one running
         it only ever asked the model, never settling TCC's own choices.
         """
-        wrote = self._flush_own_state()
-        worker = getattr(self, "_agent_worker", None)
+        wrote, worker = self._flush_own_state(), getattr(self, "_agent_worker", None)
         if worker is not None:
             self._hand_off(worker, "save", wrote)
             return
-        # No session to ask, and that is not a failure: when the flush wrote, saying so is the
-        # difference between a button that did nothing and one that had nothing more to do (N1).
-        if wrote:
-            self._dialog._add_system_message(i18n.t("savedTccOnly"))
-            self._status_strip.notify(i18n.t("savedTccOnly"))
+        self._say_saved(wrote)
+
+    def _say_saved(self, wrote: bool) -> None:
+        """A Save always answers, on the strip too: «on disk», or what kept it off (#173, N1)."""
+        said = i18n.t("savedTccOnly") if wrote else i18n.t("savedTccFailed").format(
+            why=project_settings.why_not_saved(config.tcc_dir()))
+        self._dialog._add_system_message(said)
+        self._status_strip.notify(said, level="info" if wrote else "warn")
 
     def _start_fresh_session(self) -> None:
         """Save, then start over with an empty context on the same project and model."""
@@ -5943,7 +5943,7 @@ class MainWindow(QMainWindow):
         """
         # Before the threads: the sink holds a bound method of this window, and a log line
         # arriving after Qt has torn the window down would call into a deleted C++ object.
-        app_log.set_ui_sink(None)
+        app_log.clear_ui_sink(self._on_logged_error)  # its own only, not a newer window's (M6)
         # A WAIT IS NOT THE GUARD, and these three only waited. A worker that outlasts the wait
         # stays in its attribute, the attribute dies with the window, and `~QThread` against a
         # running thread is `qFatal`. Measured 2026-09-20 (finding 35): dropping the last

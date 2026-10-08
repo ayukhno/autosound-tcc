@@ -192,3 +192,19 @@ def test_a_write_that_fails_again_after_one_landed_is_said_again(tmp_path, monke
     assert project_settings.set_value_or_say(tmp_path, "effort", "high") is False
 
     assert len(app_log_told) == 2, app_log_told
+
+
+def test_what_kept_a_save_off_the_disk_is_named_after_it_was_said_once(tmp_path, app_log_told):
+    """The re-review of Task 17, round 2: a Save is the person asking, and its answer names what
+    is wrong even after the failure was said once and the memo keeps every later read quiet.
+    Once the store is fine again, there is nothing wrong to name but its path."""
+    path = project_settings.path_for(tmp_path)
+    path.mkdir()
+    for _ in range(2):
+        assert project_settings.set_value_or_say(tmp_path, "effort", "high") is False
+
+    assert len(app_log_told) == 1
+    assert project_settings.why_not_saved(tmp_path) == app_log_told[0]
+    path.rmdir()
+    assert project_settings.set_value_or_say(tmp_path, "effort", "high") is True
+    assert project_settings.why_not_saved(tmp_path) == str(path)

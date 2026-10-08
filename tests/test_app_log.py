@@ -160,6 +160,33 @@ def test_a_report_reaches_the_window_with_no_log_file_to_point_at(monkeypatch):
     assert seen == [("tcc-project.json could not be read", None)]
 
 
+def test_a_window_going_away_clears_only_its_own_sink(monkeypatch):
+    """Task 19's review, M6: in the new-project hand-off the new window registers its sink in
+    `__init__`, and the old window's `close()` came after and cleared the sink outright — every
+    report from then on reached the log alone. The window is handed its sink as a bound method,
+    a new object on every access, so "its own" is equality, not identity."""
+    monkeypatch.setattr(app_log, "_ui_sink", None)
+    heard = []
+
+    class Window:
+        def __init__(self, name):
+            self.name = name
+
+        def told(self, message, path):
+            heard.append((self.name, message))
+
+    old, new = Window("old"), Window("new")
+    app_log.set_ui_sink(old.told)
+    app_log.set_ui_sink(new.told)
+    app_log.clear_ui_sink(old.told)
+    app_log.report("after the hand-off")
+
+    assert heard == [("new", "after the hand-off")], "the old window's clear left the new one's"
+    app_log.clear_ui_sink(new.told)
+    app_log.report("no window now")
+    assert heard == [("new", "after the hand-off")], "its own clear does clear it"
+
+
 def test_ctrl_c_is_a_decision_not_a_defect(installed, capsys):
     """KeyboardInterrupt keeps the default hook: it belongs on the terminal, where the person who
     pressed it is looking."""

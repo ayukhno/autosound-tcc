@@ -76,6 +76,7 @@ def read_json(path: Path, *,
     try:
         raw = path.read_bytes()
     except FileNotFoundError:
+        _forget(path)  # absent is fine: what was said about reading it no longer stands
         return {}
     except OSError as exc:
         message = f"{path} could not be read ({_why(exc)}); TCC will not write over it"
@@ -184,6 +185,19 @@ def say_unwritten(path: Path, exc: OSError) -> None:
     every pick. `write_json` itself raises, and says nothing."""
     _say_once(Path(path), f"{path} could not be written ({_why(exc)}); the change was not saved",
               kind="write")
+
+
+def said_about(path: Path) -> str:
+    """The sentence last said about this store and still standing — about reading it, else about
+    writing it — or "". For an answer the memo must not silence: a Save is the person asking,
+    and the failure was said once already (the re-review of Task 17). A good or absent read
+    forgets the first, a landed write the second."""
+    key = os.path.abspath(path)
+    for kind in ("read", "write"):
+        said = _said.get((key, kind))
+        if said:
+            return said[1]
+    return ""
 
 
 def _say_once(path: Path, message: str, kind: str = "read") -> None:
