@@ -253,8 +253,9 @@ can work in the window one day and the terminal the next and find everything whe
 
 ## Updating and removing
 
-To update, run the same install line again. It fetches the newest version of everything and leaves
-the rest alone — nothing is asked twice, and the sign-ins it already has are kept.
+To update, open the diagnostics window, go to **Updates** and press **Update TCC** and **Update the
+method**. Or run the install line again as this README has it on GitHub: that copy names the newest
+release. Nothing is asked twice, and the sign-ins already there are kept.
 
 To remove, on macOS:
 

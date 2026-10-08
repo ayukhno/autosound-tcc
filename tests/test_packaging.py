@@ -143,12 +143,20 @@ def test_asking_for_the_window_without_it_prints_what_to_type():
     # own. `autosound-tcc` is not on PyPI, so the line printed here has to carry the git URL —
     # caught by actually running it (2026-08-12).
     assert "git+https://" in proc.stderr, "the printed command must be one that works"
+    # And the release that is running, read on the light install this sentence is for (R-bh).
+    assert f"@v{_pyproject_version()}" in proc.stderr, proc.stderr
+
+
+def _pyproject_version() -> str:
+    """The version as a checkout's code reads it (`install_report.app_version`): pyproject's."""
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return data["project"]["version"]
 
 
 def _hint_no_window(monkeypatch) -> str:
     from autosound_tcc import app
 
-    return app._NO_GUI.format(error=ImportError("No module named 'PySide6'"))
+    return app._no_gui().format(error=ImportError("No module named 'PySide6'"))
 
 
 def _hint_no_claude(monkeypatch) -> str:
@@ -178,25 +186,47 @@ def _hint_no_scipy(monkeypatch) -> str:
     return protective.reason()
 
 
-@pytest.mark.parametrize(
+#: The four places TCC tells a person what to type, each read the way that person reads it.
+_HINTS = pytest.mark.parametrize(
     "hint",
     [_hint_no_window, _hint_no_claude, _hint_bundle_with_nothing_installed, _hint_no_scipy],
     ids=["no-window", "no-claude-sdk", "macos-bundle-nothing-installed", "no-scipy"])
+
+
+@_HINTS
 def test_every_install_hint_is_the_install_command(hint, monkeypatch):
     """tcc#174: four places told a person what to type, each a literal of its own, and none was
     the command the installer runs. The window and scipy ones asked for `[gui]` alone and the
     Claude one for `[claude]` alone, where the install is `[gui,claude]`; none named
     `--python 3.12` (`updates.TCC_INSTALL_COMMAND` says what went wrong without it); and the
     bundle's alert had no git URL either, which for a package that is not on PyPI is "no such
-    package"."""
+    package".
+
+    And each names the release that is running (R-bh), not the default branch: the ref-less form
+    is the fallback for a build with no release to name, never the silent default (F-024)."""
     from autosound_tcc.core import updates
 
+    version = _pyproject_version()
     said = hint(monkeypatch)
 
     assert "--python 3.12" in said, said
     assert "git+https://" in said, said
     assert "[gui,claude]" in said, said
-    assert updates.tcc_install_command() in said, said
+    assert f"@v{version}" in said, said
+    assert updates.tcc_install_command(f"v{version}") in said, said
+
+
+@_HINTS
+def test_a_build_that_is_not_a_release_is_told_the_ref_less_command(hint, monkeypatch):
+    """R-bh: `1.1.3.dev0` names no release, so no hint can be pinned to one, and each falls back
+    to the ref-less form — the offline path that form is kept for."""
+    from autosound_tcc.core import install_report, updates
+
+    monkeypatch.setattr(install_report, "app_version", lambda: "1.1.3.dev0")
+    said = hint(monkeypatch)
+
+    assert updates.tcc_install_command("") in said, said
+    assert "@v" not in said, said
 
 
 def test_the_two_sizes_are_declared_the_way_the_split_assumes():

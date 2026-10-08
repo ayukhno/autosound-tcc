@@ -92,13 +92,18 @@ def test_a_launcher_path_with_a_space_stays_one_word(tmp_path):
     assert "'/Users/o'\"'\"'brien/My Apps/autosound-tcc'" in body
 
 
-def test_the_not_installed_alert_says_the_install_command_through_both_quotings(tmp_path):
+def test_the_not_installed_alert_says_the_install_command_through_both_quotings(tmp_path,
+                                                                                 monkeypatch):
     """tcc#174: the alert is AppleScript inside the shell's single quotes, and the install command
     carries double quotes of its own. Put in bare, its first quote would end AppleScript's string
     in the middle of the command, and the alert would not compile at all.
 
     Read back the way the two readers read it: the shell's words first, then AppleScript's string
-    literal, which a double quote may only end and a backslash escapes."""
+    literal, which a double quote may only end and a backslash escapes. The version is pinned so
+    the command is known exactly: the release of the TCC that built the bundle (R-bh)."""
+    from autosound_tcc.core import install_report
+
+    monkeypatch.setattr(install_report, "app_version", lambda: "9.8.7")
     bundle, _ = _bundle(tmp_path)
     body = (bundle / "Contents" / "MacOS" / "autosound-tcc").read_text(encoding="utf-8")
     line = next(line for line in body.splitlines() if "osascript" in line)
@@ -109,7 +114,7 @@ def test_the_not_installed_alert_says_the_install_command_through_both_quotings(
     assert literal, f"not one AppleScript string after `message`: {argv[2]}"
     said = re.sub(r"\\(.)", r"\1", literal.group(1))
 
-    assert said == "Run the installer again, or: " + updates.tcc_install_command()
+    assert said == "Run the installer again, or: " + updates.tcc_install_command("v9.8.7")
 
 
 def test_building_twice_over_the_same_bundle_is_fine(tmp_path):

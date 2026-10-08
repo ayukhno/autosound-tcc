@@ -29,11 +29,17 @@ from typing import Iterable, Optional
 
 from autosound_tcc.core import child, updates
 
-#: The command that installs it, kept in one place so the message never drifts: the installer's own.
-#: It was a literal here that asked for `[claude]` alone and named no `--python 3.12`, where the
-#: install is `[gui,claude]` on 3.12 (tcc#174).
-INSTALL_HINT = updates.tcc_install_command()
-#: What a person types to fix a logged-out CLI. Same reasoning as `INSTALL_HINT`.
+
+def install_hint() -> str:
+    """The command that installs it, kept in one place so the message never drifts: the
+    installer's own, for the release that is running. It was a literal here that asked for
+    `[claude]` alone and named no `--python 3.12`, where the install is `[gui,claude]` on 3.12
+    (tcc#174). Built when it is said, because the version it names is read then — a constant
+    would keep whatever the version read as when this module was first imported."""
+    return updates.tcc_install_command(updates.running_tcc_tag())
+
+
+#: What a person types to fix a logged-out CLI. Kept in one place, like `install_hint`.
 LOGIN_HINT = "claude auth login"
 #: Short on purpose: this runs on a worker thread at launch, and a CLI that does not answer in
 #: two seconds has told us what we need ("cannot tell"), which is not a failure state.
@@ -180,7 +186,7 @@ def bind(names: Iterable[str], namespace: dict) -> None:
     except ImportError as exc:
         raise ClaudeSdkMissing(
             "the Claude Agent SDK is not installed, so Claude routes are unavailable.\n"
-            f"    {INSTALL_HINT}\n"
+            f"    {install_hint()}\n"
             "Other models (Gemini, Codex, …) run through `omp` and need no Python package."
         ) from exc
     for name in names:

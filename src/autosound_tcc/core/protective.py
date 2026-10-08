@@ -109,10 +109,11 @@ def reason() -> str:
         from scipy import signal  # noqa: F401
     except ImportError:
         # scipy is in the `gui` extra, so the installer's own command brings it — that command,
-        # not a literal of this file's, which asked for `[gui]` alone (tcc#174).
+        # for the release that is running, not a literal of this file's, which asked for `[gui]`
+        # alone (tcc#174).
         return (
             "taking a protective filter out of a curve needs scipy, and this installation does "
-            f"not have it: {updates.tcc_install_command()}"
+            f"not have it: {updates.tcc_install_command(updates.running_tcc_tag())}"
         )
     return "" if hasattr(module, "de_embed") else "this skill's protective module has no de_embed"
 

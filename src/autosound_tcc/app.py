@@ -32,6 +32,7 @@ APP_ICNS = APP_ICON.with_suffix(".icns")
 #: .icns, so neither installer keeps a copy of the artwork.
 APP_ICO = APP_ICON.with_suffix(".ico")
 
+
 #: What to say when the window is asked for and the toolkit that draws it is not installed.
 #: `autosound-tcc` ships in two sizes — the CLI half needs `claude-agent-sdk` and nothing else,
 #: the window needs PySide6 + pyqtgraph, which is hundreds of megabytes. A person who installed
@@ -43,16 +44,25 @@ APP_ICO = APP_ICON.with_suffix(".ico")
 #: printed here has to be a line somebody can paste.
 #: And the line is the installer's own command, not one of this file's (tcc#174): the literal that
 #: stood here asked for `[gui]` alone and named no `--python 3.12`, where the install is
-#: `[gui,claude]` on 3.12. This text is a `str.format` template whose one placeholder is `{error}`,
-#: so a brace in the command is doubled on the way in rather than read as a second placeholder.
-_NO_GUI = (
-    "autosound-tcc: the graphical window is not installed.\n"
-    "\n"
-    "    " + updates.tcc_install_command().replace("{", "{{").replace("}", "}}") + "\n"
-    "\n"
-    "(The CLI half — `tuning-session`, `dsp-profile-interview` — works without it.)\n"
-    "Missing: {error}"
-)
+#: `[gui,claude]` on 3.12. It names the release that is running (`updates.running_tcc_tag`).
+def _no_gui() -> str:
+    """The sentence above, as a `str.format` template whose one placeholder is `{error}` — so a
+    brace in the command is doubled on the way in rather than read as a second placeholder.
+
+    Built when it is said, not as a constant at import: this module is imported lazily from three
+    places, and a constant would keep whatever the version read as at the first import — in a test
+    run, one test's stub, for every test after it in that process. It also spares every start a
+    metadata read for a sentence most starts never print.
+    """
+    command = updates.tcc_install_command(updates.running_tcc_tag())
+    return (
+        "autosound-tcc: the graphical window is not installed.\n"
+        "\n"
+        "    " + command.replace("{", "{{").replace("}", "}}") + "\n"
+        "\n"
+        "(The CLI half — `tuning-session`, `dsp-profile-interview` — works without it.)\n"
+        "Missing: {error}"
+    )
 
 
 def _make_splash(QtCore, QtGui, QtWidgets):
@@ -500,7 +510,7 @@ def main() -> int:
         from autosound_tcc.ui.tcc import i18n
         from autosound_tcc.ui.tcc.app_settings import get_settings
     except ImportError as exc:
-        print(_NO_GUI.format(error=exc), file=sys.stderr)
+        print(_no_gui().format(error=exc), file=sys.stderr)
         return 2
     if args.project_dir is not None:
         # Into the environment rather than a private variable: `AUTOSOUND_PROJECT_DIR` is the
@@ -573,7 +583,7 @@ def main() -> int:
     except ImportError as exc:
         if splash is not None:
             splash.close()
-        print(_NO_GUI.format(error=exc), file=sys.stderr)
+        print(_no_gui().format(error=exc), file=sys.stderr)
         return 2
     # Before the window, not inside it: `MainWindow.__init__` binds the MCP server, the session
     # registry and the file watchers to one folder, so there is no meaningful window to build

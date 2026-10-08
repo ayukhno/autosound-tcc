@@ -153,13 +153,13 @@ def _not_installed_alert() -> str:
     """The launcher's line for a bundle with nothing to start: an alert that says what to type.
 
     What to type is the installer's own command (tcc#174) — the literal that stood here named no
-    git URL and no `--python 3.12`, so it could not have worked. That command carries double
-    quotes of its own, so AppleScript's string is escaped for them, and the whole script goes to
-    `osascript -e` as one shell word.
+    git URL and no `--python 3.12`, so it could not have worked — for the release of the TCC that
+    builds the bundle. That command carries double quotes of its own, so AppleScript's string is
+    escaped for them, and the whole script goes to `osascript -e` as one shell word.
     """
     title = _applescript_string("Autosound TCC is not installed")
     message = _applescript_string(
-        "Run the installer again, or: " + updates.tcc_install_command())
+        "Run the installer again, or: " + updates.tcc_install_command(updates.running_tcc_tag()))
     return "/usr/bin/osascript -e " + shlex.quote(f"display alert {title} message {message}")
 
 

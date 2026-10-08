@@ -106,6 +106,20 @@ def tcc_install_command(tag: str = "") -> str:
     )
 
 
+def running_tcc_tag() -> str:
+    """The release tag of the TCC that is running — `v1.1.2` — or "" when its version names none.
+
+    What every install hint passes to `tcc_install_command` (tcc#174): a person who follows one
+    gets the release they are running, with the extras and the interpreter the installer gives,
+    not whatever is on the default branch that day. A version that is not release-shaped by
+    `_release_key`'s rule (a `1.1.3.dev0` build, or one that cannot be told) has no tag to name,
+    and gets the ref-less form: the fallback that form is kept for. `install_report.app_version`
+    reads it without Qt, so this works on the light install too.
+    """
+    tag = f"v{install_report.app_version()}"
+    return tag if _release_key(tag) is not None else ""
+
+
 #: What the update window says, for a caller that passes no words of its own. The panel passes the
 #: reader's language (`updTerm*` in `ui/tcc/i18n.py`); this module stays language-free, the way its
 #: reason KEYS do (see `Status.reason`).
