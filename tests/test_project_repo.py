@@ -87,6 +87,36 @@ def test_an_approved_copy_without_the_command_is_too_old_for_the_backup(tmp_path
     assert project_repo.init(project).too_old
 
 
+@pytest.mark.parametrize("script, answer", [
+    pytest.param("import sys; sys.stderr.write('boom'); sys.exit(3)",
+                 project_repo.RepoResult(False, "boom"), id="exits non-zero"),
+    pytest.param("import sys; sys.exit(3)",
+                 project_repo.RepoResult(False, "project_repo.py status exited 3"),
+                 id="exits non-zero, saying nothing"),
+    pytest.param("print('not json')",
+                 project_repo.RepoResult(
+                     False, "project_repo.py status did not answer with a status: not json"),
+                 id="not JSON"),
+    pytest.param("print('[1]')",
+                 project_repo.RepoResult(
+                     False, "project_repo.py status did not answer with a status: [1]"),
+                 id="JSON that is no status"),
+    pytest.param("print('{\"repo\": true, \"gh\": \"absent\", \"offer\": null}')",
+                 {"repo": True, "gh": "absent", "offer": None}, id="a status"),
+])
+def test_the_backups_second_step_reads_a_status_only_where_the_method_gave_one(
+        tmp_path, monkeypatch, script, answer):
+    """M43: the backup's second step reads what `project_repo.py status --json` answers, and a run
+    that failed or printed no status used to read as an empty status — «gh is not signed in» to
+    the window (d8c8feb turned that round, and pinned only the refused and too-old answers). A
+    failure is a failed answer in the method's words, or the exit code when it said none;
+    `status` keeps its one «cannot say», None. The method's runner is real: a fake `status`."""
+    _own_copy(tmp_path, monkeypatch, script)
+
+    assert project_repo.backup_status(tmp_path / "car") == answer
+    assert project_repo.status(tmp_path / "car") == (answer if isinstance(answer, dict) else None)
+
+
 def test_only_a_gh_line_is_ever_run(tmp_path):
     result = project_repo.run_offer("rm -rf /", tmp_path)
     assert not result.ok and "not a gh command" in result.said
@@ -196,7 +226,9 @@ def test_the_second_step_does_not_say_there_is_a_next(tmp_path, monkeypatch):
 
 def test_the_backup_runs_only_after_yes(tmp_path, monkeypatch):
     """...and not at all for a project whose copy TCC will not run (#169): the press says the
-    binding's sentence — it read «gh is not signed in» — and asks nothing."""
+    binding's sentence — it read «gh is not signed in» — and asks nothing. Nor where the method
+    offers no command (M43): gh not installed and gh not signed in — what most people pressing
+    «(1/2)» meet — are each said in their own sentence, with nothing asked or run."""
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     window = _window(tmp_path, monkeypatch)
     window._set_project_params(None)
@@ -214,15 +246,21 @@ def test_the_backup_runs_only_after_yes(tmp_path, monkeypatch):
     assert window._status_strip.text() == (
         f"Did not work: {method_binding.for_project(tmp_path).reason}")
     entry.rmdir()
-    offer = f'gh repo create car --private --source "{tmp_path}" --push'
-    monkeypatch.setattr(project_repo, "backup_status",
-                        lambda project: {"gh": "signed-in", "offer": offer})
     ran = []
     monkeypatch.setattr(project_repo, "run_offer", lambda o, p: ran.append(o) or
                         project_repo.RepoResult(True, "created"))
     asked = []
     monkeypatch.setattr(QMessageBox, "exec", lambda self: asked.append(self.text()) or
                         QMessageBox.StandardButton.No)
+    for gh, sentence in (("absent", "gitNoGh"), ("signed-out", "gitGhSignedOut")):
+        monkeypatch.setattr(project_repo, "backup_status", lambda project, gh=gh: {
+            "repo": True, "remote": None, "gh": gh, "init": None, "offer": None})
+        _button(window, "Back up to GitHub (1/2)").click()
+        assert window._status_strip.text() == i18n.t(sentence), gh
+    assert (asked, ran) == ([], []), "no command offered: nothing asked, nothing run"
+    offer = f'gh repo create car --private --source "{tmp_path}" --push'
+    monkeypatch.setattr(project_repo, "backup_status",
+                        lambda project: {"gh": "signed-in", "offer": offer})
     _button(window, "Back up to GitHub (1/2)").click()
     assert asked and offer in asked[0], "the command is shown whole before anything runs"
     assert ran == [], "no means nothing is created"
