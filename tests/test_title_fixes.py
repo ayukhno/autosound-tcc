@@ -42,6 +42,8 @@ def test_another_series_is_no_typo_and_the_closest_name_wins():
 def test_supersede_calls_the_method_and_a_round_without_the_title_is_fine(tmp_path, monkeypatch):
     """Exit 1 with the method's own refusal — the `error: …` line `process.py`'s `_main` prints —
     is the round that never took the title: done, the rename was the whole fix."""
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
     seen = []
 
     def fake_run(argv, **kwargs):

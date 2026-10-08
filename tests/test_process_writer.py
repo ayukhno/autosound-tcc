@@ -639,9 +639,14 @@ def test_every_flag_tcc_sends_is_pinned_and_the_vendored_copy_knows_each(
     assert sorted(fn.__name__ for fn, _args, _kw in calls) == sorted(writers), "a writer left out"
 
     for fn, args, kwargs in calls:
-        optional = {name for name, param in inspect.signature(fn).parameters.items()
+        parameters = inspect.signature(fn).parameters
+        optional = {name for name, param in parameters.items()
                     if param.default is not inspect.Parameter.empty}
         assert optional <= set(kwargs), f"{fn.__name__}: {sorted(optional - set(kwargs))} not set"
+        # Given, and not as its default (M33): an option at its default sends nothing, and the flag
+        # it would send can still reach the set below from another writer — `--source` does.
+        idle = sorted(name for name in optional if kwargs[name] == parameters[name].default)
+        assert not idle, f"{fn.__name__}: {idle} given their defaults"
         fn(project, *args, **kwargs)
 
     assert len(sent) == len(calls), "every writer reached its child: the check refused none"

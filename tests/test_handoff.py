@@ -33,7 +33,11 @@ def test_a_phase_is_finished_when_no_step_is_left_open():
 
 
 def _the_method_answers(monkeypatch, code: int, out: str = "", err: str = "") -> None:
-    """The method's child, as `method_cli` runs it, exiting `code` having printed `out`/`err`."""
+    """The method's child, as `method_cli` runs it, exiting `code` having printed `out`/`err`.
+    `spawn` starts nothing for a script that is not there, so with no method checked out the test
+    is skipped rather than read on `ScriptMissing` (M5)."""
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
     monkeypatch.setattr(method_cli.child, "run_bounded", lambda argv, **k: subprocess.CompletedProcess(
         argv, code, out, err))
 
@@ -91,6 +95,8 @@ def test_a_handoff_that_got_no_answer_says_why_and_not_update_the_method(
     answer — each read as None, and the window said «Update the method» to a method that was
     current, which updating cannot fix. Each says what happened now, in the method's or TCC's
     words; only a method too old for the check is left to «update the method»."""
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
     monkeypatch.setattr(method_cli.child, "run_bounded", child)
 
     answer, why = handoff.ask(tmp_path)
