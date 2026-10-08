@@ -478,7 +478,10 @@ class NewProjectDialog(QDialog):
         eight git children, and `gh api user` for up to 30 s where git has no identity -- all on
         the GUI thread. So a question asked again is answered from memory: a box ticked and
         unticked inside one pause, the same folder picked twice, a redraw nothing changed.
-        `_preview_key` says what counts as the same question. A preview that raised is not kept.
+        `_preview_key` says what counts as the same question. Only an ok answer is kept: a refusal
+        can be passing -- an antivirus holding the temporary file at `os.replace`, a full temporary
+        disk -- and every refusal in `seed()` comes before `project_repo.init`, so asking again
+        starts no git child. Nor is a preview that raised.
         """
         seeder = _seeder()
         if seeder is None:
@@ -505,7 +508,7 @@ class NewProjectDialog(QDialog):
                 answer = report, _fs_carried(target)
             except Exception:      # noqa: BLE001 — a preview must never take the dialog down
                 return None, None
-        if key is not None:
+        if key is not None and report is not None and report.ok:
             self._preview_memo = (key, answer)
         return answer
 
@@ -521,9 +524,18 @@ class NewProjectDialog(QDialog):
         the method again while the dialog is open (#126).
 
         Left out, because they cannot change what the note draws -- whether the seed is ok, its
-        counts, the Fs: the source's `process/` record and whether its `measurements_repo` path
-        exists (both only shape the import record, which the method's validator takes as it
-        comes), today's date, and what `project_repo.init` finds.
+        counts, the Fs:
+
+        * the source's `process/` record. It lands in the import record as
+          `protective_by_channel()` rows, `{legs, round, version, source}`. `save()`'s validator
+          walks every fact wrapper (`{value, source, at}`) in the file, the import record's
+          included, and refuses one whose `origin` it does not know; the rows are never wrappers,
+          and their `legs` is one only in a journal written by hand. `_protective_history`
+          swallows its own errors besides. Were the method to carry wrappers there, this record
+          would belong in the key;
+        * whether its `measurements_repo` path exists: that moves one string between `paths` and
+          the import record, and the validator has no rule for `paths`;
+        * today's date, and what `project_repo.init` finds (`report.repo`, `.git` in `written`).
         """
         try:
             names = ("project.json", seeder.PROFILE_FILE, *seeder.PROSE_FILES)

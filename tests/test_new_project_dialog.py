@@ -6,10 +6,14 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
+import time
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.ui.tcc import new_project_dialog as npd  # noqa: E402
@@ -17,6 +21,39 @@ from autosound_tcc.ui.tcc import new_project_dialog as npd  # noqa: E402
 
 def _app() -> QApplication:
     return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(autouse=True)
+def _no_preview_outlives_its_test(monkeypatch):
+    """The preview timer of every dialog a test here built is stopped when the test ends (review of
+    #172, M-4). A dialog arms it while it is built -- `_on_profile_selected` writes vendor and model
+    -- and one left waiting fired in whichever later test turned the event loop, through that test's
+    `_seeder`: a stub's count one too many, or with nothing patched the real seed and its git
+    children, on another test's time. Only the timer: what a test leaves is not deleted (F-053)."""
+    built: list = []
+    build = npd.NewProjectDialog.__init__
+
+    def registered(self, *args, **kwargs):
+        build(self, *args, **kwargs)
+        built.append(self)
+
+    monkeypatch.setattr(npd.NewProjectDialog, "__init__", registered)
+    yield
+    for dlg in built:
+        try:
+            dlg._seed_note_timer.stop()
+        except RuntimeError:  # its C++ half is gone already, and the timer with it
+            pass
+
+
+@pytest.fixture(autouse=True)
+def _previews_under_the_tests_own_folder(tmp_path, monkeypatch):
+    """Python's temporary folder under `tmp_path` for every test here (review of #172, M-6): the
+    real seeder's preview makes its temporary folder a git repository, and a test's git runs only
+    on repositories under `tmp_path` (the plan's global constraints)."""
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
 
 
 def test_create_disabled_until_folder_vendor_and_model_are_filled(tmp_path):
@@ -269,10 +306,6 @@ def _settled(dlg):
 def _after_the_pause(dlg) -> None:
     """Let the note's timer run out as it does when typing stops: for real, through the event loop,
     and bounded, so a timer that never fires fails here instead of holding the run."""
-    import time
-
-    from PySide6.QtTest import QTest
-
     assert dlg._seed_note_timer.isActive(), "nothing is waiting for the pause"
     deadline = time.monotonic() + 5.0
     while dlg._seed_note_timer.isActive():
@@ -282,15 +315,14 @@ def _after_the_pause(dlg) -> None:
 
 def _past_the_pause() -> None:
     """The event loop run for longer than the pause: whatever was waiting on it has fired."""
-    from PySide6.QtTest import QTest
-
     QTest.qWait(npd._SEED_NOTE_DELAY_MS + 150)
 
 
 def _seeds_of(seeder, source) -> list:
     """The flags of each seed asked for `source`. Counted by folder, because a pause runs the event
-    loop, and a dialog an earlier test left alive may draw its own note in it -- through this
-    test's seeder, which `_seeder` now answers for every dialog."""
+    loop, and a dialog left alive elsewhere with its timer running would draw its own note in it
+    -- through this test's seeder, which `_seeder` now answers for every dialog. This file's own
+    are stopped (`_no_preview_outlives_its_test`); another file's need not be."""
     return [kwargs for src, _into, kwargs in seeder.seeded_into if src == str(source)]
 
 
@@ -422,8 +454,8 @@ def test_typing_a_dsp_name_does_not_run_a_seed_per_character(monkeypatch, tmp_pa
     assert len(seeder.seeded_into) == before + 1, "one seed per pause, not per keystroke"
 
 
-def _source_project(tmp_path):
-    source = tmp_path / "source"
+def _source_project(tmp_path, name="source"):
+    source = tmp_path / name
     source.mkdir()
     (source / "project.json").write_text('{"schema_version": 3}', encoding="utf-8")
     return source
@@ -443,6 +475,26 @@ def test_a_second_identical_preview_runs_no_seed(tmp_path, monkeypatch):
     assert len(_seeds_of(seeder, source)) == seeded, "nothing it reads changed: no second seed"
     assert dlg._seed_summary.text() == drawn, "and the same answer is drawn"
     assert seeded == 1, "the source and the DSP fields set before the pause were one preview"
+
+
+@pytest.mark.parametrize("answer", ["refused", "none"])
+def test_an_answer_that_is_not_ok_is_asked_again(tmp_path, monkeypatch, answer):
+    """Only an ok answer is remembered (review of #172, M-1). A refusal can be passing -- an
+    antivirus holding the temporary file at `os.replace`, a full temporary disk -- and kept, it
+    left the note without its «Travels» line until something else changed. Every refusal in
+    `seed()` comes before `project_repo.init`, so asking again starts no git child."""
+    source = _source_project(tmp_path)
+    report = None
+    if answer == "refused":
+        report = _Report(4)
+        report.ok = False
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), report)
+    dlg = _dialog_on(source, seeder, monkeypatch)
+    seeded = len(_seeds_of(seeder, source))
+
+    dlg._refresh_seed_note_now()
+
+    assert len(_seeds_of(seeder, source)) == seeded + 1, "a not-ok answer is asked again"
 
 
 def test_a_changed_tick_runs_one_seed_after_the_pause(tmp_path, monkeypatch):
@@ -480,6 +532,65 @@ def test_five_quick_edits_of_the_seed_source_run_one_seed_after_the_pause(tmp_pa
     _after_the_pause(dlg)
     mine = [src for src, _into, _kw in seeder.seeded_into if src.startswith(str(tmp_path))]
     assert mine == [typed], "one seed after it, of the path as the last edit left it"
+
+
+#: Everything that asks for the note, each as one change a person makes (review of #172, M-2).
+_TRIGGERS = {
+    "findings tick": lambda dlg, tmp_path: dlg._seed_findings.setChecked(True),
+    "fs tick": lambda dlg, tmp_path: dlg._seed_fs.setChecked(False),
+    "seat": lambda dlg, tmp_path: dlg._seat_combo.setCurrentIndex(
+        dlg._seat_combo.findData("passenger")),
+    "profile": lambda dlg, tmp_path: dlg._profile_combo.setCurrentIndex(
+        dlg._profile_combo.findData(None)),
+    "source": lambda dlg, tmp_path: dlg._seed_edit.setText(str(_source_project(tmp_path, "other"))),
+    "vendor": lambda dlg, tmp_path: dlg._vendor_edit.setText("Mosconi"),
+    "model": lambda dlg, tmp_path: dlg._model_edit.setText("M7"),
+}
+
+
+@pytest.mark.parametrize("trigger", list(_TRIGGERS))
+def test_every_trigger_waits_for_the_pause_then_seeds_once(tmp_path, monkeypatch, trigger):
+    """Each of the seven things that ask for the note goes through the one timer (#172): wired back
+    to an immediate redraw, any one of them is a seed per change again."""
+    source = _source_project(tmp_path)
+    seeder = _StubSeeder(_Described("VW", "Helix DSP Ultra S", 4), _Report(4))
+    dlg = _dialog_on(source, seeder, monkeypatch)
+
+    def seeds() -> int:
+        return len([src for src, _into, _kw in seeder.seeded_into
+                    if src.startswith(str(tmp_path))])
+
+    seeded = seeds()
+    _TRIGGERS[trigger](dlg, tmp_path)
+    assert seeds() == seeded, f"the {trigger} waits for the pause"
+    assert dlg._seed_note_timer.isActive(), f"the {trigger} asked for the pause"
+    _after_the_pause(dlg)
+    assert seeds() == seeded + 1, f"one seed for the {trigger}, once the pause is over"
+
+
+#: The dialog the first test of the pair below leaves with its preview waiting.
+_LEFT_WAITING: list = []
+
+
+def test_a_test_may_end_with_its_preview_still_waiting():
+    """First of a pair (review of #172, M-4): the dialog is built, a field asks for the note, and
+    the test ends inside the pause -- as most tests here do."""
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    dlg._vendor_edit.setText("Mosconi")
+    assert dlg._seed_note_timer.isActive()
+    _LEFT_WAITING.append(dlg)
+
+
+def test_the_next_test_finds_that_preview_stopped():
+    """Second of the pair, and a check only when both run in one process -- a serial run, or the
+    file's shard on one worker; split across workers it has nothing to look at. A timer left
+    running fires in whichever test next turns the event loop, through that test's `_seeder`."""
+    try:
+        assert not any(dlg._seed_note_timer.isActive() for dlg in _LEFT_WAITING), \
+            "a preview outlived its test"
+    finally:
+        _LEFT_WAITING.clear()
 
 
 @pytest.mark.parametrize("name", ["project.json", "dsp_profile.json", "autosound_context.md"])
@@ -654,6 +765,26 @@ def test_the_note_counts_the_fs_the_box_carries(tmp_path, monkeypatch):
 
     dlg._seed_fs.setChecked(False)
     assert counted not in _settled(dlg)._seed_summary.text(), "unticked, nothing of it is promised"
+
+
+def test_the_real_preview_seeds_under_the_tests_own_folder(tmp_path, monkeypatch):
+    """The real seeder's preview makes its temporary folder a git repository -- `git init`, a
+    commit -- and a test's git runs only on repositories under `tmp_path` (the plan's global
+    constraints; review of #172, M-6)."""
+    seeder = npd._seeder()
+    if seeder is None:
+        pytest.skip("the vendored skill is not checked out")
+    into: list = []
+    seed = seeder.seed
+    monkeypatch.setattr(seeder, "seed", lambda source, target, **kwargs:
+                        into.append(Path(target)) or seed(source, target, **kwargs))
+    _app()
+    dlg = npd.NewProjectDialog(seed_first=True)
+    dlg._seed_edit.setText(str(_passat_with_fs(tmp_path)))
+    _settled(dlg)
+
+    assert into, "the preview was a real seed"
+    assert all(target.resolve().is_relative_to(tmp_path.resolve()) for target in into), into
 
 
 def test_what_travels_is_said_on_one_line_the_fs_its_last_part(tmp_path, monkeypatch):
