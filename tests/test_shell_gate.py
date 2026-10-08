@@ -632,4 +632,27 @@ def test_a_gate_picked_this_run_outranks_the_strictest(tmp_path, app_log_told):
     assert not project_settings.pick(tmp_path, "gate", shell_gate.GATE_AUTO).landed
 
     assert shell_gate.project_gate(tmp_path, shell_gate.GATE_FOREIGN) == shell_gate.GATE_AUTO
-    assert shell_gate.STRICTEST_SAID.split("{")[0] not in " ".join(app_log_told), app_log_told
+    strictest = shell_gate.STRICTEST_SAID.format(path=project_settings.path_for(tmp_path))
+    assert strictest not in app_log_told, app_log_told
+
+
+def test_the_first_strictest_answer_is_handed_to_whoever_runs_a_session(tmp_path, app_log_told):
+    """The re-review, N1: R-bt was said while a session already running kept its gate, so the strip
+    named a gate that session did not run on. The first read that answers the strictest — the same
+    first that says it — calls `on_strictest`, for the window to push it there; the next does not,
+    and a good read in between makes the next stretch a first again."""
+    from autosound_tcc.core import project_settings, shell_gate
+
+    store = project_settings.path_for(tmp_path)
+    store.mkdir()
+    pushed = []
+
+    for _ in range(2):
+        assert shell_gate.project_gate(tmp_path, "", on_strictest=lambda: pushed.append(1)) \
+            == shell_gate.GATE_WRITES
+    assert pushed == [1]
+    store.rmdir()
+    shell_gate.project_gate(tmp_path, "", on_strictest=lambda: pushed.append(2))
+    store.mkdir()
+    shell_gate.project_gate(tmp_path, "", on_strictest=lambda: pushed.append(3))
+    assert pushed == [1, 3]

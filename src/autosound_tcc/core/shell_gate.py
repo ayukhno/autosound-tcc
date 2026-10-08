@@ -66,10 +66,12 @@ def effective_gate(project_choice: str = "", machine_choice: str = "") -> str:
 #: Which field of the project's own store holds its gate (`main_window._GATE_KEY`).
 PROJECT_KEY = "gate"
 
-#: What the strip is told when the project's gate cannot be read (R-bt): which gate the session
-#: runs on, and why. English, as every sentence `core/` writes is.
-STRICTEST_SAID = ("this session asks before every write — the strictest gate — because {path}, "
-                  "which holds this project's gate, could not be read")
+#: What the strip is told when the project's gate cannot be read (R-bt): which gate runs, why, and
+#: until when — so the line, which stands until its ✕, stays true once a gate is picked: the pick
+#: holds for the run and wins (the re-review, N1). English, as every sentence `core/` writes is.
+STRICTEST_SAID = ("{path} holds this project's gate and could not be read, so TCC asks before "
+                  "every write — the strictest gate — until a gate is picked or the file can be "
+                  "read again")
 
 #: The stores the strictest gate has been said for since each was last read: said once per
 #: stretch of not being readable, not once per permission judged.
@@ -77,14 +79,19 @@ _strictest_said: set[str] = set()
 _strictest_lock = threading.Lock()
 
 
-def project_gate(tcc_dir: Path, machine_choice: str = "") -> str:
+def project_gate(tcc_dir: Path, machine_choice: str = "",
+                 on_strictest: Optional[Callable[[], None]] = None) -> str:
     """`effective_gate` over the project's own store: a gate picked this run first, saved or not
     (`project_settings.get`, #173 I2), then the project's, the machine's, the default.
 
     A store that is there and cannot be read is no preference of anyone's: the gate it holds is
     unknown, and the machine's answer ran a car set to ask about every write on a looser one,
     with nothing said (I2). So the strictest, `writes`, until it can be read (R-bt) — and said,
-    once for each stretch of not being readable, with the store's own refusal said beside it."""
+    once for each stretch of not being readable, with the store's own refusal said beside it.
+
+    `on_strictest` hears that same first answer: the window pushes the strictest to a session
+    already running on another gate, so the session, the menu and the strip agree (the re-review,
+    N1). Called after the stretch is marked, so a push that reads the gate again is not a first."""
     store = str(project_settings.path_for(tcc_dir))
     try:
         chosen = project_settings.get(tcc_dir, PROJECT_KEY, "", strict=True) or ""
@@ -94,6 +101,8 @@ def project_gate(tcc_dir: Path, machine_choice: str = "") -> str:
             _strictest_said.add(store)
         if new:
             app_log.report(STRICTEST_SAID.format(path=store))
+            if on_strictest is not None:
+                on_strictest()
         return GATE_WRITES
     with _strictest_lock:
         _strictest_said.discard(store)

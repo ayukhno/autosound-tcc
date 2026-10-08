@@ -2255,14 +2255,20 @@ def test_changing_the_permission_mode_reaches_the_running_session(tmp_path, monk
 
     store = project_settings.path_for(tmp_path)
     store.unlink()
-    store.mkdir()
+    store.mkdir()  # the store turns unreadable while the session runs
+    window._set_project_params(getattr(window, "_view", None), reuse_git=True)  # a project reload
+    # The re-review, N1: the reload's read is the first to answer the strictest, and the running
+    # session gets it too — the menu, the config row and the session agree on the gate the strip
+    # names. It kept the gate it was built with, while the strip said every write asks.
+    assert Worker.session.gate == omp_session.GATE_WRITES
     window._refresh_project_button()
     assert window._effective_gate() == omp_session.GATE_WRITES
     assert window._gate_actions[omp_session.GATE_WRITES].isChecked()
     strip = window._status_strip
     said = [strip.text(), *strip.waiting()]
+    strictest = shell_gate.STRICTEST_SAID.format(path=store)
     assert str(store) in said[0], said
-    assert any(shell_gate.STRICTEST_SAID.format(path=store) in line for line in said), said
+    assert any(strictest in line for line in said), said
 
     # Then the pick: it answers though the report is spent, and it is in force — the menu, the
     # running session and the next one — though nothing reached the disk.
@@ -2272,6 +2278,10 @@ def test_changing_the_permission_mode_reaches_the_running_session(tmp_path, monk
     assert strip.waiting()[-1] == answer and len(window._dialog._bubbles) == bubbles + 1
     assert Worker.session.gate == omp_session.GATE_FOREIGN
     assert window._gate_actions[omp_session.GATE_FOREIGN].isChecked()
+    # The R-bt line still stands, and it stays true after the pick (N1): it says the strictest
+    # holds until a gate is picked or the file can be read, not that this session asks.
+    assert any(strictest in line for line in [strip.text(), *strip.waiting()])
+    assert "until a gate is picked" in strictest, strictest
     effort = window._ai_effort_combo
     other = next(i for i in range(effort.count()) if effort.itemData(i) != effort.currentData())
     level = effort.itemData(other)

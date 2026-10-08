@@ -5649,9 +5649,9 @@ class MainWindow(QMainWindow):
     # ---- the project menu ---------------------------------------------------
 
     def _effective_gate(self) -> str:
-        """The mode this project runs in (`shell_gate.project_gate`: picked, project, machine,
-        default — and the strictest while its store cannot be read, R-bt)."""
-        return shell_gate.project_gate(config.tcc_dir(), str(self._settings.value(_MACHINE_GATE_KEY, "") or ""))
+        """The mode this project runs in: `shell_gate.project_gate`, its strictest pushed (N1)."""
+        return shell_gate.project_gate(config.tcc_dir(), str(self._settings.value(_MACHINE_GATE_KEY, "") or ""),
+                                       on_strictest=self._push_gate_to_session)
 
     def _ensure_default_terminal_answered(self) -> None:
         """Offer, once per machine, to make Windows' default terminal the old console host.
