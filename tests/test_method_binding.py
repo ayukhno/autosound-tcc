@@ -381,7 +381,10 @@ def _copy_ending_in(root: Path, ending: bytes) -> Path:
     return copy
 
 
-@pytest.mark.parametrize("ending", _UNREADABLE_ENDINGS)
+@pytest.mark.parametrize("ending", [
+    *_UNREADABLE_ENDINGS,
+    pytest.param(b"\nCONTRACT_VERSION = int('2')\n", id="a number named, not a plain int (R-aw)"),
+])
 def test_a_copy_whose_contract_cannot_be_read_is_refused_like_a_newer_one(project, tmp_path,
                                                                            ending):
     """#170: a `contract.py` that does not parse here read as «no number», and a copy approved on
@@ -469,20 +472,55 @@ def test_the_contract_number_is_read_without_importing_the_file():
 
 
 @pytest.mark.parametrize("text", [
+    "def f():\n    CONTRACT_VERSION = 1\n",
+    "class Contract:\n    CONTRACT_VERSION = 1\n",
+    '"""CONTRACT_VERSION = 1"""\n',
+    "# CONTRACT_VERSION = 1\n",
+    "x = 1\n",
+    "",
+])
+def test_a_contract_that_binds_no_contract_version_of_its_own_names_no_number(text):
+    """Only the module's own name counts: one inside a function or a class, in a string or a
+    comment, is not the number the module ends up with — no number, and readable."""
+    assert method_binding.contract_of(text) == method_binding.Contract(True, None)
+    assert method_binding.contract_number(text) is None
+
+
+@pytest.mark.parametrize("text", [
     "CONTRACT_VERSION = '1'\n",
     "CONTRACT_VERSION = True\n",
     "CONTRACT_VERSION = 1.0\n",
     "CONTRACT_VERSION = ONE\n",
     "CONTRACT_VERSION = -1\n",
-    "def f():\n    CONTRACT_VERSION = 1\n",
+    "CONTRACT_VERSION = 1 + 1\n",
+    "CONTRACT_VERSION = int('2')\n",
+    "from ._v import CONTRACT_VERSION\n",
+    "import CONTRACT_VERSION\n",
+    "try:\n    from _v import CONTRACT_VERSION\nexcept ImportError:\n    CONTRACT_VERSION = 2\n",
     "if True:\n    CONTRACT_VERSION = 1\n",
-    '"""CONTRACT_VERSION = 1"""\n',
-    "# CONTRACT_VERSION = 1\n",
-    "CONTRACT_VERSION = (\n",
-    "x = 1\n",
-    "",
-])
-def test_the_contract_number_is_only_a_top_level_int(text):
+    "CONTRACT_VERSION = 1\nif True:\n    CONTRACT_VERSION = 2\n",
+    "CONTRACT_VERSION, SCHEMA = 2, 7\n",
+    "CONTRACT_VERSION = 1\nCONTRACT_VERSION += 1\n",
+    "for CONTRACT_VERSION in (1, 2):\n    pass\n",
+    "with open('v') as CONTRACT_VERSION:\n    pass\n",
+    "def CONTRACT_VERSION():\n    return 2\n",
+    "def f():\n    global CONTRACT_VERSION\n    CONTRACT_VERSION = 2\n",
+    "CONTRACT_VERSION: int\n",
+], ids=["a string", "a bool", "a float", "a name", "a negative", "an expression", "a call",
+        "imported from", "imported", "guarded by try", "guarded by if", "re-bound under an if",
+        "tuple-unpacked", "augmented", "a loop variable", "a with target", "a def",
+        "a global in a function", "annotated, no value"])
+def test_a_contract_version_that_is_not_a_plain_top_level_int_is_unreadable(text):
+    """Ruling R-aw (#170 review I5): a `CONTRACT_VERSION` the file binds at module level — guarded,
+    imported, tuple-unpacked, a call, an expression, a string, a float — read as «no number», so
+    the binding trusted the copy and the press installed it. A number the file names and TCC cannot
+    read without running it is the same unknown as a file that does not parse: `unreadable`, so
+    newer, and refused in both places. `contract_number` still answers None: no number it read."""
+    contract = method_binding.contract_of(text)
+
+    assert (contract.present, contract.number) == (True, None)
+    assert "CONTRACT_VERSION" in contract.unreadable, contract
+    assert contract.newer_than(method_binding.KNOWN_CONTRACT)
     assert method_binding.contract_number(text) is None
 
 
@@ -498,11 +536,14 @@ def test_one_reader_answers_no_file_a_number_or_none_or_unreadable():
     assert (two.present, two.number, two.unreadable) == (True, 2, "")
     broken = method_binding.contract_of(b"CONTRACT_VERSION = 2\n\x00\n")
     assert (broken.present, broken.number) == (True, None) and broken.unreadable
+    named = method_binding.contract_of(b"CONTRACT_VERSION = int('2')\n")
+    assert (named.present, named.number) == (True, None) and named.unreadable, "R-aw"
 
     known = method_binding.KNOWN_CONTRACT
     assert not absent.newer_than(known) and not legacy.newer_than(known)
     assert two.newer_than(1) and not two.newer_than(2)
     assert broken.newer_than(known), "unreadable is most likely newer"
+    assert named.newer_than(known), "a number named and not read is the same unknown"
 
 
 @pytest.mark.parametrize("blob", [

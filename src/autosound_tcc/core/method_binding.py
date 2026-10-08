@@ -289,39 +289,88 @@ def contract_of(source: Union[bytes, str, None]) -> Contract:
     None is no file. Anything else goes to `ast.parse` as it is — never imported, so nothing in it
     runs — and bytes are decoded there the way an import decodes them, a BOM and a coding cookie
     honoured. What does not decode or parse on this interpreter is `unreadable`, never «no number»:
-    a newer method is the likeliest author of syntax this Python does not know."""
+    a newer method is the likeliest author of syntax this Python does not know. So is a
+    `CONTRACT_VERSION` the module binds some other way than to a plain int (`_number_in`, R-aw)."""
     if source is None:
         return Contract(False)
     try:
-        tree = ast.parse(source, filename="contract.py")
+        return _number_in(ast.parse(source, filename="contract.py"))
     except (SyntaxError, ValueError, RecursionError) as exc:
         return Contract(True, unreadable=f"{type(exc).__name__}: {exc}")
-    return Contract(True, _top_level_int(tree, "CONTRACT_VERSION"))
 
 
 def contract_number(text: Union[str, bytes]) -> Optional[int]:
     """The top-level `CONTRACT_VERSION = <int>` of a `contract.py`'s text (an annotated one counts),
     or None. Found with `ast`, never by import: a file that raises on import still answers, and
-    nothing in it runs. Text that does not parse, or a value that is not an int literal, is None —
-    `contract_of` tells the first apart, and that is the reader a decision is made on."""
+    nothing in it runs. Text that does not parse, or a `CONTRACT_VERSION` bound to anything but an
+    int literal, is None — `contract_of` tells both apart, and that is the reader a decision is
+    made on."""
     return contract_of(text).number
 
 
-def _top_level_int(tree: ast.Module, name: str) -> Optional[int]:
+#: The name a `contract.py` says its contract number with (#170).
+_NUMBER_NAME = "CONTRACT_VERSION"
+
+
+def _number_in(tree: ast.Module) -> Contract:
+    """`CONTRACT_VERSION` as the module ends up with it, read without running it (ruling R-aw).
+
+    The last top-level `CONTRACT_VERSION = <int literal>` (an annotated one counts) is the number;
+    a module that binds no such name of its own names none. Bound any other way — to a string, a
+    float, a bool, a name, an expression or a call; tuple-unpacked; imported; under an `if`, a
+    `try`, a `with` or a loop; by a `def`, a `class`, an augmented assignment, a `global` — it is a
+    number the file names that TCC cannot know without running it: `unreadable`, so newer, and
+    refused by the binding and at the press alike. No release names the number yet, so failing
+    closed costs nothing today; a method that writes `int(...)` is refused until it writes a
+    literal. A name inside a function or a class body, a string or a comment is not the module's.
+    """
     number = None
-    for node in tree.body:  # top level only: a name inside a function or an `if` is not the module's
-        if isinstance(node, ast.Assign):
-            targets, value = node.targets, node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value = [node.target], node.value
-        else:
-            continue
-        if any(isinstance(target, ast.Name) and target.id == name for target in targets):
-            # The last assignment is the value the module ends up with. A bool is an int to Python
-            # and not a contract number to anyone.
-            literal = isinstance(value, ast.Constant) and type(value.value) is int
-            number = value.value if literal else None
-    return number
+    for node in tree.body:
+        literal = _int_literal_bound(node)
+        if literal is not None:
+            number = literal
+        elif _binds(node):
+            return _named_unread(node)
+    for node in ast.walk(tree):  # a function's `global CONTRACT_VERSION` is the module's name
+        if isinstance(node, ast.Global) and _NUMBER_NAME in node.names:
+            return _named_unread(node)
+    return Contract(True, number)
+
+
+def _named_unread(node: ast.AST) -> Contract:
+    return Contract(True, unreadable=f"{_NUMBER_NAME} on line {getattr(node, 'lineno', '?')} is "
+                                     f"not a plain integer at the top level")
+
+
+def _int_literal_bound(node: ast.stmt) -> Optional[int]:
+    """The int a top-level `CONTRACT_VERSION = <int>` (or `CONTRACT_VERSION: T = <int>`) binds, or
+    None. A bool is an int to Python and not a contract number to anyone."""
+    if isinstance(node, ast.Assign):
+        targets, value = node.targets, node.value
+    elif isinstance(node, ast.AnnAssign) and node.value is not None:
+        targets, value = [node.target], node.value
+    else:
+        return None
+    named = any(isinstance(target, ast.Name) and target.id == _NUMBER_NAME for target in targets)
+    literal = isinstance(value, ast.Constant) and type(value.value) is int
+    return value.value if named and literal else None
+
+
+def _binds(node: ast.AST) -> bool:
+    """Whether a top-level statement binds `CONTRACT_VERSION` in the module's own scope, however:
+    as a name stored or deleted, an import, a `def` or a `class`, an `except … as`, a match
+    capture. Function and class bodies are scopes of their own and are not looked into."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return node.name == _NUMBER_NAME
+    if isinstance(node, ast.Lambda):
+        return False
+    if isinstance(node, ast.Name):
+        return node.id == _NUMBER_NAME and not isinstance(node.ctx, ast.Load)
+    if isinstance(node, ast.alias):
+        return (node.asname or node.name.split(".")[0]) == _NUMBER_NAME
+    if getattr(node, "name", None) == _NUMBER_NAME or getattr(node, "rest", None) == _NUMBER_NAME:
+        return True  # `except … as`, a match capture
+    return any(_binds(child) for child in ast.iter_child_nodes(node))
 
 
 def read_contract(skill_dir: Union[str, os.PathLike]) -> Contract:

@@ -577,6 +577,8 @@ _NEWER_SYNTAX = b"try:\n    pass\nexcept ValueError, TypeError:\n    pass\n"
     pytest.param(b"NAME = 'caf\xe9'\n", "rew_tool/contract.py: ",
                  id="a byte that is not UTF-8, in code"),
     pytest.param(b"\x00\xff\xfe not python", "rew_tool/contract.py: ", id="not source"),
+    pytest.param(b"CONTRACT_VERSION = int('2')\n", "rew_tool/contract.py: CONTRACT_VERSION",
+                 id="a number named, not a plain int (R-aw)"),
 ])
 def test_a_method_this_tcc_cannot_drive_is_refused_before_anything_of_it_runs(monkeypatch, tmp_path,
                                                                               text, said):
