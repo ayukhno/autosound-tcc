@@ -146,6 +146,15 @@ def pick(tcc_dir: Path, key: str, value: Any = None) -> Picked:
     return Picked(False, new)
 
 
+def held(tcc_dir: Path, key: str) -> Optional[str]:
+    """The pick held for the run for `key` because its write did not land (`pick`), or None when
+    nothing is held. For a Save, which lands a held gate with the pickers (the re-review, O3): no
+    picker re-asserts the gate, so one picked while the store was out stayed off the disk."""
+    with _held_lock:
+        value = _held.get(_slot(tcc_dir, key))
+    return str(value) if isinstance(value, (str, int, float)) else None
+
+
 def _slot(tcc_dir: Path, key: str) -> tuple[str, str]:
     return os.path.abspath(path_for(tcc_dir)), key
 

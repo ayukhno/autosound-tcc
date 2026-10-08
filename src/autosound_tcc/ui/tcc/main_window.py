@@ -5841,11 +5841,11 @@ class MainWindow(QMainWindow):
         pickers costs a file write and removes the whole class of question.
         """
         tcc_dir, wrote = config.tcc_dir(), True
-        for key, value in (
-            (_GENERATOR_KEY, self._ai_main_combo.currentData()),
-            (_CRITIC_KEY, self._ai_critic_combo.currentData()),
-            (_EFFORT_KEY, self._ai_effort_combo.currentData()),
-        ):
+        for key, value in ((_GENERATOR_KEY, self._ai_main_combo.currentData()),
+                           (_CRITIC_KEY, self._ai_critic_combo.currentData()),
+                           (_EFFORT_KEY, self._ai_effort_combo.currentData()),
+                           # No picker holds the gate: only one picked while the store was out (O3).
+                           (_GATE_KEY, project_settings.held(tcc_dir, _GATE_KEY))):
             # An empty selection is the "nothing chosen yet" placeholder, not a choice to record —
             # writing it would turn "I have not picked a model" into "I picked no model".
             if value:

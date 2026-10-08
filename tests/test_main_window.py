@@ -2295,6 +2295,15 @@ def test_changing_the_permission_mode_reaches_the_running_session(tmp_path, monk
     window._session_factory(SimpleNamespace(harness="sdk", model="m"), server, False, level)()
     assert built["gate"] == omp_session.GATE_FOREIGN
 
+    # The re-review, O3: the store recovers and a Save lands the gate picked during the outage
+    # with the rest, and lets go of its hold. It said «on disk» while that gate stayed unsaved.
+    window._agent_worker = None  # a Save with no session: TCC's own settings and its answer
+    store.rmdir()
+    window._save_project_state()
+    assert project_settings.load(tmp_path).get("gate") == omp_session.GATE_FOREIGN
+    assert project_settings.held(tmp_path, main_window._GATE_KEY) is None
+    assert strip.waiting()[-1] == i18n.t("savedTccOnly"), strip.waiting()
+
 
 def test_a_channel_toggle_goes_on_the_bus_and_writes_nothing(tmp_path, monkeypatch):
     """Enabling a channel changes the ledger, and the ledger is the skill's to write (D-6). TCC
