@@ -2506,81 +2506,6 @@ def test_switching_a_channel_asks_first(tmp_path, monkeypatch):
     assert sent == [("virtual", "VRR", True)]
 
 
-def test_the_capture_series_comes_from_the_plan_not_the_ledger(monkeypatch):
-    """Naming the virtual-channel tier bumped the ledger `v_001 → v_002`, and the checklist jumped
-    to series 2 before series 1 had been captured — watched twice, on two projects. The skill's own
-    phase-0 steps say which round they mean: "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"."""
-    from autosound_tcc.state import process_view
-
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: None)
-    _app()
-    window = MainWindow()
-    window._view = None
-    state = {
-        "active_phase": "0",
-        "plan": [
-            {"id": "m0-tw-L", "phase": "0", "name": "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"},
-        ],
-    }
-
-    assert window._capture_version(state) == 1
-
-
-def test_the_ledger_version_never_becomes_the_series(monkeypatch):
-    """hub #153 A. The ledger's `v_NNN` also moves for changes that are not DSP changes, and a
-    project can start with the two apart (`v_001` measured as `_49`). With no round and no plan
-    step naming a series, the answer is "not known", not the ledger."""
-    from autosound_tcc.state import process_view
-
-    _app()
-    window = MainWindow()
-
-    class View:
-        version = "v_003"
-
-    window._view = View()
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: None)
-    monkeypatch.setattr(process_view, "capture_rounds", lambda *a, **k: [])
-
-    assert window._capture_version({"active_phase": "0", "plan": []}) is None
-
-
-def test_the_open_round_names_the_series_before_the_plan(monkeypatch):
-    """A pass taken again after a DSP change is the round's series, whatever the plan said first."""
-    from autosound_tcc.state import process_view
-
-    _app()
-    window = MainWindow()
-    window._view = None
-    monkeypatch.setattr(process_view, "capture_round",
-                        lambda *a, **k: {"id": "cap_002", "expected": ["w-L_07 (sw)"]})
-    state = {"active_phase": "0",
-             "plan": [{"id": "m0", "phase": "0", "name": "Baseline solo: tw-L_1 (sw)"}]}
-
-    assert window._capture_version(state) == 7
-    # A round that names nothing in `expected` is named by what it took — never by a typo it
-    # superseded (#175): `w-L_70` was corrected to `w-L_07`, and the series is 7.
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
-        "id": "cap_003", "expected": [],
-        "taken": {"w-L_70 (sw)": {"superseded_by": "w-L_07 (sw)"}, "w-L_07 (sw)": {}}})
-    assert window._capture_version(state) == 7
-
-
-def test_with_no_round_open_the_highest_series_among_the_rounds(monkeypatch):
-    from autosound_tcc.state import process_view
-
-    _app()
-    window = MainWindow()
-    window._view = None
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {"closed": True})
-    monkeypatch.setattr(process_view, "capture_rounds", lambda *a, **k: [
-        {"id": "cap_001", "expected": ["w-L_48 (sw)"], "taken": {}},
-        {"id": "cap_002", "expected": ["w-L_49 (sw)"], "taken": {"w-L_49 (sw)": {}}},
-    ])
-
-    assert window._capture_version({"active_phase": "0", "plan": []}) == 49
-
-
 def test_a_project_that_cannot_be_drawn_does_not_end_the_session(monkeypatch):
     """A rendering fault used to abort the process, because an exception in a Qt slot does not
     propagate. The last good view stays on screen and the strip says what happened — TCC does not
@@ -5249,7 +5174,7 @@ def test_the_card_hears_which_titles_were_left_for_a_retake(tmp_path, monkeypatc
     _KEEP_WINDOWS.append(window)
     asked = {}
     monkeypatch.setattr(window._meas_panel, "retake_titles", lambda: ["sw_7 (rta)"])
-    monkeypatch.setattr(window, "_capture_version", lambda state=None: 7)
+    monkeypatch.setattr(measurement_view, "capture_version", lambda state=None: 7)
     monkeypatch.setattr(measurement_view, "build_sessions",
                         lambda *a, **k: asked.update(k) or None)
 
@@ -6047,6 +5972,18 @@ def test_the_strip_after_a_check_reads_what_it_recorded_and_says_when_it_did_not
         titles, verifier=_Heard(valid=True)) and "")
     assert len(said) == 2 and strip.text() == "", "a check that ran takes «did not run» back"
 
+    # The G6+G7 review's I1: the cause can end with no check of TCC's after it. The session
+    # recorded w-R_1, the next check was busy behind it, and then the session closed the round:
+    # the process refresh that reads the close takes the line back — no check is run for it.
+    process.record_capture(typed[1])
+    a_check(busy)
+    assert strip.text() == i18n.t("captureCheckBusy"), said
+    window._refresh_process()
+    assert strip.text() == i18n.t("captureCheckBusy"), "nothing changed: the line stands"
+    process.close_capture()
+    window._refresh_process()
+    assert strip.text() == "", "the round closed: «did not run» is no longer true"
+
 
 def test_unusable_captures_are_one_line_with_the_rest_behind_a_link(monkeypatch):
     """Finding 29: sixteen UNUSABLE lines took half the window and could not be closed. One line,
@@ -6094,7 +6031,7 @@ def test_a_did_not_run_line_waiting_behind_a_report_is_taken_back_when_a_check_r
     _app()
     strip = StatusStrip()
     host = SimpleNamespace(_status_strip=strip, _refresh_capture_task=lambda state: None,
-                           _show_unusable=lambda lines: None)
+                           _show_unusable=lambda lines: None, _capture_check=None)
 
     strip.notify("a report", level="warn", sticky=True)
     MainWindow._on_capture_check_failed(host, i18n.t("captureCheckBusy"))
@@ -6103,6 +6040,70 @@ def test_a_did_not_run_line_waiting_behind_a_report_is_taken_back_when_a_check_r
     strip.linkActivated.emit("close")  # the report's ✕
 
     assert strip.text() == "", "the check ran: «did not run» does not come back"
+
+
+@pytest.mark.parametrize("then", ["the session checked", "the session found it bad",
+                                  "the session closed the round"])
+def test_a_did_not_run_line_is_taken_back_when_its_cause_ends_without_tccs_check(monkeypatch, then):
+    """The G6+G7 review's I1, its probe turned round. TCC's check met REW down (exit 69, the real
+    method's own words): «did not run … nothing was recorded». REW came back, and the session's own
+    `check_captures` recorded every title it asked — fine, or still bad — or the session closed the
+    round. No check of TCC's runs after that (nothing left to check, or the round closed), and the
+    line was taken back only in a check's result: it stood, a warning with no clock, beside cards
+    the session had checked. Taken back on the REW change and the process refresh that read the
+    verdicts or the close (`_sync_capture_ready`, the refresh's first step); left while nothing
+    changed. The window's own methods, on a host with a real strip, over rounds the method wrote."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import workers
+    from autosound_tcc.ui.tcc.status_strip import StatusStrip
+    from tests import _rounds
+
+    titles = ["w-L_1 (sw)", "w-R_1 (sw)"]
+    process = _rounds.write_round(config.project_dir(), version=1, expected=titles, taken=titles)
+    typed = [_rounds.as_typed(title) for title in titles]
+    with pytest.raises(process_writer.ProcessWriterError) as down:
+        process_writer.check_captures(config.project_dir(), typed)  # the real method, REW dead
+    why = workers.capture_check_not_run(down.value)
+    assert "REW did not answer" in why, why
+    started: list = []
+
+    class _Worker:
+        def __init__(self, project_dir, titles=None):
+            started.append(titles)
+            self.result = self.failed = self.finished = SimpleNamespace(connect=lambda *_a: None)
+
+        def start(self) -> None:
+            pass
+
+        def isRunning(self) -> bool:  # noqa: N802 — Qt's name
+            return False
+
+    monkeypatch.setattr(main_window, "_CaptureCheckWorker", _Worker)
+    _app()
+    strip = StatusStrip()
+    host = SimpleNamespace(
+        _status_strip=strip, _capture_check=SimpleNamespace(titles=list(typed)), _closing=False,
+        _refresh_capture_task=lambda state: None, _offer_title_fixes=lambda round_: None,
+        _show_unusable=lambda lines: None,
+        _meas_panel=SimpleNamespace(known_titles=lambda: list(typed)),
+        _on_capture_check_done=lambda titles: None, _on_capture_check_failed=lambda why: None,
+        _on_capture_check_finished=lambda: None)
+    host._sync_capture_ready = lambda: MainWindow._sync_capture_ready(host)
+
+    MainWindow._on_capture_check_failed(host, why)  # the worker that ran it is `_capture_check`
+    host._capture_check = None
+    host._sync_capture_ready()  # a refresh with nothing new: the line stands
+    assert strip.text() == why
+
+    if then == "the session closed the round":
+        process.close_capture()                                       # MCP close_capture
+    else:                                                             # MCP check_captures
+        process.check_captures(typed, verifier=_Heard(valid=then == "the session checked"))
+    MainWindow._on_rew_titles_changed(host)
+
+    assert strip.text() == "", "the cause ended: «did not run» is taken back"
+    assert started == ([typed] if then == "the session found it bad" else []), \
+        "a bad verdict is asked again; a fine one, or a closed round, is not"
 
 
 def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch):

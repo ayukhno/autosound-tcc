@@ -274,6 +274,11 @@ class _CaptureCheckWorker(QThread):
         # fatal line names no class, and this app has eight kinds of worker.
         qt_shutdown.watch(self)
 
+    @property
+    def titles(self) -> list:
+        """What it was handed — what a «did not run» line is about (`measurement_view.NotRun`)."""
+        return list(self._titles or [])
+
     def run(self) -> None:
         try:
             process_writer.check_captures(self._project_dir, self._titles)

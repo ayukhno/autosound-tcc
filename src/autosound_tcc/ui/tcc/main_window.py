@@ -16,7 +16,6 @@ import json
 import os
 import signal
 import threading
-import re
 import sys
 import time
 import weakref
@@ -4097,7 +4096,8 @@ class MainWindow(QMainWindow):
         """
         # It ran: a «did not run» on the strip, shown or waiting, is no longer true (R-ax), and a
         # warning that outlives its cause teaches people to ignore the strip.
-        self._status_strip.withdraw(getattr(self, "_capture_check_not_run", None))
+        not_run, self._capture_check_not_run = getattr(self, "_capture_check_not_run", None), None
+        self._status_strip.withdraw(getattr(not_run, "line", None))
         bad = measurement_view.unusable_lines(process_view.capture_round() or {}, titles)
         if bad and frozenset(bad) != getattr(self, "_unusable_dismissed", None):
             self._status_strip.notify(
@@ -4113,16 +4113,23 @@ class MainWindow(QMainWindow):
 
     def _on_capture_check_failed(self, why: str) -> None:
         """The check did not run, or did not finish — said, with why (R-ax): never silence, never
-        «everything is bad» (`workers.capture_check_not_run`)."""
-        self._capture_check_not_run = why
+        «everything is bad» (`workers.capture_check_not_run`); held until its cause ends."""
+        self._capture_check_not_run = measurement_view.NotRun.at(
+            why, process_view.capture_round(), getattr(self._capture_check, "titles", ()))
         self._status_strip.notify(why, level="warn")
 
     def _sync_capture_ready(self) -> None:
-        """«Готово» is live while the open round has taken something (finding 31)."""
+        """«Готово» is live while the open round has taken something (finding 31). On every process
+        refresh and REW change, a «did not run» whose cause has ended is taken back (I1)."""
+        round_ = process_view.capture_round()
+        not_run = getattr(self, "_capture_check_not_run", None)
+        if not_run is not None and not_run.ended(round_, self._meas_panel.known_titles()):
+            self._status_strip.withdraw(not_run.line)
+            self._capture_check_not_run = None
         button = getattr(self, "_capture_ready_btn", None)
         if button is None:
             return
-        round_ = process_view.capture_round() or {}
+        round_ = round_ or {}
         button.setEnabled(not round_.get("closed") and bool(process_view.standing(round_)))
 
     def _on_capture_ready(self) -> None:
@@ -4233,7 +4240,7 @@ class MainWindow(QMainWindow):
         # and what counts as an extra; what the project TOOK IN decides what is done. Folded
         # together, opening the read window was enough to turn the whole checklist green.
         taken = getattr(self._meas_panel, "taken_titles", lambda: titles)()
-        version = self._capture_version(state)
+        version = measurement_view.capture_version(state)
         if version is None:
             # Nothing names the series and the ledger version is not it (hub #153 A). Said, with ⤓
             # left working: an import with no round open asks for the number.
@@ -4249,36 +4256,6 @@ class MainWindow(QMainWindow):
             # The plan's per-step measurement icon reads the same list: a step gets one when a
             # round's captures are named in its evidence (SCR-035 makes sure they are).
             self._plan_panel.set_sessions(sessions)
-
-    def _capture_version(self, state: Optional[dict] = None) -> Optional[int]:
-        """The series `_N` the current captures are named with, or None when nothing says (hub #153 A).
-
-        `_N` is the DSP state the measurements were taken on. The ledger's `v_NNN` is a different
-        counter — it also moves for changes that are not DSP changes, and a project can start with
-        the two apart (`v_001` measured as `_49`) — so the ledger is not read here. In order:
-
-        1. the open round: its titles are the pass being taken now;
-        2. the active phase's plan steps ("Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"), each piece
-           read by the method's grammar;
-        3. the highest `_N` among all rounds (the Arbiter, 2026-09-16);
-        4. None: the checklist says the series is not known yet, and an import with no round open
-           asks for it.
-        """
-        round_ = process_view.capture_round() or {}
-        if round_ and not round_.get("closed"):
-            found = measurement_view.series_of(
-                list(round_.get("expected") or []) + list(process_view.standing(round_)))
-            if found is not None:
-                return found
-        for step in (state or {}).get("plan") or []:
-            if not isinstance(step, dict) or str(step.get("phase")) != str(
-                (state or {}).get("active_phase")
-            ):
-                continue
-            found = measurement_view.series_of(re.split(r"[+,;:]", str(step.get("name") or "")))
-            if found is not None:
-                return found
-        return measurement_view.highest_series()
 
     # ---- AI backends --------------------------------------------------------
 

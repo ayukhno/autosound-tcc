@@ -1550,3 +1550,111 @@ def test_an_ambiguous_verdict_under_a_title_taken_as_it_is_is_still_bad(project)
     assert mv.to_check(round_, [sw], project) == [sw], "asked again until it is renamed"
     item = _item(mv.build_session("0", 7, [sw], project, taken=[sw]), "sw_7 (sw)")
     assert (item.status, item.as_is) == (mv.STATUS_STALE, False), "the card: taken, unusable"
+
+
+# A «did not run» line, held until its cause ends (`NotRun`, the G6+G7 review's I1).
+
+_BEFORE, _AFTER = "2000-01-01T00:00:00+00:00", "2999-01-01T00:00:00+00:00"
+
+
+def test_a_check_that_did_not_run_ends_when_what_it_asked_is_recorded_or_the_round_closes(project):
+    """The line's cause is that nothing was recorded for the titles asked. It ends when each of
+    them has a verdict recorded since — by anybody's check: the session's own, fine or bad — or is
+    no longer one to check; when the round closes; or when another round opens. Not while the
+    round cannot be read, nor while nothing has changed. «Since» by the time the method stamps on
+    a verdict (`at`, to the second), the same second counting: a check busy behind the session's
+    gave up while the session's was still writing."""
+    titles = ["w-L_1 (sw)", "w-R_1 (sw)"]
+    process = _round(project, version=1, expected=titles, taken=titles)
+    typed = [_as_typed(t) for t in titles]
+    round_ = process.load()["capture"]
+    not_run = mv.NotRun("did not run", round_["id"], tuple(typed), _BEFORE)
+
+    assert not not_run.ended(round_, typed, project), "nothing recorded"
+    assert not not_run.ended(None, typed, project), "a round that cannot be read says nothing"
+    half = _check(process, {"w-L_1 (sw)": _held("u-wl", _SILENCE)})
+    assert not not_run.ended(half, typed, project), "w-R_1 has no verdict yet"
+    both = _check(process, {"w-R_1 (sw)": _held("u-wr", _SILENCE)})
+    assert not_run.ended(both, typed, project), "both recorded since, bad as they are"
+    assert not mv.NotRun("did not run", round_["id"], tuple(typed), _AFTER).ended(
+        both, typed, project), "verdicts recorded before it did not run are not news"
+    process.close_capture()
+    assert mv.NotRun("did not run", round_["id"], tuple(typed), _AFTER).ended(
+        process.load()["capture"], typed, project), "the round closed"
+
+
+def test_a_title_no_longer_to_check_has_nothing_left_to_say(project):
+    """A title the tuner has since taken as it is, or one whose verdict reads fine, is no longer
+    one `to_check` asks about: the line about it has nothing left to promise."""
+    titles = ["w-L_1 (sw)"]
+    process = _round(project, version=1, expected=titles, taken=titles)
+    typed = [_as_typed(t) for t in titles]
+    fine = _check(process, {"w-L_1 (sw)": _held("u-wl")})
+
+    assert mv.NotRun("did not run", fine["id"], tuple(typed), _AFTER).ended(fine, typed, project)
+
+
+def test_a_check_with_nothing_named_ends_only_with_its_round(project):
+    titles = ["w-L_1 (sw)"]
+    process = _round(project, version=1, expected=titles, taken=titles)
+    typed = [_as_typed(t) for t in titles]
+    not_run = mv.NotRun.at("did not run", process.load()["capture"], ())
+
+    assert not not_run.ended(_check(process, {"w-L_1 (sw)": _held("u-wl", _SILENCE)}), typed,
+                             project)
+    process.start_capture(2, expected=[_as_typed("w-L_2 (sw)")])
+    assert not_run.ended(process.load()["capture"], typed, project), "another round is open"
+
+
+# The series the captures are named with (`capture_version`, out of the window in W-9).
+
+
+def test_the_capture_series_comes_from_the_plan_not_the_ledger(monkeypatch):
+    """Naming the virtual-channel tier bumped the ledger `v_001 → v_002`, and the checklist jumped
+    to series 2 before series 1 had been captured — watched twice, on two projects. The skill's own
+    phase-0 steps say which round they mean: "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"."""
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: None)
+    state = {
+        "active_phase": "0",
+        "plan": [
+            {"id": "m0-tw-L", "phase": "0", "name": "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"},
+        ],
+    }
+
+    assert mv.capture_version(state) == 1
+
+
+def test_the_ledger_version_never_becomes_the_series(monkeypatch):
+    """hub #153 A. The ledger's `v_NNN` also moves for changes that are not DSP changes, and a
+    project can start with the two apart (`v_001` measured as `_49`). With no round and no plan
+    step naming a series, the answer is "not known", not the ledger — which is no input at all."""
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: None)
+    monkeypatch.setattr(process_view, "capture_rounds", lambda *a, **k: [])
+
+    assert mv.capture_version({"active_phase": "0", "plan": []}) is None
+
+
+def test_the_open_round_names_the_series_before_the_plan(monkeypatch):
+    """A pass taken again after a DSP change is the round's series, whatever the plan said first."""
+    monkeypatch.setattr(process_view, "capture_round",
+                        lambda *a, **k: {"id": "cap_002", "expected": ["w-L_07 (sw)"]})
+    state = {"active_phase": "0",
+             "plan": [{"id": "m0", "phase": "0", "name": "Baseline solo: tw-L_1 (sw)"}]}
+
+    assert mv.capture_version(state) == 7
+    # A round that names nothing in `expected` is named by what it took — never by a typo it
+    # superseded (#175): `w-L_70` was corrected to `w-L_07`, and the series is 7.
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
+        "id": "cap_003", "expected": [],
+        "taken": {"w-L_70 (sw)": {"superseded_by": "w-L_07 (sw)"}, "w-L_07 (sw)": {}}})
+    assert mv.capture_version(state) == 7
+
+
+def test_with_no_round_open_the_highest_series_among_the_rounds(monkeypatch):
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {"closed": True})
+    monkeypatch.setattr(process_view, "capture_rounds", lambda *a, **k: [
+        {"id": "cap_001", "expected": ["w-L_48 (sw)"], "taken": {}},
+        {"id": "cap_002", "expected": ["w-L_49 (sw)"], "taken": {"w-L_49 (sw)": {}}},
+    ])
+
+    assert mv.capture_version({"active_phase": "0", "plan": []}) == 49

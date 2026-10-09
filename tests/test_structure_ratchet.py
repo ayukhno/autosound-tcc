@@ -8,12 +8,12 @@ change frees is not spent by the next one. A build inside a helper counts once h
 call it: moving builds into a helper is not a way to lower the bound (the G13 review).
 
 The next decisions to pull out — they live only on the window and are pinned by window tests:
-`_capture_version`, the compare default, the preset choice in `_load_project`, the reviewer's
-state, and the delay maths mirrored in `curve_view` (`delay_bank`, `curve_sum`). Out already: the
-menu (`menu_registry`), the gate's three layers (`shell_gate.effective_gate`), the open signals'
-ids (`SignalBus.open_ids`) — W-8; «settled», decided once from the recorded verdicts
+the compare default, the preset choice in `_load_project`, the reviewer's state, and the delay
+maths mirrored in `curve_view` (`delay_bank`, `curve_sum`). Out already: the menu
+(`menu_registry`), the gate's three layers (`shell_gate.effective_gate`), the open signals' ids
+(`SignalBus.open_ids`) — W-8; «settled», decided once from the recorded verdicts
 (`measurement_view.verdict_state`, `to_check`, `unusable_lines`) where it was parsed from the
-check's text — W-9.
+check's text, and the capture series (`measurement_view.capture_version`) — W-9.
 """
 
 from __future__ import annotations
@@ -31,12 +31,12 @@ BUILD = "Main" + "Window("
 #: Lowered by every wave that moves a decision out; never raised (W-8: 6506 on 2026-10-06, 6270
 #: after the menu moved into its registry, #161; W-9: 6230 after «settled» moved into
 #: `measurement_view.verdict_state`, #175; 6225 once `tip_html` came from `rounded_tooltip`,
-#: #177).
-MAIN_WINDOW_MAX_LINES = 6225
+#: #177; 6202 after the capture series moved into `measurement_view.capture_version`, #175).
+MAIN_WINDOW_MAX_LINES = 6202
 #: Full-window builds in the tests, outside comments (W-8: 223 on 2026-10-06, 218 after the menu
 #: tests became renderer tests, #161; W-9: 212 after the «settled» tests became plain tests over a
-#: recorded round, #175).
-WINDOW_BUILDS_MAX = 212
+#: recorded round, #175; 208 after the capture series' tests did, #175).
+WINDOW_BUILDS_MAX = 208
 #: How far under its bound a measure may sit before the bound must come down with it.
 SLACK_LINES = 20
 SLACK_BUILDS = 2

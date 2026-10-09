@@ -16,6 +16,8 @@ an empty task that looks like a completed one.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -122,6 +124,37 @@ def highest_series(project_dir: Optional[Path] = None) -> Optional[int]:
     ]
     found = [n for n in found if n is not None]
     return max(found) if found else None
+
+
+def capture_version(state: Optional[dict] = None) -> Optional[int]:
+    """The series `_N` the current captures are named with, or None when nothing says (hub #153 A).
+
+    `_N` is the DSP state the measurements were taken on. The ledger's `v_NNN` is a different
+    counter — it also moves for changes that are not DSP changes, and a project can start with
+    the two apart (`v_001` measured as `_49`) — so the ledger is not read here. In order:
+
+    1. the open round: its titles are the pass being taken now;
+    2. the active phase's plan steps ("Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"), each piece
+       read by the method's grammar;
+    3. the highest `_N` among all rounds (the Arbiter, 2026-09-16);
+    4. None: the checklist says the series is not known yet, and an import with no round open
+       asks for it.
+
+    Out of the window, where it was `_capture_version` (W-9, the ratchet's next decision)."""
+    round_ = process_view.capture_round() or {}
+    if round_ and not round_.get("closed"):
+        found = series_of(list(round_.get("expected") or []) + list(process_view.standing(round_)))
+        if found is not None:
+            return found
+    for step in (state or {}).get("plan") or []:
+        if not isinstance(step, dict) or str(step.get("phase")) != str(
+            (state or {}).get("active_phase")
+        ):
+            continue
+        found = series_of(re.split(r"[+,;:]", str(step.get("name") or "")))
+        if found is not None:
+            return found
+    return highest_series()
 
 def groups_from_titles(titles) -> list[dict]:
     """A flat list of REW titles, split into the column groups the panel renders.
@@ -381,6 +414,53 @@ def to_check(round_: dict, rew_titles, project_dir: Optional[Path] = None) -> li
             if str(title) in held and str(title) in taken
             and verdict_state(taken[str(title)].get("verified"), str(title), as_is, window)
             in (VERDICT_ABSENT, VERDICT_BAD)]
+
+
+@dataclass(frozen=True)
+class NotRun:
+    """A strip line about a capture check that did not run (R-ax), held until its cause ends — a
+    warning has no clock, and one that outlives its cause teaches people to ignore the strip (the
+    G6+G7 review's I1). The line was taken back only in the result of a check of TCC's, and two
+    ordinary ends of a round run none: the session's own `check_captures` recording every title
+    asked (nothing left to check), and the session closing the round.
+
+    `line` is what the strip said; `round_id` the round it was about; `asked` the titles the
+    check was handed; `since` when it did not run, as the method stamps a verdict (`at`, UTC to
+    the second) — or "" for any verdict at all."""
+
+    line: str
+    round_id: Optional[str]
+    asked: tuple[str, ...]
+    since: str = ""
+
+    @classmethod
+    def at(cls, line: str, round_: Optional[dict], asked) -> "NotRun":
+        """The line, said now, about `round_` as it stands now."""
+        return cls(line, (round_ or {}).get("id"), tuple(str(t) for t in asked or ()),
+                   datetime.now(timezone.utc).isoformat(timespec="seconds"))
+
+    def ended(self, round_: Optional[dict], rew_titles, project_dir: Optional[Path] = None) -> bool:
+        """Whether the cause has ended, in `round_` (`process_view.capture_round()`): it closed,
+        or another round is open; or each title asked has a verdict recorded since — anybody's
+        check, the session's own, fine or bad — or is no longer one `to_check` asks about. Never
+        while the round cannot be read (None): nothing is known then. A check handed no titles
+        ends only with its round. The same second counts as since: a check busy behind the
+        session's gives up while that one is still writing."""
+        if round_ is None:
+            return False
+        if round_.get("closed") or (self.round_id is not None
+                                    and round_.get("id") != self.round_id):
+            return True
+        if not self.asked:
+            return False
+        pending = set(to_check(round_, rew_titles, project_dir))
+        taken = process_view.standing(round_)
+
+        def recorded_since(title: str) -> bool:
+            verdict = (taken.get(title) or {}).get("verified") or {}
+            return bool(verdict) and str(verdict.get("at") or "")[:19] >= self.since[:19]
+
+        return all(title not in pending or recorded_since(title) for title in self.asked)
 
 
 def unusable_lines(round_: dict, asked, project_dir: Optional[Path] = None) -> list[str]:
