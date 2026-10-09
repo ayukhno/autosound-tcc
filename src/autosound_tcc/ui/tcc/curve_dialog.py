@@ -557,6 +557,10 @@ class CurveDialog(QDialog):
         #: for it then — `{title: (ms, Allpass | None)}` (G10 C1). What is drawn for them is not
         #: what is banked, so nothing is banked while any is here; see `_restore_bank`.
         self._unread: dict[str, tuple] = {}
+        #: The drivers whose banked all-pass the restore could not draw — no skill maths on this
+        #: machine — `{title: why}` (G10 C3). The view holds no filter for them, so they are banked
+        #: with their filter kept, never taken off.
+        self._apf_unshown: dict[str, str] = {}
         #: What the status line says about the bank (`_render_bank`), beside the notes above.
         self._bank_note = ""
         #: `() -> {channel code: ms}` — what the DSP is set to now, supplied by the window because
@@ -1403,14 +1407,17 @@ class CurveDialog(QDialog):
         # checking the set is the only reason it is ever sent anywhere. And the driver's all-pass,
         # which is the same kind of proposal and lives in the same entry. One write for the set:
         # this runs on every step of the box (#177).
-        readings = [
-            delay_bank.Reading(
+        readings = []
+        for index, trace in enumerate(self._view._traces):
+            reading = delay_bank.Reading(
                 trace.name, self._view.delay_ms(index),
                 arrival_ms=_peak_x(trace) if self._kind == "impulse" else None,
-                allpass=self._view.allpass(index),
             )
-            for index, trace in enumerate(self._view._traces)
-        ]
+            if trace.name not in self._apf_unshown or self._view.allpass(index) is not None:
+                # A filter the view could not draw is not "no filter": the Reading's default
+                # keeps the banked one (G10 C3).
+                reading = reading._replace(allpass=self._view.allpass(index))
+            readings.append(reading)
         if readings and not self._unread:
             self._bank_or_say(readings)
         self._sync_channel_delay()
@@ -1472,6 +1479,10 @@ class CurveDialog(QDialog):
             # Said in the window, which covers the strip (I2): the drivers drawn without their bank.
             note = i18n.t("curveBankUnread").format(
                 names=", ".join(title.split(" ")[0] for title in self._unread))
+        elif self._apf_unshown:
+            note = i18n.t("curveApfUnshown").format(
+                names=", ".join(title.split(" ")[0] for title in self._apf_unshown),
+                why=next(iter(self._apf_unshown.values())))
         if note != self._bank_note:
             self._bank_note = note
             self._render_note()
@@ -1551,7 +1562,8 @@ class CurveDialog(QDialog):
         finally:
             self._restoring = False
         delay_bank.clear(session=self._session())
-        self._unread = {}  # nothing banked for this series now: what is drawn is the bank
+        # Nothing banked for this series now: what is drawn is the bank.
+        self._unread, self._apf_unshown = {}, {}
         self._render_bank()
 
     def _processing_rate_hz(self):
@@ -1803,6 +1815,7 @@ class CurveDialog(QDialog):
                     trace.name, (self._view.delay_ms(index), self._view.allpass(index)))
             return  # said by `own_store` when it was read, once for this state of the file
         unread, self._unread = self._unread, {}
+        self._apf_unshown = {}
         self._restoring = True
         try:
             target = self._view.delay_target()
@@ -1817,11 +1830,11 @@ class CurveDialog(QDialog):
                     # driver taken off the plot and put back is a new selection to the view).
                     try:
                         self._view.set_allpass(apfs[trace.name], index)
-                    except AllpassError:
-                        # No skill to compute it with. The entry stays banked until this driver
-                        # is next written from the plot; a machine without the skill cannot show
-                        # the filter, and it should not pretend to.
-                        pass
+                    except AllpassError as exc:
+                        # No skill to compute it with. A machine without the skill cannot show
+                        # the filter, and it should not pretend to — nor bank its absence: the
+                        # step was taking the filter off the store (G10 C3). Kept, and said.
+                        self._apf_unshown[trace.name] = str(exc)
             self._view.set_delay_target(target)
         finally:
             self._restoring = False

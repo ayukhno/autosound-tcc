@@ -5065,3 +5065,31 @@ def test_one_marker_move_renders_the_readout_once_and_says_so_once(mode, lines, 
     if mode == "vhs":
         assert view.levels()[0] == pytest.approx(view._y_at(0, 5.30), abs=1e-9), \
             "and the level still follows"
+
+
+# ---- a banked all-pass this machine cannot draw stays banked (G10 C3, #177) ----------------------
+
+
+def test_a_banked_all_pass_this_machine_cannot_draw_is_kept_and_said(monkeypatch):
+    """G10 C3: where the skill's filter maths cannot run, the restore swallowed the `AllpassError`,
+    the view held no filter for the driver, and the next step on ANOTHER driver banked `None` for
+    it — the filter taken off the store, with not a word. It is banked as «keep» now, and the
+    window says the filter is banked but cannot be drawn here."""
+    from autosound_tcc.core import delay_bank
+    from autosound_tcc.core.allpass import Allpass
+
+    delay_bank.put("m-L_01 (sw)", 0.0, allpass=Allpass(1, 80.0))
+
+    def no_maths(self, freqs):
+        raise RuntimeError("no skill")
+
+    monkeypatch.setattr(Allpass, "response", no_maths)
+    dialog = _plotted(["w-L_01 (sw)", "m-L_01 (sw)"])
+
+    for ms in (0.1, 0.2):
+        dialog._view.set_delay(ms)  # steps on w-L; nothing asked of m-L's filter
+
+    assert delay_bank.allpasses() == {"m-L_01 (sw)": Allpass(1, 80.0)}, delay_bank.allpasses()
+    assert delay_bank.load() == {"w-L_01 (sw)": 0.2}
+    status = dialog._status.text()
+    assert not dialog._status.isHidden() and "m-L_01" in status and "no skill" in status, status
