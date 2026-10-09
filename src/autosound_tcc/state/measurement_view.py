@@ -297,12 +297,17 @@ def flagged_by_the_window(verdict: dict, checked: dict, marked: dict) -> bool:
 def _answered_as_is(verdict: dict, title: str, marked: dict, keys: set, key) -> bool:
     """Whether a failing verdict is about a capture taken as it is. By the uuid the verdict pins:
     a re-take under the same title is another capture and is judged on its own. By the title only
-    when the verdict pins no uuid at all."""
+    when the verdict pins no uuid at all — and never for an AMBIGUOUS one, which pins none because
+    REW holds more than one curve under the title: by the method (v3.1.2, H I-8) it is unusable
+    until renamed, and the «as it is» answered for one of those curves is no answer for the title
+    (the re-review of #175 TA-8)."""
     if not verdict or verdict.get("ok") or not applicable(verdict) or absent(verdict):
         return False
     uuid = str(verdict.get("uuid") or "")
     if uuid:
         return uuid in marked
+    if verdict.get("ambiguous"):
+        return False
     return title in marked.values() or (key is not None and key in keys)
 
 

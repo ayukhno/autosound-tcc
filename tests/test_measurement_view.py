@@ -1533,17 +1533,20 @@ def test_an_ambiguous_verdict_is_bad_and_says_so_in_the_methods_words(project):
         f"{sw} — {_ambiguous(sw)['issues'][0]}"]
 
 
-@pytest.mark.xfail(strict=True, reason="the uuid-less fallback reads an AMBIGUOUS verdict as the "
-                   "tuner's «as it is» (the review of TA-8, M2); a follow-up")
 def test_an_ambiguous_verdict_under_a_title_taken_as_it_is_is_still_bad(project):
     """By the method (v3.1.2, H I-8) a title REW holds twice is unusable until renamed:
     `capture-check` says `UNUSABLE … AMBIGUOUS`, `unusable_captures` counts it. Its verdict pins
-    no uuid, so the title fallback takes the «as it is» answered for ONE curve under that title as
-    an answer for this one: `as_is` — green on the card, no strip line, never checked again. Strict
-    until the fallback leaves `ambiguous` verdicts out."""
+    no uuid, and the title fallback took the «as it is» answered for ONE curve under that title as
+    an answer for this one: `as_is` — green on the card, no strip line, never checked again (the
+    re-review of TA-8; a strict xfail until the G6+G7 fix round). The fallback leaves `ambiguous`
+    verdicts out: `bad`, on the card, on the strip and to the check loop."""
     process = _round(project, version=7, expected=["sw_7 (sw)"], taken=["sw_7 (sw)"])
     _imported(project, "sw_7 (sw)", "u-sw", as_is=True)
     sw = _as_typed("sw_7 (sw)")
+    round_ = _check(process, {"sw_7 (sw)": _ambiguous(sw)})
 
-    assert _state(project, _check(process, {"sw_7 (sw)": _ambiguous(sw)}), "sw_7 (sw)") \
-        == mv.VERDICT_BAD
+    assert _state(project, round_, "sw_7 (sw)") == mv.VERDICT_BAD
+    assert mv.unusable_lines(round_, [sw], project) == [f"{sw} — {_ambiguous(sw)['issues'][0]}"]
+    assert mv.to_check(round_, [sw], project) == [sw], "asked again until it is renamed"
+    item = _item(mv.build_session("0", 7, [sw], project, taken=[sw]), "sw_7 (sw)")
+    assert (item.status, item.as_is) == (mv.STATUS_STALE, False), "the card: taken, unusable"
