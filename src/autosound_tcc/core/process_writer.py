@@ -136,17 +136,28 @@ def _spawn(
 
 
 def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S,
-         answer_on_1: bool = False) -> str:
+         answer_on_1: bool = False, logged: bool = False) -> str:
     """One call, and a non-zero exit is a failure. Every command here works that way except
     `session-close`, whose exit code is an ANSWER — see `close_session` — and those sent with
     `answer_on_1`, whose exit 1 is their answer on stdout unless it is the method's refusal or a
-    crash (`capture-check`)."""
+    crash (`capture-check`).
+
+    `logged` puts that failure in the log too, at WARNING: the method's words, and a crash's
+    traceback whole — for a caller whose only other trace of it is a line somebody can close
+    (`check_captures`, the G6+G7 review's M2). Not what `spawn` raises: it logs its own busy,
+    timed-out, refused and failed-to-start answers."""
     code, out, err = _spawn(project_dir, args, timeout_s)
     _refuse_if_too_old(project_dir, args[0], out, err)
     if code == 0 or (answer_on_1 and code == 1 and out and not refusal(code, err)
                      and not crashed(err)):
         return out
-    raise ProcessWriterError((err or out).strip() or f"process.py exited {code}")
+    said = (err or out).strip() or f"process.py exited {code}"
+    if logged:
+        app_log.logger().warning("`%s` on %s did not run, or did not finish (exit %s), asked %s; "
+                                 "the method said:\n%s", args[0], project_dir, code,
+                                 args[1:] or "its default",
+                                 said if crashed(err) else method_cli.tail(said))
+    raise ProcessWriterError(said)
 
 
 def enter_phase(project_dir: Path, phase: str) -> str:
@@ -617,12 +628,14 @@ def check_captures(
     recorded. Raised as a failure in stderr's words, a warning there replaced the verdict, and no
     caller could tell a check that ran from one that did not (R-ax, the G5+G8 review's I2). What
     is raised now recorded nothing whole: the method's refusal (`error: …`), REW not answering
-    (exit 69), a crash, and what `spawn` raises — busy, refused, timed out.
+    (exit 69), a crash, and what `spawn` raises — busy, refused, timed out. The first three are
+    logged here, in the method's words and a crash with its traceback; `spawn` logs its own.
     """
     args = ["capture-check", *[str(t) for t in titles or []]]
     if session:
         args.append("--session")
-    return _run(project_dir, args, timeout_s=max(DEFAULT_TIMEOUT_S, 120.0), answer_on_1=True)
+    return _run(project_dir, args, timeout_s=max(DEFAULT_TIMEOUT_S, 120.0), answer_on_1=True,
+                logged=True)
 
 
 def record_capture(project_dir: Path, title: str) -> str:

@@ -250,9 +250,13 @@ def test_a_capture_check_that_ran_answers_its_verdict_even_on_exit_1(monkeypatch
              "error: unexpected KeyError: 'taken'"),
     (1, _VERDICT, "Traceback (most recent call last):\nKeyError: 'taken'"),
 ], ids=["refused", "REW down", "crashed", "crashed after its verdict"])
-def test_a_capture_check_that_did_not_run_is_raised_in_its_own_words(monkeypatch, code, out, err):
+def test_a_capture_check_that_did_not_run_is_raised_in_its_own_words(monkeypatch, code, out, err,
+                                                                     app_log_warnings):
     """The method's refusal, REW not answering and a crash recorded nothing (or nothing whole):
-    each is raised, in the words it was said in, for the caller to say the check did not run."""
+    each is raised, in the words it was said in, for the caller to say the check did not run. And
+    each is logged once, in those words, a crash with its traceback (the G6+G7 review's M2): the
+    strip's line was the only trace, and once it was closed nothing said what had refused or
+    crashed, nor which titles were asked."""
     monkeypatch.setattr(process_writer, "_spawn",
                         lambda project_dir, args, timeout_s=None, **_kw: (code, out, err))
 
@@ -260,6 +264,11 @@ def test_a_capture_check_that_did_not_run_is_raised_in_its_own_words(monkeypatch
         process_writer.check_captures(Path("car"), ["w-L_1 (sw)"])
 
     assert str(failed.value) == err
+    [logged] = [record.getMessage() for record in app_log_warnings]
+    assert "capture-check" in logged and "w-L_1 (sw)" in logged and f"exit {code}" in logged
+    assert err.splitlines()[-1] in logged, logged
+    if "Traceback" in err:
+        assert err in logged, "a crash is logged with its traceback whole"
 
 
 def test_a_method_too_old_for_a_command_says_so_instead_of_dumping_usage(project, monkeypatch):

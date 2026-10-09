@@ -6228,6 +6228,30 @@ def test_a_capture_check_that_did_not_run_says_so_and_why(monkeypatch, tmp_path,
     assert (answered, failed) == ([], [said]), stopped
 
 
+def test_a_crash_in_tccs_own_capture_check_reaches_the_log_with_its_traceback(
+        monkeypatch, tmp_path, app_log_warnings):
+    """The G6+G7 review's M2, its probe turned round: exit 70, the method's catch-all printing the
+    traceback and then `error: unexpected …`. The worker kept the last line for the strip, and
+    nothing logged the rest — unlike `session-close`, whose crash `no_answer` logs. Once the line
+    was closed or replaced, nothing said what crashed, where, or which titles were asked."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import workers
+
+    stderr = ("Traceback (most recent call last):\n  File \"process.py\", line 7861, in _main\n"
+              "KeyError: 'taken'\nerror: unexpected KeyError: 'taken'")
+    monkeypatch.setattr(process_writer, "_spawn",
+                        lambda project_dir, args, timeout_s=None, **_kw: (70, "", stderr))
+    worker = workers._CaptureCheckWorker(tmp_path, titles=["w-L_1 (sw)"])
+    said = []
+    worker.failed.connect(said.append)
+
+    worker.run()  # in this thread: the slot runs directly
+
+    assert said == [i18n.t("captureCheckRefused").format(why="unexpected KeyError: 'taken'")]
+    [logged] = [record.getMessage() for record in app_log_warnings]
+    assert "Traceback" in logged and "line 7861" in logged and "w-L_1 (sw)" in logged, logged
+
+
 def test_a_session_that_closed_itself_is_not_asked_to_save_on_quit(monkeypatch, tmp_path):
     """TEST-FINDINGS 26: the session wrote everything and closed in order, and quitting still asked
     to spend a turn saving. The close marks it saved; a write after the close takes the mark back."""
