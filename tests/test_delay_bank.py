@@ -75,23 +75,25 @@ def test_put_many_stores_exactly_what_one_put_per_reading_stores(tmp_path):
 
 
 def test_put_many_reads_the_store_once_and_writes_it_once(tmp_path, monkeypatch):
-    calls = {"load": 0, "set_value": 0}
-    real_load, real_set = project_settings.load, project_settings.set_value
+    """Counted where the store is read and written, not by the helper's name: since G10 C2 the one
+    read is `update_value`'s own, strict, and `load` is not on the write path at all."""
+    calls = {"read": 0, "write": 0}
+    real_read, real_write = own_store.read_json, own_store.write_json
 
-    def load(*args, **kwargs):
-        calls["load"] += 1
-        return real_load(*args, **kwargs)
+    def read_json(*args, **kwargs):
+        calls["read"] += 1
+        return real_read(*args, **kwargs)
 
-    def set_value(*args, **kwargs):
-        calls["set_value"] += 1
-        return real_set(*args, **kwargs)
+    def write_json(*args, **kwargs):
+        calls["write"] += 1
+        return real_write(*args, **kwargs)
 
-    monkeypatch.setattr(project_settings, "load", load)
-    monkeypatch.setattr(project_settings, "set_value", set_value)
+    monkeypatch.setattr(own_store, "read_json", read_json)
+    monkeypatch.setattr(own_store, "write_json", write_json)
 
     delay_bank.put_many(_seven(), tmp_path, session="cap_001")
 
-    assert calls == {"load": 1, "set_value": 1}
+    assert calls == {"read": 1, "write": 1}
     assert delay_bank.seen(tmp_path) == {f"d{i}_01 (sw)" for i in range(7)}
 
 
@@ -143,9 +145,9 @@ def test_a_store_that_cannot_be_read_refuses_put_many_as_it_refuses_put_and_says
     attempt at the write, not seven, and the sentence said once."""
     intact = unreadable(tmp_path)
     writes = []
-    real_set = project_settings.set_value
-    monkeypatch.setattr(project_settings, "set_value",
-                        lambda *args, **kwargs: writes.append(args) or real_set(*args, **kwargs))
+    real_update = project_settings.update_value
+    monkeypatch.setattr(project_settings, "update_value",
+                        lambda *args, **kwargs: writes.append(args) or real_update(*args, **kwargs))
 
     with pytest.raises(OSError) as by_put:
         delay_bank.put("d0_01 (sw)", 0.0, tmp_path)
@@ -179,3 +181,64 @@ def test_a_store_that_cannot_be_written_refuses_put_many_as_it_refuses_put_and_k
     assert by_many.type is by_put.type is PermissionError
     assert path.read_bytes() == before, "the store as it was"
     assert [p.name for p in folder.iterdir()] == [project_settings.FILENAME], "and no temp file"
+
+
+# ---- a read that failed is never the read a write starts from (G10 C2, #177) ---------------------
+
+
+def flaky_read_once(monkeypatch, store):
+    """The store's FIRST read after this fails, as a Windows sharing violation, an AV or sync lock,
+    or another TCC mid-write does (`PermissionError` 13); every later read is normal. The read is
+    the one thing mocked here: a failure that lasts exactly one read cannot be made for real.
+    Returns the count of reads it failed."""
+    import pathlib
+
+    real = pathlib.Path.read_bytes
+    failed = []
+
+    def read_bytes(self):
+        if not failed and os.path.abspath(self) == os.path.abspath(store):
+            failed.append(self)
+            raise PermissionError(13, "Permission denied", str(self))
+        return real(self)
+
+    monkeypatch.setattr(pathlib.Path, "read_bytes", read_bytes)
+    return failed
+
+
+def _two_series(folder):
+    delay_bank.put("sub_01 (sw)", 1.5, folder, session="S1")
+    delay_bank.put("m-L_01 (sw)", 0.0, folder, session="S1", allpass=Allpass(1, 80.0))
+    delay_bank.put("w-L_01 (sw)", 0.2, folder, session="S2")
+    return project_settings.path_for(folder)
+
+
+_ONE_CHANGE = {
+    "put": lambda folder: delay_bank.put("w-L_01 (sw)", 0.3, folder, session="S2"),
+    "put_many": lambda folder: delay_bank.put_many(
+        [delay_bank.Reading("w-L_01 (sw)", 0.3)], folder, session="S2"),
+    "clear": lambda folder: delay_bank.clear(folder, session="S2"),
+}
+
+
+@pytest.mark.parametrize("change", sorted(_ONE_CHANGE))
+def test_a_read_that_fails_once_writes_nothing_though_a_second_read_would_succeed(
+        tmp_path, monkeypatch, app_log_told, change):
+    """G10 C2: `put_many` and `clear` read the bank forgivingly — a store that could not be read
+    came back `{}` — and then wrote through `set_value`, which read again. When the first read
+    failed and the second did not, the write was the readings on screen and nothing else: every
+    other driver, every other series and their all-passes gone, under a sentence saying TCC «will
+    not write over it». One strict read now, and the write is that read plus the change."""
+    store = _two_series(tmp_path)
+    before = store.read_bytes()
+    failed = flaky_read_once(monkeypatch, store)
+
+    with pytest.raises(own_store.StoreUnreadable):
+        _ONE_CHANGE[change](tmp_path)
+
+    assert len(failed) == 1
+    assert store.read_bytes() == before, "nothing written"
+    assert len(app_log_told) == 1 and "TCC will not write over it" in app_log_told[0], app_log_told
+    _ONE_CHANGE[change](tmp_path)  # the next one reads fine, and lands
+    assert delay_bank.seen(tmp_path, session="S1") == {"sub_01 (sw)", "m-L_01 (sw)"}, "S1 kept"
+    assert delay_bank.allpasses(tmp_path) == {"m-L_01 (sw)": Allpass(1, 80.0)}

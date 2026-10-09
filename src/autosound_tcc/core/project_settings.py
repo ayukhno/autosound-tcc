@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 from autosound_tcc.core import own_store
 
@@ -90,8 +90,23 @@ def set_value(tcc_dir: Path, key: str, value: Any = None) -> None:
     changes, which can happen while a session is mid-turn, and a half-written settings file would
     read as "no preference" on the next launch -- silently forgetting what the user chose.
     """
+    update_value(tcc_dir, key, lambda _old: value)
+
+
+def update_value(tcc_dir: Path, key: str, change: Callable[[Any], Any]) -> Any:
+    """`set_value` for a value built from the one it replaces: `change(old)` is given what the
+    field holds now (None when absent) and returns the new value, or None to remove the field.
+    Returned too.
+
+    One strict read, and the write is that read plus the change. A caller that read the field
+    first and then called `set_value` read the store twice — the first forgivingly — and a first
+    read that failed and a second that did not wrote a value built from nothing over the field:
+    every banked delay but the ones on screen (G10 C2). Here a store that cannot be read raises
+    before `change` is called, and an exception out of `change` stops the write before it starts.
+    """
     target = path_for(tcc_dir)
     data = own_store.read_json(target)
+    value = change(data.get(key))
     if value is None:
         data.pop(key, None)
     else:
@@ -100,6 +115,7 @@ def set_value(tcc_dir: Path, key: str, value: Any = None) -> None:
     own_store.write_json(target, data)
     with _held_lock:
         _held.pop(_slot(tcc_dir, key), None)  # on the disk now: what was held is no longer news
+    return value
 
 
 def set_value_or_say(tcc_dir: Path, key: str, value: Any = None) -> bool:

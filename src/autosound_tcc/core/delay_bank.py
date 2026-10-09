@@ -72,12 +72,20 @@ class Reading(NamedTuple):
 def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, dict]:
     """`{title: {"ms": delay, "at": measured arrival or None, "set": series, "apf": Allpass|None}}`.
 
+    Read forgivingly: a store that cannot be read is "nothing banked". A write never starts from
+    this — see `put_many`.
+    """
+    return _parsed(project_settings.load(tcc_dir or config.tcc_dir()).get(KEY), session)
+
+
+def _parsed(raw: Any, session: Optional[str] = None) -> dict[str, dict]:
+    """The bank's field as `_entries` gives it.
+
     Two shapes are read: a bare number (what the first version wrote) and the object. The arrival
     is what the delay is measured FROM — a delay with no origin is not checkable, and the whole
     point of handing the set to a model is that it can check it. The all-pass is read through
     `Allpass.from_dict`, so what comes back is a valid filter or nothing — never a half of one.
     """
-    raw = project_settings.load(tcc_dir or config.tcc_dir()).get(KEY)
     if not isinstance(raw, dict):
         return {}
     out: dict[str, dict] = {}
@@ -194,16 +202,28 @@ def put_many(
     the set. And the store never holds half a set — a reading that cannot be stored stops the
     write before it starts, where the `put`s ahead of it would already have written. No reading
     is no write.
+
+    The write is ONE strict read plus these readings (`project_settings.update_value`). The bank
+    was read forgivingly first and written through `set_value`, which read again: a first read
+    that failed and a second that did not wrote the readings alone over every other driver,
+    series and all-pass (G10 C2).
     """
     tcc_dir = tcc_dir or config.tcc_dir()
     readings = list(readings)
-    entries = _entries(tcc_dir)
-    if readings:
+    if not readings:
+        return load(tcc_dir)
+    banked: dict[str, float] = {}
+
+    def change(raw: Any) -> dict[str, dict]:
+        entries = _parsed(raw)
         for reading in readings:
             title = str(reading.title)
             entries[title] = _entry(entries.get(title) or {}, reading, session)
-        project_settings.set_value(tcc_dir, KEY, _serialised(entries) or None)
-    return {name: entry["ms"] for name, entry in entries.items() if entry["ms"]}
+        banked.update((name, entry["ms"]) for name, entry in entries.items() if entry["ms"])
+        return _serialised(entries)
+
+    project_settings.update_value(tcc_dir, KEY, change)
+    return banked
 
 
 def _entry(was: dict, reading: Reading, session: Optional[str]) -> dict:
@@ -235,17 +255,22 @@ def clear(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> None
     """Forget one capture series' readings, or all of them when no series is named.
 
     Scoped, because the button sits under a window showing one series and a button that also wiped
-    last week's would be doing something nobody asked for.
+    last week's would be doing something nobody asked for. Through one strict read, as `put_many`
+    is (G10 C2): a read that failed clears nothing.
     """
     tcc_dir = tcc_dir or config.tcc_dir()
     if session is None:
         project_settings.set_value(tcc_dir, KEY, None)
         return
-    keep = {
-        title: entry for title, entry in _entries(tcc_dir).items()
-        if entry["set"] is not None and entry["set"] != session
-    }
-    project_settings.set_value(tcc_dir, KEY, _serialised(keep) or None)
+
+    def change(raw: Any) -> Optional[dict[str, dict]]:
+        keep = {
+            title: entry for title, entry in _parsed(raw).items()
+            if entry["set"] is not None and entry["set"] != session
+        }
+        return _serialised(keep) or None
+
+    project_settings.update_value(tcc_dir, KEY, change)
 
 
 def as_sentence(

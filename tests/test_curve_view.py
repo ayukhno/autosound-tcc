@@ -4753,25 +4753,26 @@ def _plotted(names) -> CurveDialog:
 
 
 def _store_calls_of_one_step(names, monkeypatch) -> dict:
-    """How often one `set_delay` reads and writes the project's store, counted through the module
-    the bank calls it by."""
-    from autosound_tcc.core import project_settings
+    """How often one `set_delay` reads and writes the project's store, counted where the store is
+    read and written (`own_store`): since G10 C2 the bank's write reads strictly, not by `load`."""
+    from autosound_tcc.core import config, own_store, project_settings
 
     dialog = _plotted(names)
-    calls = {"load": 0, "set_value": 0}
-    real_load, real_set = project_settings.load, project_settings.set_value
+    store = os.path.abspath(project_settings.path_for(config.tcc_dir()))
+    calls = {"read": 0, "write": 0}
+    real_read, real_write = own_store.read_json, own_store.write_json
 
-    def load(*args, **kwargs):
-        calls["load"] += 1
-        return real_load(*args, **kwargs)
+    def read_json(path, *args, **kwargs):
+        calls["read"] += os.path.abspath(path) == store
+        return real_read(path, *args, **kwargs)
 
-    def set_value(*args, **kwargs):
-        calls["set_value"] += 1
-        return real_set(*args, **kwargs)
+    def write_json(path, *args, **kwargs):
+        calls["write"] += os.path.abspath(path) == store
+        return real_write(path, *args, **kwargs)
 
     with monkeypatch.context() as patched:
-        patched.setattr(project_settings, "load", load)
-        patched.setattr(project_settings, "set_value", set_value)
+        patched.setattr(own_store, "read_json", read_json)
+        patched.setattr(own_store, "write_json", write_json)
         dialog._view.set_delay(0.26)
     return calls
 
@@ -4785,8 +4786,8 @@ def test_one_delay_step_writes_the_bank_once_however_many_drivers_are_on_screen(
     two = _store_calls_of_one_step(_SIDE[:2], monkeypatch)
     seven = _store_calls_of_one_step(_SIDE, monkeypatch)
 
-    assert seven["set_value"] == 1, seven
-    assert seven["load"] == two["load"], (two, seven)
+    assert seven["write"] == 1, seven
+    assert seven["read"] == two["read"], (two, seven)
     assert delay_bank.seen() == set(_SIDE), "every driver on screen is still banked"
 
 
@@ -4833,6 +4834,30 @@ def test_a_bank_that_cannot_be_written_is_said_once_however_many_steps_fail(app_
     assert len(app_log_told) == 1, app_log_told
     assert str(store) in app_log_told[0] and "could not be written" in app_log_told[0]
     assert dialog._view.delay_ms() == pytest.approx(0.3), "and the curves still move"
+
+
+def test_one_step_after_one_failed_read_keeps_every_banked_driver(monkeypatch, app_log_told):
+    """G10 C2, in the window: one read that failed and the next that did not, and the step wrote
+    the drivers on screen over the whole bank — the sub and the centre banked earlier were gone,
+    while the strip said TCC would not write over it. Now the step writes nothing, and the next
+    one banks the screen beside them."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+    from tests.test_delay_bank import flaky_read_once
+
+    delay_bank.put("sub_01 (sw)", 1.5, session="S1")
+    delay_bank.put("c_01 (sw)", 0.7, session="S1")
+    dialog = _plotted(_SIDE[:2])
+    store = project_settings.path_for(config.tcc_dir())
+    before = store.read_bytes()
+    flaky_read_once(monkeypatch, store)
+
+    dialog._view.set_delay(0.26)
+
+    assert store.read_bytes() == before, "nothing written over the bank"
+    assert len(app_log_told) == 1 and "TCC will not write over it" in app_log_told[0], app_log_told
+    dialog._view.set_delay(0.27)
+    assert delay_bank.seen() == {"sub_01 (sw)", "c_01 (sw)", *_SIDE[:2]}
+    assert delay_bank.load()["sub_01 (sw)"] == 1.5
 
 
 # ---- one readout render per step (#177, TA-4) --------------------------------------------------

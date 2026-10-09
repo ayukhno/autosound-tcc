@@ -259,3 +259,37 @@ def test_a_strict_read_tells_a_store_that_cannot_be_read_from_one_that_is_not_th
     assert project_settings.get(tmp_path, "gate", "") == ""
     with pytest.raises(own_store.StoreUnreadable):
         project_settings.get(tmp_path, "gate", "", strict=True)
+
+
+def test_update_value_reads_once_strictly_and_writes_that_read_plus_the_change(
+        tmp_path, monkeypatch, app_log_told):
+    """G10 C2: a read-modify-write of one field with ONE read. `set_value` read strictly but took
+    the new value whole, so a caller that built it from the old one had read the store before,
+    forgivingly — and a first read that failed and a second that did not wrote over the field.
+    `update_value` hands the change what the one strict read found, and writes what it returns."""
+    from tests.test_delay_bank import flaky_read_once
+
+    project_settings.set_value(tmp_path, "generator", "sdk:claude-opus-5")
+    project_settings.set_value(tmp_path, "curve_delays", {"sub_01 (sw)": 1.5})
+    path = project_settings.path_for(tmp_path)
+    before = path.read_bytes()
+    seen = []
+
+    def add(old):
+        seen.append(old)
+        return {**old, "w-L_01 (sw)": 0.2}
+
+    flaky_read_once(monkeypatch, path)
+    with pytest.raises(own_store.StoreUnreadable):
+        project_settings.update_value(tmp_path, "curve_delays", add)
+    assert seen == [] and path.read_bytes() == before, "no change made, nothing written"
+    assert len(app_log_told) == 1, app_log_told
+
+    project_settings.update_value(tmp_path, "curve_delays", add)
+
+    assert seen == [{"sub_01 (sw)": 1.5}]
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert stored["curve_delays"] == {"sub_01 (sw)": 1.5, "w-L_01 (sw)": 0.2}
+    assert stored["generator"] == "sdk:claude-opus-5", "the rest of the file is kept"
+    project_settings.update_value(tmp_path, "curve_delays", lambda _old: None)
+    assert "curve_delays" not in json.loads(path.read_text(encoding="utf-8")), "None removes it"
