@@ -8,8 +8,10 @@ an empty plan that looks like a finished one.
 
 from __future__ import annotations
 
+import ast
 import builtins
 import os
+from pathlib import Path
 
 import pytest
 
@@ -851,3 +853,79 @@ def test_standing_is_the_methods_own_rule_row_by_row(project, process):
                          ids=["no-round", "empty", "taken-null", "taken-a-list"])
 def test_standing_of_no_round_or_no_taken_is_nothing(round_):
     assert process_view.standing(round_) == {}
+
+
+# ---- `standing()` is the only reader of `taken` (#175) -----------------------------------------
+#
+# A reader that counts the rows itself is the defect `standing()` was written against: it reads a
+# superseded typo as a capture. The fold builds the rows; everything else asks `standing()`.
+
+_SRC = Path(__file__).resolve().parents[1] / "src"
+
+#: Where `taken` is read raw: `standing()` itself, and the fold that builds the rows.
+_TAKEN_READERS = frozenset({
+    ("autosound_tcc/state/process_view.py", "standing"),
+    ("autosound_tcc/state/process_view.py", "capture_rounds"),
+    ("autosound_tcc/state/process_view.py", "_as_it_closed"),
+})
+
+
+def _within(node: ast.AST, outer: str | None = None):
+    """Every node under `node`, with the outermost function it sits in."""
+    for child in ast.iter_child_nodes(node):
+        inner = outer
+        if inner is None and isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            inner = child.name
+        yield inner, child
+        yield from _within(child, inner)
+
+
+def _taken_reads(root: Path, readers=_TAKEN_READERS) -> list[str]:
+    """`path:line` of each `.get("taken"…)` and `["taken"]` under `root`, outside `readers`.
+
+    Read off the syntax tree, not the text: a key is the same key in either quote style, a comment
+    or a docstring that names `taken` reads nothing, and `"taken_at"` is another key."""
+    def is_taken(node) -> bool:
+        return isinstance(node, ast.Constant) and node.value == "taken"
+
+    found = set()
+    for path in sorted(root.rglob("*.py")):
+        # `as_posix`: a report about source, named the same on every platform.
+        where = path.relative_to(root).as_posix()
+        for function, node in _within(ast.parse(path.read_text(encoding="utf-8"))):
+            read = (isinstance(node, ast.Subscript) and is_taken(node.slice)) or (
+                isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get" and bool(node.args) and is_taken(node.args[0]))
+            if read and (where, function) not in readers:
+                found.add((where, node.lineno))
+    return [f"{where}:{line}" for where, line in sorted(found)]
+
+
+def test_standing_is_the_only_reader_of_taken():
+    """#175: outside `standing()` and the fold, nothing in `src/` reads a round's `taken` itself —
+    the window's three did, and a superseded typo could light «Готово» on its own, went out in the
+    capture-ready signal, and could name the series."""
+    sites = _taken_reads(_SRC)
+    assert sites == [], "read them through process_view.standing(round_): " + ", ".join(sites)
+    exempt = {site.split(":")[0] for site in _taken_reads(_SRC, readers=frozenset())}
+    assert "autosound_tcc/state/process_view.py" in exempt, \
+        "the walk found not even the fold's reads: a moved folder would pass this"
+
+
+def test_the_taken_scan_names_each_read_and_leaves_the_lookalikes(tmp_path):
+    """Green by design, so shown failing: each spelling of a read, named by file and line, and the
+    keys, comments and strings that only look like one left alone."""
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "m.py").write_text(
+        "def f(r):\n"
+        "    a = r.get('taken')\n"
+        '    b = r["taken"][0]\n'
+        '    c = r.get("taken", {})\n'
+        '    d = r.get("taken_at"), r["mistaken"], r["taken_titles"], r.taken\n'
+        '    # r.get("taken") and r["taken"] in a comment\n'
+        '    """r.get("taken") in a string"""\n'
+        '    return {"taken": {}}\n',
+        encoding="utf-8")
+
+    assert _taken_reads(tmp_path) == ["pkg/m.py:2", "pkg/m.py:3", "pkg/m.py:4"]
+    assert _taken_reads(tmp_path, readers={("pkg/m.py", "f")}) == []

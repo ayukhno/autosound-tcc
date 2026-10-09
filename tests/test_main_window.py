@@ -2558,6 +2558,12 @@ def test_the_open_round_names_the_series_before_the_plan(monkeypatch):
              "plan": [{"id": "m0", "phase": "0", "name": "Baseline solo: tw-L_1 (sw)"}]}
 
     assert window._capture_version(state) == 7
+    # A round that names nothing in `expected` is named by what it took — never by a typo it
+    # superseded (#175): `w-L_70` was corrected to `w-L_07`, and the series is 7.
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
+        "id": "cap_003", "expected": [],
+        "taken": {"w-L_70 (sw)": {"superseded_by": "w-L_07 (sw)"}, "w-L_07 (sw)": {}}})
+    assert window._capture_version(state) == 7
 
 
 def test_with_no_round_open_the_highest_series_among_the_rounds(monkeypatch):

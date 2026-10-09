@@ -4129,7 +4129,7 @@ class MainWindow(QMainWindow):
         if button is None:
             return
         round_ = process_view.capture_round() or {}
-        button.setEnabled(bool(round_) and not round_.get("closed") and bool(round_.get("taken")))
+        button.setEnabled(not round_.get("closed") and bool(process_view.standing(round_)))
 
     def _on_capture_ready(self) -> None:
         """The Arbiter says the captures in front of him are taken: put it on the bus and, when a
@@ -4142,7 +4142,7 @@ class MainWindow(QMainWindow):
             self._status_strip.notify(i18n.t("noSessionForSignal"), level="warn")
             return
         round_ = process_view.capture_round() or {}
-        titles = sorted(str(t) for t in (round_.get("taken") or {}))
+        titles = sorted(str(t) for t in process_view.standing(round_))
         server.bus.push(signal_bus.CAPTURE_READY, round=round_.get("id"), titles=titles)
         listening = self._dialog.has_agent()
         self._status_strip.notify(i18n.t("captureReadySent" if listening else "captureReadyQueued")
@@ -4273,7 +4273,7 @@ class MainWindow(QMainWindow):
         round_ = process_view.capture_round() or {}
         if round_ and not round_.get("closed"):
             found = measurement_view.series_of(
-                list(round_.get("expected") or []) + list(round_.get("taken") or {}))
+                list(round_.get("expected") or []) + list(process_view.standing(round_)))
             if found is not None:
                 return found
         for step in (state or {}).get("plan") or []:

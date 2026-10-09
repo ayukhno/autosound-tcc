@@ -261,7 +261,11 @@ def test_done_on_the_capture_card_follows_the_open_round_and_signals_the_ai(tmp_
     monkeypatch.setattr(main_window.process_view, "capture_round", lambda *a, **k: round_)
     window._sync_capture_ready()
     assert not window._capture_ready_btn.isEnabled()
-    round_["taken"] = {"m-L_1 (sw)": {}, "m-R_1 (sw)": {}}
+    # A superseded row is a typo's trace, not a capture (#175): it lights nothing and is not sent.
+    round_["taken"] = {"m-R_l (sw)": {"superseded_by": "m-R_1 (sw)"}}
+    window._sync_capture_ready()
+    assert not window._capture_ready_btn.isEnabled()
+    round_["taken"].update({"m-L_1 (sw)": {}, "m-R_1 (sw)": {}})
     window._sync_capture_ready()
     assert window._capture_ready_btn.isEnabled()
 
