@@ -80,12 +80,44 @@ def read_state_text(project_dir: Optional[Path] = None) -> Optional[dict]:
     to v3.1.1 has no `strict`, and every copy `method_binding` admits must read the same way. A BOM
     is read, as the method reads it: refused here, a state the method reads would freeze the plan.
     """
+    return _read_state(project_dir)[0]
+
+
+def unreadable(project_dir: Optional[Path] = None) -> Optional[str]:
+    """Why `process-state.json`, which is there, does not read as a state — `read_state_text`'s
+    None, in the read's own words: «it is not valid JSON: Expecting …», «it is empty» — or None
+    when it reads, or there is no file. A write cut off and a hand edit gone wrong read alike as
+    None, and the agent and the log need to tell them apart (Task 24's review M2/M3; the G6+G7
+    review's M5). The file is only read (R-bw)."""
+    return _read_state(project_dir)[1]
+
+
+#: What a top level that is no object holds, in JSON's words.
+_JSON_KINDS = {type(None): "null", list: "an array", str: "a string", bool: "true or false",
+               int: "a number", float: "a number"}
+
+
+def _read_state(project_dir: Optional[Path]) -> tuple[Optional[dict], Optional[str]]:
+    """`(the state's object, None)`, `(None, why it does not read)`, or `(None, None)` for no
+    file: the one read both answers come from, as the method's `project_io.read_json` reads."""
     try:
         with open(state_file(project_dir), "rb") as handle:
-            data = json.loads(handle.read().decode("utf-8-sig"))
-    except (OSError, ValueError):  # `UnicodeDecodeError` and `JSONDecodeError` are ValueErrors
-        return None
-    return data if isinstance(data, dict) else None
+            raw = handle.read()
+    except FileNotFoundError:
+        return None, None
+    except OSError as exc:
+        return None, f"it could not be opened: {exc}"
+    if not raw.strip():
+        return None, "it is empty"
+    try:
+        data = json.loads(raw.decode("utf-8-sig"))
+    except UnicodeDecodeError as exc:
+        return None, f"it is not UTF-8: {exc}"
+    except ValueError as exc:  # `JSONDecodeError`
+        return None, f"it is not valid JSON: {exc}"
+    if not isinstance(data, dict):
+        return None, f"it holds {_JSON_KINDS.get(type(data), type(data).__name__)}, not a JSON object"
+    return data, None
 
 
 def load_state(project_dir: Optional[Path] = None) -> Optional[dict]:

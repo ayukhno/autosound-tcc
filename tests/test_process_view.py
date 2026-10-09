@@ -74,6 +74,18 @@ def test_a_state_file_that_is_not_a_state_reads_as_none(project, written):
     assert process_view.load_plan(project) is None
     assert process_view.read_state_text(project) is None
     assert process_view.has_process_state(project)  # there: how the window's guard tells them apart
+    # And why, in the read's own words (Task 24's review M2/M3, the G6+G7 review's M5): a write cut
+    # off and a hand edit gone wrong are told apart, by the agent and in the log.
+    assert process_view.unreadable(project) == {
+        b"{ half": "it is not valid JSON: Expecting property name enclosed in double quotes: "
+                   "line 1 column 3 (char 2)",
+        b"": "it is empty",
+        b"null": "it holds null, not a JSON object",
+        b"[]": "it holds an array, not a JSON object",
+        b"\xff\xfe{}": "it is not UTF-8: 'utf-8' codec can't decode byte 0xff in position 0: "
+                        "invalid start byte",
+    }[written]
+    assert path.read_bytes() == written, "read, never written or moved aside (R-bw)"
 
 
 def test_a_state_file_that_cannot_be_opened_reads_as_none(project, process, monkeypatch):
@@ -84,6 +96,14 @@ def test_a_state_file_that_cannot_be_opened_reads_as_none(project, process, monk
 
     assert process_view.load_state(project) is None
     assert process_view.read_state_text(project) is None
+    assert process_view.unreadable(project).startswith("it could not be opened: [Errno 13] held by "
+                                                       "another program")
+
+
+def test_a_state_that_reads_or_is_not_there_has_nothing_to_say(project, process):
+    assert process_view.unreadable(project) is None, "no file: a fresh project"
+    process.enter_phase("2")
+    assert process_view.unreadable(project) is None
 
 
 def test_a_state_with_a_bom_still_reads(project, process):

@@ -1664,7 +1664,8 @@ def test_a_project_mid_interview_keeps_its_plan(tmp_path, monkeypatch):
     assert any("Set session language" in s.name for p in window._plan_panel.plan for s in p.steps)
 
 
-def test_a_half_written_process_file_does_not_erase_the_plan(tmp_path, monkeypatch):
+def test_a_half_written_process_file_does_not_erase_the_plan(tmp_path, monkeypatch,
+                                                              app_log_warnings):
     """The skill rewrites `process-state.json` on every step, and the watcher can read it mid-
     write. Blanking then turns half a second of writing into "the phases disappeared" — reported
     exactly that way, with them coming back on the next turn.
@@ -1699,6 +1700,29 @@ def test_a_half_written_process_file_does_not_erase_the_plan(tmp_path, monkeypat
     assert window._plan_panel.plan  # the last thing known to be true stays on screen
     assert "xo" in [s.id for p in window._plan_panel.plan for s in p.steps]
     assert path in window._process_watcher.files()  # so the write that completes it is seen
+
+    # Task 24's review, M2: and it was silent, so a file that STAYS unreadable froze the plan with
+    # nothing in the log or on screen. One WARNING per state of the file, not per refresh, said
+    # once on the strip, taken back once the file reads; the file only read (R-bw).
+    why = process_view.unreadable()
+    said = i18n.t("processStateUnread").format(why=why)
+    logged = [record.getMessage() for record in app_log_warnings if "process-state" in
+              record.getMessage()]
+    assert len(logged) == 1 and why in logged[0] and window._status_strip.text() == said, logged
+    window._refresh_process()
+    assert len([r for r in app_log_warnings if "process-state" in r.getMessage()]) == 1
+    (process / "process-state.json").write_text("[]", encoding="utf-8")  # another state of it
+    window._refresh_process()
+    assert len([r for r in app_log_warnings if "process-state" in r.getMessage()]) == 2
+    assert window._status_strip.text() == i18n.t("processStateUnread").format(
+        why=process_view.unreadable())
+    assert (process / "process-state.json").read_text(encoding="utf-8") == "[]"
+    (process / "process-state.json").write_text(json.dumps({
+        "schema_version": 3, "active_phase": "1",
+        "plan": [{"id": "xo", "name": "Choose crossovers", "status": "done", "phase": "1"}]}),
+        encoding="utf-8")
+    window._refresh_process()
+    assert window._status_strip.text() == "", "it reads: the line is taken back"
 
 
 def test_a_phase_closed_on_prose_is_flagged_in_the_panel(tmp_path, monkeypatch):

@@ -54,6 +54,7 @@ import contextvars
 import ctypes
 import dataclasses
 import functools
+import inspect
 import json
 import os
 import secrets
@@ -583,15 +584,22 @@ def build_server(
         `(state, None)` or `(None, reason)` — a project with no process yet reads as an empty
         state, which is not an error. A file that is there and does not read as a state is: the
         method reads it as the empty process too, and «no active phase» from it sent the agent to
-        record a move it may well have recorded (#176). Read first as the window reads it.
+        record a move it may well have recorded (#176). Read first as the window reads it, and
+        answered with why, in the read's own words (the G6+G7 review's M5): a write in progress
+        is asked again in a second, a broken edit is repaired — the method's own read names how,
+        from the copy whose `load` takes `strict` (v3.1.2); an older one names none, and is not
+        pointed at. Never written or moved aside (R-bw).
         """
         try:
             process = vendor_loader.load_process()
         except vendor_loader.VendorNotInitializedError as exc:
             return None, str(exc)
-        if (process_view.read_state_text(project_dir) is None
-                and process_view.has_process_state(project_dir)):
-            return None, "process-state.json could not be read"
+        why = process_view.unreadable(project_dir)
+        if why is not None:
+            names = "strict" in inspect.signature(process.Process.load).parameters
+            return None, (f"process-state.json could not be read: {why}" + (
+                " -- the method's own read names the repair: `state/process.py "
+                f"{process_view.process_dir(project_dir)} show`" if names else ""))
         return process.Process(str(project_dir / "process")).load(), None
 
     async def _confirm(request: ConfirmRequest) -> bool:
@@ -1003,9 +1011,12 @@ def build_server(
         bridge.refresh_from_disk()
         # Written after a close, it is no longer a closed session (TEST-FINDINGS 26).
         _tell("session_changed")
-        state, _ = _load_process_state()
+        # The reason kept (Task 24's review, M3): «active_phase: null» alone after a recorded move
+        # is the «no active phase» misdirection #176 names.
+        state, error = _load_process_state()
         return json.dumps({"recorded": True, "said": line,
-                           "active_phase": (state or {}).get("active_phase")},
+                           "active_phase": (state or {}).get("active_phase"),
+                           **({"process_state_error": error} if error else {})},
                           ensure_ascii=False)
 
     @tool()

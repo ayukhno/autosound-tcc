@@ -101,7 +101,7 @@ from autosound_tcc.state import (
 from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, VersionRefused, load_project_view, rig_view
 from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, mcp_view, sizing
-from autosound_tcc.ui.tcc import main_menu, menu_registry
+from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc import qt_shutdown
@@ -766,6 +766,7 @@ class MainWindow(QMainWindow):
         # The step «Back up to GitHub» shows, as the folder last read: 0, 1, or None for no button.
         self._backup_step: Optional[int] = None
         self._has_project = False  # set for real by _load_project(); read by _refresh_process()
+        self._process_unread = process_state_line.Unread()  # and this, by its guard
         # Here, and not where a session starts it: filling the model combos below fires
         # `currentIndexChanged`, so `_on_effort_changed` runs while the window is still being
         # built and reads this. Without the line it read an attribute that did not exist yet, and
@@ -3674,11 +3675,9 @@ class MainWindow(QMainWindow):
         # The round is in the process state, so «Готово» follows every write to it (finding 31).
         self._sync_capture_ready()
         state = process_view.load_state()
-        if state is None and process_view.has_process_state():
-            # The file is there but did not read as state: the skill is mid-write, or wrote
-            # something this version cannot parse. Either way the plan on screen is the last thing
-            # known to be true, and blanking it turns a half-second of writing into "the phases
-            # disappeared" -- reported exactly that way, with them coming back on the next turn.
+        # A file that is there and did not read as a state keeps the plan on screen, and says so
+        # once per state of the file (`process_state_line.Unread`, #176).
+        if self._process_unread.stops(self._status_strip, state):
             return
         if state is None:
             # "No plan yet" and "no project open" are different empty states with different fixes,

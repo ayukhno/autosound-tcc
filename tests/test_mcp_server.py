@@ -730,8 +730,76 @@ def test_report_phase_on_a_file_that_is_not_a_state_says_it_could_not_be_read(tm
 
     result = json.loads(_text(asyncio.run(mcp.call_tool("report_phase", {"phase": "2"}))))
 
-    assert result == {"refreshed": False, "error": "process-state.json could not be read"}
+    assert result == {"refreshed": False, "error": _UNREAD_HALF.format(dir=tmp_path / "process")}
     assert registry.current_phase() is None
+
+
+#: What the agent is told about a `{ half` state (the G6+G7 review's M5): the cause in the read's
+#: words — a write cut off is not a hand edit gone wrong — and where the method names the repair.
+_UNREAD_HALF = ("process-state.json could not be read: it is not valid JSON: Expecting property "
+                "name enclosed in double quotes: line 1 column 3 (char 2) -- the method's own read "
+                "names the repair: `state/process.py {dir} show`")
+
+
+def test_the_state_tcc_reports_says_why_the_file_did_not_read(tmp_path):
+    """The G6+G7 review's M5: `get_tcc_state.process_state_error` was one fixed sentence for a write
+    in progress (ask again in a second) and a broken edit (repair it). The file is only read (R-bw)."""
+    mcp, _, _ = _server(tmp_path, RecordingBridge(allow=True))
+    (tmp_path / "process").mkdir()
+    state = tmp_path / "process" / "process-state.json"
+    state.write_text("{ half", encoding="utf-8")
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool("get_tcc_state", {}))))
+
+    assert result["process_state_error"] == _UNREAD_HALF.format(dir=tmp_path / "process")
+    assert result["current_phase"] is None
+    assert state.read_text(encoding="utf-8") == "{ half", "never written or moved aside"
+
+
+def test_a_copy_of_the_method_that_names_no_repair_is_not_pointed_at(tmp_path, monkeypatch):
+    """Up to v3.1.1 the method's read is lenient only (`load` takes no `strict`), and its `show`
+    prints the empty process: pointed at it, the agent would read «nothing is wrong». The cause
+    is said; the pointer is not."""
+    import types
+
+    from autosound_tcc.core import vendor_loader
+
+    class _Older:
+        def __init__(self, folder):
+            self.folder = folder
+
+        def load(self):
+            return {}
+
+    mcp, _, _ = _server(tmp_path, RecordingBridge(allow=True))
+    monkeypatch.setattr(vendor_loader, "load_process", lambda: types.SimpleNamespace(Process=_Older))
+    (tmp_path / "process").mkdir()
+    (tmp_path / "process" / "process-state.json").write_text("{ half", encoding="utf-8")
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool("get_tcc_state", {}))))
+
+    assert result["process_state_error"] == _UNREAD_HALF.split(" -- ")[0]
+
+
+def test_a_recorded_move_over_a_state_that_then_does_not_read_keeps_the_reason(tmp_path,
+                                                                               monkeypatch):
+    """Task 24's review, M3: `_record` dropped the reason (`state, _ =`), so a move recorded and a
+    re-read that failed answered `"active_phase": null` — the «no active phase» misdirection #176
+    names. The reason is in the answer beside it."""
+    from autosound_tcc.core import process_writer
+
+    def recorded(project_dir, phase):
+        (project_dir / "process").mkdir(exist_ok=True)
+        (project_dir / "process" / "process-state.json").write_text("{ half", encoding="utf-8")
+        return f"phase {phase} is current"
+
+    monkeypatch.setattr(process_writer, "enter_phase", recorded)
+    mcp, _, _ = _server(tmp_path, RecordingBridge(allow=True))
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool("enter_phase", {"phase": "2"}))))
+
+    assert result["recorded"] is True and result["active_phase"] is None, result
+    assert result["process_state_error"] == _UNREAD_HALF.format(dir=tmp_path / "process")
 
 
 def test_write_mcp_config_merges_instead_of_clobbering(tmp_path, monkeypatch):

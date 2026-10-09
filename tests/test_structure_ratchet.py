@@ -31,8 +31,9 @@ BUILD = "Main" + "Window("
 #: Lowered by every wave that moves a decision out; never raised (W-8: 6506 on 2026-10-06, 6270
 #: after the menu moved into its registry, #161; W-9: 6230 after «settled» moved into
 #: `measurement_view.verdict_state`, #175; 6225 once `tip_html` came from `rounded_tooltip`,
-#: #177; 6202 after the capture series moved into `measurement_view.capture_version`, #175).
-MAIN_WINDOW_MAX_LINES = 6202
+#: #177; 6202 after the capture series moved into `measurement_view.capture_version`, #175;
+#: 6201 after the plan's guard did, into `process_state_line.Unread`, #176).
+MAIN_WINDOW_MAX_LINES = 6201
 #: Full-window builds in the tests, outside comments (W-8: 223 on 2026-10-06, 218 after the menu
 #: tests became renderer tests, #161; W-9: 212 after the «settled» tests became plain tests over a
 #: recorded round, #175; 208 after the capture series' tests did, #175).
