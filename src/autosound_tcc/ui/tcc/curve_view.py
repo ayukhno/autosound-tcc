@@ -1103,6 +1103,8 @@ class CurveView(QWidget):
         self._step_ms = _DEFAULT_STEP_MS
         self._crossing_dots = None
         self._syncing = False
+        #: True while one marker move is being drawn — see `_on_marker_moved`.
+        self._moving = False
         self._marker_names: list[str] = []
         #: Which two traces the cross modes compare — see `cross_pair` for why it is two.
         self._cross_indices = (0, 1)
@@ -3513,8 +3515,22 @@ class CurveView(QWidget):
     # ---- internals -------------------------------------------------------
 
     def _on_marker_moved(self) -> None:
-        self._sync_levels()
-        self._on_any_move()
+        """One move, one render, one `markersChanged`.
+
+        Two modes drew one move twice. In `vhs`, `_sync_levels` moves the level, and that line
+        reports its move back through this same handler. In `hx`, re-placing the dots moves an
+        auto-ranged view, and `_on_view_changed` rendered again from inside `_render_crossings`,
+        leaving the dots it drew behind on the plot. Both re-entries stop here, and the outer call
+        draws what both wanted.
+        """
+        if self._syncing:
+            return
+        self._moving = True
+        try:
+            self._sync_levels()
+            self._on_any_move()
+        finally:
+            self._moving = False
         self._render_readout()
         self.markersChanged.emit()
 
@@ -3526,7 +3542,7 @@ class CurveView(QWidget):
             self.bring_markers_into_view()
 
     def _on_view_changed(self, *_args) -> None:
-        if self._axes_mode == "hx":
+        if self._axes_mode == "hx" and not self._moving:
             self._render_crossings()
             self._render_readout()
 

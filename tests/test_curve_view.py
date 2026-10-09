@@ -4931,3 +4931,42 @@ def test_one_all_pass_step_renders_the_readout_once(monkeypatch):
     assert _readout_renders(
         dialog._view, lambda: dialog._view.set_allpass(Allpass(1, 80.0), 2), monkeypatch) == 1
     assert dialog._view.allpass(2) == Allpass(1, 80.0)
+
+
+
+# ---- one render per marker move (#177, TA-11) -------------------------------------------------
+
+
+#: Each mode with the line its drag moves and where to: the verticals where a vertical is the
+#: gesture, the level where the level is. A level of 0 is crossed twice by each impulse.
+_MARKER_DRAGS = [("v", "_markers", 5.30), ("h", "_h_markers", 0.0), ("vh", "_markers", 5.30),
+                 ("vh", "_h_markers", 0.0), ("vhs", "_markers", 5.30), ("vx", "_markers", 5.30),
+                 ("hx", "_h_markers", 0.0)]
+
+
+@pytest.mark.parametrize(("mode", "lines", "to"), _MARKER_DRAGS)
+def test_one_marker_move_renders_the_readout_once_and_says_so_once(mode, lines, to, monkeypatch):
+    """In `vhs` the level follows the vertical, and that move came back through the same handler:
+    two renders and two `markersChanged` for one move. In `hx` the move re-placed the dots, the
+    auto-ranged view moved with them, and the view's own handler rendered the readout again and
+    left the dots it drew behind on the plot. Every mode: one render, one signal, one set of
+    dots."""
+    import pyqtgraph as pg
+
+    view = _view()
+    view.set_y_unit("dB")
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+    view.set_axes_mode(mode)
+    line = getattr(view, lines)[0]
+    assert line.value() != pytest.approx(to), "the move has to move something"
+    said = []
+    view.markersChanged.connect(lambda: said.append(1))
+
+    assert _readout_renders(view, lambda: line.setValue(to), monkeypatch) == 1
+    assert len(said) == 1
+    dots = [item for item in view._plot.getPlotItem().items
+            if isinstance(item, pg.ScatterPlotItem)]
+    assert len(dots) <= 1 and (not dots or dots[0] is view._crossing_dots), dots
+    if mode == "vhs":
+        assert view.levels()[0] == pytest.approx(view._y_at(0, 5.30), abs=1e-9), \
+            "and the level still follows"
