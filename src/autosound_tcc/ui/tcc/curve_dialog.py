@@ -30,7 +30,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import app_log, capture_import, config, curve_groups, delay_bank, protective
+from autosound_tcc.core import (
+    app_log, capture_import, config, curve_groups, delay_bank, own_store, project_settings,
+    protective,
+)
 from autosound_tcc.state import process_view
 from autosound_tcc.core.allpass import AllpassError
 from autosound_tcc.core.rew_bridge import RewBridge
@@ -1384,21 +1387,41 @@ class CurveDialog(QDialog):
         """
         if self._restoring:
             return
-        for index, trace in enumerate(self._view._traces):
-            # All of them, every time. Each driver carries its own delay now, so there is
-            # nothing to move
-            # from one entry to another — the radio only chooses which one you are typing into.
-            # The arrival AS CAPTURED goes with it: a delay with no origin cannot be checked, and
-            # checking the set is the only reason it is ever sent anywhere. And the driver's
-            # all-pass, which is the same kind of proposal and lives in the same entry.
-            delay_bank.put(
+        # All of them, every time. Each driver carries its own delay now, so there is nothing to
+        # move from one entry to another — the radio only chooses which one you are typing into.
+        # The arrival AS CAPTURED goes with it: a delay with no origin cannot be checked, and
+        # checking the set is the only reason it is ever sent anywhere. And the driver's all-pass,
+        # which is the same kind of proposal and lives in the same entry. One write for the set:
+        # this runs on every step of the box (#177).
+        readings = [
+            delay_bank.Reading(
                 trace.name, self._view.delay_ms(index),
                 arrival_ms=_peak_x(trace) if self._kind == "impulse" else None,
-                session=self._session(),
                 allpass=self._view.allpass(index),
             )
+            for index, trace in enumerate(self._view._traces)
+        ]
+        if readings:
+            self._bank_or_say(readings)
         self._sync_channel_delay()
         self._render_bank()
+
+    def _bank_or_say(self, readings: list) -> None:
+        """`put_many`, for a slot that runs on every step of the box: a store that cannot be read
+        or written is said once for this state of the file, and the step goes on.
+
+        Raised out of the slot, the refusal reached the strip on every step — a write to a
+        read-only `.tcc/` with a temp name of its own each time, so a new sentence per step, and a
+        report stands until its ✕. One that cannot be read was said where it was read
+        (`own_store`); a write that failed is said here, as the window's other writes say it
+        (`project_settings.set_value_or_say`, R-bl).
+        """
+        try:
+            delay_bank.put_many(readings, session=self._session())
+        except own_store.StoreUnreadable:
+            pass  # said by `own_store` when the bank read it, once for this state of the file
+        except OSError as exc:
+            own_store.say_unwritten(project_settings.path_for(config.tcc_dir()), exc)
 
     def _render_bank(self) -> None:
         """The banked set behind its own button, and the same numbers beside the titles in the

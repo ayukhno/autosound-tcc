@@ -4736,3 +4736,100 @@ def test_a_rew_known_to_be_offline_is_said_at_once_not_waited_for(monkeypatch):
     dialog.rew_state_changed(True)
     dialog.hide()
     assert len(started) == 1, "and the read happens once it is back"
+
+
+# ---- one bank write per step (#177, TA-4) ------------------------------------------------------
+
+#: A whole side and the sub: what the window banks on every step of the delay box.
+_SIDE = ["w-L_01 (sw)", "w-R_01 (sw)", "m-L_01 (sw)", "m-R_01 (sw)", "tw-L_01 (sw)",
+         "tw-R_01 (sw)", "sw_01 (sw)"]
+
+
+def _plotted(names) -> CurveDialog:
+    dialog = _dialog(list(names), bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace(name, *_impulse(4.5 + 0.05 * i)) for i, name in enumerate(names)])
+    return dialog
+
+
+def _store_calls_of_one_step(names, monkeypatch) -> dict:
+    """How often one `set_delay` reads and writes the project's store, counted through the module
+    the bank calls it by."""
+    from autosound_tcc.core import project_settings
+
+    dialog = _plotted(names)
+    calls = {"load": 0, "set_value": 0}
+    real_load, real_set = project_settings.load, project_settings.set_value
+
+    def load(*args, **kwargs):
+        calls["load"] += 1
+        return real_load(*args, **kwargs)
+
+    def set_value(*args, **kwargs):
+        calls["set_value"] += 1
+        return real_set(*args, **kwargs)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(project_settings, "load", load)
+        patched.setattr(project_settings, "set_value", set_value)
+        dialog._view.set_delay(0.26)
+    return calls
+
+
+def test_one_delay_step_writes_the_bank_once_however_many_drivers_are_on_screen(monkeypatch):
+    """Every driver on screen is banked on every step of the box — seven `put`s, seven loads and
+    seven writes of the whole file for a side and the sub. One step is one write now, and reads
+    the store as often for seven drivers as for two."""
+    from autosound_tcc.core import delay_bank
+
+    two = _store_calls_of_one_step(_SIDE[:2], monkeypatch)
+    seven = _store_calls_of_one_step(_SIDE, monkeypatch)
+
+    assert seven["set_value"] == 1, seven
+    assert seven["load"] == two["load"], (two, seven)
+    assert delay_bank.seen() == set(_SIDE), "every driver on screen is still banked"
+
+
+def test_a_bank_that_cannot_be_read_is_said_once_and_the_steps_go_on(app_log_told):
+    """A store that is there and cannot be read refuses the write (Task 17). The refusal raised
+    out of the slot on every step of the box; it is said once, where it was read, and the window
+    carries on — the curves still move."""
+    from autosound_tcc.core import config, project_settings
+
+    store = project_settings.path_for(config.tcc_dir())
+    store.mkdir(parents=True)
+    (store / "inside").write_text("kept", encoding="utf-8")
+    dialog = _plotted(_SIDE)
+
+    for ms in (0.1, 0.2, 0.3):
+        dialog._view.set_delay(ms)
+
+    assert dialog._view.delay_ms() == pytest.approx(0.3)
+    assert (store / "inside").read_text(encoding="utf-8") == "kept", "never written over"
+    assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told
+
+
+@pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                    reason="POSIX permissions, and root writes whatever the mode")
+def test_a_bank_that_cannot_be_written_is_said_once_however_many_steps_fail(app_log_told):
+    """A read-only `.tcc/` fails every step's write, each with a temp name of its own — a new
+    sentence on the strip per step while the exception left the slot, and a report stands until
+    its ✕. Said once for this state of the file, as the window's other writes are (R-bl)."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    folder = config.tcc_dir()
+    delay_bank.put("w-L_01 (sw)", 0.198)
+    store = project_settings.path_for(folder)
+    before = store.read_bytes()
+    dialog = _plotted(_SIDE)
+    folder.chmod(0o500)
+    try:
+        for ms in (0.1, 0.2, 0.3):
+            dialog._view.set_delay(ms)
+    finally:
+        folder.chmod(0o700)
+
+    assert store.read_bytes() == before, "the bank as it was"
+    assert len(app_log_told) == 1, app_log_told
+    assert str(store) in app_log_told[0] and "could not be written" in app_log_told[0]
+    assert dialog._view.delay_ms() == pytest.approx(0.3), "and the curves still move"

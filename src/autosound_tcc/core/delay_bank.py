@@ -45,7 +45,7 @@ Lives in `.tcc/` with TCC's other state, never in the skill's files (D-6).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Iterable, NamedTuple, Optional
 
 from autosound_tcc.core import config, project_settings
 from autosound_tcc.core.allpass import Allpass
@@ -55,6 +55,18 @@ KEY = "curve_delays"
 #: `put(allpass=_KEEP)`: leave whatever all-pass the entry already carries. The delay is banked on
 #: every change of every trace, and a call that only meant to move a delay must not wipe a filter.
 _KEEP = object()
+
+
+class Reading(NamedTuple):
+    """One driver's reading for `put_many`: what `put` is handed for one title.
+
+    `allpass` as in `put` — an `Allpass` to set, `None` to take off, `_KEEP` to leave the entry's.
+    """
+
+    title: str
+    ms: float
+    arrival_ms: Optional[float] = None
+    allpass: Any = _KEEP
 
 
 def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, dict]:
@@ -162,22 +174,50 @@ def put(
     reference indistinguishable from a channel nobody opened. What separates the two now is
     whether there is an entry at all.
     """
+    return put_many([Reading(title, ms, arrival_ms, allpass)], tcc_dir, session)
+
+
+def put_many(
+    readings: Iterable[Reading],
+    tcc_dir: Optional[Path] = None,
+    session: Optional[str] = None,
+) -> dict[str, float]:
+    """Bank a whole set of readings in one read and one write, as one `put` per reading would.
+
+    The curve window banks every driver on screen on every step of the delay box, and one `put`
+    each was one load and one write of the whole store per driver — seven of both for a side and
+    the sub, on every step (#177). Applied in order to one copy of the entries, so the store ends
+    exactly as the `put`s leave it: a later reading of the same title over an earlier one, an
+    all-pass kept or taken off, an arrival not named kept, the series set.
+
+    It fails as they do: a store that cannot be read or written raises what `put` raises, once for
+    the set. And the store never holds half a set — a reading that cannot be stored stops the
+    write before it starts, where the `put`s ahead of it would already have written. No reading
+    is no write.
+    """
     tcc_dir = tcc_dir or config.tcc_dir()
+    readings = list(readings)
     entries = _entries(tcc_dir)
-    title = str(title)
-    was = entries.get(title) or {}
-    at = arrival_ms if arrival_ms is not None else was.get("at")
-    apf = was.get("apf") if allpass is _KEEP else allpass
+    if readings:
+        for reading in readings:
+            title = str(reading.title)
+            entries[title] = _entry(entries.get(title) or {}, reading, session)
+        project_settings.set_value(tcc_dir, KEY, _serialised(entries) or None)
+    return {name: entry["ms"] for name, entry in entries.items() if entry["ms"]}
+
+
+def _entry(was: dict, reading: Reading, session: Optional[str]) -> dict:
+    """The entry `reading` leaves, over what the bank held for its title (`was`, or `{}`)."""
+    at = reading.arrival_ms if reading.arrival_ms is not None else was.get("at")
+    apf = was.get("apf") if reading.allpass is _KEEP else reading.allpass
     if apf is not None and not isinstance(apf, Allpass):
         raise TypeError(f"allpass must be an Allpass or None, got {apf!r}")
-    entries[title] = {
-        "ms": round(float(ms), 4),
+    return {
+        "ms": round(float(reading.ms), 4),
         "at": None if at is None else round(float(at), 4),
         "set": session if session is not None else was.get("set"),
         "apf": apf,
     }
-    project_settings.set_value(tcc_dir, KEY, _serialised(entries) or None)
-    return {name: entry["ms"] for name, entry in entries.items() if entry["ms"]}
 
 
 def _serialised(entries: dict[str, dict]) -> dict[str, dict]:
