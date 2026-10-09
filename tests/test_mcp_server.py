@@ -1714,6 +1714,28 @@ def test_the_whole_session_probe_can_be_asked_for(tmp_path, monkeypatch):
     assert argv == [["capture-check", "w-L_1 (sw)", "--session"]]
 
 
+def test_a_check_that_found_a_capture_unusable_answers_recorded_with_the_methods_lines(
+        tmp_path, monkeypatch):
+    """The review of TA-8, M1: `capture-check` exits 1 when a capture is unusable — its verdict,
+    recorded, on stdout. The tool answered `recorded: false` with those lines as its `error`, so a
+    check that ran read as one that did not. It answers `recorded: true`, the method's lines in
+    `said`, and its description says how to read the two answers."""
+    from autosound_tcc.core import process_writer
+
+    verdict = ("UNUSABLE w-L_1 (sw) — in-band mean -94.0 dB — silence, not a sweep\n"
+               "0/1 придатні")
+    monkeypatch.setattr(process_writer, "_spawn",
+                        lambda project_dir, args, timeout_s=None, **_kw: (1, verdict, ""))
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    answer = json.loads(_text(asyncio.run(
+        mcp.call_tool("check_captures", {"titles": ["w-L_1 (sw)"]}))))
+
+    assert (answer["recorded"], answer.get("said")) == (True, verdict), answer
+    described = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}["check_captures"]
+    assert "`recorded: true` means the check ran" in " ".join(described.description.split())
+
+
 def test_stopping_is_reachable_without_a_shell(tmp_path, monkeypatch):
     """SKL-025: `session-close` existed nowhere in TCC — not as a tool, not in the UI. The model
     could only reach it through Bash, and `process.py` is not in the read-only allowlist, so

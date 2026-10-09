@@ -6034,7 +6034,7 @@ def test_unusable_captures_are_one_line_with_the_rest_behind_a_link(monkeypatch)
     said = []
     host = SimpleNamespace(
         _status_strip=SimpleNamespace(notify=lambda text, **k: said.append((text, k)),
-                                      text=lambda: ""),
+                                      withdraw=lambda text: None),
         _refresh_capture_task=lambda state: None, _show_unusable=lambda lines: None)
 
     MainWindow._on_capture_check_done(host, titles[:16])
@@ -6048,6 +6048,33 @@ def test_unusable_captures_are_one_line_with_the_rest_behind_a_link(monkeypatch)
     MainWindow._on_capture_check_done(host, titles)
     assert len(said) == 2 and said[-1][0].startswith(
         i18n.t("unusableSummary").format(n=17, first=""))
+
+
+def test_a_did_not_run_line_waiting_behind_a_report_is_taken_back_when_a_check_runs():
+    """The review of TA-8, I1: a report (`app_log.report`) stands on the strip until its ✕, and
+    the «did not run» line waits behind it. A check then ran and found nothing bad, so nothing
+    replaced that line — and at the report's ✕ the strip said the check had not run, for good: a
+    warning has no clock. The window's own two methods, on a host with a real strip, over a round
+    the method recorded."""
+    from autosound_tcc.ui.tcc.status_strip import StatusStrip
+    from tests import _rounds
+
+    typed = [_rounds.as_typed("w-L_1 (sw)")]
+    process = _rounds.write_round(config.project_dir(), version=1, expected=typed, taken=typed,
+                                  pad=False)
+    process.check_captures(typed, verifier=_Heard(valid=True))
+    _app()
+    strip = StatusStrip()
+    host = SimpleNamespace(_status_strip=strip, _refresh_capture_task=lambda state: None,
+                           _show_unusable=lambda lines: None)
+
+    strip.notify("a report", level="warn", sticky=True)
+    MainWindow._on_capture_check_failed(host, i18n.t("captureCheckBusy"))
+    assert strip.text() == "a report" and strip.waiting() == [i18n.t("captureCheckBusy")]
+    MainWindow._on_capture_check_done(host, typed)  # it ran, and found nothing bad
+    strip.linkActivated.emit("close")  # the report's ✕
+
+    assert strip.text() == "", "the check ran: «did not run» does not come back"
 
 
 def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch):

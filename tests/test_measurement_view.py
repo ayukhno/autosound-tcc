@@ -1489,3 +1489,61 @@ def test_a_title_the_check_recorded_nothing_for_is_never_said_bad(project):
 
     assert mv.unusable_lines(process.load()["capture"], [_as_typed("w-L_1 (sw)"),
                                                          _as_typed("w-R_1 (sw)")], project) == []
+
+
+# `verdict_state`'s fallback for a verdict that pins no uuid (the review of TA-8, M2).
+
+
+def test_a_verdict_with_no_uuid_is_matched_as_is_by_its_title_or_the_cards_name_key(project):
+    """With no uuid on the verdict — an older method's — «as it is» is matched by the capture's
+    title; on the live card, whose rows are derived names (`sw_7 (sw)`) while the round, the
+    import store and the verdict hold the title as typed (`sw_07 (sw)`), by its name key."""
+    process = _round(project, version=7, expected=["sw_7 (sw)"], taken=["sw_7 (sw)"])
+    _imported(project, "sw_7 (sw)", "u-sw", as_is=True)
+    sw = _as_typed("sw_7 (sw)")
+    verdict = _check(process, {"sw_7 (sw)": {**_held("u-sw", _SILENCE), "stats": {}}})[
+        "taken"][sw]["verified"]
+    assert verdict["uuid"] is None
+    as_is, window, key = mv.taken_as_is(project), mv.window_checked(project), _key(project)
+
+    assert mv.verdict_state(verdict, sw, as_is, window) == mv.VERDICT_AS_IS, "by its title"
+    assert mv.verdict_state(verdict, "sw_7 (sw)", as_is, window) == mv.VERDICT_BAD
+    assert mv.verdict_state(verdict, "sw_7 (sw)", as_is, window, key=key("sw_7 (sw)"),
+                            keys={key(sw)}) == mv.VERDICT_AS_IS, "by the name key"
+    item = _item(mv.build_session("0", 7, [sw], project, taken=[sw]), "sw_7 (sw)")
+    assert (item.status, item.as_is) == (mv.STATUS_DONE, True), "the card matches by key"
+
+
+def _ambiguous(title: str) -> dict:
+    """REW holds `title` twice: `verify`'s verdict (H I-8) — there, unusable until renamed, and
+    with no one curve's uuid to pin."""
+    return {"valid": False, "exists": True, "stats": {}, "ambiguous": 2,
+            "issues": [f"Ambiguous: 2 measurements titled {title!r} → ['3', '4']; rename so "
+                       "titles are unique"]}
+
+
+def test_an_ambiguous_verdict_is_bad_and_says_so_in_the_methods_words(project):
+    process = _round(project, version=7, expected=["sw_7 (sw)"], taken=["sw_7 (sw)"])
+    sw = _as_typed("sw_7 (sw)")
+    round_ = _check(process, {"sw_7 (sw)": _ambiguous(sw)})
+
+    assert round_["taken"][sw]["verified"]["uuid"] is None
+    assert _state(project, round_, "sw_7 (sw)") == mv.VERDICT_BAD
+    assert mv.unusable_lines(round_, [sw], project) == [
+        f"{sw} — {_ambiguous(sw)['issues'][0]}"]
+
+
+@pytest.mark.xfail(strict=True, reason="the uuid-less fallback reads an AMBIGUOUS verdict as the "
+                   "tuner's «as it is» (the review of TA-8, M2); a follow-up")
+def test_an_ambiguous_verdict_under_a_title_taken_as_it_is_is_still_bad(project):
+    """By the method (v3.1.2, H I-8) a title REW holds twice is unusable until renamed:
+    `capture-check` says `UNUSABLE … AMBIGUOUS`, `unusable_captures` counts it. Its verdict pins
+    no uuid, so the title fallback takes the «as it is» answered for ONE curve under that title as
+    an answer for this one: `as_is` — green on the card, no strip line, never checked again. Strict
+    until the fallback leaves `ambiguous` verdicts out."""
+    process = _round(project, version=7, expected=["sw_7 (sw)"], taken=["sw_7 (sw)"])
+    _imported(project, "sw_7 (sw)", "u-sw", as_is=True)
+    sw = _as_typed("sw_7 (sw)")
+
+    assert _state(project, _check(process, {"sw_7 (sw)": _ambiguous(sw)}), "sw_7 (sw)") \
+        == mv.VERDICT_BAD

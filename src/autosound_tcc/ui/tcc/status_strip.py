@@ -214,6 +214,14 @@ class StatusStrip(QFrame):
         self._line = None
         self._show()
 
+    def withdraw(self, text: Optional[str]) -> None:
+        """Let go of the latest line if it says `text`, shown or waiting behind a standing one: a
+        caller takes back its own line once its cause has ended, never a report or a line that came
+        after it. Taken back only while shown, a line waiting behind a report came back at the
+        report's ✕ — false, and a warning has no clock (the review of #175 TA-8, I1)."""
+        if text and self._line is not None and self._line.text == text:
+            self.clear()
+
     def waiting(self) -> list[str]:
         """The lines behind the one shown, in the order its ✕ brings them — for the test, and for
         anybody wondering what the count beside it counts."""

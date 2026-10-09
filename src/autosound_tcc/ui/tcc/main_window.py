@@ -4100,10 +4100,9 @@ class MainWindow(QMainWindow):
         strip took half the window and nothing could close it. A list closed by hand stays closed
         until it CHANGES -- the same sixteen again are not news.
         """
-        # It ran: a «did not run» still on the strip is no longer true (R-ax), and a warning that
-        # outlives its cause teaches people to ignore the strip.
-        if self._status_strip.text() == getattr(self, "_capture_check_not_run", None):
-            self._status_strip.clear()
+        # It ran: a «did not run» on the strip, shown or waiting, is no longer true (R-ax), and a
+        # warning that outlives its cause teaches people to ignore the strip.
+        self._status_strip.withdraw(getattr(self, "_capture_check_not_run", None))
         bad = measurement_view.unusable_lines(process_view.capture_round() or {}, titles)
         if bad and frozenset(bad) != getattr(self, "_unusable_dismissed", None):
             self._status_strip.notify(

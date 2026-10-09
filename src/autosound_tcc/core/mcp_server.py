@@ -1084,7 +1084,9 @@ def build_server(
         step's gate reads what it recorded.
 
         A step that asked for captures will not close until they pass. `titles` defaults to
-        everything the round expects.
+        everything the round expects. `recorded: true` means the check ran and recorded its
+        verdicts — which captures pass is in `said`, the method's own lines; `recorded: false`
+        means it did not run or did not finish, and `error` says why.
 
         `session=True` adds the whole-session probe on top: every level side by side, loudest and
         quietest, ctl1->ctl3 drift. That reads the shoot as one thing rather than measurement by

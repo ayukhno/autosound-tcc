@@ -288,11 +288,11 @@ def capture_check_not_run(exc: Exception) -> str:
     review's I2): Busy, a refusal and a timeout came back as the check's «output», with no
     `UNUSABLE` line in it, and vanished — the cards stayed «waiting» with no reason. TCC's own
     reasons in TCC's words; a refusal in the words of what refused — the binding's sentence, or the
-    method's last line without its `error: `. Never «everything is bad»: nothing was recorded."""
+    method's last line (`process_writer.last_words`) without its `error: `. Never «everything is
+    bad»: nothing was recorded."""
     if isinstance(exc, process_writer.Busy):
         return i18n.t("captureCheckBusy")
     if isinstance(exc, process_writer.TimedOut):
         return i18n.t("captureCheckTimedOut").format(seconds=f"{exc.seconds:g}")
-    lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
-    why = lines[-1] if lines else type(exc).__name__
+    why = process_writer.last_words(0, "", str(exc))
     return i18n.t("captureCheckRefused").format(why=why.removeprefix("error: "))

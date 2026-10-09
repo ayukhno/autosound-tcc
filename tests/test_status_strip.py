@@ -195,3 +195,30 @@ def test_a_fact_waiting_behind_a_sticky_line_starts_its_clock_when_it_is_shown()
     assert strip.timer_is_running(), "shown again, on its clock again"
     strip._expire()
     assert strip.text() == "" and strip.isHidden()
+
+
+def test_a_line_taken_back_goes_whether_it_is_shown_or_waiting_and_no_other_does():
+    """The review of TA-8, I1: a caller whose cause has ended takes its own line back — the capture
+    check's «did not run», once a check ran. Taken back only while shown, the line waiting behind a
+    report came back at the report's ✕, false, and a warning has no clock to let go of it. What is
+    taken back is the caller's own line: not a report, not a line that came after it."""
+    _app()
+    strip = StatusStrip()
+
+    strip.notify("did not run", level="warn")
+    strip.withdraw("did not run")
+    assert strip.text() == ""
+
+    strip.notify("a report", level="warn", sticky=True)
+    strip.notify("did not run", level="warn")
+    assert strip.text() == "a report" and strip.waiting() == ["did not run"]
+    strip.withdraw("did not run")
+    assert strip.waiting() == [], "taken back while it waits, too"
+    strip.linkActivated.emit("close")
+    assert strip.text() == ""
+
+    strip.notify("a report", level="warn", sticky=True)
+    strip.notify("something later", level="warn")
+    strip.withdraw("did not run")
+    strip.withdraw("a report")
+    assert strip.text() == "a report" and strip.waiting() == ["something later"]

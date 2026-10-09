@@ -29,9 +29,9 @@ WINDOW = ROOT / "src" / "autosound_tcc" / "ui" / "tcc" / "main_window.py"
 BUILD = "Main" + "Window("
 
 #: Lowered by every wave that moves a decision out; never raised (W-8: 6506 on 2026-10-06, 6270
-#: after the menu moved into its registry, #161; W-9: 6231 after «settled» moved into
+#: after the menu moved into its registry, #161; W-9: 6230 after «settled» moved into
 #: `measurement_view.verdict_state`, #175).
-MAIN_WINDOW_MAX_LINES = 6231
+MAIN_WINDOW_MAX_LINES = 6230
 #: Full-window builds in the tests, outside comments (W-8: 223 on 2026-10-06, 218 after the menu
 #: tests became renderer tests, #161; W-9: 212 after the «settled» tests became plain tests over a
 #: recorded round, #175).
