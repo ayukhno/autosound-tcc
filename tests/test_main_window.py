@@ -5953,6 +5953,34 @@ def test_giving_the_clipboard_back_does_not_crash_the_interpreter_on_exit(tmp_pa
     assert done.stdout.strip().splitlines()[-1] == "mine", "and what was there came back"
 
 
+def test_the_window_module_starts_without_pyqtgraph(tmp_path):
+    """`tip_html` was imported from `curve_view`, and pyqtgraph and numpy came with it at every
+    start, behind the splash, for a function that needs neither (#177, TA-7). The plot belongs to
+    the curve window, which is imported when it is first opened. In a child process, because this
+    one has imported pyqtgraph long ago, and with a QApplication first, as the app starts."""
+    import sys
+    import textwrap
+
+    script = textwrap.dedent("""
+        import sys
+
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication([])
+
+        import autosound_tcc.ui.tcc.main_window
+
+        print(sorted(m for m in sys.modules if m.split(".")[0] == "pyqtgraph"))
+    """)
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
+                          env=env, cwd=str(tmp_path), timeout=120)
+
+    assert done.returncode == 0, f"exit {done.returncode}: {done.stderr[-2000:]}"
+    assert done.stdout.strip().splitlines()[-1] == "[]", "pyqtgraph is loaded at start"
+
+
 # ---- the capture check: which titles it asks about is `measurement_view.to_check`, what the strip
 # says after it `measurement_view.unusable_lines` — both tested there, over rounds the method
 # recorded (#175, TA-8). Here: the window's half — the worker, the queue, the strip's one line.

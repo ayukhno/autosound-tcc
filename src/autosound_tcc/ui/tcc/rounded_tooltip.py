@@ -12,6 +12,8 @@ tooltip in the app should look the same).
 
 from __future__ import annotations
 
+import html
+import textwrap
 from typing import Optional
 
 import shiboken6
@@ -20,6 +22,50 @@ from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPa
 from PySide6.QtWidgets import QLabel, QWidget
 
 from autosound_tcc.ui.tcc.theme import current_theme
+
+#: How the hover tips that replaced the paragraphs under the plot are built.
+#:
+#: `_TIP_FONT_PX` because the paragraphs they replaced were 11 px `phead-sub` grey and the user
+#: could not read them (2026-08-18). `_TIP_WRAP_CHARS` because the shared tip widget is a QLabel
+#: with word wrap OFF, so a long sentence asks for a label as wide as the sentence and
+#: `adjustSize` clips it to two thirds of the screen: measured here, a 200-character line wants
+#: 1434 px and gets 533. Wrapping the text by hand is the only lever that leaves that label
+#: alone, and it is shared with every other tip in the app.
+_TIP_WRAP_CHARS = 72
+_TIP_FONT_PX = 15
+
+
+def _wrapped(text: str) -> str:
+    """`text` escaped and broken into lines by hand — see `_TIP_WRAP_CHARS` for why by hand."""
+    lines: list[str] = []
+    for paragraph in str(text).split("\n"):
+        wrapped = textwrap.wrap(
+            paragraph, _TIP_WRAP_CHARS, break_long_words=False, break_on_hyphens=False
+        )
+        lines.extend(html.escape(part) for part in (wrapped or [""]))
+    return "<br>".join(lines)
+
+
+def tip_html(text: str, head: str = "", warn: bool = False) -> str:
+    """`text` as a hover tip: large, wrapped, with a bold head, warning-coloured when in doubt.
+
+    The three paragraphs that used to stand under the plot are behind buttons now (user,
+    2026-08-18: they took the space and could not be read), so the text that was a wall of small
+    grey type is the same text laid out to be read — which is the whole point of moving it.
+
+    Nothing that LEAVES the curve window comes through here: `statement()` and the bank's own
+    sentence are built from the plain strings and are unchanged. This is drawing, only.
+
+    It lives beside the tip it formats for, not in `curve_view`, which imports pyqtgraph and
+    numpy: the main window uses it too, and starting the app paid for both (#177).
+    """
+    theme = current_theme()
+    body = _wrapped(text)
+    if head:
+        body = f"<b>{html.escape(head)}</b><br>{body}"
+    if warn:
+        body = f'<span style="color: {theme.warn}">{body}</span>'
+    return f'<div style="font-size: {_TIP_FONT_PX}px; color: {theme.text}">{body}</div>'
 
 
 class RoundedTooltip(QLabel):

@@ -42,10 +42,9 @@ from autosound_tcc.ui.tcc.flow_layout import FlowLayout as _FlowLayout
 from autosound_tcc.ui.tcc.curve_view import (
     CurveView,
     Trace,
-    tip_html,
     trace_colour,
 )
-from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip, tip_html
 from autosound_tcc.ui.tcc.theme import current_theme, mini_combo
 
 #: What can be plotted, and how each one is fetched and labelled. Impulse first because that is

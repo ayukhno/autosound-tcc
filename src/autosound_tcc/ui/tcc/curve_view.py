@@ -26,7 +26,6 @@ from __future__ import annotations
 import html
 import importlib
 import math
-import textwrap
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
@@ -52,6 +51,7 @@ from autosound_tcc.core import curve_sum
 from autosound_tcc.core.allpass import Allpass, AllpassError
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
+from autosound_tcc.ui.tcc.rounded_tooltip import _TIP_FONT_PX, _wrapped, tip_html
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import current_theme, mini_combo
 
@@ -143,16 +143,6 @@ _DEFAULT_APF_F0_HZ = 250.0
 #: the data, at the end furthest from the legend — which is anchored to the top RIGHT, so the pill
 #: naming each driver and its delay is never covered.
 _OVERLAY_MARGIN_PX = 6
-#: How the hover tips that replaced the paragraphs under the plot are built.
-#:
-#: `_TIP_FONT_PX` because the paragraphs they replaced were 11 px `phead-sub` grey and the user
-#: could not read them (2026-08-18). `_TIP_WRAP_CHARS` because the shared tip widget is a QLabel
-#: with word wrap OFF, so a long sentence asks for a label as wide as the sentence and
-#: `adjustSize` clips it to two thirds of the screen: measured here, a 200-character line wants
-#: 1434 px and gets 533. Wrapping the text ourselves is the only lever this side of
-#: `rounded_tooltip`, which is shared with every other tip in the app.
-_TIP_WRAP_CHARS = 72
-_TIP_FONT_PX = 15
 #: What the readout prints where a trace never reaches the level being read. An em dash rather
 #: than a blank: a blank cell reads as a number somebody forgot to fill in, and "this curve never
 #: gets there" is an answer to the question that was asked.
@@ -270,17 +260,6 @@ def trace_colour(index: int) -> QColor:
     return colour_of(trace_token(index))
 
 
-def _wrapped(text: str) -> str:
-    """`text` escaped and broken into lines by hand — see `_TIP_WRAP_CHARS` for why by hand."""
-    lines: list[str] = []
-    for paragraph in str(text).split("\n"):
-        wrapped = textwrap.wrap(
-            paragraph, _TIP_WRAP_CHARS, break_long_words=False, break_on_hyphens=False
-        )
-        lines.extend(html.escape(part) for part in (wrapped or [""]))
-    return "<br>".join(lines)
-
-
 def _wrapped_html(text: str, colour: str = "") -> str:
     """A paragraph inside a tip that is not all paragraph — the readout's own (`_readout_html`).
 
@@ -326,25 +305,6 @@ class _MarkerTable:
     head_unit: str
     cell_unit: str
     rows: list
-
-
-def tip_html(text: str, head: str = "", warn: bool = False) -> str:
-    """`text` as a hover tip: large, wrapped, with a bold head, warning-coloured when in doubt.
-
-    The three paragraphs that used to stand under the plot are behind buttons now (user,
-    2026-08-18: they took the space and could not be read), so the text that was a wall of small
-    grey type is the same text laid out to be read — which is the whole point of moving it.
-
-    Nothing that LEAVES the window comes through here: `statement()` and the bank's own sentence
-    are built from the plain strings and are unchanged. This is drawing, only.
-    """
-    theme = current_theme()
-    body = _wrapped(text)
-    if head:
-        body = f"<b>{html.escape(head)}</b><br>{body}"
-    if warn:
-        body = f'<span style="color: {theme.warn}">{body}</span>'
-    return f'<div style="font-size: {_TIP_FONT_PX}px; color: {theme.text}">{body}</div>'
 
 
 def _restyle(widget: QWidget, sheet: str) -> None:

@@ -123,12 +123,7 @@ from autosound_tcc.ui.tcc.resonalyze_import_dialog import ResonalyzeImportDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedButton, ElidedLabel
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
-from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
-# Imported from the curve view because that is where it was written and where it is used most.
-# It belongs beside `rounded_tooltip`, whose widget it formats for, and moving it there is a
-# separate change: `curve_view.py` is being edited in another thread of work right now, and a
-# helper's address is not worth a merge conflict.
-from autosound_tcc.ui.tcc.curve_view import tip_html
+from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip, tip_html
 from autosound_tcc.ui.tcc.sidebar_section import (
     CollapsibleGroup,
     SidebarSection,

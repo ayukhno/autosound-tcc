@@ -499,9 +499,10 @@ def main() -> int:
     # Imported HERE, not at module scope. A light install has no PySide6, and an entry point that
     # cannot even be imported gives its user a traceback where a sentence belongs.
     # Split in two on purpose (2026-09-06): the toolkit first, so there can be a window on screen
-    # saying "starting" while the expensive half — `main_window`, and through it mcp, pyqtgraph
-    # and numpy — is still being imported. Both halves answer a missing PySide6 with the same
-    # sentence, because a light install fails at the first one.
+    # saying "starting" while the expensive half — `main_window`, and through it mcp — is still
+    # being imported. pyqtgraph and numpy are not in it: the curve window imports them when it
+    # first opens (#177). Both halves answer a missing PySide6 with the same sentence, because a
+    # light install fails at the first one.
     try:
         from PySide6 import QtCore, QtGui, QtWidgets
         from PySide6.QtGui import QIcon

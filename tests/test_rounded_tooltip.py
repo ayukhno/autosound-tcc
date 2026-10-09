@@ -14,8 +14,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPoint  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip  # noqa: E402
-from autosound_tcc.ui.tcc.theme import apply_theme  # noqa: E402
+from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip, tip_html  # noqa: E402
+from autosound_tcc.ui.tcc.theme import apply_theme, current_theme  # noqa: E402
 
 
 def _app() -> QApplication:
@@ -128,3 +128,50 @@ def test_hover_tip_names_its_widget_as_the_owner():
     tip._check_owner()
     assert not tip.isVisible()
     owner.close()
+
+
+# ---- `tip_html`, the markup these tips are written in (#177, TA-7) ---------------------------
+
+
+def _tip_div(body: str) -> str:
+    return f'<div style="font-size: 15px; color: {current_theme().text}">{body}</div>'
+
+
+def test_tip_html_escapes_the_text_and_sets_it_large():
+    assert tip_html("Plain & <simple>") == _tip_div("Plain &amp; &lt;simple&gt;")
+
+
+def test_tip_html_puts_a_bold_head_on_its_own_line():
+    assert tip_html("body", head="Head <b>") == _tip_div("<b>Head &lt;b&gt;</b><br>body")
+
+
+def test_tip_html_colours_head_and_body_when_it_warns():
+    warn = current_theme().warn
+    assert tip_html("x", head="H", warn=True) == _tip_div(
+        f'<span style="color: {warn}"><b>H</b><br>x</span>')
+
+
+def test_tip_html_wraps_at_72_characters_by_hand():
+    """The shared tip label does not wrap, so the text arrives broken into lines. At 72, counted
+    before escaping: the first line is 72 long and would break at 71, and the next paragraph's
+    first line is 70 and would take its next word at 73. A hyphenated word and an over-long one
+    stay whole, and a blank line stays a blank line."""
+    text = (
+        "Delay the chosen trace by one step & the predicted sum follows it on the screen, while "
+        "the readout says what the DSP <would> be set to.\n"
+        "Delay the chosen trace by a single step & the predicted sum follows it on screen.\n"
+        "The level line is read where it crosses each curve, nearest the middle-of-the-screen "
+        "point.\n\n" + "w" * 80 + " end"
+    )
+
+    assert tip_html(text) == _tip_div("<br>".join([
+        "Delay the chosen trace by one step &amp; the predicted sum follows it on the",
+        "screen, while the readout says what the DSP &lt;would&gt; be set to.",
+        "Delay the chosen trace by a single step &amp; the predicted sum follows it",
+        "on screen.",
+        "The level line is read where it crosses each curve, nearest the",
+        "middle-of-the-screen point.",
+        "",
+        "w" * 80,
+        "end",
+    ]))
