@@ -90,12 +90,13 @@ LANDED_IN = {
 
 
 #: `method_cli`'s, under the names every caller already catches — the same classes, not copies, so
-#: an `except process_writer.ProcessWriterError` (or `.Busy`, `.Refused`, `.UnknownFlag`) catches
-#: what `method_cli` raises.
+#: an `except process_writer.ProcessWriterError` (or `.Busy`, `.Refused`, `.UnknownFlag`,
+#: `.TimedOut`) catches what `method_cli` raises.
 ProcessWriterError = method_cli.ProcessWriterError
 Busy = method_cli.Busy
 Refused = method_cli.Refused
 UnknownFlag = method_cli.UnknownFlag
+TimedOut = method_cli.TimedOut
 
 
 class TooOld(ProcessWriterError):
@@ -134,14 +135,18 @@ def _spawn(
     )
 
 
-def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
+def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S,
+         answer_on_1: bool = False) -> str:
     """One call, and a non-zero exit is a failure. Every command here works that way except
-    `session-close`, whose exit code is an ANSWER — see `close_session`."""
+    `session-close`, whose exit code is an ANSWER — see `close_session` — and those sent with
+    `answer_on_1`, whose exit 1 is their answer on stdout unless it is the method's refusal or a
+    crash (`capture-check`)."""
     code, out, err = _spawn(project_dir, args, timeout_s)
     _refuse_if_too_old(project_dir, args[0], out, err)
-    if code != 0:
-        raise ProcessWriterError((err or out).strip() or f"process.py exited {code}")
-    return out
+    if code == 0 or (answer_on_1 and code == 1 and out and not refusal(code, err)
+                     and not crashed(err)):
+        return out
+    raise ProcessWriterError((err or out).strip() or f"process.py exited {code}")
 
 
 def enter_phase(project_dir: Path, phase: str) -> str:
@@ -607,11 +612,17 @@ def check_captures(
 
     Slower than the other writes: it pulls every expected measurement out of REW. Call it off the
     GUI thread.
+
+    **Exit 1 is an answer too**: a capture is not usable, said on stdout, and every verdict is
+    recorded. Raised as a failure in stderr's words, a warning there replaced the verdict, and no
+    caller could tell a check that ran from one that did not (R-ax, the G5+G8 review's I2). What
+    is raised now recorded nothing whole: the method's refusal (`error: …`), REW not answering
+    (exit 69), a crash, and what `spawn` raises — busy, refused, timed out.
     """
     args = ["capture-check", *[str(t) for t in titles or []]]
     if session:
         args.append("--session")
-    return _run(project_dir, args, timeout_s=max(DEFAULT_TIMEOUT_S, 120.0))
+    return _run(project_dir, args, timeout_s=max(DEFAULT_TIMEOUT_S, 120.0), answer_on_1=True)
 
 
 def record_capture(project_dir: Path, title: str) -> str:

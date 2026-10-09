@@ -4043,30 +4043,9 @@ class MainWindow(QMainWindow):
         if not round_ or round_.get("closed"):
             return
         self._offer_title_fixes(round_)
-        titles = set(self._meas_panel.known_titles())
-        as_is = measurement_view.taken_as_is()
-        window = measurement_view.window_checked()  # tcc#149, until hub #247
-
-        def settled(title: str) -> bool:
-            """Checked and fine, a capture the check does not apply to (hub #154 §1), one the
-            tuner took as it is after this very verdict (review of finding 147, I1), or one the
-            import window passed over its own range that the method calls «truncated» alone —
-            its verdict will not change until hub #247 (tcc#149, the review's m1; drop with it)."""
-            verdict = ((round_.get("taken") or {}).get(title) or {}).get("verified") or {}
-            return (bool(verdict.get("ok")) or not measurement_view.applicable(verdict)
-                    or measurement_view.answered_as_is(verdict, title, as_is)
-                    or measurement_view.held_by_the_window(verdict, window))
-
-        # Only what the round TOOK (tcc#21): the method records a `taken` entry for every title it
-        # checks, so checking whatever REW shows made a dud left for a re-take «брак — знятий» and
-        # a good sweep nobody ticked green — a title in REW's list is not this project taking it in
-        # (the Arbiter, 2026-09-06). The titles are handed over, not left to the method's default.
-        taken = round_.get("taken") or {}
-        outstanding = [
-            title
-            for title in round_.get("expected", [])
-            if title in titles and title in taken and not settled(title)
-        ]
+        # What the round took and holds no settled verdict for (tcc#21, #175 TA-8), handed over
+        # rather than left to the method's default of every expected title.
+        outstanding = measurement_view.to_check(round_, self._meas_panel.known_titles())
         if not outstanding:
             return
         if self._capture_check is not None and self._capture_check.isRunning():
@@ -4078,6 +4057,7 @@ class MainWindow(QMainWindow):
         self._capture_check_again = False
         self._capture_check = _CaptureCheckWorker(config.project_dir(), titles=outstanding)
         self._capture_check.result.connect(self._on_capture_check_done)
+        self._capture_check.failed.connect(self._on_capture_check_failed)
         self._capture_check.finished.connect(self._on_capture_check_finished)
         self._capture_check.start()
 
@@ -4110,55 +4090,38 @@ class MainWindow(QMainWindow):
             i18n.t("tfOffer").format(first=title_fixes.summary(fixes), n=len(fixes)), level="warn",
             action=(i18n.t("tfAction"), self._meas_panel.open_import))
 
-    def _on_capture_check_done(self, output: str, titles: Optional[list] = None) -> None:
-        """Put the verdict on screen. The checker's own words, not a paraphrase.
+    def _on_capture_check_done(self, titles: list) -> None:
+        """Put the check's verdict on screen: one line for the captures of `titles` — what it was
+        handed — whose recorded verdict reads bad (`measurement_view.unusable_lines`, #175 TA-8),
+        each with the checker's own reasons: "silence in band" and "covers 200-2000 Hz, asked for
+        20-20000" lead to different actions at the car.
 
-        An unusable capture is a retake the Arbiter has to decide on, and deciding it needs the
-        reason -- "silence in band" and "covers 200-2000 Hz, asked for 20-20000" lead to different
-        actions at the car.
-
-        `titles` is what the check was handed. The method prints a line for every expected title,
-        and one it was not handed — not taken, so not checked — reads `UNUSABLE … не перевірено`
-        (tcc#21, review I5). Only the lines about those titles are answers.
+        One line and the rest behind a link, with a ✕ (finding 29): sixteen of them joined into the
+        strip took half the window and nothing could close it. A list closed by hand stays closed
+        until it CHANGES -- the same sixteen again are not news.
         """
-        # A curve that is not there is waiting, not unusable (the Arbiter, 2026-09-23): only a curve
-        # REW holds and the check failed is a retake to decide on. Nor is a curve nobody took.
-        asked = [str(title) for title in titles or []]
-        # Nor is a capture the tuner took as it is (review of finding 147, I1): its row on the
-        # card is green «taken as it is», and a warning beside it contradicted the choice just
-        # made. The verdict the method recorded is read back, so the match is by its uuid.
-        recorded = (process_view.capture_round() or {}).get("taken") or {}
-        as_is = measurement_view.taken_as_is()
-        # Nor a sweep the import window passed over its own range, which the method's check, over
-        # 20-20000 Hz, calls «truncated» alone (tcc#149) — until hub #247; drop with that patch.
-        window = measurement_view.window_checked()
-
-        def answered(line: str) -> bool:
-            title = next((t for t in asked if line.startswith(f"UNUSABLE {t} — ")),
-                         line[len("UNUSABLE"):].strip().split(" — ", 1)[0])
-            verdict = (recorded.get(title) or {}).get("verified") or {}
-            return (measurement_view.answered_as_is(verdict, title, as_is)
-                    or measurement_view.held_by_the_window(verdict, window))
-
-        bad = [line for line in (output or "").splitlines() if line.startswith("UNUSABLE")
-               and "no measurement titled" not in line.lower()
-               and (not asked or any(line.startswith(f"UNUSABLE {title} — ") for title in asked))
-               and not answered(line)]
-        # One line and the rest behind a link, with a ✕ (finding 29): sixteen of them joined into
-        # the strip took half the window and nothing could close it. A list closed by hand stays
-        # closed until it CHANGES -- the same sixteen again are not news.
+        # It ran: a «did not run» still on the strip is no longer true (R-ax), and a warning that
+        # outlives its cause teaches people to ignore the strip.
+        if self._status_strip.text() == getattr(self, "_capture_check_not_run", None):
+            self._status_strip.clear()
+        bad = measurement_view.unusable_lines(process_view.capture_round() or {}, titles)
         if bad and frozenset(bad) != getattr(self, "_unusable_dismissed", None):
-            first = bad[0][len("UNUSABLE"):].strip()
             self._status_strip.notify(
-                i18n.t("unusableSummary").format(n=len(bad), first=first), level="warn",
+                i18n.t("unusableSummary").format(n=len(bad), first=bad[0]), level="warn",
                 action=(i18n.t("unusableShow"), lambda lines=tuple(bad): self._show_unusable(lines)),
                 dismissible=True,
                 on_dismiss=lambda lines=frozenset(bad): setattr(self, "_unusable_dismissed", lines),
             )
-        # The panel reads the recorded verdict, not this text.
+        # The panel reads the recorded verdict too.
         state = process_view.load_state()
         if state:
             self._refresh_capture_task(state)
+
+    def _on_capture_check_failed(self, why: str) -> None:
+        """The check did not run, or did not finish — said, with why (R-ax): never silence, never
+        «everything is bad» (`workers.capture_check_not_run`)."""
+        self._capture_check_not_run = why
+        self._status_strip.notify(why, level="warn")
 
     def _sync_capture_ready(self) -> None:
         """«Готово» is live while the open round has taken something (finding 31)."""
@@ -4191,8 +4154,7 @@ class MainWindow(QMainWindow):
         box = QMessageBox(self)
         box.setWindowTitle(i18n.t("unusableTitle"))
         box.setIcon(QMessageBox.Icon.Warning)
-        box.setText(i18n.t("unusableSummary").format(
-            n=len(lines), first=lines[0][len("UNUSABLE"):].strip()))
+        box.setText(i18n.t("unusableSummary").format(n=len(lines), first=lines[0]))
         box.setDetailedText("\n".join(lines))
         box.exec()
 

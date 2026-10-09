@@ -23,7 +23,7 @@ from autosound_tcc.core import (
     self_check,
 )
 from autosound_tcc.core.rew_bridge import RewBridge
-from autosound_tcc.ui.tcc import qt_shutdown
+from autosound_tcc.ui.tcc import i18n, qt_shutdown
 
 
 class _RewPingWorker(QThread):
@@ -257,17 +257,18 @@ class _CaptureCheckWorker(QThread):
     freeze for seconds while somebody is sitting in a car waiting to move the mic.
     """
 
-    #: The checker's own output, or the refusal verbatim — and the titles it was handed. The
-    #: method prints a line for every expected title, those it was not handed as `UNUSABLE …
-    #: не перевірено`, so a reader needs to know which lines are answers (tcc#21, review I5).
-    result = Signal(str, list)
+    #: The check ran and recorded its verdicts: the titles it was handed. The verdicts are read
+    #: back from the round (`measurement_view.unusable_lines`), not from the check's text, which
+    #: has a line for every expected title, handed or not (#175 TA-8; tcc#21, review I5).
+    result = Signal(list)
+    #: The check did not run, or did not finish: the strip's line saying so, and why (R-ax).
+    failed = Signal(str)
 
     def __init__(self, project_dir, titles=None) -> None:
         super().__init__()
         self._project_dir = project_dir
         #: The titles to check — the ones the round TOOK (tcc#21). None is the method's own
-        #: default, every expected title, and the method writes a `taken` entry for each title it
-        #: checks: a title REW merely shows would come back "taken" (`process.py` check_captures).
+        #: default, every expected title — a title REW merely shows among them.
         self._titles = list(titles) if titles is not None else None
         # Say who you were if you are destroyed before you finished (finding 35): Qt's own
         # fatal line names no class, and this app has eight kinds of worker.
@@ -275,7 +276,23 @@ class _CaptureCheckWorker(QThread):
 
     def run(self) -> None:
         try:
-            self.result.emit(process_writer.check_captures(self._project_dir, self._titles),
-                             list(self._titles or []))
+            process_writer.check_captures(self._project_dir, self._titles)
         except process_writer.ProcessWriterError as exc:
-            self.result.emit(str(exc), list(self._titles or []))
+            self.failed.emit(capture_check_not_run(exc))
+            return
+        self.result.emit(list(self._titles or []))
+
+
+def capture_check_not_run(exc: Exception) -> str:
+    """What the strip says for a capture check that did not run, or did not finish (R-ax, the G5+G8
+    review's I2): Busy, a refusal and a timeout came back as the check's «output», with no
+    `UNUSABLE` line in it, and vanished — the cards stayed «waiting» with no reason. TCC's own
+    reasons in TCC's words; a refusal in the words of what refused — the binding's sentence, or the
+    method's last line without its `error: `. Never «everything is bad»: nothing was recorded."""
+    if isinstance(exc, process_writer.Busy):
+        return i18n.t("captureCheckBusy")
+    if isinstance(exc, process_writer.TimedOut):
+        return i18n.t("captureCheckTimedOut").format(seconds=f"{exc.seconds:g}")
+    lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+    why = lines[-1] if lines else type(exc).__name__
+    return i18n.t("captureCheckRefused").format(why=why.removeprefix("error: "))

@@ -227,6 +227,41 @@ def test_a_stop_the_method_refuses_is_raised_in_its_words_not_reported_as_open_w
     assert str(failed.value) == "error: process-state.json is not a process record"
 
 
+_VERDICT = "UNUSABLE w-L_1 (sw) — in-band mean -94.0 dB — silence, not a sweep\n0/1 придатні"
+
+
+@pytest.mark.parametrize("code, err", [(0, ""), (1, ""),
+                                       (1, "DeprecationWarning: a library said something")])
+def test_a_capture_check_that_ran_answers_its_verdict_even_on_exit_1(monkeypatch, code, err):
+    """R-ax (the G5+G8 review's I2): `capture-check` exits 1 when a capture is unusable — its
+    verdict, recorded, on stdout. Through `_run` that was a failure in stderr's words, so a warning
+    there replaced the verdict, and no caller could tell a check that ran from one that did not."""
+    monkeypatch.setattr(process_writer, "_spawn",
+                        lambda project_dir, args, timeout_s=None, **_kw: (code, _VERDICT, err))
+
+    assert process_writer.check_captures(Path("car"), ["w-L_1 (sw)"]) == _VERDICT
+
+
+@pytest.mark.parametrize("code, out, err", [
+    (1, "", "error: REW's measurement list was not read (HTTP 500) -- nothing was recorded"),
+    (69, "", "error: REW did not answer (connection refused) -- nothing was recorded; start REW "
+             "and run capture-check again"),
+    (70, "", "Traceback (most recent call last):\nKeyError: 'taken'\n"
+             "error: unexpected KeyError: 'taken'"),
+    (1, _VERDICT, "Traceback (most recent call last):\nKeyError: 'taken'"),
+], ids=["refused", "REW down", "crashed", "crashed after its verdict"])
+def test_a_capture_check_that_did_not_run_is_raised_in_its_own_words(monkeypatch, code, out, err):
+    """The method's refusal, REW not answering and a crash recorded nothing (or nothing whole):
+    each is raised, in the words it was said in, for the caller to say the check did not run."""
+    monkeypatch.setattr(process_writer, "_spawn",
+                        lambda project_dir, args, timeout_s=None, **_kw: (code, out, err))
+
+    with pytest.raises(process_writer.ProcessWriterError) as failed:
+        process_writer.check_captures(Path("car"), ["w-L_1 (sw)"])
+
+    assert str(failed.value) == err
+
+
 def test_a_method_too_old_for_a_command_says_so_instead_of_dumping_usage(project, monkeypatch):
     """Measured on the user's Windows VM, 2026-09-09: TCC ran `session_close`, the installed
     method was **3.0.8**, and `process.py` answered by printing its own usage text. What the model

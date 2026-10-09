@@ -251,27 +251,6 @@ def test_the_dsp_section_shows_the_configuration_in_the_processor(tmp_path, monk
     assert "Helix DSP Ultra S" in section._sub_label.toolTip()
 
 
-def test_unusable_captures_are_one_line_with_the_rest_behind_a_link(tmp_path, monkeypatch):
-    """Finding 29: sixteen UNUSABLE lines took half the window and could not be closed."""
-    window, _ = _window(tmp_path, monkeypatch)
-    said = []
-    monkeypatch.setattr(window._status_strip, "notify",
-                        lambda text, level="info", action=None, dismissible=False, on_dismiss=None:
-                        said.append((text, level, action, dismissible, on_dismiss)))
-    monkeypatch.setattr(main_window.process_view, "load_state", lambda *a, **k: None)
-    # A curve that failed the check: an ABSENT one is not unusable, it is waiting (2026-09-23).
-    lines = "\n".join(f"UNUSABLE sw_{n} (sw) — silence in band 20-80 Hz" for n in range(1, 17))
-    window._on_capture_check_done(lines)
-    text, level, action, dismissible, on_dismiss = said[-1]
-    assert "<br>" not in text and "16" in text and "sw_1 (sw)" in text
-    assert action is not None and dismissible
-    on_dismiss()
-    window._on_capture_check_done(lines)
-    assert len(said) == 1, "a list closed by hand does not come back until it changes"
-    window._on_capture_check_done(lines + "\nUNUSABLE sw_17 (sw) — gone")
-    assert len(said) == 2
-
-
 def test_done_on_the_capture_card_follows_the_open_round_and_signals_the_ai(tmp_path, monkeypatch):
     """Finding 31: «Готово» hands what was just captured to the AI — disabled until the open
     round has taken something, and a SIGNAL, so a terminal session gets it too."""

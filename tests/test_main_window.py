@@ -5947,136 +5947,115 @@ def test_giving_the_clipboard_back_does_not_crash_the_interpreter_on_exit(tmp_pa
     assert done.stdout.strip().splitlines()[-1] == "mine", "and what was there came back"
 
 
-def test_an_rta_the_check_does_not_apply_to_is_not_checked_again(monkeypatch):
-    """hub #154 §1: its verdict is `ok: false, applicable: false` for good, so treating it as
-    unchecked started a capture check on every scan of REW."""
-    from autosound_tcc.state import process_view
-    from autosound_tcc.ui.tcc import main_window as mw
+# ---- the capture check: which titles it asks about is `measurement_view.to_check`, what the strip
+# says after it `measurement_view.unusable_lines` — both tested there, over rounds the method
+# recorded (#175, TA-8). Here: the window's half — the worker, the queue, the strip's one line.
 
-    _app()
-    window = MainWindow()
-    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
-        "id": "cap_001", "expected": ["sw_1 (rta)"],
-        "taken": {"sw_1 (rta)": {"verified": {"ok": False, "applicable": False}}}})
-    monkeypatch.setattr(window._meas_panel, "known_titles", lambda: ["sw_1 (rta)"])
-    started = []
-    monkeypatch.setattr(mw, "_CaptureCheckWorker", lambda *a, **k: started.append(1))
-
-    window._on_rew_titles_changed()
-
-    assert started == []
+_SILENCE = "in-band mean -96.1 dB — silence, not a sweep"
 
 
-def _round_check_started(monkeypatch, round_: dict, known: list) -> list:
-    """What `_on_rew_titles_changed` hands the capture check, with the round and REW faked."""
-    from types import SimpleNamespace
+class _Heard:
+    """The method's `verify.verify` for a check that heard `issue` under every title it was handed
+    — or a good sweep, `valid` — held by REW: what `Process.check_captures` records, with no REW."""
 
-    from autosound_tcc.state import process_view
-    from autosound_tcc.ui.tcc import main_window as mw
+    def __init__(self, issue: str = _SILENCE, valid: bool = False) -> None:
+        self.issues, self.valid = ([] if valid else [issue]), valid
 
-    _app()
-    window = MainWindow()
-    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: round_)
-    monkeypatch.setattr(window._meas_panel, "known_titles", lambda: list(known))
-    started: list = []
-
-    class _Worker:
-        def __init__(self, project_dir, titles=None):
-            started.append(titles)
-            self.result = SimpleNamespace(connect=lambda *_a: None)
-            self.finished = SimpleNamespace(connect=lambda *_a: None)
-
-        def start(self) -> None:
-            pass
-
-        def isRunning(self) -> bool:  # noqa: N802 — Qt's name
-            return False
-
-        def isFinished(self) -> bool:  # noqa: N802 — Qt's name
-            return True
-
-    monkeypatch.setattr(mw, "_CaptureCheckWorker", _Worker)
-    window._on_rew_titles_changed()
-    window._capture_check = None
-    return started
+    def verify(self, wanted):
+        return [{"name": title, "valid": self.valid, "exists": True, "applicable": True,
+                 "reachable": True, "stats": {"uuid": f"u-{title}"}, "issues": list(self.issues)}
+                for title in wanted]
 
 
-def test_the_after_import_check_asks_only_about_what_the_round_took(monkeypatch):
-    """tcc#21, review I3. The method's `check_captures` writes a `taken` entry for EVERY title it
-    checks, so checking all expected titles REW shows made them taken: a dud the import window left
-    for a re-take read «брак — знятий», and a good sweep nobody ticked turned green (the Arbiter,
-    2026-09-06: a title in REW's list is not this project taking it in). Only what the round took
-    is checked, and the titles are handed over, not left for the method to fill in."""
-    started = _round_check_started(monkeypatch, {
-        "id": "cap_001", "expected": ["m-L_1 (sw)", "m-R_1 (sw)", "sw_1 (sw)"],
-        "taken": {"m-L_1 (sw)": {"at": "2026-10-03T20:01:00", "planned": True}},
-    }, ["m-L_1 (sw)", "m-R_1 (sw)", "sw_1 (sw)"])
-
-    assert started == [["m-L_1 (sw)"]]
-
-
-def test_an_expected_title_in_rew_that_nobody_took_is_not_checked(monkeypatch):
-    started = _round_check_started(monkeypatch, {
-        "id": "cap_001", "expected": ["m-L_1 (sw)"], "taken": {},
-    }, ["m-L_1 (sw)"])
-
-    assert started == []
-
-
-def test_the_strip_counts_only_the_titles_the_check_was_handed(monkeypatch):
-    """Review I5 (tcc#21): the method's `capture-check` prints a line for EVERY expected title, and
-    one it was not handed — not taken, so not checked — prints `UNUSABLE <title> — не перевірено`.
-    After an import in a round still waiting for two, the strip said «Непридатних замірів: 2 —
-    w-R_1 (sw) — не перевірено» about two captures nobody had taken. A curve not taken is waiting,
-    not unusable (the Arbiter, 2026-09-23). Through the real worker, so the titles travel with the
-    answer the way they do in the app."""
+def test_the_strip_after_a_check_reads_what_it_recorded_and_says_when_it_did_not_run(monkeypatch):
+    """#175 TA-8: the strip read the check's TEXT, and the method prints a line for every expected
+    title — one it was not handed as `UNUSABLE … не перевірено` (review I5, tcc#21). It reads the
+    verdicts the check recorded, for the titles it was handed. And a check that did not run — busy
+    behind another write, here — says so, with why (R-ax): it vanished without a word. The next
+    check that runs takes the line back. Through the real worker, so the answer travels to the
+    window the way it does in the app."""
     from autosound_tcc.core import process_writer
-    from autosound_tcc.state import process_view
+    from tests import _rounds
 
+    titles = ["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"]
+    process = _rounds.write_round(config.project_dir(), version=1, expected=titles,
+                                  taken=titles[:1])
+    typed = [_rounds.as_typed(title) for title in titles]
+
+    def check(project, titles=None, session=False):
+        process.check_captures(titles, verifier=_Heard())
+        return "\n".join(f"UNUSABLE {title} — не перевірено" for title in typed)  # not read
+
+    monkeypatch.setattr(process_writer, "check_captures", check)
     _app()
     window = MainWindow()
-    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
-        "id": "cap_001", "expected": ["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"],
-        "taken": {"w-L_1 (sw)": {"at": "2026-10-03T20:01:00", "planned": True}}})
-    monkeypatch.setattr(window._meas_panel, "known_titles",
-                        lambda: ["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"])
-    # What the method prints for `capture-check w-L_1 (sw)` in that round (process.py's CLI loop).
-    monkeypatch.setattr(process_writer, "check_captures", lambda project, titles=None, session=False: (
-        "UNUSABLE w-L_1 (sw) — in-band mean -96.1 dB — silence, not a sweep\n"
-        "UNUSABLE w-R_1 (sw) — не перевірено\n"
-        "UNUSABLE sw_1 (sw) — не перевірено\n"
-        "0/3 придатні"))
+    monkeypatch.setattr(window._meas_panel, "known_titles", lambda: list(typed))
+    strip, said = window._status_strip, []
+    shown = strip.notify
+    monkeypatch.setattr(strip, "notify", lambda text, **k: said.append(text) or shown(text, **k))
+
+    def a_check(answer) -> None:
+        monkeypatch.setattr(process_writer, "check_captures", answer)
+        window._on_rew_titles_changed()
+        window._capture_check.wait(5000)
+        _app().processEvents()
+
+    a_check(check)
+    assert said == [i18n.t("unusableSummary").format(n=1, first=f"{typed[0]} — {_SILENCE}")], said
+
+    def busy(project, titles=None, session=False):
+        raise process_writer.Busy("busy: another write to this project is still running")
+
+    a_check(busy)  # w-L_1 is still bad: asked about again
+    assert said[1:] == [i18n.t("captureCheckBusy")] and strip.text() == said[-1], said
+
+    a_check(lambda project, titles=None, session=False: process.check_captures(
+        titles, verifier=_Heard(valid=True)) and "")
+    assert len(said) == 2 and strip.text() == "", "a check that ran takes «did not run» back"
+
+
+def test_unusable_captures_are_one_line_with_the_rest_behind_a_link(monkeypatch):
+    """Finding 29: sixteen UNUSABLE lines took half the window and could not be closed. One line,
+    the rest behind a link, with a ✕ — and a list closed by hand does not come back until it
+    changes. Read from what the check recorded (#175 TA-8); the window's own method, with a host in
+    the window's place."""
+    from tests import _rounds
+
+    titles = [_rounds.as_typed(f"sw_{n} (sw)") for n in range(1, 18)]
+    process = _rounds.write_round(config.project_dir(), version=1, expected=titles, taken=titles,
+                                  pad=False)
+    process.check_captures(titles, verifier=_Heard())
     said = []
-    monkeypatch.setattr(window._status_strip, "notify", lambda text, **k: said.append(text))
+    host = SimpleNamespace(
+        _status_strip=SimpleNamespace(notify=lambda text, **k: said.append((text, k)),
+                                      text=lambda: ""),
+        _refresh_capture_task=lambda state: None, _show_unusable=lambda lines: None)
 
-    window._on_rew_titles_changed()
-    window._capture_check.wait(5000)
-    _app().processEvents()
-
-    assert said == [i18n.t("unusableSummary").format(
-        n=1, first="w-L_1 (sw) — in-band mean -96.1 dB — silence, not a sweep")], said
+    MainWindow._on_capture_check_done(host, titles[:16])
+    text, said_with = said[-1]
+    assert text == i18n.t("unusableSummary").format(n=16, first=f"{titles[0]} — {_SILENCE}")
+    assert "<br>" not in text and said_with["level"] == "warn"
+    assert said_with["action"] is not None and said_with["dismissible"]
+    said_with["on_dismiss"]()
+    MainWindow._on_capture_check_done(host, titles[:16])
+    assert len(said) == 1, "a list closed by hand does not come back until it changes"
+    MainWindow._on_capture_check_done(host, titles)
+    assert len(said) == 2 and said[-1][0].startswith(
+        i18n.t("unusableSummary").format(n=17, first=""))
 
 
 def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch):
     """Review M10 (tcc#21): the ledger write asks for a check of what it just recorded while the
     check the import itself set off is still running. "The next title change re-triggers it" held
     while every check covered every expected title; one covering only what was taken loses the
-    rest, which then reads unchecked until something else changes."""
-    from types import SimpleNamespace
+    rest, which then reads unchecked until something else changes. The window's own two methods,
+    with a host in the window's place, over a round the method recorded."""
+    from tests import _rounds
 
-    from autosound_tcc.state import process_view
-    from autosound_tcc.ui.tcc import main_window as mw
-
-    _app()
-    window = MainWindow()
-    round_ = {"id": "cap_001", "expected": ["w-L_1 (sw)", "w-R_1 (sw)"],
-              "taken": {"w-L_1 (sw)": {"at": "x"}}}
-    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: round_)
-    monkeypatch.setattr(window._meas_panel, "known_titles", lambda: ["w-L_1 (sw)", "w-R_1 (sw)"])
+    titles = ["w-L_1 (sw)", "w-R_1 (sw)"]
+    process = _rounds.write_round(config.project_dir(), version=1, expected=titles,
+                                  taken=titles[:1])
+    typed = [_rounds.as_typed(title) for title in titles]
     started: list = []
     ended: list = []
 
@@ -6085,6 +6064,7 @@ def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch)
             started.append(titles)
             self.running = True
             self.result = SimpleNamespace(connect=lambda *_a: None)
+            self.failed = SimpleNamespace(connect=lambda *_a: None)
             self.finished = SimpleNamespace(connect=ended.append)
 
         def start(self) -> None:
@@ -6093,38 +6073,98 @@ def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch)
         def isRunning(self) -> bool:  # noqa: N802 — Qt's name
             return self.running
 
-        def isFinished(self) -> bool:  # noqa: N802 — Qt's name
-            return not self.running
+    monkeypatch.setattr(main_window, "_CaptureCheckWorker", _Worker)
+    host = SimpleNamespace(
+        _capture_check=None, _closing=False, _refresh_capture_task=lambda state: None,
+        _sync_capture_ready=lambda: None, _offer_title_fixes=lambda round_: None,
+        _meas_panel=SimpleNamespace(known_titles=lambda: list(typed)),
+        _on_capture_check_done=lambda titles: None, _on_capture_check_failed=lambda why: None)
+    host._on_rew_titles_changed = lambda: MainWindow._on_rew_titles_changed(host)
+    host._on_capture_check_finished = lambda: MainWindow._on_capture_check_finished(host)
 
-    monkeypatch.setattr(mw, "_CaptureCheckWorker", _Worker)
-    try:
-        window._on_rew_titles_changed()            # the import's own check: w-L_1
-        round_["taken"]["w-R_1 (sw)"] = {"at": "y"}
-        window._on_rew_titles_changed()            # the ledger wrote w-R_1: asked while it runs
-        assert started == [["w-L_1 (sw)"]]
+    host._on_rew_titles_changed()            # the import's own check: w-L_1
+    process.record_capture(typed[1])
+    host._on_rew_titles_changed()            # the ledger wrote w-R_1: asked while it runs
+    assert started == [typed[:1]]
 
-        window._capture_check.running = False
-        for callback in list(ended):
-            callback()
+    host._capture_check.running = False
+    for callback in list(ended):
+        callback()
 
-        assert started == [["w-L_1 (sw)"], ["w-L_1 (sw)", "w-R_1 (sw)"]]
-    finally:
-        window._capture_check = None
+    assert started == [typed[:1], typed]
 
 
 def test_the_capture_check_worker_hands_the_method_its_titles(monkeypatch, tmp_path):
-    """An empty title list is the method's "every expected title" — so the titles go over as given."""
+    """An empty title list is the method's "every expected title" — so the titles go over as given,
+    and come back with the answer: the verdicts are read for those (#175 TA-8)."""
     from autosound_tcc.core import process_writer
     from autosound_tcc.ui.tcc import workers
 
-    asked = []
+    asked, answered, failed = [], [], []
     monkeypatch.setattr(process_writer, "check_captures",
                         lambda project, titles=None, session=False: asked.append((project, titles))
                         or "")
+    worker = workers._CaptureCheckWorker(tmp_path, titles=["m-L_1 (sw)"])
+    worker.result.connect(answered.append)
+    worker.failed.connect(failed.append)
 
-    workers._CaptureCheckWorker(tmp_path, titles=["m-L_1 (sw)"]).run()
+    worker.run()
 
     assert asked == [(tmp_path, ["m-L_1 (sw)"])]
+    assert (answered, failed) == ([["m-L_1 (sw)"]], [])
+
+
+@pytest.mark.parametrize("stopped", ["busy", "timed out", "refused", "the method's refusal",
+                                     "REW down", "a crash"])
+def test_a_capture_check_that_did_not_run_says_so_and_why(monkeypatch, tmp_path, stopped):
+    """R-ax (the G5+G8 review's I2): Busy, a refused binding, a timeout and the method's refusal all
+    came back on the same signal as a verdict, with no `UNUSABLE` line in them — and vanished. The
+    person at the car saw the cards stay «waiting», with no reason. Each says the check did not
+    run, and why: TCC's own reason in TCC's words, a refusal in the words of what refused. Never
+    «everything is bad»: no verdict goes to the window at all."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import workers
+
+    error, said = {
+        "busy": (process_writer.Busy("busy: another write to this project is still running"),
+                 i18n.t("captureCheckBusy")),
+        "timed out": (process_writer.TimedOut("process.py timed out after 120s", 120.0),
+                      i18n.t("captureCheckTimedOut").format(seconds="120")),
+        "refused": (process_writer.Refused("this project runs a copy of the method TCC has not "
+                                           "approved"),
+                    i18n.t("captureCheckRefused").format(
+                        why="this project runs a copy of the method TCC has not approved")),
+        "the method's refusal": (
+            process_writer.ProcessWriterError(
+                "error: REW's measurement list was not read (HTTP 500) -- nothing was recorded"),
+            i18n.t("captureCheckRefused").format(
+                why="REW's measurement list was not read (HTTP 500) -- nothing was recorded")),
+        "REW down": (
+            process_writer.ProcessWriterError(
+                "error: REW did not answer (connection refused) -- nothing was recorded; start "
+                "REW and run capture-check again"),
+            i18n.t("captureCheckRefused").format(
+                why="REW did not answer (connection refused) -- nothing was recorded; start REW "
+                    "and run capture-check again")),
+        "a crash": (
+            process_writer.ProcessWriterError(
+                "Traceback (most recent call last):\n  File \"process.py\", line 1\n"
+                "KeyError: 'taken'\nerror: unexpected KeyError: 'taken'"),
+            i18n.t("captureCheckRefused").format(why="unexpected KeyError: 'taken'")),
+    }[stopped]
+
+    def check(project, titles=None, session=False):
+        raise error
+
+    monkeypatch.setattr(process_writer, "check_captures", check)
+    answered, failed = [], []
+    worker = workers._CaptureCheckWorker(tmp_path, titles=["m-L_1 (sw)"])
+    worker.result.connect(answered.append)
+    worker.failed.connect(failed.append)
+
+    worker.run()
+
+    assert (answered, failed) == ([], [said]), stopped
 
 
 def test_a_session_that_closed_itself_is_not_asked_to_save_on_quit(monkeypatch, tmp_path):
@@ -7659,112 +7699,6 @@ def test_closing_the_window_during_a_check_stops_the_wheel(monkeypatch):
     window.closeEvent(QCloseEvent())
 
     assert not window._critic_spinner.is_spinning()
-
-
-# ---- a capture taken as it is: the strip agrees with the card (review of finding 147, I1) -------
-
-_AS_IS_VERDICT = {"ok": False, "exists": True, "applicable": True, "uuid": "u-sw",
-                  "issues": ["covers 20-1001 Hz, asked for 20-20000 — truncated"]}
-
-
-def test_a_capture_taken_as_it_is_is_not_checked_again(monkeypatch):
-    """The tuner answered for that verdict in the import window: checking it again on every title
-    change pulled the curve from REW and repeated «unusable» beside a green row. A re-take under
-    the same title is another capture (another uuid) and is checked."""
-    from autosound_tcc.state import measurement_view
-
-    monkeypatch.setattr(measurement_view, "taken_as_is", lambda *a, **k: {"u-sw": "sw_7 (sw)"})
-    round_ = {"id": "cap_002", "expected": ["sw_7 (sw)"],
-              "taken": {"sw_7 (sw)": {"at": "x", "verified": dict(_AS_IS_VERDICT)}}}
-
-    assert _round_check_started(monkeypatch, round_, ["sw_7 (sw)"]) == []
-
-    round_["taken"]["sw_7 (sw)"]["verified"]["uuid"] = "u-retaken"
-    assert _round_check_started(monkeypatch, round_, ["sw_7 (sw)"]) == [["sw_7 (sw)"]]
-
-
-def test_a_sweep_the_import_window_passed_is_not_checked_again(monkeypatch):
-    """tcc#149, the review's m1: a capture the window passed over its own range, which the method's
-    check calls «truncated» alone, was checked again on every change to REW's list — a pull from
-    REW and a journal event each time, for a verdict that will not change until hub #247. Settled,
-    as one taken as it is is; a re-take under the same title is another uuid and is checked."""
-    from autosound_tcc.core import capture_import, config
-
-    capture_import.record_imported([capture_import.Candidate(
-        ordinal="1", title="sw_7 (sw)", uuid="u-sw", date="", when=None, imported=False,
-        checked="usable")], project_dir=config.project_dir())
-    round_ = {"id": "cap_002", "expected": ["sw_7 (sw)"],
-              "taken": {"sw_7 (sw)": {"at": "x", "verified": dict(_AS_IS_VERDICT)}}}
-
-    assert _round_check_started(monkeypatch, round_, ["sw_7 (sw)"]) == []
-
-    round_["taken"]["sw_7 (sw)"]["verified"]["uuid"] = "u-retaken"
-    assert _round_check_started(monkeypatch, round_, ["sw_7 (sw)"]) == [["sw_7 (sw)"]]
-
-
-def test_the_strip_leaves_out_a_sweep_the_import_window_passed_over_its_own_range(monkeypatch):
-    """tcc#149: after Apply the strip said «1 unusable: sw_7 (sw) — covers 20-1001 Hz, asked for
-    20-20000 — truncated» for a sub the import window had just passed over its own range. Until
-    the method reads the sweep's range (hub #247) that line alone, on that capture, is not a
-    warning — read from TCC's own store by the uuid the method's verdict pins. Another capture's
-    failure still is."""
-    from autosound_tcc.core import capture_import, config
-    from autosound_tcc.state import process_view
-
-    _app()
-    window = MainWindow()
-    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
-    capture_import.record_imported([capture_import.Candidate(
-        ordinal="1", title="sw_7 (sw)", uuid="u-sw", date="", when=None, imported=False,
-        checked="usable")], project_dir=config.project_dir())
-    silence = {"ok": False, "exists": True, "applicable": True, "uuid": "u-wl",
-               "issues": ["in-band mean -96.1 dB — silence, not a sweep"]}
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
-        "id": "cap_002", "expected": ["sw_7 (sw)", "w-L_7 (sw)"],
-        "taken": {"sw_7 (sw)": {"verified": dict(_AS_IS_VERDICT)},
-                  "w-L_7 (sw)": {"verified": silence}}})
-    said = []
-    monkeypatch.setattr(window._status_strip, "notify", lambda text, **k: said.append(text))
-    own_range = "UNUSABLE sw_7 (sw) — " + _AS_IS_VERDICT["issues"][0]
-
-    window._on_capture_check_done(own_range + "\n0/1 придатні", ["sw_7 (sw)"])
-    assert said == []
-
-    window._on_capture_check_done(
-        own_range + "\nUNUSABLE w-L_7 (sw) — in-band mean -96.1 dB — silence, not a sweep\n"
-        "0/2 придатні", ["sw_7 (sw)", "w-L_7 (sw)"])
-    assert said == [i18n.t("unusableSummary").format(
-        n=1, first="w-L_7 (sw) — in-band mean -96.1 dB — silence, not a sweep")], said
-
-
-def test_the_strip_does_not_call_a_capture_taken_as_it_is_unusable(monkeypatch):
-    """Review I1: right after Apply the strip said «1 unusable: sw_7 (sw) — … truncated» while the
-    card's row read green «взято як є». The method's verdict stays recorded as it is; the strip
-    does not warn about a capture the tuner already answered for — and still warns about another."""
-    from autosound_tcc.state import measurement_view, process_view
-
-    _app()
-    window = MainWindow()
-    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
-    monkeypatch.setattr(measurement_view, "taken_as_is", lambda *a, **k: {"u-sw": "sw_7 (sw)"})
-    silence = {"ok": False, "exists": True, "applicable": True, "uuid": "u-wl",
-               "issues": ["in-band mean -96.1 dB — silence, not a sweep"]}
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
-        "id": "cap_002", "expected": ["sw_7 (sw)", "w-L_7 (sw)"],
-        "taken": {"sw_7 (sw)": {"verified": dict(_AS_IS_VERDICT)},
-                  "w-L_7 (sw)": {"verified": silence}}})
-    said = []
-    monkeypatch.setattr(window._status_strip, "notify", lambda text, **k: said.append(text))
-    as_is_line = "UNUSABLE sw_7 (sw) — covers 20-1001 Hz, asked for 20-20000 — truncated"
-
-    window._on_capture_check_done(as_is_line + "\n0/1 придатні", ["sw_7 (sw)"])
-    assert said == []
-
-    window._on_capture_check_done(
-        as_is_line + "\nUNUSABLE w-L_7 (sw) — in-band mean -96.1 dB — silence, not a sweep\n"
-        "0/2 придатні", ["sw_7 (sw)", "w-L_7 (sw)"])
-    assert said == [i18n.t("unusableSummary").format(
-        n=1, first="w-L_7 (sw) — in-band mean -96.1 dB — silence, not a sweep")], said
 
 
 def _two_presets(tmp_path, monkeypatch):

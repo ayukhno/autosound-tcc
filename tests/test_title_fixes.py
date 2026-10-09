@@ -211,24 +211,3 @@ def test_a_curve_that_is_not_there_is_waiting_not_bad():
 
     assert measurement_view.absent({"ok": False, "issues": ["No measurement titled 'sw_1 (sw)'"]})
     assert not measurement_view.absent({"ok": False, "issues": ["silence in band 20-80 Hz"]})
-
-
-def test_the_strip_does_not_call_an_absent_curve_unusable(tmp_path, monkeypatch):
-    import os
-
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication
-
-    from autosound_tcc.core import config
-    from autosound_tcc.ui.tcc.main_window import MainWindow
-
-    QApplication.instance() or QApplication([])
-    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
-    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
-    window = MainWindow()
-    said = []
-    monkeypatch.setattr(window._status_strip, "notify", lambda text, **k: said.append(text))
-    window._on_capture_check_done("UNUSABLE sw_1 (sw) — No measurement titled 'sw_1 (sw)'")
-    assert said == []
-    window._on_capture_check_done("UNUSABLE m-L_1 (sw) — silence in band")
-    assert said and "m-L_1 (sw)" in said[0]

@@ -254,9 +254,8 @@ def taken_as_is(project_dir: Optional[Path] = None) -> dict[str, str]:
 # ---- tcc#149: the card agrees with the import window on a sweep's own range ------------------
 # A patch until the method's own check reads a sweep's range (hub #247, TCC-049). At the re-pin
 # that carries it, drop this block and its uses (`window_checked`, `held_by_the_window`,
-# `flagged_by_the_window` below, and in `main_window`'s `settled` and `_on_capture_check_done`),
-# `MeasItem.own_range`,
-# `measOwnRange*`, and `Candidate.checked` with what writes it.
+# `flagged_by_the_window` below, and the `own_range` state of `verdict_state` with its `window`),
+# `MeasItem.own_range`, `measOwnRange*`, and `Candidate.checked` with what writes it.
 # The clash half (`flagged_by_the_window`, `CLASHES`, the clash names in `checked`) is not about the
 # band: keep it at that re-pin unless the method's check also reads titles by then.
 
@@ -318,11 +317,85 @@ def _row(name: str, status: str, issues: Optional[str], as_is: bool, own_range: 
                     own_range=own, **fields)
 
 
-def answered_as_is(verdict: dict, title: str, marked: dict) -> bool:
-    """Whether the tuner already answered for this failing verdict with «Take it as it is» —
-    `marked` is `taken_as_is()`. The window's after-import check reads it as settled and does not
-    warn about it again (review of finding 147, I1); the verdict itself stays the method's."""
-    return _answered_as_is(verdict, title, marked, set(), None)
+#: What a capture's recorded verdict means to the Arbiter — `verdict_state`'s five answers.
+VERDICT_FINE = "fine"
+VERDICT_AS_IS = "as_is"
+VERDICT_OWN_RANGE = "own_range"
+VERDICT_ABSENT = "absent"
+VERDICT_BAD = "bad"
+
+
+def verdict_state(verdict: dict, title: str, as_is: dict, window: dict, *, key=None,
+                  keys=frozenset()) -> str:
+    """Whether a capture's verdict needs the Arbiter, decided once (#175, TA-8). The card, the
+    window's check loop (`to_check`) and the strip after a check (`unusable_lines`) all read it;
+    three places decided it before, and a text parse of the check's output was one of them.
+
+    `verdict` is the method's own, as it recorded it (`taken[title]["verified"]`), and `title` the
+    capture's; `as_is` is `taken_as_is()`, `window` `window_checked()`. The answer is one of:
+
+    * `fine` — ok, or the check does not apply (an RTA: `applicable: false`, hub #154 §1);
+    * `as_is` — failing, and the tuner took it as it is (finding 147);
+    * `own_range` — failing «truncated» alone, on a sweep the import window passed over its own
+      range (tcc#149): kept in this one place, so dropping it after hub #247 is one deletion;
+    * `absent` — no curve under that title (the Arbiter, 2026-09-23: waiting, not bad);
+    * `bad` — a curve that is there and fails: a retake to decide on. So is a capture never
+      checked (`{}`), as the method's own gate counts it (`unusable_captures`).
+
+    Each reader maps the answer its own way, and that is why it is not one boolean: `absent` is
+    waiting on the card and «check again» in the window. The verdict stays the method's, and so
+    does its step gate. As-is is by the uuid the verdict pins; with none, by `title` — or by `key`
+    among `keys`, the card's name keys of the titles taken as is (its rows are derived names)."""
+    verdict = verdict or {}
+    if verdict.get("ok") or not applicable(verdict):
+        return VERDICT_FINE
+    if absent(verdict):
+        return VERDICT_ABSENT
+    if _answered_as_is(verdict, title, as_is, keys, key):
+        return VERDICT_AS_IS
+    if held_by_the_window(verdict, window):
+        return VERDICT_OWN_RANGE
+    return VERDICT_BAD
+
+
+def to_check(round_: dict, rew_titles, project_dir: Optional[Path] = None) -> list[str]:
+    """What the window's capture check asks the method about (SCR-040): each title the round
+    expects that REW holds and the round TOOK, whose verdict is not settled — `bad` or `absent`.
+
+    Only what the round took (tcc#21): checking whatever REW showed made a dud left for a re-take
+    «брак — знятий» and a good sweep nobody ticked green, and a title in REW's list is not this
+    project taking it in (the Arbiter, 2026-09-06). What still stands (#175): a superseded row is
+    a typo's trace. Settled is `fine`, `as_is` and `own_range`: none of those verdicts will change,
+    and each check is a pull from REW and a journal event — an RTA's, read as unchecked, started
+    one on every scan of REW (hub #154 §1). An absent one is asked again: the curve may be there
+    now."""
+    held = {str(title) for title in rew_titles}
+    taken = process_view.standing(round_)
+    as_is, window = taken_as_is(project_dir), window_checked(project_dir)
+    return [str(title) for title in round_.get("expected") or []
+            if str(title) in held and str(title) in taken
+            and verdict_state(taken[str(title)].get("verified"), str(title), as_is, window)
+            in (VERDICT_ABSENT, VERDICT_BAD)]
+
+
+def unusable_lines(round_: dict, asked, project_dir: Optional[Path] = None) -> list[str]:
+    """What the strip says after a check that ran: `<title> — <issues joined by "; ">`, in the
+    checker's own words, for each title of `asked` — what the check was handed — whose verdict the
+    method RECORDED reads `bad`, in the order asked (#175, TA-8).
+
+    Read from the record, not the check's text: that text has a line for every expected title, one
+    not handed as `UNUSABLE … не перевірено` (tcc#21, review I5), and it was parsed in two places.
+    No line for `as_is` (its row is green «taken as it is», review of finding 147 I1), `own_range`
+    (tcc#149) or `absent` (waiting, not unusable). None for a title with no verdict recorded
+    either: never «everything is bad» — a check that did not run says so itself (R-ax)."""
+    taken = process_view.standing(round_)
+    as_is, window = taken_as_is(project_dir), window_checked(project_dir)
+    lines = []
+    for title in asked or ():
+        verdict = (taken.get(str(title)) or {}).get("verified")
+        if verdict and verdict_state(verdict, str(title), as_is, window) == VERDICT_BAD:
+            lines.append(f"{title} — {'; '.join(str(i) for i in verdict.get('issues') or [])}")
+    return lines
 
 
 def _round_is_at(round_: dict, version, naming, glossary) -> bool:
@@ -497,29 +570,33 @@ def build_session(
             return STATUS_FOUND
         return STATUS_WAIT
 
-    def as_is_for(name: str) -> bool:
+    def verdict_for(name: str):
+        """The row's verdict and what it means (`verdict_state`); `(None, None)` for a capture
+        never checked, whose row is what was taken."""
         entry = naming.parse_name(name, glossary)
         key = naming.name_key(entry) if entry else None
-        verdict = verdicts.get(name) or verdicts_by_key.get(key) or {}
-        return (_answered_as_is(verdict, name, as_is_marked, as_is_keys, key)
-                or flagged_by_the_window(verdict, window, as_is_marked))
+        verdict = verdicts.get(name) or verdicts_by_key.get(key)
+        if not verdict:
+            return None, None
+        return verdict, verdict_state(verdict, name, as_is_marked, window, key=key,
+                                      keys=as_is_keys)
+
+    def as_is_for(name: str) -> bool:
+        verdict, state = verdict_for(name)
+        return state == VERDICT_AS_IS or flagged_by_the_window(verdict, window, as_is_marked)
 
     def own_range_for(name: str) -> bool:
-        entry = naming.parse_name(name, glossary)
-        key = naming.name_key(entry) if entry else None
-        return held_by_the_window(verdicts.get(name) or verdicts_by_key.get(key) or {}, window)
+        return verdict_for(name)[1] == VERDICT_OWN_RANGE
 
     def status_for(name: str) -> str:
         entry = naming.parse_name(name, glossary)
         key = naming.name_key(entry) if entry else None
         if name in recorded_skipped or (key is not None and key in skipped_keys):
             return STATUS_SKIPPED  # a decision, and it outranks both REW and the derivation
-        verdict = verdicts.get(name) or verdicts_by_key.get(key)
-        if verdict and absent(verdict):
+        state = verdict_for(name)[1]
+        if state == VERDICT_ABSENT:
             return not_taken(key)  # not there: yellow, waiting — not a bad curve
-        if (verdict and not verdict.get("ok") and applicable(verdict)
-                and not _answered_as_is(verdict, name, as_is_marked, as_is_keys, key)
-                and not held_by_the_window(verdict, window)):
+        if state == VERDICT_BAD:
             # The panel's own legend already calls this "taken, unusable" -- which is exactly what
             # a capture that came back and failed the check is. Unless the tuner took it as it is:
             # then it is taken like any other, below (finding 147).
@@ -663,28 +740,28 @@ def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict
     marked = dict(as_is or {})
     window = dict(checked or {})  # tcc#149, until hub #247
 
+    def state_for(name: str) -> Optional[str]:
+        """What the row's verdict means (`verdict_state`); None for one never checked."""
+        verdict = (taken.get(name) or {}).get("verified")
+        return verdict_state(verdict, name, marked, window) if verdict else None
+
     def as_is_for(name: str) -> bool:
         """Taken as it is, as on the live card (finding 147): history does not turn it red."""
-        verdict = (taken.get(name) or {}).get("verified") or {}
-        return (_answered_as_is(verdict, name, marked, set(), None)
-                or flagged_by_the_window(verdict, window, marked))
+        return (state_for(name) == VERDICT_AS_IS or flagged_by_the_window(
+            (taken.get(name) or {}).get("verified") or {}, window, marked))
 
     def own_range_for(name: str) -> bool:
-        return held_by_the_window((taken.get(name) or {}).get("verified") or {}, window)
+        return state_for(name) == VERDICT_OWN_RANGE
 
     def status_for(name: str) -> str:
         if name in skipped:
             return STATUS_SKIPPED
-        entry = taken.get(name)
-        if entry is None:
+        if name not in taken:
             return STATUS_WAIT  # asked for, never taken, and the round closed anyway
-        verdict = entry.get("verified") or {}
-        if absent(verdict):
+        state = state_for(name)
+        if state == VERDICT_ABSENT:
             return STATUS_WAIT
-        if (verdict.get("ok", True) or not applicable(verdict) or as_is_for(name)
-                or own_range_for(name)):
-            return STATUS_DONE
-        return STATUS_STALE
+        return STATUS_STALE if state == VERDICT_BAD else STATUS_DONE
 
     def issues_for(name: str) -> Optional[str]:
         # The skip reason comes first, and the order is the point: a skipped capture is ALSO

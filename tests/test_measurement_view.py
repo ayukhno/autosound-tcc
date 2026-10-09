@@ -1283,3 +1283,209 @@ def test_a_close_without_outstanding_leaves_the_round_as_its_lines_folded_it(pro
     assert _rows(past, key, mv.STATUS_WAIT, mv.STATUS_FOUND) == {key(t) for t in said} == {
         key("w-R_1 (sw)"), key("sw_1 (rta)")}
     assert _rows(past, key, mv.STATUS_DONE) == {key("w-L_1 (sw)"), key("sw_1 (sw)")}
+
+
+# ---- «settled» is decided once, from the recorded verdicts (#175, TA-8) ------------------------
+# Three places decided whether a capture's verdict needs the Arbiter: the window's check loop, the
+# strip's parse of the check's text, and the card. Each is `verdict_state` now, read off a round
+# the method recorded: its own `check_captures`, with `verify` answered here instead of by REW.
+
+_SILENCE = "in-band mean -94.0 dB — silence, not a sweep"
+_NOT_SWEPT = "this check is for swept captures; REW says this one is rta — nothing here was checked"
+
+
+class _Answers:
+    """The method's `verify.verify`, answering each title what `answers` holds for it — so the
+    method's own `Process.check_captures` records the verdict, pinned to the uuid given."""
+
+    def __init__(self, answers: dict):
+        self.answers = answers
+
+    def verify(self, wanted):
+        return [{"name": title, "reachable": True, "applicable": True, **self.answers[title]}
+                for title in wanted]
+
+
+def _held(uuid: str, *issues: str, applicable: bool = True) -> dict:
+    """REW holds the curve, under `uuid`: fine with no issue, failing with any."""
+    return {"valid": applicable and not issues, "exists": True, "applicable": applicable,
+            "stats": {"uuid": uuid}, "issues": list(issues)}
+
+
+def _not_held(title: str) -> dict:
+    """REW holds nothing under `title`, in REW's own words (`rew_api.find_measurement_id`)."""
+    return {"valid": False, "exists": False, "stats": {},
+            "issues": [f"No measurement titled {title!r} (REW holds 3)"]}
+
+
+def _check(process, answers: dict) -> dict:
+    """The method checks `answers`' titles (as typed) and records the verdicts; the round after."""
+    typed = {_as_typed(title): answer for title, answer in answers.items()}
+    process.check_captures(list(typed), verifier=_Answers(typed))
+    return process.load()["capture"]
+
+
+def _state(project, round_: dict, title: str) -> str:
+    typed = _as_typed(title)
+    verdict = process_view.standing(round_)[typed].get("verified") or {}
+    return mv.verdict_state(verdict, typed, mv.taken_as_is(project), mv.window_checked(project))
+
+
+def _imported(project, title: str, uuid: str, **said) -> None:
+    """The import window took `title` in, as REW's `uuid`: `as_is=True`, or what it `checked`."""
+    from autosound_tcc.core import capture_import
+
+    capture_import.record_imported([capture_import.Candidate(
+        ordinal="1", title=_as_typed(title), uuid=uuid, date="", when=None, imported=False,
+        **said)], project_dir=project)
+
+
+def test_a_capture_that_passed_or_that_the_check_does_not_apply_to_is_fine(project):
+    """hub #154 §1: an RTA's verdict is `ok: false, applicable: false` — not bad, not judged."""
+    process = _round(project, version=7, expected=["w-L_7 (sw)", "sw_7 (rta)"],
+                     taken=["w-L_7 (sw)", "sw_7 (rta)"])
+    round_ = _check(process, {"w-L_7 (sw)": _held("u-wl"),
+                              "sw_7 (rta)": _held("u-rta", _NOT_SWEPT, applicable=False)})
+
+    assert _state(project, round_, "w-L_7 (sw)") == mv.VERDICT_FINE
+    assert _state(project, round_, "sw_7 (rta)") == mv.VERDICT_FINE
+
+
+def test_a_capture_taken_as_it_is_is_as_is_and_a_retake_under_its_title_is_bad(project):
+    """Finding 147: the tuner answered for that verdict in the import window — by its uuid, so a
+    re-take under the same title is another capture, judged on its own."""
+    process = _round(project, version=7, expected=["sw_7 (sw)"], taken=["sw_7 (sw)"])
+    _imported(project, "sw_7 (sw)", "u-sw", as_is=True)
+
+    assert _state(project, _check(process, {"sw_7 (sw)": _held("u-sw", _TRUNCATED)}),
+                  "sw_7 (sw)") == mv.VERDICT_AS_IS
+    assert _state(project, _check(process, {"sw_7 (sw)": _held("u-retaken", _TRUNCATED)}),
+                  "sw_7 (sw)") == mv.VERDICT_BAD
+
+
+def test_a_sweep_the_window_passed_over_its_own_range_is_own_range_and_nothing_more(project):
+    """tcc#149, until hub #247: «truncated» alone, on the uuid the window passed. Anything beside
+    it is the method's verdict, and so is a re-take."""
+    process = _round(project, version=7, expected=["sw_7 (sw)"], taken=["sw_7 (sw)"])
+    _imported(project, "sw_7 (sw)", "u-sw", checked="usable")
+
+    assert _state(project, _check(process, {"sw_7 (sw)": _held("u-sw", _TRUNCATED)}),
+                  "sw_7 (sw)") == mv.VERDICT_OWN_RANGE
+    assert _state(project, _check(process, {"sw_7 (sw)": _held("u-sw", _TRUNCATED, _SILENCE)}),
+                  "sw_7 (sw)") == mv.VERDICT_BAD
+    assert _state(project, _check(process, {"sw_7 (sw)": _held("u-retaken", _TRUNCATED)}),
+                  "sw_7 (sw)") == mv.VERDICT_BAD
+
+
+def test_a_curve_rew_does_not_hold_is_absent_not_bad(project):
+    """The Arbiter, 2026-09-23: red is for a curve that is there and fails; one not there waits."""
+    process = _round(project, version=7, expected=["w-R_7 (sw)"], taken=["w-R_7 (sw)"])
+    round_ = _check(process, {"w-R_7 (sw)": _not_held(_as_typed("w-R_7 (sw)"))})
+
+    assert _state(project, round_, "w-R_7 (sw)") == mv.VERDICT_ABSENT
+
+
+def test_a_failing_capture_is_bad_and_so_is_one_never_checked(project):
+    """A capture taken and never checked is not usable yet, as the method's own gate reads it
+    (`unusable_captures`): `bad` too, so the window's check asks about it."""
+    process = _round(project, version=7, expected=["w-L_7 (sw)", "w-R_7 (sw)"],
+                     taken=["w-L_7 (sw)", "w-R_7 (sw)"])
+    round_ = _check(process, {"w-L_7 (sw)": _held("u-wl", _SILENCE)})
+
+    assert _state(project, round_, "w-L_7 (sw)") == mv.VERDICT_BAD
+    assert "verified" not in round_["taken"][_as_typed("w-R_7 (sw)")]
+    assert _state(project, round_, "w-R_7 (sw)") == mv.VERDICT_BAD
+
+
+# The window's check loop: what it asks the method about (`to_check`).
+
+
+def test_the_window_checks_only_what_the_round_took_and_rew_holds(project):
+    """tcc#21, review I3: a title in REW's list is not this project taking it in (the Arbiter,
+    2026-09-06) — checking whatever REW showed made a dud left for a re-take «брак — знятий» and a
+    good sweep nobody ticked green. Only what the round took, and only while REW holds it."""
+    three = [_as_typed(t) for t in ("m-L_1 (sw)", "m-R_1 (sw)", "sw_1 (sw)")]
+    _round(project, version=1, expected=["m-L_1 (sw)", "m-R_1 (sw)", "sw_1 (sw)"],
+           taken=["m-L_1 (sw)"])
+    round_ = process_view.capture_round(project)
+
+    assert mv.to_check(round_, three, project) == [_as_typed("m-L_1 (sw)")]
+    assert mv.to_check(round_, three[1:], project) == []
+
+
+def test_an_expected_title_in_rew_that_nobody_took_is_not_checked(project):
+    _round(project, version=1, expected=["m-L_1 (sw)"])
+
+    assert mv.to_check(process_view.capture_round(project), [_as_typed("m-L_1 (sw)")],
+                       project) == []
+
+
+def test_a_settled_capture_is_not_checked_again_and_one_that_is_not_is(project):
+    """hub #154 §1: an RTA's verdict will not change, and treating it as unchecked started a check
+    on every scan of REW. Nor will one taken as it is (finding 147), or one the window passed over
+    its own range until hub #247 (tcc#149) — each a pull from REW and a journal event for nothing.
+    A re-take under the same title is another uuid and is checked; so are a bad one and an absent
+    one, whose curve may be there now."""
+    titles = ["sw_7 (rta)", "sw_7 (sw)", "w-L_7 (sw)", "w-R_7 (sw)", "m-L_7 (sw)"]
+    process = _round(project, version=7, expected=titles, taken=titles)
+    _imported(project, "sw_7 (sw)", "u-sw", as_is=True)
+    _imported(project, "w-L_7 (sw)", "u-wl", checked="usable")
+    held = [_as_typed(t) for t in titles]
+    answers = {"sw_7 (rta)": _held("u-rta", _NOT_SWEPT, applicable=False),
+               "sw_7 (sw)": _held("u-sw", _TRUNCATED), "w-L_7 (sw)": _held("u-wl", _TRUNCATED),
+               "w-R_7 (sw)": _held("u-wr", _SILENCE),
+               "m-L_7 (sw)": _not_held(_as_typed("m-L_7 (sw)"))}
+
+    assert mv.to_check(_check(process, answers), held, project) == [
+        _as_typed("w-R_7 (sw)"), _as_typed("m-L_7 (sw)")]
+    retaken = _check(process, {"sw_7 (sw)": _held("u-sw2", _TRUNCATED),
+                               "w-L_7 (sw)": _held("u-wl2", _TRUNCATED)})
+    assert mv.to_check(retaken, held, project) == [
+        _as_typed("sw_7 (sw)"), _as_typed("w-L_7 (sw)"), _as_typed("w-R_7 (sw)"),
+        _as_typed("m-L_7 (sw)")]
+
+
+# The strip after a check that ran: a line for each recorded `bad` verdict (`unusable_lines`).
+
+
+def test_the_strip_says_each_bad_capture_and_none_taken_as_it_is_held_or_absent(project):
+    """Review of finding 147, I1: «1 unusable: sw_7 (sw) — … truncated» beside a row the card read
+    green «taken as it is». tcc#149: the same for a sub the window had just passed over its own
+    range. The Arbiter, 2026-09-23: a curve that is not there is waiting, not unusable. Another
+    capture's failure still is a line — the method's issues, joined."""
+    titles = ["sw_7 (sw)", "w-L_7 (sw)", "w-R_7 (sw)", "m-L_7 (sw)"]
+    process = _round(project, version=7, expected=titles, taken=titles)
+    _imported(project, "sw_7 (sw)", "u-sw", as_is=True)
+    _imported(project, "w-L_7 (sw)", "u-wl", checked="usable")
+    round_ = _check(process, {
+        "sw_7 (sw)": _held("u-sw", _TRUNCATED), "w-L_7 (sw)": _held("u-wl", _TRUNCATED),
+        "w-R_7 (sw)": _not_held(_as_typed("w-R_7 (sw)")),
+        "m-L_7 (sw)": _held("u-ml", _TRUNCATED, _SILENCE)})
+
+    assert mv.unusable_lines(round_, [_as_typed(t) for t in titles], project) == [
+        f"{_as_typed('m-L_7 (sw)')} — {_TRUNCATED}; {_SILENCE}"]
+
+
+def test_the_strip_names_only_the_titles_the_check_was_handed(project):
+    """Review I5 (tcc#21): the method's text has a line for every expected title, and the strip
+    once counted «w-R_1 (sw) — не перевірено» about captures nobody had taken. What the check was
+    handed is what it answered — in the order handed — whatever an earlier check recorded."""
+    titles = ["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"]
+    process = _round(project, version=1, expected=titles, taken=titles)
+    _check(process, {title: _held(f"u-{n}", _SILENCE) for n, title in enumerate(titles)})
+    round_ = _check(process, {"sw_1 (sw)": _held("u-sw", _SILENCE),
+                              "w-L_1 (sw)": _held("u-wl", _SILENCE)})
+
+    assert mv.unusable_lines(round_, [_as_typed("sw_1 (sw)"), _as_typed("w-L_1 (sw)")],
+                             project) == [f"{_as_typed('sw_1 (sw)')} — {_SILENCE}",
+                                          f"{_as_typed('w-L_1 (sw)')} — {_SILENCE}"]
+
+
+def test_a_title_the_check_recorded_nothing_for_is_never_said_bad(project):
+    """Never «everything is bad»: a title the round holds no verdict for — a check that did not
+    reach it — is no line, though it reads `bad` to the check loop."""
+    process = _round(project, version=1, expected=["w-L_1 (sw)", "w-R_1 (sw)"],
+                     taken=["w-L_1 (sw)", "w-R_1 (sw)"])
+
+    assert mv.unusable_lines(process.load()["capture"], [_as_typed("w-L_1 (sw)"),
+                                                         _as_typed("w-R_1 (sw)")], project) == []

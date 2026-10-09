@@ -109,6 +109,16 @@ class UnknownFlag(Refused):
         self.flag = flag
 
 
+class TimedOut(ProcessWriterError):
+    """The child ran past `timeout_s` and its tree was killed (`spawn`). Never `Busy`: a child cut
+    halfway may have written. `seconds` is the bound it ran past, so a caller can say it in its own
+    words without reading the sentence (R-ax: the capture check's strip line)."""
+
+    def __init__(self, message: str, seconds: float) -> None:
+        super().__init__(message)
+        self.seconds = seconds
+
+
 class ScriptMissing(ProcessWriterError):
     """The copy of the method the project runs has no such script, so nothing was started: a
     method older than the command, or a copy with files missing. A class of its own so that a
@@ -247,7 +257,7 @@ def spawn(
     `lock` holds the project's writer lock around the child, and `lock_wait_s` is how long to wait
     for it — by default `GUI_LOCK_WAIT_S` on the main thread and `LOCK_WAIT_S` on any other, read
     now. Past it the answer is `Busy`, with nothing started. Past `timeout_s` the child's tree is
-    killed and the answer is a `ProcessWriterError` saying it timed out — never `Busy`, because a
+    killed and the answer is `TimedOut`, a `ProcessWriterError` saying so — never `Busy`, because a
     child cut halfway may have written. An `OSError` — no interpreter, a lock the filesystem cannot
     take — is a `ProcessWriterError` in its words. Each of these is logged once, as a refusal is.
     One raised giving the lock back, after the child ran, is logged too, and the child's answer
@@ -309,7 +319,7 @@ def spawn(
         app_log.logger().warning(
             "timed out: `%s` on %s after %gs: %s", _named(script, args, project_dir), project_dir,
             timeout_s, tail(exc.stderr) or "(nothing on stderr)")
-        raise ProcessWriterError(f"{script.name} timed out after {timeout_s:g}s") from None
+        raise TimedOut(f"{script.name} timed out after {timeout_s:g}s", timeout_s) from None
     except OSError as exc:
         if proc is None:
             # An interpreter that would not start, or a lock this filesystem cannot take (ENOLCK on

@@ -53,7 +53,10 @@ def test_process_writer_raises_and_catches_the_same_classes():
     assert process_writer.Busy is method_cli.Busy
     assert process_writer.Refused is method_cli.Refused
     assert process_writer.UnknownFlag is method_cli.UnknownFlag
+    assert process_writer.TimedOut is method_cli.TimedOut
     assert issubclass(method_cli.Refused, method_cli.ProcessWriterError)
+    assert issubclass(method_cli.TimedOut, method_cli.ProcessWriterError)
+    assert not issubclass(method_cli.TimedOut, method_cli.Busy)
     assert not issubclass(method_cli.Refused, method_cli.Busy)
     assert issubclass(method_cli.UnknownFlag, method_cli.Refused)
 
@@ -61,7 +64,9 @@ def test_process_writer_raises_and_catches_the_same_classes():
 def test_a_child_past_its_timeout_is_cut_and_answered_timed_out_not_busy(tmp_path, method_copy):
     """`timeout_s` bounds the child alone. A child cut at its timeout may have written half of
     something, so its answer is a failure that says it timed out — not «busy», whose whole
-    promise is that nothing was written and the same call will work in a moment."""
+    promise is that nothing was written and the same call will work in a moment. A class of its own,
+    with the bound it ran past, so a caller says it in its own words without reading the sentence
+    (R-ax: the capture check's strip line)."""
     (method_copy / "rew_tool" / "state" / "process.py").write_text(
         "import time\ntime.sleep(60)\n", encoding="utf-8")
     car = tmp_path / "car"
@@ -72,8 +77,8 @@ def test_a_child_past_its_timeout_is_cut_and_answered_timed_out_not_busy(tmp_pat
         method_cli.spawn(car, "state/process.py", [str(car / "process"), "show"], timeout_s=0.5)
     elapsed = time.monotonic() - started
 
-    assert type(cut.value) is method_cli.ProcessWriterError, f"answered busy: {cut.value!r}"
-    assert "timed out" in str(cut.value), str(cut.value)
+    assert type(cut.value) is method_cli.TimedOut, f"answered {cut.value!r}"
+    assert "timed out" in str(cut.value) and cut.value.seconds == 0.5, str(cut.value)
     assert elapsed < 10, f"{elapsed:.1f}s: the child was waited out, not cut at 0.5 s"
 
 
@@ -178,7 +183,8 @@ def test_a_timeout_or_a_run_that_could_not_start_leaves_one_warning_in_the_busy_
     with pytest.raises(method_cli.ProcessWriterError) as failed:
         method_cli.spawn(car, "state/process.py", [str(car / "process"), "show"], timeout_s=0.5)
 
-    assert type(failed.value) is method_cli.ProcessWriterError, repr(failed.value)
+    assert type(failed.value) is (method_cli.TimedOut if fails == "timed out"
+                                  else method_cli.ProcessWriterError), repr(failed.value)
     said = [record.getMessage() for record in app_log_warnings]
     assert len(said) == 1 and app_log_warnings[0].levelno == logging.WARNING, said
     tail = "\n".join(_STDERR.splitlines()[-8:])
