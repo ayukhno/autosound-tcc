@@ -828,18 +828,19 @@ def build_server(
         with its answers. `project_profile` and `bundled_exact_match` are both UNWRAPPED (no
         top-level `dsp_profile` key) -- `project_profile` IS the object `save_profile_field`'s
         `path` resolves against, so never prefix a path with `dsp_profile.`.
+
+        A null `bundled_exact_match` with `bundled_library_error` beside it is NOT "no match": the
+        library could not be read, and why is in it. Tell the Arbiter so; do not interview as for
+        a DSP the library lacks.
         """
         try:
             current = profile_writer.start(project_dir, vendor, model)
-            bundled = profile_writer.find_bundled(
-                vendor, model, config.bundled_profiles_dir(), project_dir=project_dir
-            )
-        except profile_writer.ProfileWriterError as exc:
+        except (profile_writer.ProfileWriterError, vendor_loader.VendorNotInitializedError) as exc:
             return json.dumps({"error": str(exc)})
         return json.dumps({
             "project_profile": current.get("draft", {}),
             "open_questions": current.get("open_questions", []),
-            "bundled_exact_match": bundled,
+            **profile_writer.bundled_match(vendor, model, project_dir=project_dir),
         }, ensure_ascii=False)
 
     @tool()

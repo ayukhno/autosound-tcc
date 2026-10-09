@@ -173,6 +173,7 @@ def test_with_no_skill_the_picker_offers_only_add_new_and_the_log_says_why(monke
     assert _offered(dlg) == [None]
     assert not dlg._vendor_edit.isHidden() and not dlg._model_edit.isHidden()
     assert any("was not found" in said for said in _warnings(caplog)), caplog.text
+    assert _says_the_library_could_not_be_read(dlg)
 
 
 def test_a_skill_older_than_the_library_leaves_only_add_new_and_says_so(monkeypatch, caplog):
@@ -190,6 +191,44 @@ def test_a_skill_older_than_the_library_leaves_only_add_new_and_says_so(monkeypa
     assert _offered(dlg) == [None]
     skill = str(vendor_loader.skill_dir())
     assert any("v3.0.19" in said and skill in said for said in _warnings(caplog)), caplog.text
+    assert _says_the_library_could_not_be_read(dlg)
+
+
+def _says_the_library_could_not_be_read(dlg) -> bool:
+    from PySide6.QtWidgets import QLabel
+
+    return any(label.text() == npd.i18n.t("npLibraryUnread") and not label.isHidden()
+               for label in dlg.findChildren(QLabel))
+
+
+@pytest.mark.parametrize("folder", ["missing", "empty"])
+def test_a_library_folder_missing_or_empty_is_said_not_offered_as_nothing(
+        monkeypatch, caplog, tmp_path, folder):
+    """Task 26 (its review's Minor 1): the method's `bundled_dir()` named a folder that was not
+    there, or held no profile, and the picker offered only «Add new» with nothing in the log —
+    a broken install read as «the method has no profiles», which is exactly when somebody makes a
+    new profile for a box the library has. One WARNING naming the folder, and the picker says the
+    library could not be read."""
+    from autosound_tcc.core import config
+
+    library = tmp_path / "profiles"
+    if folder == "empty":
+        library.mkdir()
+    monkeypatch.setattr(config, "bundled_profiles_dir", lambda: library)
+    _app()
+    dlg = npd.NewProjectDialog()
+
+    assert _offered(dlg) == [None]
+    said = [line for line in _warnings(caplog) if str(library) in line]
+    assert len(said) == 1, _warnings(caplog)
+    assert _says_the_library_could_not_be_read(dlg)
+
+
+def test_a_library_that_reads_says_nothing_about_it():
+    _app()
+    dlg = npd.NewProjectDialog()
+
+    assert not _says_the_library_could_not_be_read(dlg)
 
 
 def test_run_via_combo_lists_detected_clis_and_defaults_to_in_app(monkeypatch):

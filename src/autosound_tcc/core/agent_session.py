@@ -56,7 +56,7 @@ import json
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-from autosound_tcc.core import app_log, claude_sdk, config, profile_writer
+from autosound_tcc.core import app_log, claude_sdk, profile_writer
 
 #: Built-in Claude Code tools this agent may use: NONE. Named rather than written inline because
 #: the module docstring's "Built-in tools granted" line is compared against it by a test — the
@@ -210,16 +210,17 @@ def build_tools(project_dir: Path, vendor: str, model: str):
 
     @_logged_tool("check_existing_profile",
           "Check the project's own in-progress profile and the bundled reference library for an "
-          "EXACT vendor+model match. Never treat a different model's profile as fact.", {})
+          "EXACT vendor+model match. Never treat a different model's profile as fact. A null "
+          "match with `bundled_library_error` beside it is not 'no match': the library could not "
+          "be read -- say so, and do not interview as for a DSP the library lacks.", {})
     async def check_existing_profile(_args: dict) -> dict:
         current = profile_writer.draft(project_dir)
         draft["data"] = current.get("draft", {})
         out = {
             "project_profile": draft["data"],
             "open_questions": current.get("open_questions", []),
-            "bundled_exact_match": profile_writer.find_bundled(
-                vendor, model, config.bundled_profiles_dir(), project_dir=project_dir
-            ),
+            # Answered, never raised (the G6+G7 review): no skill, no library, a lookup that failed.
+            **profile_writer.bundled_match(vendor, model, project_dir=project_dir),
         }
         return {"content": [{"type": "text", "text": json.dumps(out)}]}
 

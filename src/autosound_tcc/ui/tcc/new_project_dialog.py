@@ -35,7 +35,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from autosound_tcc.core import app_log, config, model_choices, terminal_launcher, vendor_loader
+from autosound_tcc.core import (
+    app_log, config, model_choices, profile_writer, terminal_launcher, vendor_loader,
+)
 from autosound_tcc.ui.tcc import car_source, i18n
 from autosound_tcc.ui.tcc.mock_data import AI_MAIN_MODELS, AI_MODEL_IDS
 
@@ -144,34 +146,39 @@ def _fs_carried(target: Path) -> Optional[int]:
     return count
 
 
-def _bundled_profiles() -> list[tuple[str, str]]:
+def _bundled_profiles() -> tuple[list[tuple[str, str]], bool]:
     """(vendor, name) pairs of the method's library of reference profiles, in its own order:
-    `list_bundled()` of the skill TCC loads, over `config.bundled_profiles_dir()` (#175 D-1).
+    `list_bundled()` of the skill TCC loads, over `config.bundled_profiles_dir()` (#175 D-1) — and
+    whether that library could not be read.
 
     Picking one of these guarantees an EXACT match against `dsp_profile.find_bundled()`'s
     deliberately strict, no-fuzzy-matching check (project-intake.md §4) -- free-typing "Helix" /
     "Ultra S" against a profile actually keyed `Audiotec-Fischer` / `Helix DSP Ultra S` is exactly
     how a real bundled profile gets missed (user report 2026-07-29).
 
-    Empty, with a warning in the log, when there is no library to read: no skill found, one that
-    does not load here, or one older than v3.0.19, which keeps none. The picker then offers only
-    «Add new», whose fields name a DSP all the same -- this dialog is the first screen a fresh
-    install meets, and it has to open."""
+    Empty, with one warning in the log, when there is no library to read: no skill found, one that
+    does not load here, one older than v3.0.19, which keeps none, or a folder that is not there or
+    holds no profile that reads (`profile_writer.library_unread`; Task 26's review, Minor 1: that
+    one said nothing, a broken install read as a method with no profiles). The picker then offers
+    only «Add new», whose fields name a DSP all the same -- this dialog is the first screen a fresh
+    install meets, and it has to open -- and says the library could not be read."""
     try:
         library = config.bundled_profiles_dir()
-        rows = [] if library is None else vendor_loader.load_dsp_profile().list_bundled(str(library))
+        why = profile_writer.library_unread(library)
+        rows = [] if why else vendor_loader.load_dsp_profile().list_bundled(str(library))
         pairs = [(str(vendor).strip(), str(name).strip()) for vendor, name, _path in rows]
     except Exception as exc:  # noqa: BLE001 — no skill, or one that does not load: only «Add new»
         app_log.logger().warning(
             "the New-project picker offers no reference DSP profile: the method's library could "
             "not be read (%s: %s)", type(exc).__name__, exc,
             exc_info=not isinstance(exc, vendor_loader.VendorNotInitializedError))
-        return []
-    if library is None:
+        return [], True
+    pairs = [(vendor, name) for vendor, name in pairs if vendor and name]
+    why = why or (None if pairs else f"{library} holds no profile that can be read")
+    if why:
         app_log.logger().warning("the New-project picker offers no reference DSP profile: the "
-                                 "skill at %s keeps no library (it arrived in v3.0.19)",
-                                 vendor_loader.skill_dir())
-    return [(vendor, name) for vendor, name in pairs if vendor and name]
+                                 "method's library could not be read: %s", why)
+    return pairs, bool(why)
 
 
 #: How long the seed-note redraw waits for typing to stop. Below the threshold where the note
@@ -327,12 +334,20 @@ class NewProjectDialog(QDialog):
         layout.addWidget(_field_label(i18n.t("npProfile")))
         self._profile_combo = QComboBox()
         self._profile_combo.setProperty("class", "mini-select")
-        for vendor, name in _bundled_profiles():
+        profiles, unread = _bundled_profiles()
+        for vendor, name in profiles:
             self._profile_combo.addItem(f"{vendor} — {name}", (vendor, name))
         self._profile_combo.addItem(i18n.t("npAddNew"), None)
         self._profile_combo.currentIndexChanged.connect(self._on_profile_selected)
         self._profile_combo.currentIndexChanged.connect(self._refresh_seed_note)
         layout.addWidget(self._profile_combo)
+        # A library that could not be read is said where its profiles would be: «Add new» alone
+        # reads as a method with none, and a profile gets made for a box it has (Task 26).
+        self._library_note = QLabel(i18n.t("npLibraryUnread"))
+        self._library_note.setWordWrap(True)
+        self._library_note.setProperty("class", "kv-lbl")
+        self._library_note.setVisible(unread)
+        layout.addWidget(self._library_note)
 
         self._vendor_edit = QLineEdit()
         self._vendor_edit.setPlaceholderText(i18n.t("npVendorPlaceholder"))

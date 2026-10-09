@@ -251,3 +251,51 @@ def test_the_language_rule_is_in_the_system_prompt_not_only_in_the_opening_turn(
 
     assert "## Language" in prompt
     assert "EVERY word you emit" in prompt
+
+
+@pytest.mark.parametrize("library", ["older skill", "no skill", "missing", "empty", "lookup failed"])
+def test_the_interviews_lookup_says_a_library_it_could_not_read(tmp_path, monkeypatch, library):
+    """Task 26's review (Minors 2 and 3), and the G6+G7 review's «wider than written»: the in-app
+    interview's `check_existing_profile` had no `try` at all, so `VendorNotInitializedError` and a
+    failed lookup left it as a tool error, and a skill older than v3.0.19 or a folder missing or
+    empty answered `bundled_exact_match: null` — the answer for a box the library lacks. Each
+    answers that the library could not be read, with why, beside the draft."""
+    import asyncio
+    import json
+    import types
+
+    from autosound_tcc.core import config, vendor_loader
+
+    monkeypatch.setattr(agent_session.profile_writer, "start", lambda *a, **kw: None)
+    monkeypatch.setattr(agent_session.profile_writer, "draft",
+                        lambda *a, **kw: {"draft": {"vendor": "Musway"}, "open_questions": []})
+    folder = tmp_path / "profiles"
+    if library in ("empty", "lookup failed"):
+        folder.mkdir()
+    if library == "lookup failed":
+        (folder / "one.json").write_text("{}", encoding="utf-8")
+
+    def gone():
+        raise vendor_loader.VendorNotInitializedError("the autosound-tuning skill was not found")
+
+    def failed(*_a, **_k):
+        raise agent_session.profile_writer.ProfileWriterError("dsp_profile.py timed out after 30s")
+
+    if library == "older skill":
+        monkeypatch.setattr(vendor_loader, "load_dsp_profile", lambda: types.SimpleNamespace())
+    else:
+        monkeypatch.setattr(config, "bundled_profiles_dir",
+                            gone if library == "no skill" else lambda: folder)
+    monkeypatch.setattr(agent_session.profile_writer, "find_bundled",
+                        failed if library == "lookup failed" else lambda *a, **k: None)
+    tools, _draft = agent_session.build_tools(tmp_path, "Musway", "M6V4 (no 512K)")
+    [lookup] = [t for t in tools if t.name == "check_existing_profile"]
+
+    answer = json.loads(asyncio.run(lookup.handler({}))["content"][0]["text"])
+
+    assert answer["project_profile"] == {"vendor": "Musway"}
+    assert answer["bundled_exact_match"] is None
+    why = answer["bundled_library_error"]
+    assert "could not be read" in why, why
+    assert {"older skill": "v3.0.19", "no skill": "was not found", "missing": str(folder),
+            "empty": str(folder), "lookup failed": "timed out"}[library] in why, why

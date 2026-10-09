@@ -134,6 +134,43 @@ def find_bundled(vendor: str, model: str, bundled_dir: Optional[Path], *,
     return found.get("dsp_profile", found) if isinstance(found, dict) else None
 
 
+def library_unread(library: Optional[Path]) -> Optional[str]:
+    """Why the method's library of reference profiles at `library` — `config.bundled_profiles_dir()`
+    — cannot be read, or None when it can be asked (Task 26's review, Minors 1 and 2): a skill
+    older than v3.0.19, which keeps none; a folder that is not there; one with no profile in it.
+    Each read as «no match» before, the answer for a box the library lacks — a broken install
+    taken for a method with no profiles, which is when somebody makes a new profile for a box the
+    library has. A look at the folder, not a scan: the scan is the method's (`list_bundled`), and
+    from a tool's thread it would be that thread's first load of the method's `project_io`."""
+    if library is None:
+        return (f"the skill at {vendor_loader.skill_dir()} keeps no library "
+                "(it arrived in v3.0.19)")
+    if not Path(library).is_dir():
+        return f"{library} is not there"
+    if not any(Path(library).glob("*.json")):
+        return f"{library} holds no profile"
+    return None
+
+
+def bundled_match(vendor: str, model: str, *, project_dir: Path) -> dict:
+    """What a lookup tool answers about the library: `{"bundled_exact_match": <profile or None>}`,
+    and `"bundled_library_error"` beside a None that is no answer — the library could not be read
+    (`library_unread`), no skill was found (`VendorNotInitializedError`, a skill gone since the
+    server was built: mid-update), or the lookup itself failed. The two lookup tools, MCP's and the
+    in-app interview's, answer the same way (the G6+G7 review: the interview's had no `try`)."""
+    try:
+        library = config.bundled_profiles_dir()
+        why = library_unread(library)
+        if why is None:
+            return {"bundled_exact_match": find_bundled(vendor, model, library,
+                                                        project_dir=project_dir)}
+    except (vendor_loader.VendorNotInitializedError, ProfileWriterError) as exc:
+        why = str(exc)
+    return {"bundled_exact_match": None,
+            "bundled_library_error": "the method's library of reference profiles could not be "
+                                     f"read: {why}. The null match is no answer, not «no match»"}
+
+
 def has_draft(project_dir: Path) -> bool:
     """Whether an interview has been started for this project (a draft, or an existing profile to
     correct). The onboarding tools check this so calling them out of order is a message an agent

@@ -1165,10 +1165,12 @@ def test_check_existing_profile_finds_the_musway_of_the_skills_library(tmp_path)
     assert "dsp_profile" not in match
 
 
-def test_a_skill_older_than_the_library_answers_no_match_and_runs_no_lookup(tmp_path, monkeypatch):
+def test_a_skill_older_than_the_library_answers_that_it_could_not_be_read(tmp_path, monkeypatch):
     """`bundled_dir` arrived with the method's library, in v3.0.19, and the loader takes an older
-    3.0 skill all the same (the map's note 11). There is no library then, so no match: the draft
-    and its questions come back as ever, and no lookup runs against a folder that is not there."""
+    3.0 skill all the same (the map's note 11). There is no library then: the draft and its
+    questions come back as ever, no lookup runs against a folder that is not there — and the
+    answer says the library could not be read, never «no match» (Task 26's review, Minor 2), which
+    sent the agent to interview from scratch about a box the method may well have."""
     import types
 
     from autosound_tcc.core import profile_writer, vendor_loader
@@ -1193,8 +1195,43 @@ def test_a_skill_older_than_the_library_answers_no_match_and_runs_no_lookup(tmp_
     assert mcp_server.config.bundled_profiles_dir() is None
     assert "error" not in result, result
     assert result["bundled_exact_match"] is None
+    assert "could not be read" in result["bundled_library_error"] \
+        and "v3.0.19" in result["bundled_library_error"], result
     assert "open_questions" in result
     assert ran == ["start"], ran
+
+
+@pytest.mark.parametrize("library", ["no skill", "missing", "empty"])
+def test_a_library_that_cannot_be_read_is_said_beside_the_draft(tmp_path, monkeypatch, library):
+    """Task 26 (its review's Minors 1 and 3; the G6+G7 review: wider than written): a library folder
+    that is not there or holds nothing answered `bundled_exact_match: null`, «no match»; and with
+    the skill gone since the build (mid-update), `VendorNotInitializedError` left the tool as a
+    FastMCP error after the draft was started. Each answers the draft, and that the library could
+    not be read, with why."""
+    from autosound_tcc.core import vendor_loader
+
+    folder = tmp_path / "profiles"
+    if library == "empty":
+        folder.mkdir()
+
+    def gone():
+        raise vendor_loader.VendorNotInitializedError("the autosound-tuning skill was not found")
+
+    monkeypatch.setattr(mcp_server.config, "bundled_profiles_dir",
+                        gone if library == "no skill" else lambda: folder)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir(exist_ok=True)
+    mcp, _, _ = _server(project_dir, HeadlessBridge(project_dir))
+
+    result = json.loads(_text(asyncio.run(mcp.call_tool(
+        "check_existing_profile", {"vendor": "Musway", "model": "M6V4 (no 512K)"},
+    ))))
+
+    assert "error" not in result and "open_questions" in result, result
+    assert result["bundled_exact_match"] is None
+    why = result["bundled_library_error"]
+    assert "could not be read" in why, why
+    assert ("was not found" in why) if library == "no skill" else (str(folder) in why), why
 
 
 def test_the_library_is_read_on_the_servers_loop_from_a_module_loaded_when_it_was_built(

@@ -30,6 +30,18 @@ STRINGS: dict[str, dict[str, str]] = {
         'pl': '+ Dodaj nowy (nie ma na liście)',
         'de': '+ Neu hinzufügen (nicht in der Liste)',
     },
+    'npLibraryUnread': {
+        'en': "The method's library of DSP profiles could not be read, so none is offered here: "
+              "name the DSP below. The log says why.",
+        'uk': 'Бібліотеку профілів DSP методу не вдалося прочитати, тож тут жодного не '
+              'запропоновано: назвіть DSP нижче. Чому — сказано в журналі.',
+        # #170: the English until the Advisor.
+        'pl': "The method's library of DSP profiles could not be read, so none is offered here: "
+              "name the DSP below. The log says why.",
+        # #170: the English until the Advisor.
+        'de': "The method's library of DSP profiles could not be read, so none is offered here: "
+              "name the DSP below. The log says why.",
+    },
     'npVendor': {
         'en': 'DSP vendor',
         'uk': 'Виробник DSP',
