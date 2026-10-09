@@ -206,7 +206,11 @@ def test_two_text_blocks_do_not_glue_into_one_sentence():
     concatenates whatever it is handed."""
     import asyncio
 
-    from autosound_tcc.core import agent_session
+    from autosound_tcc.core import agent_session, claude_sdk
+
+    # The SDK's names are bound at a session's first use (`build_tools`). Run alone, or first on
+    # its worker, nothing had bound them, and the swap below read a name that was not there.
+    claude_sdk.bind(agent_session.SDK_NAMES, vars(agent_session))
 
     class _Block:
         def __init__(self, text):
