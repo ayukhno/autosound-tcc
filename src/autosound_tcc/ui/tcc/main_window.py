@@ -4122,9 +4122,9 @@ class MainWindow(QMainWindow):
         round_ = process_view.capture_round()
         not_run = getattr(self, "_capture_check_not_run", None)
         if not_run is not None and not_run.ended(round_, self._meas_panel.known_titles()):
-            self._status_strip.withdraw(not_run.line)
             self._capture_check_not_run = None
-            self._offer_title_fixes(round_)
+            if self._status_strip.withdraw(not_run.line):  # its slot held the offer once (M1)
+                self._offer_title_fixes(round_)
         button = getattr(self, "_capture_ready_btn", None)
         if button is None:
             return

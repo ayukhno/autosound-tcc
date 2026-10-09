@@ -6346,6 +6346,13 @@ def test_the_title_fix_offer_is_said_again_once_a_failed_checks_line_goes(monkey
     MainWindow._sync_capture_ready(host)
     assert strip.text() == offer, "the line went, and the offer came back"
 
+    # Only into the slot the failure's line held: a line said after it is not covered over.
+    MainWindow._on_capture_check_failed(host, i18n.t("captureCheckBusy"))
+    strip.notify("Not written down: the target", level="warn")
+    process.check_captures(typed, verifier=_Heard())
+    MainWindow._sync_capture_ready(host)
+    assert strip.text() == "Not written down: the target"
+
 
 def test_a_check_that_ran_over_a_round_it_cannot_read_back_says_so(monkeypatch):
     """The G6+G7 review's M6: a check ran, then the round read None (a write cut halfway by a

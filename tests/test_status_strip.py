@@ -206,7 +206,7 @@ def test_a_line_taken_back_goes_whether_it_is_shown_or_waiting_and_no_other_does
     strip = StatusStrip()
 
     strip.notify("did not run", level="warn")
-    strip.withdraw("did not run")
+    assert strip.withdraw("did not run") is True, "it says whether it took the line back"
     assert strip.text() == ""
 
     strip.notify("a report", level="warn", sticky=True)
@@ -219,6 +219,5 @@ def test_a_line_taken_back_goes_whether_it_is_shown_or_waiting_and_no_other_does
 
     strip.notify("a report", level="warn", sticky=True)
     strip.notify("something later", level="warn")
-    strip.withdraw("did not run")
-    strip.withdraw("a report")
+    assert strip.withdraw("did not run") is False and strip.withdraw("a report") is False
     assert strip.text() == "a report" and strip.waiting() == ["something later"]
