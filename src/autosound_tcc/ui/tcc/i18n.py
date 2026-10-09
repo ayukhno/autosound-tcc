@@ -1124,6 +1124,8 @@ offered on the impulse: that plot's axis is time.",
         # — send, clear, and this one — and that is the point: one word for one group of controls.
         "curveReadoutBtn": "Markers",
         "curveBankEmpty": "no delays read yet — set one above and it is kept per measurement",
+        "curveBankNotRead": "the delay bank could not be read — nothing set here is kept until it reads:",
+        "curveBankOff": "Off: the delay bank could not be read — {why}",
         "curveApfUnshown": "A banked all-pass this machine cannot draw stays banked as it is: {names} — {why}",
         "curveBankUnread": "The delay bank could not be read, so these are drawn without what is banked for them, and nothing is banked until it reads: {names}",
         "curveClearLabel": "clear:",
@@ -2385,6 +2387,8 @@ Choose sweeps (sw) above to read this.",
 там вісь — час.",
         "curveReadoutBtn": "Маркери",
         "curveBankEmpty": "затримок ще нема — виставте вище, і вона збережеться по заміру",
+        "curveBankNotRead": "банк затримок не прочитано — нічого з виставленого тут не зберігається, доки він не прочитається:",
+        "curveBankOff": "Вимкнено: банк затримок не прочитано — {why}",
         "curveApfUnshown": "Збережений all-pass, який на цій машині не намалювати, лишається в банку як є: {names} — {why}",
         "curveBankUnread": "Банк затримок не прочитано, тож ці драйвери показано без збереженого для них, і нічого не зберігається, доки банк не прочитається: {names}",
         "curveClearLabel": "очистити:",
@@ -3703,6 +3707,10 @@ Choose sweeps (sw) above to read this.",
                              'niedostępne: tam osią jest czas.',
         "curveReadoutBtn": 'Markery',
         "curveBankEmpty": 'opóźnień jeszcze nie ma — ustaw wyżej, a zostanie zapamiętane przy pomiarze',
+        # #170: the English until the Advisor.
+        "curveBankNotRead": "the delay bank could not be read — nothing set here is kept until it reads:",
+        # #170: the English until the Advisor.
+        "curveBankOff": "Off: the delay bank could not be read — {why}",
         # #170: the English until the Advisor.
         "curveApfUnshown": "A banked all-pass this machine cannot draw stays banked as it is: {names} — {why}",
         # #170: the English until the Advisor.
@@ -5039,6 +5047,10 @@ Choose sweeps (sw) above to read this.",
                              'auszurichten. Im Impuls nicht angeboten: dort ist die Achse die Zeit.',
         "curveReadoutBtn": 'Marker',
         "curveBankEmpty": 'noch keine Delays abgelesen — stell oben eines ein, es wird je Messung behalten',
+        # #170: the English until the Advisor.
+        "curveBankNotRead": "the delay bank could not be read — nothing set here is kept until it reads:",
+        # #170: the English until the Advisor.
+        "curveBankOff": "Off: the delay bank could not be read — {why}",
         # #170: the English until the Advisor.
         "curveApfUnshown": "A banked all-pass this machine cannot draw stays banked as it is: {names} — {why}",
         # #170: the English until the Advisor.

@@ -661,6 +661,7 @@ class CurveDialog(QDialog):
         self._bank_clear_btn.setProperty("class", "clear-btn")
         self._bank_clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._bank_clear_btn.clicked.connect(self._on_clear_bank)
+        attach_tip(self._bank_clear_btn, "")  # why it is off, when the bank cannot be read
         self._view.add_note_action(self._bank_clear_btn)
         self._markers_clear_btn = QPushButton(i18n.t("curveClearMarkers"))
         self._markers_clear_btn.setProperty("class", "clear-btn")
@@ -677,6 +678,7 @@ class CurveDialog(QDialog):
         self._bank_ask_btn.setProperty("class", "composer-send")
         self._bank_ask_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._bank_ask_btn.clicked.connect(self._on_ask_about_bank)
+        attach_tip(self._bank_ask_btn, "")
         self._view.add_delay_action(self._bank_ask_btn)
 
         self._titles = list(titles)
@@ -1449,14 +1451,25 @@ class CurveDialog(QDialog):
         two different partners and banked twice with different answers. It used to be on the picker
         rows, which is the same place by another name.
         """
-        bank = delay_bank.load(session=self._session())
-        apfs = delay_bank.allpasses(session=self._session())
+        series = self._session()
+        try:
+            bank = delay_bank.load(session=series, strict=True)
+            apfs = delay_bank.allpasses(session=series, strict=True)
+            unreadable = ""
+        except own_store.StoreUnreadable as exc:
+            # Not an empty bank: one that is there and cannot be read, and while it cannot,
+            # nothing set here is kept. It read as «no delays read yet — set one above and it is
+            # kept», with a count of 0, after every refused step (G10 I1). The strip heard it once,
+            # from `own_store`; this is the bank saying what it is, not a second report.
+            bank, apfs, unreadable = {}, {}, str(exc)
         head = i18n.t("curveBankLabel")
         # A driver counts once whether it carries a delay, an all-pass, or both: the number on the
         # button is how many drivers have a proposal on them, which is what decides whether the
         # set is worth sending yet.
         titles = sorted(set(bank) | set(apfs))
-        if titles:
+        if unreadable:
+            shown, head = unreadable, i18n.t("curveBankNotRead")
+        elif titles:
             shown = ", ".join(
                 " ".join(
                     part for part in (
@@ -1467,7 +1480,6 @@ class CurveDialog(QDialog):
                 )
                 for title in titles
             )
-            series = self._session()
             if series:
                 # Named, because the same channel can carry a different correction in another
                 # series and a list with no series on it says which one is being looked at.
@@ -1486,11 +1498,13 @@ class CurveDialog(QDialog):
         if note != self._bank_note:
             self._bank_note = note
             self._render_note()
-        self._bank_btn.setText(i18n.t("curveBankBtn").format(n=len(titles)))
+        self._bank_btn.setText(i18n.t("curveBankBtn").format(n="?" if unreadable else len(titles)))
         if getattr(self._bank_btn, "hover_tip", None) is not None:
             self._bank_btn.hover_tip.set_text(tip_html(shown, head=head))
-        self._bank_ask_btn.setEnabled(bool(titles))
-        self._bank_clear_btn.setEnabled(bool(titles))
+        off = tip_html(i18n.t("curveBankOff").format(why=unreadable)) if unreadable else ""
+        for button in (self._bank_ask_btn, self._bank_clear_btn):
+            button.setEnabled(bool(titles))
+            button.hover_tip.set_text(off)
         for title, action in getattr(self, "_choose_actions", {}).items():
             bits = []
             if bank.get(title):

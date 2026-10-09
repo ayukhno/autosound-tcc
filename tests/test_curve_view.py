@@ -5093,3 +5093,57 @@ def test_a_banked_all_pass_this_machine_cannot_draw_is_kept_and_said(monkeypatch
     assert delay_bank.load() == {"w-L_01 (sw)": 0.2}
     status = dialog._status.text()
     assert not dialog._status.isHidden() and "m-L_01" in status and "no skill" in status, status
+
+
+# ---- a bank that cannot be read is not an empty one (G10 I1, #177) -------------------------------
+
+
+def _store_in_mode_0(store):
+    store.chmod(0o000)
+    return lambda: store.chmod(0o600)
+
+
+def _a_folder_in_the_store_s_place(store):
+    good = store.read_bytes()
+    store.unlink()
+    store.mkdir()
+    return lambda: store.rmdir() or store.write_bytes(good)
+
+
+@pytest.mark.parametrize("unreadable", [
+    pytest.param(_store_in_mode_0, marks=pytest.mark.skipif(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="POSIX permissions, and root reads whatever the mode")),
+    _a_folder_in_the_store_s_place,
+], ids=["mode-0", "folder"])
+def test_a_bank_that_cannot_be_read_says_so_and_never_reads_as_empty(app_log_told, unreadable):
+    """G10 I1: an unreadable store came back `{}`, and the bank said «Delays read (0)» with the tip
+    «no delays read yet — set one above and it is kept», Ask and Clear grey — over a bank that was
+    there, while nothing typed was kept. Since every refused step re-renders the bank, it said
+    that on every step. Now it says the store could not be read and why, the count is «?», and
+    Ask and Clear say why they are off; the strip hears it once, however many steps."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    delay_bank.put("w-L_01 (sw)", 0.198)
+    delay_bank.put("sub_01 (sw)", 1.5)
+    dialog = _plotted(_SIDE[:2])
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=2), "good store: 2"
+    restore = unreadable(project_settings.path_for(config.tcc_dir()))
+    try:
+        for ms in (0.3, 0.31, 0.32):
+            dialog._view.set_delay(ms)
+        shown, tip = dialog._bank_btn.text(), _tip(dialog._bank_btn)
+        ask, clear = dialog._bank_ask_btn, dialog._bank_clear_btn
+        off = (ask.isEnabled(), clear.isEnabled(),
+               *(_tip(b) if hasattr(b, "hover_tip") else "" for b in (ask, clear)))
+    finally:
+        restore()
+
+    assert shown == i18n.t("curveBankBtn").format(n="?"), shown
+    assert i18n.t("curveBankEmpty") not in tip and "could not be read" in tip, tip
+    assert off[:2] == (False, False)
+    assert all("could not be read" in why for why in off[2:]), off
+    assert len(app_log_told) == 1 and "could not be read" in app_log_told[0], app_log_told
+    dialog._view.set_delay(0.33)
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=2), "read again: the bank"
+    assert dialog._bank_ask_btn.isEnabled() and not _tip(dialog._bank_ask_btn)
