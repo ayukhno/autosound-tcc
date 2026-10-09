@@ -5966,7 +5966,7 @@ def test_the_strip_after_a_check_reads_what_it_recorded_and_says_when_it_did_not
         raise process_writer.Busy("busy: another write to this project is still running")
 
     a_check(busy)  # w-L_1 is still bad: asked about again
-    assert said[1:] == [i18n.t("captureCheckBusy")] and strip.text() == said[-1], said
+    assert said[1:] == [i18n.t("captureCheckBusy")] and said[-1] in strip.text(), said
 
     a_check(lambda project, titles=None, session=False: process.check_captures(
         titles, verifier=_Heard(valid=True)) and "")
@@ -5977,9 +5977,9 @@ def test_the_strip_after_a_check_reads_what_it_recorded_and_says_when_it_did_not
     # the process refresh that reads the close takes the line back — no check is run for it.
     process.record_capture(typed[1])
     a_check(busy)
-    assert strip.text() == i18n.t("captureCheckBusy"), said
+    assert i18n.t("captureCheckBusy") in strip.text(), said
     window._refresh_process()
-    assert strip.text() == i18n.t("captureCheckBusy"), "nothing changed: the line stands"
+    assert i18n.t("captureCheckBusy") in strip.text(), "nothing changed: the line stands"
     process.close_capture()
     window._refresh_process()
     assert strip.text() == "", "the round closed: «did not run» is no longer true"
@@ -6031,7 +6031,8 @@ def test_a_did_not_run_line_waiting_behind_a_report_is_taken_back_when_a_check_r
     _app()
     strip = StatusStrip()
     host = SimpleNamespace(_status_strip=strip, _refresh_capture_task=lambda state: None,
-                           _show_unusable=lambda lines: None, _capture_check=None)
+                           _show_unusable=lambda lines: None, _on_rew_titles_changed=lambda: None,
+                           _capture_check=SimpleNamespace(titles=list(typed)))
 
     strip.notify("a report", level="warn", sticky=True)
     MainWindow._on_capture_check_failed(host, i18n.t("captureCheckBusy"))
@@ -6089,17 +6090,18 @@ def test_a_did_not_run_line_is_taken_back_when_its_cause_ends_without_tccs_check
         _on_capture_check_done=lambda titles: None, _on_capture_check_failed=lambda why: None,
         _on_capture_check_finished=lambda: None)
     host._sync_capture_ready = lambda: MainWindow._sync_capture_ready(host)
+    host._on_rew_titles_changed = lambda: MainWindow._on_rew_titles_changed(host)
 
     MainWindow._on_capture_check_failed(host, why)  # the worker that ran it is `_capture_check`
     host._capture_check = None
     host._sync_capture_ready()  # a refresh with nothing new: the line stands
-    assert strip.text() == why
+    assert why in strip.text()
 
     if then == "the session closed the round":
         process.close_capture()                                       # MCP close_capture
     else:                                                             # MCP check_captures
         process.check_captures(typed, verifier=_Heard(valid=then == "the session checked"))
-    MainWindow._on_rew_titles_changed(host)
+    host._on_rew_titles_changed()
 
     assert strip.text() == "", "the cause ended: «did not run» is taken back"
     assert started == ([typed] if then == "the session found it bad" else []), \
@@ -6202,12 +6204,10 @@ def test_a_capture_check_that_did_not_run_says_so_and_why(monkeypatch, tmp_path,
             i18n.t("captureCheckRefused").format(
                 why="REW's measurement list was not read (HTTP 500) -- nothing was recorded")),
         "REW down": (
-            process_writer.ProcessWriterError(
+            process_writer.RewUnavailable(
                 "error: REW did not answer (connection refused) -- nothing was recorded; start "
                 "REW and run capture-check again"),
-            i18n.t("captureCheckRefused").format(
-                why="REW did not answer (connection refused) -- nothing was recorded; start REW "
-                    "and run capture-check again")),
+            i18n.t("captureCheckRewDown")),
         "a crash": (
             process_writer.ProcessWriterError(
                 "Traceback (most recent call last):\n  File \"process.py\", line 1\n"
@@ -6251,6 +6251,110 @@ def test_a_crash_in_tccs_own_capture_check_reaches_the_log_with_its_traceback(
     assert said == [i18n.t("captureCheckRefused").format(why="unexpected KeyError: 'taken'")]
     [logged] = [record.getMessage() for record in app_log_warnings]
     assert "Traceback" in logged and "line 7861" in logged and "w-L_1 (sw)" in logged, logged
+
+
+@pytest.mark.parametrize("lang", sorted(i18n.T))
+def test_a_did_not_run_line_promises_only_what_tcc_does(lang):
+    """The G6+G7 review's M4: «It runs again when REW's list changes» — it did not, after REW was
+    started with the same titles — and REW down passed on the method's «start REW and run
+    capture-check again», a verb TCC has no control for. What the person can do in TCC is said:
+    start REW, then the line's own «Check again»."""
+    for key in ("captureCheckBusy", "captureCheckTimedOut", "captureCheckRefused",
+                "captureCheckRewDown"):
+        said = i18n.T[lang][key]
+        assert "capture-check" not in said and "list changes" not in said, (key, said)
+    assert i18n.T[lang]["captureCheckAgain"] in i18n.T[lang]["captureCheckRewDown"]
+
+
+def test_a_did_not_run_line_offers_the_check_again(monkeypatch):
+    """M4: the line carries the action it names — «Check again» asks as a change of REW's list
+    does (`_on_rew_titles_changed`), and the line goes with the click."""
+    from autosound_tcc.ui.tcc.status_strip import StatusStrip
+
+    _app()
+    strip, asked = StatusStrip(), []
+    host = SimpleNamespace(_status_strip=strip, _capture_check=SimpleNamespace(titles=[]),
+                           _on_rew_titles_changed=lambda: asked.append("asked"))
+
+    MainWindow._on_capture_check_failed(host, i18n.t("captureCheckBusy"))
+    assert i18n.t("captureCheckBusy") in strip.text() and i18n.t("captureCheckAgain") in strip.text()
+    strip.linkActivated.emit("action")
+
+    assert asked == ["asked"] and strip.text() == ""
+
+
+def test_the_title_fix_offer_is_said_again_once_a_failed_checks_line_goes(monkeypatch):
+    """The G6+G7 review's M1, its probe turned round. The offer is said once per set of fixes, and
+    the check `_on_rew_titles_changed` starts right after it took the strip's one slot when it
+    did not run: the offer was gone for good. It is said again — at the next REW change, and once
+    the failed check's line is taken back (its cause ended: the session checked)."""
+    from autosound_tcc.core import title_fixes
+    from autosound_tcc.ui.tcc.status_strip import StatusStrip
+    from tests import _rounds
+
+    process = _rounds.write_round(config.project_dir(), version=1, expected=["w-L_1 (sw)"],
+                                  taken=["w-L_1 (sw)"])
+    typed = [_rounds.as_typed("w-L_1 (sw)")]
+    fix = title_fixes.TitleFix(wrong="wL_01 (sw)", right=typed[0], kind="typo")
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: config.project_dir())
+    monkeypatch.setattr(title_fixes, "glossary_for", lambda project_dir: None)
+    monkeypatch.setattr(title_fixes, "proposals", lambda *a, **k: [fix])
+    _app()
+    strip = StatusStrip()
+    host = SimpleNamespace(
+        _status_strip=strip, _capture_check=SimpleNamespace(titles=list(typed)),
+        _on_rew_titles_changed=lambda: None,
+        _meas_panel=SimpleNamespace(rew_titles=lambda: ["wL_01 (sw)"], open_import=lambda: None,
+                                    known_titles=lambda: list(typed)))
+    host._offer_title_fixes = lambda round_: MainWindow._offer_title_fixes(host, round_)
+    round_ = process.load()["capture"]
+
+    host._offer_title_fixes(round_)
+    offer = strip.text()
+    assert typed[0] in offer
+    MainWindow._on_capture_check_failed(host, i18n.t("captureCheckBusy"))
+    assert i18n.t("captureCheckBusy") in strip.text()
+    host._offer_title_fixes(round_)  # the next REW change
+    assert strip.text() == offer, "said again, not lost with the slot"
+
+    MainWindow._on_capture_check_failed(host, i18n.t("captureCheckBusy"))
+    process.check_captures(typed, verifier=_Heard())  # the session's own check: it ran
+    MainWindow._sync_capture_ready(host)
+    assert strip.text() == offer, "the line went, and the offer came back"
+
+
+def test_a_check_that_ran_over_a_round_it_cannot_read_back_says_so(monkeypatch):
+    """The G6+G7 review's M6: a check ran, then the round read None (a write cut halfway by a
+    writer that is not the method). The bad captures were read from nothing, so the strip said
+    nothing about a check that may have found some. It says the verdicts could not be read back,
+    and takes that back once the round reads with them."""
+    from autosound_tcc.state import process_view
+    from autosound_tcc.ui.tcc.status_strip import StatusStrip
+    from tests import _rounds
+
+    process = _rounds.write_round(config.project_dir(), version=1, expected=["w-L_1 (sw)"],
+                                  taken=["w-L_1 (sw)"])
+    typed = [_rounds.as_typed("w-L_1 (sw)")]
+    process.check_captures(typed, verifier=_Heard())
+    _app()
+    strip = StatusStrip()
+    host = SimpleNamespace(_status_strip=strip, _refresh_capture_task=lambda state: None,
+                           _show_unusable=lambda lines: None, _capture_check=None,
+                           _offer_title_fixes=lambda round_: None,
+                           _meas_panel=SimpleNamespace(known_titles=lambda: list(typed)))
+    reads = process_view.capture_round, process_view.load_state
+    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: None)
+    monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
+
+    MainWindow._on_capture_check_done(host, typed)
+    assert strip.text() == i18n.t("captureCheckUnread")
+    MainWindow._sync_capture_ready(host)
+    assert strip.text() == i18n.t("captureCheckUnread"), "still unread: it stands"
+
+    monkeypatch.setattr(process_view, "capture_round", reads[0])
+    monkeypatch.setattr(process_view, "load_state", reads[1])
+    MainWindow._sync_capture_ready(host)
+    assert strip.text() == "", "the round reads, with the verdicts the check recorded"
 
 
 def test_a_session_that_closed_itself_is_not_asked_to_save_on_quit(monkeypatch, tmp_path):

@@ -434,9 +434,10 @@ class NotRun:
     since: str = ""
 
     @classmethod
-    def at(cls, line: str, round_: Optional[dict], asked) -> "NotRun":
-        """The line, said now, about `round_` as it stands now."""
-        return cls(line, (round_ or {}).get("id"), tuple(str(t) for t in asked or ()),
+    def at(cls, line: str, asked) -> "NotRun":
+        """The line, said now, about the round as it stands now (`process_view.capture_round`)."""
+        return cls(line, (process_view.capture_round() or {}).get("id"),
+                   tuple(str(t) for t in asked or ()),
                    datetime.now(timezone.utc).isoformat(timespec="seconds"))
 
     def ended(self, round_: Optional[dict], rew_titles, project_dir: Optional[Path] = None) -> bool:

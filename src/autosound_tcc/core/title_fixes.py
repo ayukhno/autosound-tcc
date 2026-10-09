@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal, Optional
 
-from autosound_tcc.core import app_log, capture_import, process_writer, vendor_loader
+from autosound_tcc.core import app_log, capture_import, config, process_writer, vendor_loader
 
 Kind = Literal["grammar", "typo"]
 REASON = process_writer.SUPERSEDE_REASON
@@ -66,6 +66,20 @@ def proposals(rew_titles: Iterable[str], expected: Iterable[str],
                                         naming, glossary)
     fixes.extend(TitleFix(loose[index], right, "typo") for index, right in found.items())
     return fixes
+
+
+def offered(rew_titles: Iterable[str], round_: Optional[dict]) -> list[TitleFix]:
+    """What the window's strip offers to fix in the open `round_`: `proposals` over what REW holds
+    and what the round expects, read with the project's glossary. Nothing for no project, a round
+    closed or none, or no method or a grammar it cannot read: nothing to offer then, which is not
+    a failure to say. Out of the window's `_offer_title_fixes` (W-9)."""
+    project = config.chosen_project_dir()
+    if project is None or not round_ or round_.get("closed"):
+        return []
+    try:
+        return proposals(rew_titles, round_.get("expected") or [], glossary_for(project))
+    except Exception:  # noqa: BLE001 — no method, or a grammar it cannot read: nothing to offer
+        return []
 
 
 def supersede(project_dir: Path, wrong: str, right: str) -> tuple[bool, str]:

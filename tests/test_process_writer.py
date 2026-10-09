@@ -264,6 +264,8 @@ def test_a_capture_check_that_did_not_run_is_raised_in_its_own_words(monkeypatch
         process_writer.check_captures(Path("car"), ["w-L_1 (sw)"])
 
     assert str(failed.value) == err
+    assert isinstance(failed.value, process_writer.RewUnavailable) == (code == 69), \
+        "REW not answering is told apart by its exit, not its words (the G6+G7 review's M4)"
     [logged] = [record.getMessage() for record in app_log_warnings]
     assert "capture-check" in logged and "w-L_1 (sw)" in logged and f"exit {code}" in logged
     assert err.splitlines()[-1] in logged, logged

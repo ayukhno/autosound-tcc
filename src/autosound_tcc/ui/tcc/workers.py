@@ -294,9 +294,13 @@ def capture_check_not_run(exc: Exception) -> str:
     `UNUSABLE` line in it, and vanished — the cards stayed «waiting» with no reason. TCC's own
     reasons in TCC's words; a refusal in the words of what refused — the binding's sentence, or the
     method's last line (`process_writer.last_words`) without its `error: `. Never «everything is
-    bad»: nothing was recorded."""
+    bad»: nothing was recorded. REW not answering in TCC's words: the method's advice names its
+    command-line verb, and what the person does in TCC is start REW and press the line's «Check
+    again» (the G6+G7 review's M4)."""
     if isinstance(exc, process_writer.Busy):
         return i18n.t("captureCheckBusy")
+    if isinstance(exc, process_writer.RewUnavailable):
+        return i18n.t("captureCheckRewDown")
     if isinstance(exc, process_writer.TimedOut):
         return i18n.t("captureCheckTimedOut").format(seconds=f"{exc.seconds:g}")
     why = process_writer.last_words(0, "", str(exc))

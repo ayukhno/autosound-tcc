@@ -4065,15 +4065,7 @@ class MainWindow(QMainWindow):
     def _offer_title_fixes(self, round_: dict) -> None:
         """A title REW holds that the round asked for under another spelling, or with a typo:
         offered as a fix, not left to be refused as unusable (the Arbiter's A17)."""
-        project = config.chosen_project_dir()
-        if project is None:
-            return
-        try:
-            fixes = title_fixes.proposals(self._meas_panel.rew_titles(),
-                                          round_.get("expected") or [],
-                                          title_fixes.glossary_for(project))
-        except Exception:  # noqa: BLE001 — no method, or a grammar it cannot read: nothing to offer
-            return
+        fixes = title_fixes.offered(self._meas_panel.rew_titles(), round_)
         key = frozenset((f.wrong, f.right) for f in fixes)
         if not fixes or key == getattr(self, "_title_fixes_said", None):
             return
@@ -4098,7 +4090,12 @@ class MainWindow(QMainWindow):
         # warning that outlives its cause teaches people to ignore the strip.
         not_run, self._capture_check_not_run = getattr(self, "_capture_check_not_run", None), None
         self._status_strip.withdraw(getattr(not_run, "line", None))
-        bad = measurement_view.unusable_lines(process_view.capture_round() or {}, titles)
+        round_ = process_view.capture_round()
+        if round_ is None:  # it ran, and nothing it recorded can be read back: said, held (M6)
+            self._capture_check_not_run = measurement_view.NotRun(i18n.t("captureCheckUnread"),
+                                                                  None, tuple(titles))
+            self._status_strip.notify(self._capture_check_not_run.line, level="warn")
+        bad = measurement_view.unusable_lines(round_ or {}, titles)
         if bad and frozenset(bad) != getattr(self, "_unusable_dismissed", None):
             self._status_strip.notify(
                 i18n.t("unusableSummary").format(n=len(bad), first=bad[0]), level="warn",
@@ -4113,10 +4110,12 @@ class MainWindow(QMainWindow):
 
     def _on_capture_check_failed(self, why: str) -> None:
         """The check did not run, or did not finish — said, with why (R-ax): never silence, never
-        «everything is bad» (`workers.capture_check_not_run`); held until its cause ends."""
-        self._capture_check_not_run = measurement_view.NotRun.at(
-            why, process_view.capture_round(), getattr(self._capture_check, "titles", ()))
-        self._status_strip.notify(why, level="warn")
+        «everything is bad» (`workers.capture_check_not_run`); held until its cause ends, with
+        the action it names (M4). It takes the title-fix offer's slot: that is said again (M1)."""
+        self._capture_check_not_run = measurement_view.NotRun.at(why, self._capture_check.titles)
+        self._title_fixes_said = None
+        self._status_strip.notify(why, level="warn", action=(i18n.t("captureCheckAgain"),
+                                                             self._on_rew_titles_changed))
 
     def _sync_capture_ready(self) -> None:
         """«Готово» is live while the open round has taken something (finding 31). On every process
@@ -4126,6 +4125,7 @@ class MainWindow(QMainWindow):
         if not_run is not None and not_run.ended(round_, self._meas_panel.known_titles()):
             self._status_strip.withdraw(not_run.line)
             self._capture_check_not_run = None
+            self._offer_title_fixes(round_)
         button = getattr(self, "_capture_ready_btn", None)
         if button is None:
             return

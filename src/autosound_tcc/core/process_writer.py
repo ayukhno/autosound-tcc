@@ -106,6 +106,16 @@ class TooOld(ProcessWriterError):
     no answer — a crash, a timeout — where updating mends nothing (#169 review I4)."""
 
 
+#: The method's own exit for REW not answering (`process.py`'s `EXIT_REW_UNAVAILABLE`, #134).
+EXIT_REW_UNAVAILABLE = 69
+
+
+class RewUnavailable(ProcessWriterError):
+    """The method's exit 69: REW did not answer, and nothing was written. A class of its own so a
+    caller can say what the person does next in its own words (start REW) without reading the
+    method's, whose advice names a command-line verb (the G6+G7 review's M4)."""
+
+
 def script_path() -> Path:
     """TCC's own `process.py`, for a caller with no project: `is_available`, a bare CLI run beside
     TCC (`test_writer_race.py`). A write runs the PROJECT's bound copy (`method_cli.spawn`); this is
@@ -157,7 +167,7 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
                                  "the method said:\n%s", args[0], project_dir, code,
                                  args[1:] or "its default",
                                  said if crashed(err) else method_cli.tail(said))
-    raise ProcessWriterError(said)
+    raise (RewUnavailable if code == EXIT_REW_UNAVAILABLE else ProcessWriterError)(said)
 
 
 def enter_phase(project_dir: Path, phase: str) -> str:

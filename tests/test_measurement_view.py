@@ -1598,7 +1598,7 @@ def test_a_check_with_nothing_named_ends_only_with_its_round(project):
     titles = ["w-L_1 (sw)"]
     process = _round(project, version=1, expected=titles, taken=titles)
     typed = [_as_typed(t) for t in titles]
-    not_run = mv.NotRun.at("did not run", process.load()["capture"], ())
+    not_run = mv.NotRun.at("did not run", ())
 
     assert not not_run.ended(_check(process, {"w-L_1 (sw)": _held("u-wl", _SILENCE)}), typed,
                              project)
