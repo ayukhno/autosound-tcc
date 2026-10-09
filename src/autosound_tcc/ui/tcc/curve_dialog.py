@@ -1367,9 +1367,10 @@ class CurveDialog(QDialog):
 
     def _sync_channel_delay(self) -> None:
         """What each channel on screen is set to now — every one of them, because every one may
-        carry a proposal and the reading states a total for each."""
-        for index, trace in enumerate(self._view._traces):
-            self._view.set_channel_delay(self._current_delay_of(trace.name), index)
+        carry a proposal and the reading states a total for each. As one set: this runs on every
+        step of the delay box (#177)."""
+        self._view.set_channel_delays(
+            [self._current_delay_of(trace.name) for trace in self._view._traces])
 
     def _bank_current_delay(self) -> None:
         """Remember what the Arbiter just read, against the measurement they read it on.

@@ -4833,3 +4833,101 @@ def test_a_bank_that_cannot_be_written_is_said_once_however_many_steps_fail(app_
     assert len(app_log_told) == 1, app_log_told
     assert str(store) in app_log_told[0] and "could not be written" in app_log_told[0]
     assert dialog._view.delay_ms() == pytest.approx(0.3), "and the curves still move"
+
+
+# ---- one readout render per step (#177, TA-4) --------------------------------------------------
+
+
+def _readout_renders(view, act, monkeypatch) -> int:
+    """How often `act` renders `view`'s readout — every render is the reading built twice over
+    and a tip set, on every step of the box."""
+    renders = []
+    real = CurveView._render_readout
+
+    def counted(self):
+        if self is view:
+            renders.append(1)
+        return real(self)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(CurveView, "_render_readout", counted)
+        act()
+    return len(renders)
+
+
+def _side_view() -> CurveView:
+    view = _view()
+    view.set_traces([Trace(name, *_impulse(4.5 + 0.05 * i)) for i, name in enumerate(_SIDE)])
+    return view
+
+
+#: What the ledger says each channel of `_SIDE` is set to now.
+_LEDGER = {"w-L": 1.0, "w-R": 1.2, "m-L": 0.5, "m-R": 0.6, "tw-L": 0.1, "tw-R": 0.2, "sw": 3.0}
+
+
+def _side_dialog() -> CurveDialog:
+    dialog = _plotted(_SIDE)
+    dialog.set_delays_provider(lambda: dict(_LEDGER))
+    return dialog
+
+
+def test_one_delay_step_renders_the_readout_once(monkeypatch):
+    """`set_delay` re-sets the traces, which ends in the readout, and then rendered it again."""
+    view = _side_view()
+
+    assert _readout_renders(view, lambda: view.set_delay(0.26), monkeypatch) == 1
+    assert view.delays()[view.delay_target()] == pytest.approx(0.26)
+    bare = CurveView()
+    _KEEP.append(bare)
+    assert _readout_renders(bare, lambda: bare.set_delay(0.26), monkeypatch) == 1, \
+        "with no traces it is the only render"
+
+
+def test_one_delay_step_renders_the_readout_once_in_a_window_that_knows_the_ledger(monkeypatch):
+    """In the window each step also put every channel's ledger delay back, one render each: 2 + N
+    renders for one step. The set goes in at once, and a set that did not move renders nothing."""
+    dialog = _side_dialog()
+    view = dialog._view
+    target = view.delay_target()
+
+    assert _readout_renders(view, lambda: view.set_delay(0.26), monkeypatch) == 1
+    assert view.total_delay_ms(target) == pytest.approx(
+        _LEDGER[_SIDE[target].split("_")[0]] + 0.26), "the total still counts the ledger"
+
+
+def test_a_ledger_that_moved_still_reaches_the_reading():
+    dialog = _side_dialog()
+    view = dialog._view
+    target = view.delay_target()
+    moved = dict(_LEDGER, **{_SIDE[target].split("_")[0]: 2.0})
+    dialog.set_delays_provider(lambda: dict(moved))
+
+    view.set_delay(0.26)
+
+    assert view.total_delay_ms(target) == pytest.approx(2.26)
+
+
+def test_the_set_of_channel_delays_goes_in_with_one_render(monkeypatch):
+    view = _side_view()
+    values = [0.1 * i for i in range(len(_SIDE))]
+
+    assert _readout_renders(view, lambda: view.set_channel_delays(values), monkeypatch) == 1
+    assert view._channel_delays[:len(_SIDE)] == pytest.approx(values)
+    assert _readout_renders(view, lambda: view.set_channel_delays(values), monkeypatch) == 0, \
+        "nothing moved, nothing to render"
+    assert _readout_renders(view, lambda: view.set_channel_delays([None] * 7), monkeypatch) == 1
+    assert view._channel_delays[:len(_SIDE)] == [None] * len(_SIDE)
+
+
+@_needs_skill
+def test_one_all_pass_step_renders_the_readout_once(monkeypatch):
+    """`set_allpass` had the same two renders as `set_delay`, and the same N more in the window."""
+    from autosound_tcc.core.allpass import Allpass
+
+    view = _side_view()
+    dialog = _side_dialog()
+
+    assert _readout_renders(view, lambda: view.set_allpass(Allpass(1, 80.0), 2), monkeypatch) == 1
+    assert _readout_renders(
+        dialog._view, lambda: dialog._view.set_allpass(Allpass(1, 80.0), 2), monkeypatch) == 1
+    assert dialog._view.allpass(2) == Allpass(1, 80.0)

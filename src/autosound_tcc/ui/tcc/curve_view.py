@@ -1437,8 +1437,9 @@ class CurveView(QWidget):
             box.setValue(self._shift_ms)
             box.blockSignals(blocked)
         if self._traces:
-            self.set_traces(self._traces)
-        self._render_readout()
+            self.set_traces(self._traces)  # ends in the readout: once per step of the box (#177)
+        else:
+            self._render_readout()
         self.delayChanged.emit()
 
     @property
@@ -1456,6 +1457,21 @@ class CurveView(QWidget):
         if 0 <= at < len(self._channel_delays):
             self._channel_delays[at] = None if ms is None else float(ms)
         self._render_readout()
+
+    def set_channel_delays(self, values) -> None:
+        """What every channel on screen is already set to, in trace order (`None` when not known):
+        `set_channel_delay` for the lot, with one render — and none when nothing moved.
+
+        The window puts the ledger's delays back on every step of the delay box, after the step
+        has rendered the readout with these same values; one render per channel was 2 + N renders
+        for one step (#177).
+        """
+        before = list(self._channel_delays)
+        for at, ms in enumerate(values):
+            if at < len(self._channel_delays):
+                self._channel_delays[at] = None if ms is None else float(ms)
+        if self._channel_delays != before:
+            self._render_readout()
 
     def proposed_delays(self) -> list[float]:
         """The delay set this window PROPOSES: the drags with their common part taken off.
@@ -1632,8 +1648,9 @@ class CurveView(QWidget):
         if at == self._shift_target:
             self._sync_apf_controls()
         if self._traces:
-            self.set_traces(self._traces)
-        self._render_readout()
+            self.set_traces(self._traces)  # ends in the readout, as in `set_delay` (#177)
+        else:
+            self._render_readout()
         self.allpassChanged.emit()
 
     def allpass(self, index: Optional[int] = None) -> Optional[Allpass]:
