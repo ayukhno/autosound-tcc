@@ -4860,6 +4860,76 @@ def test_one_step_after_one_failed_read_keeps_every_banked_driver(monkeypatch, a
     assert delay_bank.load()["sub_01 (sw)"] == 1.5
 
 
+# ---- a restore that could not read the bank is not a set of zero readings (G10 C1, #177) --------
+
+
+def _banked_three():
+    from autosound_tcc.core import delay_bank
+
+    names = _SIDE[:3]
+    for name, ms in zip(names, (0.198, 0.300, 0.450)):
+        delay_bank.put(name, ms)
+    dialog = _dialog(list(names), bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    return dialog, names
+
+
+def _curves_back(dialog, names) -> None:
+    dialog._on_curves([Trace(n, *_impulse(4.5 + 0.05 * i)) for i, n in enumerate(names)])
+
+
+def test_a_bank_unreadable_at_restore_is_not_banked_over_once_it_reads_again(app_log_told):
+    """G10 C1: the restore read the bank forgivingly, so a store that could not be read put every
+    driver at zero — and the very next step, once the person had fixed the file as the strip told
+    them to, banked those zeros over the afternoon's readings. A driver whose bank could not be
+    read is unknown now, says so on the window's own line, and is not banked; the first step that
+    reads the bank puts what is banked back on screen — except what the person has set since —
+    and only then banks the set. A folder in the store's place: unreadable on every platform."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    dialog, names = _banked_three()
+    store = project_settings.path_for(config.tcc_dir())
+    good = store.read_bytes()
+    store.unlink()
+    store.mkdir()
+    _curves_back(dialog, names)
+    dialog._view.set_delay_target(0)
+    dialog._view.set_delay(0.05)  # the person's step, while the bank cannot be read
+
+    assert dialog._view.delays()[1:3] == [0.0, 0.0], "nothing restored"
+    assert not dialog._status.isHidden() and names[1].split(" ")[0] in dialog._status.text(), \
+        "the window says which drivers are not read"
+    assert any("could not be read" in told for told in app_log_told), app_log_told
+    store.rmdir()
+    store.write_bytes(good)  # what the strip's sentence leads the person to do
+
+    dialog._view.set_delay(0.06)
+
+    assert delay_bank.load() == {names[0]: 0.06, names[1]: 0.300, names[2]: 0.450}
+    assert dialog._view.delays()[:3] == pytest.approx([0.06, 0.300, 0.450]), \
+        "the banked delays back on screen, the person's own step kept"
+    assert names[1].split(" ")[0] not in dialog._status.text()
+
+
+def test_a_restore_read_that_failed_once_does_not_bank_zeros_over_real_readings(
+        monkeypatch, app_log_told):
+    """The same, with no person in the loop: one read that failed while the curves came back (a
+    lock, a sync) and one step on the first driver wrote 0.0 over the second's 0.300."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+    from tests.test_delay_bank import flaky_read_once
+
+    dialog, names = _banked_three()
+    flaky_read_once(monkeypatch, project_settings.path_for(config.tcc_dir()))
+    _curves_back(dialog, names)
+    assert dialog._view.delays()[:3] == [0.0, 0.0, 0.0], "nothing restored"
+
+    dialog._view.set_delay_target(0)
+    dialog._view.set_delay(0.05)
+
+    assert delay_bank.load() == {names[0]: 0.05, names[1]: 0.300, names[2]: 0.450}
+    assert delay_bank.references() == []
+
+
 # ---- one readout render per step (#177, TA-4) --------------------------------------------------
 
 

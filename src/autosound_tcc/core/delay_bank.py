@@ -69,13 +69,15 @@ class Reading(NamedTuple):
     allpass: Any = _KEEP
 
 
-def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, dict]:
+def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None,
+             strict: bool = False) -> dict[str, dict]:
     """`{title: {"ms": delay, "at": measured arrival or None, "set": series, "apf": Allpass|None}}`.
 
-    Read forgivingly: a store that cannot be read is "nothing banked". A write never starts from
-    this — see `put_many`.
+    Read forgivingly unless `strict`: a store that cannot be read is "nothing banked", or, strict,
+    `StoreUnreadable`. A write never starts from this — see `put_many`.
     """
-    return _parsed(project_settings.load(tcc_dir or config.tcc_dir()).get(KEY), session)
+    data = project_settings.load(tcc_dir or config.tcc_dir(), strict=strict)
+    return _parsed(data.get(KEY), session)
 
 
 def _parsed(raw: Any, session: Optional[str] = None) -> dict[str, dict]:
@@ -111,15 +113,21 @@ def _parsed(raw: Any, session: Optional[str] = None) -> dict[str, dict]:
     return out
 
 
-def load(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, float]:
+def load(tcc_dir: Optional[Path] = None, session: Optional[str] = None, *,
+         strict: bool = False) -> dict[str, float]:
     """`{measurement title: ms}` for the drivers actually MOVED, worst case empty.
 
     Zeros are excluded here because this feeds the pickers and the label, where "+0.000 ms" beside
     a title says nothing — `references()` is where a deliberate zero surfaces. Never raises: a
     hand-edited file is "nothing banked yet", not a dead curve window.
+
+    `strict` raises `StoreUnreadable` for a store that is there and cannot be read: for a reader
+    that puts what it reads on screen, where "nothing banked" is every driver at zero, and the
+    next step banks what is on screen (G10 C1).
     """
     return {
-        title: entry["ms"] for title, entry in _entries(tcc_dir, session).items() if entry["ms"]
+        title: entry["ms"]
+        for title, entry in _entries(tcc_dir, session, strict).items() if entry["ms"]
     }
 
 
@@ -136,10 +144,11 @@ def references(tcc_dir: Optional[Path] = None, session: Optional[str] = None) ->
     )
 
 
-def allpasses(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> dict[str, Allpass]:
-    """`{measurement title: Allpass}` for the drivers that carry one."""
+def allpasses(tcc_dir: Optional[Path] = None, session: Optional[str] = None, *,
+              strict: bool = False) -> dict[str, Allpass]:
+    """`{measurement title: Allpass}` for the drivers that carry one; `strict` as in `load`."""
     return {
-        title: entry["apf"] for title, entry in _entries(tcc_dir, session).items()
+        title: entry["apf"] for title, entry in _entries(tcc_dir, session, strict).items()
         if entry["apf"] is not None
     }
 

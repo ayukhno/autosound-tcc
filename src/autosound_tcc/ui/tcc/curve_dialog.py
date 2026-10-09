@@ -553,6 +553,12 @@ class CurveDialog(QDialog):
         #: Which measurement the delay currently on screen is banked against, so that moving the
         #: radio moves the entry instead of leaving one behind on the other curve.
         self._restoring = False
+        #: The drivers on screen whose bank the restore could not read, each with what was drawn
+        #: for it then — `{title: (ms, Allpass | None)}` (G10 C1). What is drawn for them is not
+        #: what is banked, so nothing is banked while any is here; see `_restore_bank`.
+        self._unread: dict[str, tuple] = {}
+        #: What the status line says about the bank (`_render_bank`), beside the notes above.
+        self._bank_note = ""
         #: `() -> {channel code: ms}` — what the DSP is set to now, supplied by the window because
         #: this dialog has no business loading a ledger. Without it the panel simply does not
         #: state a total, which is honest; with it, it can say when a correction would take a
@@ -1387,6 +1393,10 @@ class CurveDialog(QDialog):
         """
         if self._restoring:
             return
+        if self._unread:
+            # The restore could not read the bank, so what is drawn is not what is banked: a read
+            # now puts the bank back first. Still not read, nothing is banked (G10 C1).
+            self._restore_bank()
         # All of them, every time. Each driver carries its own delay now, so there is nothing to
         # move from one entry to another — the radio only chooses which one you are typing into.
         # The arrival AS CAPTURED goes with it: a delay with no origin cannot be checked, and
@@ -1401,7 +1411,7 @@ class CurveDialog(QDialog):
             )
             for index, trace in enumerate(self._view._traces)
         ]
-        if readings:
+        if readings and not self._unread:
             self._bank_or_say(readings)
         self._sync_channel_delay()
         self._render_bank()
@@ -1457,6 +1467,14 @@ class CurveDialog(QDialog):
                 head = i18n.t("curveBankLabelIn").format(set=series)
         else:
             shown = i18n.t("curveBankEmpty")
+        note = ""
+        if self._unread:
+            # Said in the window, which covers the strip (I2): the drivers drawn without their bank.
+            note = i18n.t("curveBankUnread").format(
+                names=", ".join(title.split(" ")[0] for title in self._unread))
+        if note != self._bank_note:
+            self._bank_note = note
+            self._render_note()
         self._bank_btn.setText(i18n.t("curveBankBtn").format(n=len(titles)))
         if getattr(self._bank_btn, "hover_tip", None) is not None:
             self._bank_btn.hover_tip.set_text(tip_html(shown, head=head))
@@ -1533,6 +1551,7 @@ class CurveDialog(QDialog):
         finally:
             self._restoring = False
         delay_bank.clear(session=self._session())
+        self._unread = {}  # nothing banked for this series now: what is drawn is the bank
         self._render_bank()
 
     def _processing_rate_hz(self):
@@ -1614,15 +1633,17 @@ class CurveDialog(QDialog):
         tuner needed.
         """
         self._note = " ".join(
-            part for part in (self._refused_note, self._group_note, self._twice_note) if part
+            part for part in (self._refused_note, self._group_note, self._twice_note,
+                              self._bank_note) if part
         )
         self._status.setText(self._note)
         self._status.setVisible(bool(self._note))
         # Red when the note means NOTHING can be shown — which from the tuner's seat is the same
         # event as a failed read, and was the quiet grey until he said so (2026-09-20). The split
         # is not failure-versus-success: a group drawn with one member missing keeps the quiet
-        # colour, because the plot does answer.
-        self._status_bad(bool(self._note) and self._note_bad)
+        # colour, because the plot does answer. The bank's note is red: what is on screen is not
+        # being kept.
+        self._status_bad(bool(self._note) and (self._note_bad or bool(self._bank_note)))
 
     def _apply_kind(self) -> None:
         spec = KINDS[self._kind]
@@ -1737,23 +1758,60 @@ class CurveDialog(QDialog):
         # are not. It is written HERE as well as where each note is decided, because `_reload` puts
         # "Reading the curves from REW…" over whatever was there.
         self._render_note()
+        if [t.name for t in self._view._traces] != [t.name for t in traces]:
+            # A new selection: the view puts every driver back at nothing, so what was drawn for
+            # a driver the bank could not be read for, and what the person set on it since, is
+            # gone with it.
+            self._unread = {}
         self._view.set_traces(traces)
         # A curve already argued about comes back with its answer on it. `set_traces` clears the
         # delays by design (a new selection is a new question); the bank is what makes coming BACK
         # to a driver different from meeting it for the first time — and over a whole side that is
         # most of what is on screen, not one of two curves.
-        bank = delay_bank.load(session=self._session())
-        apfs = delay_bank.allpasses(session=self._session())
-        # Restoring, not reading: `_bank_current_delay` must not see these calls, or the zeros
-        # they pass through on the way would erase what they are restoring.
+        self._restore_bank()
+        positions, names, tokens = self._starting_markers(traces)
+        self._view.set_markers(positions, names, tokens)
+        self._frame(traces, positions)
+        self._sync_channel_delay()
+        self._render_bank()
+        # What came back, in the order it is drawn — and the chips are re-coloured off it, because
+        # a title REW could not produce is missing from here while its chip is still on the row,
+        # and from that point the two lists no longer agree about which colour belongs to whom.
+        self._plotted = [str(trace.name) for trace in traces]
+        self._render_chips()
+
+    def _restore_bank(self) -> None:
+        """Put each driver's banked delay and all-pass back on what is on screen — read strictly.
+
+        Restoring, not reading: `_bank_current_delay` must not see these calls, or the zeros they
+        pass through on the way would erase what they are restoring.
+
+        Strictly, because a store that could not be read does not hold "nothing banked". Read
+        forgivingly, it put every driver at zero, and the next step banked those zeros over the
+        afternoon's readings (G10 C1). Not read, every driver on screen goes into `_unread` with
+        what is drawn for it, and the bank is not written. The read that succeeds puts the bank
+        back — on every driver but where the person has moved its delay or filter since, which
+        is theirs and stays — and the set is banked again from there.
+        """
+        series = self._session()
+        try:
+            bank = delay_bank.load(session=series, strict=True)
+            apfs = delay_bank.allpasses(session=series, strict=True)
+        except own_store.StoreUnreadable:
+            for index, trace in enumerate(self._view._traces):
+                self._unread.setdefault(
+                    trace.name, (self._view.delay_ms(index), self._view.allpass(index)))
+            return  # said by `own_store` when it was read, once for this state of the file
+        unread, self._unread = self._unread, {}
         self._restoring = True
         try:
             target = self._view.delay_target()
-            for index, trace in enumerate(traces):
-                if trace.name in bank:
+            for index, trace in enumerate(self._view._traces):
+                drawn = unread.get(trace.name)
+                if trace.name in bank and (drawn is None or self._view.delay_ms(index) == drawn[0]):
                     self._view.set_delay_target(index)
                     self._view.set_delay(bank[trace.name])
-                if trace.name in apfs:
+                if trace.name in apfs and (drawn is None or self._view.allpass(index) == drawn[1]):
                     # The filter comes back with the driver for the same reason the delay does —
                     # and it is the one of the two that is lost on the first × otherwise (a
                     # driver taken off the plot and put back is a new selection to the view).
@@ -1767,16 +1825,6 @@ class CurveDialog(QDialog):
             self._view.set_delay_target(target)
         finally:
             self._restoring = False
-        positions, names, tokens = self._starting_markers(traces)
-        self._view.set_markers(positions, names, tokens)
-        self._frame(traces, positions)
-        self._sync_channel_delay()
-        self._render_bank()
-        # What came back, in the order it is drawn — and the chips are re-coloured off it, because
-        # a title REW could not produce is missing from here while its chip is still on the row,
-        # and from that point the two lists no longer agree about which colour belongs to whom.
-        self._plotted = [str(trace.name) for trace in traces]
-        self._render_chips()
 
     def _frame(self, traces: list, positions: list) -> None:
         """Open on the part being argued about rather than on everything REW recorded."""

@@ -44,14 +44,20 @@ def path_for(tcc_dir: Path) -> Path:
     return Path(tcc_dir) / FILENAME
 
 
-def load(tcc_dir: Path) -> dict[str, Any]:
-    """Whatever is on disk, or an empty dict — never an exception.
+def load(tcc_dir: Path, *, strict: bool = False) -> dict[str, Any]:
+    """Whatever is on disk, or an empty dict — never an exception, unless `strict`.
 
     A project that has never been opened has no settings, and that is not news. A file that cannot
     be read is (#173): `own_store` sets a broken one aside with its bytes and says so, and says so
     about one it may not open. For a reader both still come back as "no preference" rather than
     take the window down. A write must not do the same — see `set_value`.
+
+    `strict`, as in `get`: for a reader to whom a store that is there and cannot be read is not
+    "nothing here", it raises `StoreUnreadable` — the curve window's restore of the delay bank,
+    where "nothing banked" put every driver at zero (G10 C1).
     """
+    if strict:
+        return own_store.read_json(path_for(tcc_dir))
     try:
         return own_store.read_json(path_for(tcc_dir))
     except own_store.StoreUnreadable:
