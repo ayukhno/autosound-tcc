@@ -1395,8 +1395,9 @@ class MeasurementPanel(QWidget):
         through the method's `capture-supersede`, after REW was renamed (A17, hub #201's order).
         A title the round never took needs nothing more — the import records the right one.
 
-        Returns `(done, refused, not_asked)`: the `(wrong, right)` the round took, and
-        `title_fixes.supersede_each`'s two, for the status to name.
+        Returns `title_fixes.supersede_each`'s `(done, refused, not_asked)`, for the status to name:
+        done is what the method changed (exit 0), never a refusal read as «never took it» — a round
+        another writer closed between the read below and the call (Task 27 M1).
 
         A CLOSED round is none, as in `_on_import_offer` (finding 147): `capture_round` hands back
         the last round as it stands, the method refuses any write into a closed one, and
@@ -1407,9 +1408,7 @@ class MeasurementPanel(QWidget):
         fixes = [(row.title, (titles or {}).get(row.uuid)) for row in rows]
         fixes = [(wrong, right) for wrong, right in fixes
                  if right and wrong != right and wrong in taken]
-        refused, not_asked = title_fixes.supersede_each(config.project_dir(), fixes)
-        failed = {(wrong, right) for wrong, right, _said in refused} | set(not_asked)
-        return [fix for fix in fixes if fix not in failed], refused, not_asked
+        return title_fixes.supersede_each(config.project_dir(), fixes)
 
     def _write_ledger(self, rows: list, titles: dict) -> None:
         """Tell the ledger about the pass: open the round if there is none, record each capture

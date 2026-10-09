@@ -70,10 +70,10 @@ def test_a_crashed_supersede_is_a_failure_said_and_logged_never_done(tmp_path, m
     car = tmp_path / "car"
     car.mkdir()
 
-    refused, not_asked = title_fixes.supersede_each(car, [("sw_01 (sw)", "sw_1 (sw)")])
+    done, refused, not_asked = title_fixes.supersede_each(car, [("sw_01 (sw)", "sw_1 (sw)")])
 
     [(wrong, right, why)] = refused
-    assert (wrong, right, not_asked) == ("sw_01 (sw)", "sw_1 (sw)", []), refused
+    assert (done, wrong, right, not_asked) == ([], "sw_01 (sw)", "sw_1 (sw)", []), refused
     assert "KeyError: 'taken'" in why and "Traceback" not in why, why
     assert title_fixes.supersede(car, "sw_01 (sw)", "sw_1 (sw)") == (False, why)
     logged = "\n".join(record.getMessage() for record in app_log_warnings)
@@ -121,11 +121,13 @@ def test_a_supersede_behind_another_write_answers_busy_and_writes_nothing(tmp_pa
 
 def test_each_rename_is_asked_until_a_busy_answer_and_none_after_it(tmp_path, monkeypatch):
     """`supersede_each`, which the import uses: a refusal of one title leaves the next to be asked,
-    and exit 1 (the round never took it) is done, as in `supersede`. A busy answer is the one that
-    stops it — every next one would wait the same wait for the same answer — and what is left is
-    handed back unasked, to be named."""
+    and exit 1 (the round never took it) is no failure, as in `supersede` — nor is it done: done
+    is what exited 0 (Task 27 M1). A busy answer is the one that stops it — every next one would
+    wait the same wait for the same answer — and what is left is handed back unasked, to be
+    named."""
     old = "this project's method does not have `capture-supersede`"
     answers = iter([process_writer.ProcessWriterError(old),
+                    (0, "'b0' superseded by 'B0'", ""),
                     (1, "", "error: round r1 never took 'b'"),
                     process_writer.Busy("busy: nothing was written")])
     asked = []
@@ -138,10 +140,11 @@ def test_each_rename_is_asked_until_a_busy_answer_and_none_after_it(tmp_path, mo
         return answer
 
     monkeypatch.setattr(process_writer, "supersede_capture", supersede_capture)
-    refused, not_asked = title_fixes.supersede_each(
-        tmp_path, [("a", "A"), ("b", "B"), ("c", "C"), ("d", "D")])
+    done, refused, not_asked = title_fixes.supersede_each(
+        tmp_path, [("a", "A"), ("b0", "B0"), ("b", "B"), ("c", "C"), ("d", "D")])
 
-    assert asked == ["a", "b", "c"]
+    assert asked == ["a", "b0", "b", "c"]
+    assert done == [("b0", "B0")], "only what exited 0; the refusal for b is not done"
     assert refused == [("a", "A", old), ("c", "C", "busy: nothing was written")]
     assert not_asked == [("d", "D")]
 
@@ -159,9 +162,10 @@ def test_a_refused_copy_of_the_method_stops_the_renames_as_busy_does(tmp_path, m
         raise process_writer.Refused(sentence)
 
     monkeypatch.setattr(process_writer, "supersede_capture", supersede_capture)
-    refused, not_asked = title_fixes.supersede_each(tmp_path, [("a", "A"), ("b", "B"), ("c", "C")])
+    done, refused, not_asked = title_fixes.supersede_each(
+        tmp_path, [("a", "A"), ("b", "B"), ("c", "C")])
 
-    assert asked == ["a"], "behind a refused answer the next is not asked"
+    assert done == [] and asked == ["a"], "behind a refused answer the next is not asked"
     assert refused == [("a", "A", sentence)]
     assert not_asked == [("b", "B"), ("c", "C")]
     assert title_fixes.supersede(tmp_path, "a", "A") == (False, sentence)
