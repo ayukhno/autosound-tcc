@@ -40,7 +40,10 @@ def allowed_signers_line(principal: str = TCC_SIGNING_PRINCIPAL,
 #: git checks an SSH signature with `gpg.ssh.program`, and somebody who signs through a helper
 #: (1Password's) has it set to that helper: through it a good release was refused (T-35, R-bc,
 #: #174). Pinned to git's own default on the command line, where it outranks every config file.
-VERIFY_PROGRAM = ("-c", "gpg.ssh.program=ssh-keygen")
+#: So is the trust level: git rates a key in an allowed-signers file `fully` at most, and a person's
+#: `gpg.minTrustLevel=ultimate` refused the release the method's `upkeep.py` accepts (the skill's
+#: v3.1.3, which holds it at `fully` in the installers and `upkeep.py`).
+VERIFY_PROGRAM = ("-c", "gpg.ssh.program=ssh-keygen", "-c", "gpg.minTrustLevel=fully")
 
 
 def verify_env(parent: Mapping[str, str]) -> dict[str, str]:

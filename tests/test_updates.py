@@ -1698,6 +1698,25 @@ def test_a_signing_helper_in_the_person_s_git_config_does_not_refuse_a_good_rele
 
 
 @pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_a_person_s_ultimate_trust_level_does_not_refuse_a_good_release(monkeypatch, tmp_path):
+    """The skill's v3.1.3 (its CHANGELOG, Upgrading), with real git: the person's own config asks
+    for ultimate trust (`gpg.minTrustLevel`), and git rates a key in an allowed-signers file
+    `fully` at most, so a release the method's `upkeep.py` accepts was refused here. The check
+    holds the level at `fully`, as the installers and `upkeep.py` do."""
+    temp = _tcc_origin(monkeypatch, tmp_path)
+    own = tmp_path / "the-person-s-gitconfig"
+    _git_in("config", "--file", str(own), "gpg.minTrustLevel", "ultimate")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(own))
+    _offering(monkeypatch, "v0.1.45")
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None and ready.reason == "", ready
+    assert ready.signature == "v0.1.45: signature good (author)"
+    assert _left_in(temp) == ["autosound-tcc"]
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
 def test_a_good_tcc_tag_verifies_under_a_temp_folder_named_in_cyrillic(monkeypatch, tmp_path):
     """Review of #174, Minor 5, with real git: the temp folder sits under a user name in Cyrillic,
     as on a Ukrainian Windows machine, so the bare repository and the signers file git hands
