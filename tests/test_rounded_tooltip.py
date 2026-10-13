@@ -137,6 +137,16 @@ def _tip_div(body: str) -> str:
     return f'<div style="font-size: 15px; color: {current_theme().text}">{body}</div>'
 
 
+def test_a_tip_laid_out_elsewhere_is_framed_as_tip_html_frames_its_own():
+    """The curve readout lays out its own table and prose and reached into this module for the
+    size by its private name (Task 31's review, Minor 4). `tip_frame` and `wrapped` are what it
+    takes now: the frame is the one `tip_html` writes, and the body goes in as it is given."""
+    from autosound_tcc.ui.tcc.rounded_tooltip import tip_frame, wrapped
+
+    assert tip_frame("<table></table>") == _tip_div("<table></table>")
+    assert tip_frame(wrapped("a & b")) == tip_html("a & b")
+
+
 def test_tip_html_escapes_the_text_and_sets_it_large():
     assert tip_html("Plain & <simple>") == _tip_div("Plain &amp; &lt;simple&gt;")
 

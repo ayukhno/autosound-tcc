@@ -51,7 +51,7 @@ from autosound_tcc.core import curve_sum
 from autosound_tcc.core.allpass import Allpass, AllpassError
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.app_settings import get_settings
-from autosound_tcc.ui.tcc.rounded_tooltip import _TIP_FONT_PX, _wrapped, tip_html
+from autosound_tcc.ui.tcc.rounded_tooltip import tip_frame, tip_html, wrapped
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.theme import current_theme, mini_combo
 
@@ -267,7 +267,7 @@ def _wrapped_html(text: str, colour: str = "") -> str:
     end up on the same line: Qt's rich text lays `<table>` out inline otherwise.
     """
     style = f' style="color: {colour}"' if colour else ""
-    return f"<div{style}>{_wrapped(text)}</div>"
+    return f"<div{style}>{wrapped(text)}</div>"
 
 
 def _fmt(value: float, digits: int) -> str:
@@ -3483,10 +3483,7 @@ class CurveView(QWidget):
         if not any(block.strip() for block in blocks):
             blocks = [_wrapped_html(i18n.t("curveNoMarkers"))]
         head = f'<b>{html.escape(i18n.t("curveReadoutBtn"))}</b>'
-        return (
-            f'<div style="font-size: {_TIP_FONT_PX}px; color: {theme.text}">'
-            f'{head}{"".join(blocks)}</div>'
-        )
+        return tip_frame(f'{head}{"".join(blocks)}')
 
     # ---- internals -------------------------------------------------------
 

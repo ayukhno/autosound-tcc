@@ -35,8 +35,9 @@ _TIP_WRAP_CHARS = 72
 _TIP_FONT_PX = 15
 
 
-def _wrapped(text: str) -> str:
-    """`text` escaped and broken into lines by hand — see `_TIP_WRAP_CHARS` for why by hand."""
+def wrapped(text: str) -> str:
+    """`text` escaped and broken into lines by hand — see `_TIP_WRAP_CHARS` for why by hand. For a
+    tip `tip_html` does not lay out: the curve readout's paragraphs between its tables."""
     lines: list[str] = []
     for paragraph in str(text).split("\n"):
         wrapped = textwrap.wrap(
@@ -59,13 +60,21 @@ def tip_html(text: str, head: str = "", warn: bool = False) -> str:
     It lives beside the tip it formats for, not in `curve_view`, which imports pyqtgraph and
     numpy: the main window uses it too, and starting the app paid for both (#177).
     """
-    theme = current_theme()
-    body = _wrapped(text)
+    body = wrapped(text)
     if head:
         body = f"<b>{html.escape(head)}</b><br>{body}"
     if warn:
-        body = f'<span style="color: {theme.warn}">{body}</span>'
-    return f'<div style="font-size: {_TIP_FONT_PX}px; color: {theme.text}">{body}</div>'
+        body = f'<span style="color: {current_theme().warn}">{body}</span>'
+    return tip_frame(body)
+
+
+def tip_frame(body: str) -> str:
+    """`body`, HTML already, in the type every tip is read in: `_TIP_FONT_PX`, the text colour.
+
+    For a tip `tip_html` does not lay out — the curve readout, a table with prose under it. It
+    reached in for the size by its private name; this is the one place the frame is written.
+    """
+    return f'<div style="font-size: {_TIP_FONT_PX}px; color: {current_theme().text}">{body}</div>'
 
 
 class RoundedTooltip(QLabel):
