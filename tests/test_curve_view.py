@@ -5241,6 +5241,20 @@ _MARKER_DRAGS = [("v", "_markers", 5.30), ("h", "_h_markers", 0.0), ("vh", "_mar
                  ("hx", "_h_markers", 0.0)]
 
 
+def _dots_drawn(view) -> list:
+    """Where the crossing dots are on the plot, in the view's own x."""
+    if view._crossing_dots is None:
+        return []
+    xs, ys = view._crossing_dots.getData()
+    return sorted((round(float(x), 9), round(float(y), 9)) for x, y in zip(xs, ys))
+
+
+def _crossings_stated(view) -> list:
+    """Where the reading says the line meets the curves, in the same x."""
+    return sorted((round(float(view._to_view(x)), 9), round(float(y), 9))
+                  for x, y in view.crossings())
+
+
 @pytest.mark.parametrize(("mode", "lines", "to"), _MARKER_DRAGS)
 def test_one_marker_move_renders_the_readout_once_and_says_so_once(mode, lines, to, monkeypatch):
     """In `vhs` the level follows the vertical, and that move came back through the same handler:
@@ -5263,10 +5277,36 @@ def test_one_marker_move_renders_the_readout_once_and_says_so_once(mode, lines, 
     assert len(said) == 1
     dots = [item for item in view._plot.getPlotItem().items
             if isinstance(item, pg.ScatterPlotItem)]
-    assert len(dots) <= 1 and (not dots or dots[0] is view._crossing_dots), dots
+    if mode in ("vx", "hx"):
+        # One set, and where the reading says: a move that never re-placed the dots also left
+        # one set on the plot (G10 tests, G4; Task 31's review, Minor 2).
+        assert len(dots) == 1 and dots[0] is view._crossing_dots, dots
+        assert _dots_drawn(view) == _crossings_stated(view)
+    else:
+        assert dots == [], dots
     if mode == "vhs":
         assert view.levels()[0] == pytest.approx(view._y_at(0, 5.30), abs=1e-9), \
             "and the level still follows"
+
+
+def test_in_hx_a_pan_after_a_move_still_moves_the_dots_and_the_readout(monkeypatch):
+    """In hx the reading is the crossing nearest the middle of the screen, so a pan or a zoom is
+    part of asking the question. A move skips the view's own handler while it draws (R-cd); a view
+    change outside one still re-picks the crossing, re-places the dots and renders the readout. A
+    move that left its flag up left both on the old crossing after every pan (G10 tests, G3)."""
+    view = _view()
+    view.set_y_unit("dB")
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+    view.set_axes_mode("hx")
+    view._h_markers[0].setValue(0.0)  # one move
+    before = view.crossings()
+
+    renders = _readout_renders(
+        view, lambda: view._plot.getViewBox().setXRange(5.6, 7.4, padding=0), monkeypatch)
+
+    assert view.crossings() != before, "the pan has to change the answer"
+    assert renders >= 1, "the readout follows the pan"
+    assert _dots_drawn(view) == _crossings_stated(view), "and the dots sit where the reading says"
 
 
 # ---- a banked all-pass this machine cannot draw stays banked (G10 C3, #177) ----------------------
