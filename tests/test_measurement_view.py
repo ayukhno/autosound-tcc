@@ -1100,8 +1100,8 @@ def test_a_capture_the_window_flagged_for_its_driver_reads_as_in_the_window(proj
 # ---- a superseded capture is not done (#175, F6 N16) ------------------------------------------
 # Parity with the method: what a round still waits for is the method's own list — the open round's
 # `capture_outstanding()`, a closed round's closing event. Compared by `name_key`, because the rows
-# are the derived names and the round holds titles as typed. No `optional` titles in these rounds:
-# TCC does not read them, and the method leaves them out of `outstanding`.
+# are the derived names and the round holds titles as typed. An `optional` title (skill #80) is in
+# `expected`, and a close lists it untaken under `outstanding_optional`, apart from `outstanding`.
 
 
 def _key(project):
@@ -1305,6 +1305,25 @@ def test_a_title_checked_but_never_taken_is_waiting_in_history_not_unusable(proj
     assert wr not in process.load()["capture"]["taken"], "the method took nothing for it"
     process.start_capture(1, expected=[_as_typed("sw_1 (sw)")])  # closes cap_001
     assert _closing(process, "cap_001")["outstanding"] == [wr]
+
+    past = _past(project, "cap_001")
+
+    assert (_item(past, wr).status, _item(past, wl).status) == (mv.STATUS_WAIT, mv.STATUS_DONE)
+    assert wr not in process_view.standing(_folded(project, "cap_001"))
+    assert _live_extra(project, wr) == mv.STATUS_FOUND
+
+
+def test_an_optional_capture_nobody_took_is_waiting_in_history_not_done(project):
+    """The G6+G7 tests review's G1: an optional capture (skill #80) sits in `expected`, and the
+    close lists it untaken under `outstanding_optional`, apart from `outstanding`. Read as neither,
+    `_as_it_closed` marked it taken by the read against REW: the past card said «done» for a
+    capture the method says nobody took, and the live card «done» for a curve REW shows under it."""
+    process = _round(project, version=1, expected=["w-L_1 (sw)"], optional=["w-R_1 (sw)"],
+                     taken=["w-L_1 (sw)"])
+    wl, wr = _as_typed("w-L_1 (sw)"), _as_typed("w-R_1 (sw)")
+    process.start_capture(1, expected=[_as_typed("sw_1 (sw)")])  # closes cap_001
+    closed = _closing(process, "cap_001")
+    assert (closed["outstanding"], closed["outstanding_optional"]) == ([], [wr]), closed
 
     past = _past(project, "cap_001")
 

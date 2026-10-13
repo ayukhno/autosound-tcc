@@ -38,10 +38,11 @@ def write_round(project, **fields):
     """Open a capture round in `project` at phase 0 and record into it, through the method's own
     writer; returns the `Process`.
 
-    `expected`, `taken` (in order), `superseded` — `{wrong: right}`, each through
-    `Process.supersede_capture`, after the takes, which marks the wrong row and takes the right
-    title — and `skipped` (`{title: reason}`, last). `pad=False` for a fixture that is
-    deliberately about the tidy case.
+    `expected`, `optional` (skill #80: asked for, holding no step — the method keeps them inside
+    `expected`, and a close lists the untaken ones under `outstanding_optional`), `taken` (in
+    order), `superseded` — `{wrong: right}`, each through `Process.supersede_capture`, after the
+    takes, which marks the wrong row and takes the right title — and `skipped` (`{title: reason}`,
+    last). `pad=False` for a fixture that is deliberately about the tidy case.
     """
     from autosound_tcc.state import process_view
 
@@ -52,7 +53,8 @@ def write_round(project, **fields):
     process = module.Process(str(process_view.process_dir(project)))
     process.enter_phase("0")
     process.start_capture(fields.pop("version", 1),
-                          expected=[typed(t) for t in fields.pop("expected", ())])
+                          expected=[typed(t) for t in fields.pop("expected", ())],
+                          optional=[typed(t) for t in fields.pop("optional", ())])
     for title in fields.pop("taken", ()):
         process.record_capture(typed(title))
     for wrong, right in (fields.pop("superseded", {}) or {}).items():
