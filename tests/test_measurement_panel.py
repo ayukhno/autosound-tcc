@@ -1101,11 +1101,11 @@ def _ledger_calls(monkeypatch):
                         lambda d, v, e, step="", origin="", plan=False, **_kw:
                         calls.append(("start", v, tuple(e), origin, plan)))
     monkeypatch.setattr(mp.process_writer, "record_capture",
-                        lambda d, t: calls.append(("taken", t)))
+                        lambda d, t, **_kw: calls.append(("taken", t)))
     # `source` is recorded too (method `v3.0.59`, S-036): who answered is part of what was
     # written, and a double that drops it cannot tell a person's answer from a bulk default.
     monkeypatch.setattr(mp.process_writer, "set_protective",
-                        lambda d, c, legs, source="user":
+                        lambda d, c, legs, source="user", **_kw:
                         calls.append(("protective", c, legs, source)))
     monkeypatch.setattr(mp.process_view, "capture_round", lambda *_a, **_k: {"id": "cap_003"})
     return calls
@@ -1160,7 +1160,7 @@ def test_a_refused_capture_does_not_silence_the_protective_record(tmp_path, monk
     _app()
     calls = _ledger_calls(monkeypatch)
 
-    def _refuse(_dir, title):
+    def _refuse(_dir, title, **_kw):
         raise RuntimeError("gate said:\nno such measurement in REW")
 
     monkeypatch.setattr(mp.process_writer, "record_capture", _refuse)
@@ -1199,9 +1199,9 @@ def test_protection_the_round_does_not_hold_after_the_write_is_not_counted_as_re
     round_id = process_view.capture_round(tmp_path)["id"]
     real = process_writer.set_protective
 
-    def _keeps_only_w_l(project_dir, channel, legs, source="user"):
+    def _keeps_only_w_l(project_dir, channel, legs, source="user", **kw):
         # `m-L` reports success and writes nothing: the defect being caught.
-        return real(project_dir, channel, legs, source) if channel == "w-L" else ""
+        return real(project_dir, channel, legs, source, **kw) if channel == "w-L" else ""
 
     monkeypatch.setattr(process_writer, "set_protective", _keeps_only_w_l)
     worker = _LedgerWriteWorker(
@@ -1863,12 +1863,12 @@ def _stopping_ledger(monkeypatch, answer: str, *, at: str):
     calls = _ledger_calls(monkeypatch)
     stop = process_writer.Busy(_BUSY) if answer == "busy" else process_writer.Refused(_REFUSED)
 
-    def record(d, title):
+    def record(d, title, **_kw):
         calls.append(("taken", title))
         if title == at:
             raise stop
 
-    def protect(d, channel, legs, source="user"):
+    def protect(d, channel, legs, source="user", **_kw):
         calls.append(("protective", channel, legs, source))
         if channel == at:
             raise stop
@@ -1942,6 +1942,77 @@ def test_a_busy_answer_for_a_channel_leaves_the_channels_after_it_unasked(tmp_pa
         channels="m-L, m-R, w-L", why=why) in panel._status_label.text()
 
 
+def test_an_import_whose_round_the_session_moved_on_from_records_nothing_and_says_so(tmp_path):
+    """The end-of-branch review, silent I1 = code I3, its probe turned round, on the real method.
+    The panel read round A when REW answered; while the person was in the import dialog the
+    session's `capture-start` closed A and opened B. The ledger worker recorded A's take into B —
+    unplanned — said «Recorded in the round: 1», and the protective half, read back against A,
+    called the channel lost: «a defect in TCC». The writes go to the round the import was started
+    for or not at all: nothing in B, nothing more asked, and one line naming what was not
+    recorded and why — with no false defect beside it."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    from tests import _rounds
+
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    _app()
+    process = _rounds.write_round(tmp_path, version=1, expected=["w-L_1 (sw)", "w-R_1 (sw)"])
+    round_a = process.load()["capture"]["id"]
+    process.start_capture(2, expected=[_rounds.as_typed("w-L_2 (sw)")])  # the session moves on
+    titles = [_rounds.as_typed("w-L_1 (sw)"), _rounds.as_typed("w-R_1 (sw)")]
+    worker = _LedgerWriteWorker(project_dir=tmp_path, round_id=round_a, version=1,
+                                expected=["w-L_1 (sw)", "w-R_1 (sw)"], titles=titles,
+                                protective={"w-L": "OFF"})
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    round_b = process.load()["capture"]
+    assert not round_b.get("taken") and not round_b.get("protective"), round_b
+    why = i18n.t("capRoundGone").format(round=round_a)
+    assert (seen["recorded"], seen["refused"], seen["prot_done"], seen["prot_lost"]) == (
+        [], [], [], []), seen
+    assert (seen["stopped"], seen["not_recorded"], seen["prot_not_recorded"]) == (
+        why, titles, ["w-L"]), seen
+
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._set_status("capImportDone", n=2)  # the import's lead, as it stands when the ledger answers
+    panel._on_ledger_written(seen)
+    said = panel._status_label.text()
+    assert i18n.t("capRoundStoppedBoth").format(
+        titles=", ".join(titles), channels="w-L", why=why) in said, said
+    assert i18n.t("capRoundRecorded").format(n=1) not in said
+    assert "defect" not in said, said
+
+
+def test_an_import_writes_into_the_round_it_opened_itself(tmp_path, monkeypatch):
+    """A pass with no round open opens its own, and its writes are asked with THAT round: the one
+    TCC opened is the one they go to, or none."""
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+    asked: list = []
+    monkeypatch.setattr(mp.process_writer, "record_capture",
+                        lambda d, t, **kw: asked.append(("taken", kw.get("round_id"))))
+    monkeypatch.setattr(mp.process_writer, "set_protective",
+                        lambda d, c, legs, source="user", **kw:
+                        asked.append(("protective", kw.get("round_id"))))
+    worker = _LedgerWriteWorker(project_dir=tmp_path, round_id="", version=6,
+                                expected=["w-L_6 (sw)"], titles=["w-L_6 (sw)"],
+                                protective={"w-L": "OFF"})
+
+    worker.run()
+
+    assert calls[0][0] == "start"
+    assert asked == [("taken", "cap_003"), ("protective", "cap_003")]
+
+
 def test_a_flag_one_channel_sends_stops_no_other_channel(tmp_path, monkeypatch):
     """Not every refusal says the same about the writes to come: a copy that does not know
     `--source` (`UnknownFlag`) refuses only the channel this window filled in, which sends it —
@@ -1953,7 +2024,7 @@ def test_a_flag_one_channel_sends_stops_no_other_channel(tmp_path, monkeypatch):
     _app()
     calls = _ledger_calls(monkeypatch)
 
-    def protect(d, channel, legs, source="user"):
+    def protect(d, channel, legs, source="user", **_kw):
         calls.append(("protective", channel, legs, source))
         if source != "user":
             raise process_writer.UnknownFlag("--source")

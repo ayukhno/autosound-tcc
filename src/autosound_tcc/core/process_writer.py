@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from autosound_tcc.core import app_log, method_binding, method_cli
-# The round TCC's own check was asked for is read on the check's worker thread
+# The round TCC's own check or import was asked for is read on its worker thread
 # (`_the_round_asked`), where an import is the defect `tests/conftest.py` refuses.
 from autosound_tcc.state import process_view
 
@@ -120,16 +120,18 @@ class RewUnavailable(ProcessWriterError):
 
 
 class RoundGone(ProcessWriterError):
-    """TCC's own capture check was asked for round `asked`, and by its turn at the project's lock
-    that round was no longer the open one: closed, or another open (`now`, None for none). Nothing
-    was started, so nothing was checked or written (`check_captures`; the re-review of G6+G7 fix
-    B, OOS-1)."""
+    """TCC's own `command` was asked for round `asked` — its capture check, or its import's
+    capture and protective records — and by its turn at the project's lock that round was no
+    longer the open one: closed, or another open (`now`, None for none). Nothing was started, so
+    nothing was checked or written (`check_captures`, the re-review of G6+G7 fix B, OOS-1;
+    `record_capture` and `set_protective`, the end-of-branch review's code I3)."""
 
-    def __init__(self, asked: str, now: Optional[str]) -> None:
-        super().__init__(f"capture-check was not run: it was asked for {asked}, and "
+    def __init__(self, asked: str, now: Optional[str], command: str = "capture-check") -> None:
+        nothing = "nothing was checked" if command == "capture-check" else "nothing was written"
+        super().__init__(f"{command} was not run: it was asked for {asked}, and "
                          + (f"{now} is the open round now" if now else f"{asked} is not open now")
-                         + " -- nothing was checked")
-        self.asked, self.now = asked, now
+                         + f" -- {nothing}")
+        self.asked, self.now, self.command = asked, now, command
 
 
 def script_path() -> Path:
@@ -315,7 +317,8 @@ def _protective_legs(channel: str, legs) -> list[str]:
     return out
 
 
-def set_protective(project_dir: Path, channel: str, legs, source: str = "user") -> str:
+def set_protective(project_dir: Path, channel: str, legs, source: str = "user",
+                   round_id: Optional[str] = None) -> str:
     """Declare what was in the signal path for one channel of the OPEN capture round.
 
     `legs` is `"OFF"` -- an ANSWER, meaning this channel was swept with nothing in the chain -- or
@@ -334,6 +337,9 @@ def set_protective(project_dir: Path, channel: str, legs, source: str = "user") 
     Nothing is validated here. The skill refuses a leg missing `f`/`type`/`slope` at write time,
     and that refusal comes back verbatim through `ProcessWriterError` for the dialog to show: a UI
     that quietly fixes what a gate would have refused trains people to trust the UI over the gate.
+
+    `round_id`, as `record_capture`'s: the round TCC's own import was started for, written into
+    or not at all (`RoundGone`).
     """
     args = ["capture-protective", *_protective_legs(channel, legs)]
     if source and source != "user":
@@ -342,7 +348,7 @@ def set_protective(project_dir: Path, channel: str, legs, source: str = "user") 
         # flag). Sending it only where it changes the meaning keeps the ordinary path working
         # against the method this build is paired with and against the one before it.
         args += ["--source", str(source)]
-    return _run(project_dir, args)
+    return _run(project_dir, args, **_in_round(project_dir, round_id, args[0]))
 
 
 def amend_protective(project_dir: Path, capture_id: str, channel: str, legs,
@@ -682,30 +688,46 @@ def check_captures(
     args = ["capture-check", *[str(t) for t in titles or []]]
     if session:
         args.append("--session")
-    kw = {} if round_id is None else {"under_lock": lambda: _the_round_asked(project_dir, round_id)}
     return _run(project_dir, args, timeout_s=max(DEFAULT_TIMEOUT_S, 120.0), answer_on_1=True,
-                logged=True, **kw)
+                logged=True, **_in_round(project_dir, round_id, args[0]))
 
 
-def _the_round_asked(project_dir: Path, round_id: str) -> None:
+def _in_round(project_dir: Path, round_id: Optional[str], command: str) -> dict:
+    """`spawn`'s `under_lock` for a write asked for `round_id` (`_the_round_asked`); none for a
+    write asked for no round — the agent's own, into the round its session has open."""
+    if round_id is None:
+        return {}
+    return {"under_lock": lambda: _the_round_asked(project_dir, round_id, command)}
+
+
+def _the_round_asked(project_dir: Path, round_id: str, command: str = "capture-check") -> None:
     """`RoundGone`, said once in the log, unless the round `process-state.json` holds open now is
-    `round_id` (`check_captures`, under the lock). Read as the file stands, not through the method:
-    a state that does not read is left to the method, which refuses it and writes nothing."""
+    `round_id` (`check_captures`, `record_capture`, `set_protective`, under the lock). Read as the
+    file stands, not through the method: a state that does not read is left to the method, which
+    refuses it and writes nothing."""
     state = process_view.read_state_text(project_dir)
     if state is None:
         return
     round_ = state.get("capture") if isinstance(state.get("capture"), dict) else {}
     if round_.get("id") == round_id and not round_.get("closed"):
         return
-    gone = RoundGone(round_id, None if round_.get("closed") else round_.get("id"))
-    app_log.logger().info("`capture-check` on %s: %s", project_dir, gone)
+    gone = RoundGone(round_id, None if round_.get("closed") else round_.get("id"), command)
+    app_log.logger().info("`%s` on %s: %s", command, project_dir, gone)
     raise gone
 
 
-def record_capture(project_dir: Path, title: str) -> str:
+def record_capture(project_dir: Path, title: str, round_id: Optional[str] = None) -> str:
     """A measurement came back. One that was not on the round's list is recorded as unplanned
-    rather than rejected — the derivation can only say what should have been taken."""
-    return _run(project_dir, ["capture-taken", title])
+    rather than rejected — the derivation can only say what should have been taken.
+
+    `round_id` is the round TCC's own import was started for: recorded into that round or not
+    at all, as `check_captures`' check. The import reads the round when REW answers, and the
+    person can spend minutes in its dialog while the session's `capture-start` closes it and opens
+    the next: the method then recorded round A's take as one round B took, `planned: False`, and
+    the import said «recorded» (the end-of-branch review, code I3). The agent's own record passes
+    none."""
+    return _run(project_dir, ["capture-taken", title],
+                **_in_round(project_dir, round_id, "capture-taken"))
 
 
 def skip_capture(project_dir: Path, title: str, reason: str) -> str:

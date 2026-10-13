@@ -309,11 +309,21 @@ class _LedgerWriteWorker(QThread):
     def _stops(exc: Exception) -> bool:
         """Whether an answer is the same for every write still to come, so the rest are not asked
         (M29): busy behind another write (#171) — each busy write waits `LOCK_WAIT_S` here, off the
-        GUI thread — or the project's copy refused (#169). Not a flag the copy does not know
+        GUI thread — the project's copy refused (#169), or the round this pass was for no longer
+        open (`RoundGone`, the end-of-branch review's code I3). Not a flag the copy does not know
         (`UnknownFlag`): that refuses only the writes sending it — `--source` goes with a channel
         this window filled in, and a channel a person answered sends none."""
-        return (isinstance(exc, (process_writer.Busy, process_writer.Refused))
+        return (isinstance(exc, (process_writer.Busy, process_writer.Refused,
+                                 process_writer.RoundGone))
                 and not isinstance(exc, process_writer.UnknownFlag))
+
+    @classmethod
+    def _stopped_why(cls, exc: Exception) -> str:
+        """What a stop says: the gate's own last line (`_why`) — or, for a round no longer open,
+        which round the import was for, in the person's language."""
+        if isinstance(exc, process_writer.RoundGone):
+            return i18n.t("capRoundGone").format(round=exc.asked)
+        return cls._why(exc)
 
     @staticmethod
     def _retries_without_plan(exc: Exception) -> bool:
@@ -370,13 +380,18 @@ class _LedgerWriteWorker(QThread):
                 result["refused"].append(self._why(exc))
                 self.done.emit(result)
                 return
+        # Into the round this pass was for — the one read when REW answered, or the one opened
+        # above — or not at all: the session can close it and open the next while the person is
+        # in the import dialog, and the method records into whichever is open (code I3). Read
+        # again under the project's lock, as TCC's own check is (`RoundGone`).
+        round_id = result["round_id"] or None
         for index, title in enumerate(self._titles):
             try:
-                process_writer.record_capture(self._project_dir, title)
+                process_writer.record_capture(self._project_dir, title, round_id=round_id)
                 result["recorded"].append(title)
             except Exception as exc:  # noqa: BLE001
                 if self._stops(exc):
-                    result["stopped"] = self._why(exc)
+                    result["stopped"] = self._stopped_why(exc)
                     result["not_recorded"] = self._titles[index:]
                     break
                 result["refused"].append(self._why(exc))
@@ -388,11 +403,12 @@ class _LedgerWriteWorker(QThread):
                 process_writer.set_protective(
                     self._project_dir, channel, legs,
                     source="front_end" if channel in self._auto else "user",
+                    round_id=round_id,
                 )
                 result["prot_done"].append(channel)
             except Exception as exc:  # noqa: BLE001
                 if self._stops(exc):
-                    result["stopped"] = self._why(exc)
+                    result["stopped"] = self._stopped_why(exc)
                     result["prot_not_recorded"].append(channel)
                     continue
                 result["prot_refused"].append(

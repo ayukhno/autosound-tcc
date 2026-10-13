@@ -362,6 +362,73 @@ def test_tccs_own_check_runs_over_the_round_it_was_asked_for_or_not_at_all(
     assert len(said) == 1 and asked in said[0], said
 
 
+@pytest.mark.parametrize("write", ["capture-taken", "capture-protective"])
+@pytest.mark.parametrize("meanwhile", ["the session opened the next round",
+                                       "the session closed the round", "nothing"])
+def test_tccs_own_import_records_into_the_round_it_was_asked_for_or_not_at_all(
+        tmp_path, monkeypatch, app_log_heard, write, meanwhile):
+    """The end-of-branch review, code I3 = silent I1: fix C's round hook guarded TCC's own check
+    alone. The import read round A when REW answered, the person spent minutes in its dialog, and
+    the session's `capture-start` closed A and opened B — and `capture-taken` and
+    `capture-protective`, which carry no round, recorded A's take as one B took, `planned: False`,
+    and said «recorded». Asked with the round, each is read again UNDER the project's lock before
+    the child starts: one closed, or another open, is `RoundGone` — nothing started, nothing
+    written, said once in the log. The round asked for, still open, is written into."""
+    from tests import _rounds
+
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    process = _rounds.write_round(tmp_path, version=1, expected=["w-L_1 (sw)"])
+    asked, typed = process.load()["capture"]["id"], _rounds.as_typed("w-L_1 (sw)")
+    heard = app_log_heard(logging.INFO)
+    at_the_lock, hold = threading.Event(), project_lock.hold
+
+    def hold_once_said(project_dir, timeout_s):
+        at_the_lock.set()  # whatever the call read before the lock, it has read by now
+        return hold(project_dir, timeout_s)
+
+    monkeypatch.setattr(project_lock, "hold", hold_once_said)
+    answered: list = []
+
+    def record() -> None:
+        try:
+            if write == "capture-taken":
+                process_writer.record_capture(tmp_path, typed, round_id=asked)
+            else:
+                process_writer.set_protective(tmp_path, "w-L", "OFF", round_id=asked)
+            answered.append(None)
+        except process_writer.ProcessWriterError as exc:
+            answered.append(exc)
+
+    with hold(tmp_path, 5):  # the session's write, holding the lock
+        worker = threading.Thread(target=record)
+        worker.start()
+        assert at_the_lock.wait(10)
+        if meanwhile == "the session opened the next round":
+            process.start_capture(2, expected=[_rounds.as_typed("w-L_2 (sw)")])
+        elif meanwhile == "the session closed the round":
+            process.close_capture()
+        before = _bytes_of(tmp_path)
+    worker.join(60)
+
+    [answer] = answered
+    with hold(tmp_path, 0):  # given back, whichever way the write was answered
+        pass
+    round_ = process.load()["capture"]
+    if meanwhile == "nothing":
+        assert answer is None, answer
+        assert typed in round_["taken"] if write == "capture-taken" else "w-L" in round_[
+            "protective"], round_
+        return
+    assert isinstance(answer, process_writer.RoundGone), answer
+    assert answer.asked == asked and asked in str(answer) and write in str(answer), str(answer)
+    assert _bytes_of(tmp_path) == before, "nothing started, nothing written"
+    if meanwhile == "the session opened the next round":
+        assert not round_.get("taken") and not round_.get("protective"), "B took none of A's"
+    said = [record.getMessage() for record in heard if write in record.getMessage()]
+    assert len(said) == 1 and asked in said[0], said
+
+
 def test_a_method_too_old_for_a_command_says_so_instead_of_dumping_usage(project, monkeypatch):
     """Measured on the user's Windows VM, 2026-09-09: TCC ran `session_close`, the installed
     method was **3.0.8**, and `process.py` answered by printing its own usage text. What the model
@@ -722,7 +789,8 @@ def _every_writer_with_every_option() -> list:
         (pw.block_step, ("2.9", "no REW on this machine"), {}),
         (pw.record_reviewer, ("gemini", "flash"),
          {"step": "2.9", "review": "critiques/2.9.md", "mode": "clipboard"}),
-        (pw.set_protective, ("m-L", legs), {"source": "front_end"}),
+        # `round_id` sends no flag: it is read against the state under the lock (none here).
+        (pw.set_protective, ("m-L", legs), {"source": "front_end", "round_id": "cap_001"}),
         (pw.amend_protective, ("cap-1", "m-L", legs, "filed OFF by mistake"),
          {"source": "default"}),
         (pw.record_listening_verdict, ([("t1", "bass", True)],),
@@ -742,7 +810,7 @@ def _every_writer_with_every_option() -> list:
         # `round_id` sends no flag: it is read against the state under the lock (none here).
         (pw.check_captures, (), {"titles": ["m-L p1_49 (sw)"], "session": True,
                                  "round_id": "cap_001"}),
-        (pw.record_capture, ("m-L p1_49 (sw)",), {}),
+        (pw.record_capture, ("m-L p1_49 (sw)",), {"round_id": "cap_001"}),
         (pw.skip_capture, ("m-R p1_49 (sw)", "the tweeter is out"), {}),
         (pw.close_capture, (), {"reason": "done"}),
         (pw.check, (), {}),
