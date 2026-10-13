@@ -16,6 +16,7 @@ from autosound_tcc.core import vendor_loader
 from autosound_tcc.state import measurement_view, process_view
 
 from tests import _intake, _rew_fakes, _rounds
+from tests._fresh import qt_loaded
 from autosound_tcc.state import measurement_view as mv
 
 pytestmark = pytest.mark.skipif(
@@ -1761,58 +1762,79 @@ def test_a_line_is_said_only_while_the_round_its_check_was_started_for_is_open(p
     assert mv.NotRun.at("did not run", then) is None, "its round is closed"
 
 
-# The series the captures are named with (`capture_version`, out of the window in W-9).
+# The series the captures are named with (`capture_version`, out of the window in W-9), asked of
+# real rounds the method wrote, in a project of their own (#179): the project `config` answers is
+# another, empty folder (`conftest._isolated_project_dir`), so a read that forgot `project_dir`
+# answers from there.
 
 
-def test_the_capture_series_comes_from_the_plan_not_the_ledger(monkeypatch):
+def test_the_capture_series_comes_from_the_plan_not_the_ledger(tmp_path):
     """Naming the virtual-channel tier bumped the ledger `v_001 → v_002`, and the checklist jumped
     to series 2 before series 1 had been captured — watched twice, on two projects. The skill's own
     phase-0 steps say which round they mean: "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"."""
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: None)
+    car = _intake.seed(tmp_path / "car")
+    _bank_next_version(car)
     state = {
         "active_phase": "0",
         "plan": [
-            {"id": "m0-tw-L", "phase": "0", "name": "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"},
+            {"id": "m0-w-L", "phase": "0", "name": "Baseline solo: w-L_1 (sw) + w-L_1 (rta)"},
         ],
     }
 
-    assert mv.capture_version(state) == 1
+    assert process_view.capture_round(car) is None, "no round: the plan step decides"
+    assert mv.capture_version(state, project_dir=car) == 1
 
 
-def test_the_ledger_version_never_becomes_the_series(monkeypatch):
+def test_the_ledger_version_never_becomes_the_series(tmp_path):
     """hub #153 A. The ledger's `v_NNN` also moves for changes that are not DSP changes, and a
     project can start with the two apart (`v_001` measured as `_49`). With no round and no plan
     step naming a series, the answer is "not known", not the ledger — which is no input at all."""
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: None)
-    monkeypatch.setattr(process_view, "capture_rounds", lambda *a, **k: [])
+    car = _intake.seed(tmp_path / "car")
+    _bank_next_version(car)
 
-    assert mv.capture_version({"active_phase": "0", "plan": []}) is None
+    assert mv.capture_version({"active_phase": "0", "plan": []}, project_dir=car) is None
 
 
-def test_the_open_round_names_the_series_before_the_plan(monkeypatch):
+def test_the_open_round_names_the_series_before_the_plan(tmp_path):
     """A pass taken again after a DSP change is the round's series, whatever the plan said first."""
-    monkeypatch.setattr(process_view, "capture_round",
-                        lambda *a, **k: {"id": "cap_002", "expected": ["w-L_07 (sw)"]})
     state = {"active_phase": "0",
-             "plan": [{"id": "m0", "phase": "0", "name": "Baseline solo: tw-L_1 (sw)"}]}
+             "plan": [{"id": "m0", "phase": "0", "name": "Baseline solo: w-L_1 (sw)"}]}
+    retaken = tmp_path / "retaken"
+    _round(retaken, version=7, expected=["w-L_7 (sw)"])
 
-    assert mv.capture_version(state) == 7
+    assert mv.capture_version(state, project_dir=retaken) == 7
     # A round that names nothing in `expected` is named by what it took — never by a typo it
     # superseded (#175): `w-L_70` was corrected to `w-L_07`, and the series is 7.
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {
-        "id": "cap_003", "expected": [],
-        "taken": {"w-L_70 (sw)": {"superseded_by": "w-L_07 (sw)"}, "w-L_07 (sw)": {}}})
-    assert mv.capture_version(state) == 7
+    typo = tmp_path / "typo"
+    _round(typo, version=7, taken=["w-L_70 (sw)"], superseded={"w-L_70 (sw)": "w-L_7 (sw)"})
+    assert mv.capture_version(state, project_dir=typo) == 7
 
 
-def test_with_no_round_open_the_highest_series_among_the_rounds(monkeypatch):
-    monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: {"closed": True})
-    monkeypatch.setattr(process_view, "capture_rounds", lambda *a, **k: [
-        {"id": "cap_001", "expected": ["w-L_48 (sw)"], "taken": {}},
-        {"id": "cap_002", "expected": ["w-L_49 (sw)"], "taken": {"w-L_49 (sw)": {}}},
-    ])
+def test_with_no_round_open_the_highest_series_among_the_rounds(tmp_path):
+    car = tmp_path / "car"
+    process = _round(car, version=48, expected=["w-L_48 (sw)"])
+    process.start_capture(49, expected=[_as_typed("w-L_49 (sw)")])
+    process.record_capture(_as_typed("w-L_49 (sw)"))
+    process.close_capture()
 
-    assert mv.capture_version({"active_phase": "0", "plan": []}) == 49
+    assert process_view.capture_round(car).get("closed")
+    assert mv.capture_version({"active_phase": "0", "plan": []}, project_dir=car) == 49
+
+
+def test_the_capture_series_is_asked_with_no_qt(tmp_path):
+    """The decision left the window for a module that imports no Qt (#179, the `row_rule`
+    precedent): asked of a fresh interpreter, over a real round, it answers and loads none."""
+    car = tmp_path / "car"
+    _round(car, version=7, expected=["w-L_7 (sw)"])
+
+    loaded = qt_loaded(f"""
+        from pathlib import Path
+        from autosound_tcc.state import measurement_view
+        state = {{"active_phase": "0", "plan": []}}
+        assert measurement_view.capture_version(state, project_dir=Path({str(car)!r})) == 7
+    """)
+
+    assert loaded == "[]"
 
 
 def test_a_superseded_typo_names_no_series(project):

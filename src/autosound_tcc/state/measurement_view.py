@@ -126,7 +126,8 @@ def highest_series(project_dir: Optional[Path] = None) -> Optional[int]:
     return max(found) if found else None
 
 
-def capture_version(state: Optional[dict] = None) -> Optional[int]:
+def capture_version(state: Optional[dict] = None,
+                    project_dir: Optional[Path] = None) -> Optional[int]:
     """The series `_N` the current captures are named with, or None when nothing says (hub #153 A).
 
     `_N` is the DSP state the measurements were taken on. The ledger's `v_NNN` is a different
@@ -140,10 +141,12 @@ def capture_version(state: Optional[dict] = None) -> Optional[int]:
     4. None: the checklist says the series is not known yet, and an import with no round open
        asks for it.
 
-    Out of the window, where it was `_capture_version` (W-9, the ratchet's next decision)."""
-    round_ = process_view.capture_round() or {}
+    Out of the window, where it was `_capture_version` (W-9, the ratchet's next decision); every
+    read is of `project_dir`, the current project when it is None (#179)."""
+    round_ = process_view.capture_round(project_dir) or {}
     if round_ and not round_.get("closed"):
-        found = series_of(list(round_.get("expected") or []) + list(process_view.standing(round_)))
+        found = series_of(list(round_.get("expected") or []) + list(process_view.standing(round_)),
+                          project_dir)
         if found is not None:
             return found
     for step in (state or {}).get("plan") or []:
@@ -151,10 +154,10 @@ def capture_version(state: Optional[dict] = None) -> Optional[int]:
             (state or {}).get("active_phase")
         ):
             continue
-        found = series_of(re.split(r"[+,;:]", str(step.get("name") or "")))
+        found = series_of(re.split(r"[+,;:]", str(step.get("name") or "")), project_dir)
         if found is not None:
             return found
-    return highest_series()
+    return highest_series(project_dir)
 
 def groups_from_titles(titles) -> list[dict]:
     """A flat list of REW titles, split into the column groups the panel renders.
