@@ -459,3 +459,21 @@ def test_two_readers_setting_one_broken_store_aside_at_once(store, monkeypatch, 
         assert app_log_told == [], "said in the other process, not here"
         assert own_store.aside_said(store) == "", "no copy of this process's to name"
     assert own_store.times_set_aside(store) >= 1, "set aside, whoever moved it"
+
+
+def test_a_broken_store_gone_before_a_name_was_reserved_still_counts_as_set_aside(
+        store, monkeypatch, app_log_told):
+    """The other way to lose the race: the store (with its folder) is gone before this reader could
+    reserve a name beside it. `{}`, said by nobody here — and still counted set aside: the bytes
+    read were broken, so whatever they held, a gate among it, is unknown (code I1)."""
+    store.write_bytes(b'{"gate": "writes",')
+
+    def gone(*_args, **_kwargs):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(own_store, "_reserve_aside", gone)
+
+    assert own_store.read_json(store) == {}
+    assert app_log_told == []
+    assert own_store.times_set_aside(store) == 1
+    assert own_store.aside_said(store) == ""

@@ -177,9 +177,12 @@ def _set_aside(path: Path, why: str, aside_dir: Optional[Path] = None) -> dict[s
         if aside is not None:
             with contextlib.suppress(OSError):
                 aside.unlink()  # the reserved name, still empty: given back
+        gone = isinstance(exc, FileNotFoundError)
         if marked is not None:
-            _unmark_aside(path, marked, count=not isinstance(exc, FileNotFoundError))
-        if isinstance(exc, FileNotFoundError):
+            _unmark_aside(path, marked, count=not gone)
+        elif gone:
+            _count_aside(path, 1)  # gone before a name was reserved: broken bytes all the same
+        if gone:
             return {}  # another reader moved it between our read and this move, and said so
         message = (f"{path} could not be read ({why}) and could not be set aside "
                    f"({_why(exc)}); TCC will not write over it")
@@ -195,8 +198,14 @@ def _mark_aside(path: Path, message: str) -> tuple[str, Optional[str]]:
     with _said_lock:
         before = _aside_said.get(key)
         _aside_said[key] = message
-        _asides[key] = _asides.get(key, 0) + 1
+    _count_aside(path, 1)
     return message, before
+
+
+def _count_aside(path: Path, by: int) -> None:
+    key = os.path.abspath(path)
+    with _said_lock:
+        _asides[key] = max(0, _asides.get(key, 0) + by)
 
 
 def _unmark_aside(path: Path, marked: tuple[str, Optional[str]], *, count: bool) -> None:
@@ -210,8 +219,8 @@ def _unmark_aside(path: Path, marked: tuple[str, Optional[str]], *, count: bool)
                 _aside_said.pop(key, None)
             else:
                 _aside_said[key] = before
-        if count:
-            _asides[key] = _asides.get(key, 1) - 1
+    if count:
+        _count_aside(path, -1)
 
 
 def aside_said(path: Path) -> str:
