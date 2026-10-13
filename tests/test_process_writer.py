@@ -278,6 +278,26 @@ def test_a_capture_check_that_did_not_run_is_raised_in_its_own_words(monkeypatch
         assert err in logged, "a crash is logged with its traceback whole"
 
 
+def test_tccs_own_check_on_a_method_too_old_for_it_is_logged_once(project, monkeypatch,
+                                                                  app_log_warnings):
+    """The re-review of the G6+G7 fix: `TooOld` was raised before the log line every other failure
+    of TCC's own check reaches (M2), so a project on a method older than `capture-check` left only
+    the strip's line, and nothing once that was closed. One WARNING, as the others: TCC's sentence
+    and the method's own words. A call that does not ask for the log still logs nothing."""
+    usage = "usage: process.py <process-dir> <command> [args]\n  show\n  plan [phase]"
+    monkeypatch.setattr(process_writer, "_spawn",
+                        lambda project_dir, args, timeout_s=None, **_kw: (2, usage, ""))
+
+    with pytest.raises(process_writer.TooOld) as old:
+        process_writer.check_captures(project, ["w-L_1 (sw)"])
+    with pytest.raises(process_writer.TooOld):
+        process_writer.enter_phase(project, "0")
+
+    [logged] = [record.getMessage() for record in app_log_warnings]
+    assert "capture-check" in logged and "w-L_1 (sw)" in logged and "exit 2" in logged, logged
+    assert str(old.value) in logged and "usage: process.py" in logged, logged
+
+
 def test_a_method_too_old_for_a_command_says_so_instead_of_dumping_usage(project, monkeypatch):
     """Measured on the user's Windows VM, 2026-09-09: TCC ran `session_close`, the installed
     method was **3.0.8**, and `process.py` answered by printing its own usage text. What the model

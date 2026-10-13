@@ -154,20 +154,33 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
 
     `logged` puts that failure in the log too, at WARNING: the method's words, and a crash's
     traceback whole — for a caller whose only other trace of it is a line somebody can close
-    (`check_captures`, the G6+G7 review's M2). Not what `spawn` raises: it logs its own busy,
-    timed-out, refused and failed-to-start answers."""
+    (`check_captures`, the G6+G7 review's M2); a method too old for the command (`TooOld`) with
+    TCC's sentence beside them. Not what `spawn` raises: it logs its own busy, timed-out, refused
+    and failed-to-start answers."""
     code, out, err = _spawn(project_dir, args, timeout_s)
-    _refuse_if_too_old(project_dir, args[0], out, err)
+    try:
+        _refuse_if_too_old(project_dir, args[0], out, err)
+    except TooOld as too_old:
+        if logged:
+            _log_not_run(project_dir, args, code, method_cli.tail(err or out), why=str(too_old))
+        raise
     if code == 0 or (answer_on_1 and code == 1 and out and not refusal(code, err)
                      and not crashed(err)):
         return out
     said = (err or out).strip() or f"process.py exited {code}"
     if logged:
-        app_log.logger().warning("`%s` on %s did not run, or did not finish (exit %s), asked %s; "
-                                 "the method said:\n%s", args[0], project_dir, code,
-                                 args[1:] or "its default",
-                                 said if crashed(err) else method_cli.tail(said))
+        _log_not_run(project_dir, args, code, said if crashed(err) else method_cli.tail(said))
     raise (RewUnavailable if code == EXIT_REW_UNAVAILABLE else ProcessWriterError)(said)
+
+
+def _log_not_run(project_dir: Path, args: list[str], code: int, words: str, why: str = "") -> None:
+    """The one WARNING a `logged` call leaves when it did not run, or did not finish (`_run`):
+    which call, on which project, its exit and the titles asked; the method's own `words`, and
+    `why` in TCC's when TCC reads them as something."""
+    app_log.logger().warning("`%s` on %s did not run, or did not finish (exit %s), asked %s; "
+                             "the method said:\n%s%s", args[0], project_dir, code,
+                             args[1:] or "its default", words,
+                             f"\nTCC reads that as: {why}" if why else "")
 
 
 def enter_phase(project_dir: Path, phase: str) -> str:
