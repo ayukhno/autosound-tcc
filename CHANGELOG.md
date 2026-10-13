@@ -136,10 +136,12 @@ suite ran against the method's candidate before its release. The guide's method 
   copy the readings went to until the next step starts a fresh bank.
 - **A write from a terminal no longer saves over TCC's** (tcc#178): the method run by hand, or by an agent in a
   terminal, took no lock, so a write it made while TCC wrote saved the plan it had loaded over TCC's step. From
-  v3.1.3 the method locks its own writes. TCC gives that lock at most 5 s — a quarter of a write's time limit —
-  and a write that still meets it answers «busy» in the method's words: nothing written, try again. A write that
-  landed without the lock (a shared folder on Windows) and a capture plan the method could not write are said on
-  the strip, once each per run.
+  v3.1.3 the method locks its own writes. TCC waits for that lock at most a quarter of a write's time limit (5 s
+  for most writes), and a write that still meets it answers «busy» in the method's words: nothing written, try
+  again — except a capture round's close, which takes the lock three times and, stopped after the first, names
+  what already landed. The close now has the capture check's time limit, since it reads REW as the check does. A
+  write that landed without the lock (a shared folder on Windows) and a capture plan the method could not write
+  are said on the strip, once each per run.
 - **A git set to ask for ultimate trust no longer refuses a good release** (tcc#178): with `gpg.minTrustLevel`
   at `ultimate` in git's settings, the update press read a release the method's installers accept as a bad
   signature. The check holds the level at `fully`, as the installers do.

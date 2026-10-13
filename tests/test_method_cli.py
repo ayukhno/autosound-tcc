@@ -1032,7 +1032,7 @@ def test_the_method_s_exit_75_is_busy_in_its_own_words(tmp_path, monkeypatch, ap
 
     assert str(busy.value) == said
     assert [record.getMessage() for record in app_log_warnings] == [
-        f"busy: `add-step` on {car} wrote nothing: {said}"]
+        f"busy: `add-step` on {car}, the method's own lock: {said}"]
 
 
 @pytest.mark.parametrize("lock_wait_s, timeout_s, sent", [
@@ -1045,9 +1045,8 @@ def test_the_method_s_exit_75_is_busy_in_its_own_words(tmp_path, monkeypatch, ap
 def test_the_method_s_lock_wait_is_set_per_call_within_the_child_s_bound(
         tmp_path, monkeypatch, lock_wait_s, timeout_s, sent):
     """`AUTOSOUND_LOCK_TIMEOUT_S`, on every call: the wait TCC gives its own lock, but never more
-    than a quarter of the child's bound — `capture-close` takes the method's lock twice, around its
-    read of REW, and a child cut at its bound is `TimedOut`, never the `busy` the method would have
-    said. Never in `child_env()`: an agent's session takes its environment from there, and its own
+    than a quarter of the child's bound — a child waits that long per hold, and one cut at its
+    bound is `TimedOut`, never the `busy` the method would have said. Never in `child_env()`: an agent's session takes its environment from there, and its own
     writers would inherit TCC's short wait."""
     if not process_writer.is_available():
         pytest.skip("skill submodule not checked out")
@@ -1063,12 +1062,15 @@ def test_the_method_s_lock_wait_is_set_per_call_within_the_child_s_bound(
     assert method_cli.METHOD_LOCK_WAIT_ENV not in vendor_loader.child_env()
 
 
-def test_a_note_on_a_write_that_landed_is_told_once_per_run(tmp_path, monkeypatch, app_log_told):
-    """v3.1.3: a `note:` line on stderr with exit 0 says what the write did not do — `<project>
-    cannot be locked`, a write that landed without the method's lock (a shared folder on Windows,
-    where TCC's own lock takes none across processes), or `capture-start`'s plan file not written.
-    The person hears it on the strip; the same line again in this run goes to the log alone, since
-    every write on such a folder prints it. Other lines on stderr are not notes, and the answer is
+@pytest.mark.parametrize("code", [0, 1])
+def test_a_note_on_a_write_that_landed_is_told_once_per_run(tmp_path, monkeypatch, app_log_told,
+                                                            code):
+    """v3.1.3: a `note:` line on stderr says what a write did not do — `<project> cannot be locked`,
+    a write that landed without the method's lock (a shared folder on Windows, where TCC's own lock
+    takes none across processes), or `capture-start`'s plan file not written. The person hears it
+    on the strip; the same line again in this run goes to the log alone, since every write on such
+    a folder prints it. On exit 1 too: `capture-check` answers 1 with its verdicts written, and
+    `_run` hands back its stdout alone. Other lines on stderr are not notes, and the answer is
     handed back as it was."""
     if not process_writer.is_available():
         pytest.skip("skill submodule not checked out")
@@ -1077,10 +1079,52 @@ def test_a_note_on_a_write_that_landed_is_told_once_per_run(tmp_path, monkeypatc
     note = (f"note: {car} cannot be locked (Operation not supported) -- writing without the "
             "project lock; two writers at once can lose a write here")
     err = f"reading the round\n{note}"
-    _a_child_that_exits(monkeypatch, 0, err, out="step 2.1 added")
+    _a_child_that_exits(monkeypatch, code, err, out="step 2.1 added")
 
     answers = [method_cli.spawn(car, "state/process.py", [str(car / "process"), "add-step", "2.1"],
                                 timeout_s=20) for _ in range(2)]
 
-    assert answers == [(0, "step 2.1 added", err)] * 2
+    assert answers == [(code, "step 2.1 added", err)] * 2
     assert app_log_told == [note]
+
+
+def test_a_busy_answer_carries_its_note_and_does_not_tell_it_apart(tmp_path, monkeypatch,
+                                                                   app_log_told):
+    """A busy write's stderr is `Busy`'s own sentence, said whole by whoever catches it; a note in
+    it is not told on the strip a second time."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    car = tmp_path / "car"
+    car.mkdir()
+    err = f"note: {car} cannot be locked (Operation not supported) -- writing without\n{_BUSY_LINE}"
+    _a_child_that_exits(monkeypatch, method_cli.EXIT_BUSY, err)
+
+    with pytest.raises(method_cli.Busy) as busy:
+        method_cli.spawn(car, "state/process.py", [str(car / "process"), "add-step", "2.1"],
+                         timeout_s=20)
+
+    assert str(busy.value) == err
+    assert app_log_told == []
+
+
+def test_capture_close_has_room_for_three_holds_of_the_method_s_lock(tmp_path, monkeypatch):
+    """`capture-close` takes the method's lock three times — the reconcile, the checks, the close —
+    and reads REW between them, as `capture-check` does. Its bound is the check's, so the waits a
+    quarter of it allows leave the REW reads room: at the default 20 s, three contended holds used
+    15 s and the child was cut as `TimedOut`, which may have written, where the method would have
+    said what landed."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    car = tmp_path / "car"
+    car.mkdir()
+    bounds: list = []
+
+    def run(argv, **kw):
+        bounds.append(kw["timeout"])
+        return subprocess.CompletedProcess(argv, 0, "closed", "")
+
+    monkeypatch.setattr(method_cli.child, "run_bounded", run)
+
+    process_writer.close_capture(car)
+
+    assert bounds == [120.0]

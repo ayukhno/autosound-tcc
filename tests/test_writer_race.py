@@ -146,6 +146,9 @@ def _tcc_writes_while_the_bare_cli_is_held(project: Path, harness: Path) -> None
             wait([tcc], timeout=TCC_LANDS_S if locks_itself else _TCC_RETURNS_S)
             if not tcc.done() and not locks_itself:
                 raise RuntimeError(f"TCC's write did not return within {_TCC_RETURNS_S:g} s")
+            # On a copy that locks itself TCC's write is still waiting for the method's lock: had
+            # it returned, the lock did not bind it, whatever the plan shows after.
+            assert not (locks_itself and tcc.done()), "TCC's write landed under the bare writer's lock"
             go.touch()
             tcc.result(timeout=_TCC_RETURNS_S)  # TCC's own failure, raised as itself
     finally:

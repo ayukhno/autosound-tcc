@@ -741,11 +741,15 @@ def skip_capture(project_dir: Path, title: str, reason: str) -> str:
 
 
 def close_capture(project_dir: Path, reason: str = "") -> str:
-    """Close the open round. What is neither taken nor skipped is named as outstanding."""
+    """Close the open round. What is neither taken nor skipped is named as outstanding.
+
+    The capture check's bound, not the default: from v3.1.3 the close reads REW as the check does,
+    and takes the method's lock three times — the reconcile, the checks, the close — each wait up
+    to a quarter of the bound (`method_cli.spawn`)."""
     args = ["capture-close"]
     if reason:
         args.append(reason)
-    return _run(project_dir, args)
+    return _run(project_dir, args, timeout_s=max(DEFAULT_TIMEOUT_S, 120.0))
 
 
 def check(project_dir: Path) -> str:

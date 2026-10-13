@@ -84,10 +84,13 @@ class ProcessWriterError(RuntimeError):
 
 
 class Busy(ProcessWriterError):
-    """Another write to this project held the lock past the wait, so this one never started.
+    """Another write to this project held the lock past the wait: TCC's own, so this one never
+    started, or from v3.1.3 the method's, so its child wrote nothing and said so (exit 75).
 
-    The one failure that means "nothing happened, and the same call will work in a moment" — and a
-    `ProcessWriterError`, so every caller that already shows a refusal shows this one too.
+    The one failure that means "the same call will work in a moment" — and a `ProcessWriterError`,
+    so every caller that already shows a refusal shows this one too. One verb is narrower:
+    `capture-close` takes the method's lock three times, and stopped past its first its own line,
+    carried here word for word, names what already landed and says the retry is safe.
     """
 
 
@@ -279,12 +282,13 @@ def spawn(
 
     From v3.1.3 the method takes a lock of its own, which a bare CLI writer holds too (an agent's
     session in a terminal). The child is told how long to wait for it, `METHOD_LOCK_WAIT_ENV`: the
-    wait TCC gives its own, at most a quarter of `timeout_s` — `capture-close` takes it twice,
-    around its read of REW, and a child cut at its bound is `TimedOut`, never the busy it would
-    have said. Never in `child_env()`: an agent's session takes its environment from there. Its
-    exit 75 is `Busy` in its own words, logged as TCC's own busy is; a `note:` line on stderr at
-    exit 0 — a write that landed without the method's lock, a plan file not written — is told to
-    the person (`_tell_notes`). Older copies print neither.
+    wait TCC gives its own, at most a quarter of `timeout_s`, since a child waits that long per
+    hold and one cut at its bound is `TimedOut`, never the busy it would have said (`capture-close`
+    holds three times, and so runs under the capture check's longer bound). Never in
+    `child_env()`: an agent's session takes its environment from there. Its exit 75 is `Busy` in
+    its own words, logged as TCC's own busy is; a `note:` line on stderr — a write that landed
+    without the method's lock, a plan file not written — is told to the person (`_tell_notes`) on
+    any other exit. Older copies print neither.
     """
     project_dir = Path(project_dir)
     args = [str(arg) for arg in args]
@@ -304,7 +308,7 @@ def spawn(
         on_gui_thread = threading.current_thread() is threading.main_thread()
         lock_wait_s = GUI_LOCK_WAIT_S if on_gui_thread else LOCK_WAIT_S
     env = {**env, METHOD_LOCK_WAIT_ENV: f"{min(lock_wait_s, timeout_s / 4):g}"}
-    held =project_lock.hold(project_dir, lock_wait_s) if lock else contextlib.nullcontext()
+    held = project_lock.hold(project_dir, lock_wait_s) if lock else contextlib.nullcontext()
     locking = lock  # until the lock is held: an OSError before that is the lock's
     proc = None  # once the child has come back: an OSError after that is the lock's release
     try:
@@ -364,11 +368,10 @@ def spawn(
     code, out, err = proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
     if code == EXIT_BUSY:
         said = err or BUSY_SAID
-        app_log.logger().warning(
-            "busy: `%s` on %s wrote nothing: %s", _named(script, args, project_dir), project_dir, said)
+        app_log.logger().warning("busy: `%s` on %s, the method's own lock: %s",
+                                 _named(script, args, project_dir), project_dir, said)
         raise Busy(said)
-    if code == 0:
-        _tell_notes(err)
+    _tell_notes(err)
     return code, out, err
 
 
@@ -378,10 +381,11 @@ _NOTES_TOLD: set[str] = set()
 
 
 def _tell_notes(err: str) -> None:
-    """Each `note: ` line on the stderr of a run that exited 0, to the person (`app_log.report`)
-    the first time in this run and to the log alone after that. From v3.1.3 such a line says what a
-    write that landed did not do: `<project> cannot be locked` (a shared folder on Windows, where
-    TCC's own lock takes none across processes), `capture-start`'s plan file not written."""
+    """Each `note: ` line on a run's stderr, to the person (`app_log.report`) the first time in
+    this run and to the log alone after that. From v3.1.3 such a line says what a write that landed
+    did not do: `<project> cannot be locked` (a shared folder on Windows, where TCC's own lock takes
+    none across processes), `capture-start`'s plan file not written. Not only at exit 0:
+    `capture-check` answers 1 with its verdicts written, and `_run` hands back its stdout alone."""
     for line in err.splitlines():
         line = line.strip()
         if not line.startswith("note: "):
