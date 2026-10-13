@@ -831,8 +831,11 @@ def test_the_copy_beside_the_store_is_looked_for_once_not_at_every_permission(
 def _another_process_sets_it_aside(store) -> str:
     """What a second TCC on the same folder (the Mac and the VM over a shared folder), or the CLI,
     does to a store it finds broken: moves it beside itself and counts and says it in ITS process.
-    `os.replace` here, not `own_store`, so nothing in this process is counted or said."""
-    copy = store.parent / "tcc-project.json.corrupt-20261013-200000"
+    `os.replace` here, not `own_store`, so nothing in this process is counted or said. Its stamp
+    sorts after any copy this run makes: the second process set it aside later. A stamp of a real
+    day failed from that day's hour on, where the run's own copy came out newer (N2's run of
+    beta-v3.1.3-rc1, hub #271)."""
+    copy = store.parent / "tcc-project.json.corrupt-29991231-235959"
     os.replace(store, copy)
     return copy.name
 
