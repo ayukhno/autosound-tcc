@@ -72,6 +72,43 @@ def test_a_copy_older_than_json_is_said_as_too_old(tmp_path, monkeypatch):
     assert handoff.ask(tmp_path) == (None, None)
 
 
+def test_a_copy_tcc_does_not_update_too_old_for_the_check_is_told_to_update_that_copy(
+        tmp_path, monkeypatch, other_copy, own_copy_is_the_submodule):
+    """The end-of-branch review, code m1: `ask` answered `(None, None)` for a method too old for
+    `handoff --json` whichever copy the project ran, so the window said «Update the method» — and
+    TCC's update row updates TCC's own copy, nothing of a copy installed or approved on this
+    machine. `_refuse_if_too_old` had built the remedy for that copy (M28): update that copy, or
+    re-link the project to TCC's. That sentence is the answer now; TCC's own copy keeps «Update
+    the method» (`…_is_said_as_such`)."""
+    from tests._method_copies import linked_and_approved
+
+    car = tmp_path / "car"
+    binding = linked_and_approved(car, other_copy)
+    monkeypatch.setattr(method_cli.child, "run_bounded", lambda argv, **_k: subprocess.CompletedProcess(
+        argv, 2, "", "usage: process.py <process-dir> <command> [args]"))
+
+    answer, why = handoff.ask(car)
+
+    assert answer is None
+    assert why and str(binding.skill_dir) in why and "re-link" in why, why
+    assert "update row offers it" not in why, why
+
+
+def test_a_copy_tcc_does_not_update_that_lacks_json_is_told_to_update_that_copy(
+        tmp_path, own_copy_is_the_submodule):
+    """The same for an approved copy whose `process.py` does not know `--json` (`UnknownFlag`,
+    refused before it starts): its own sentence — update it, or re-link — not «Update the
+    method», which would point at TCC's update row."""
+    from tests._method_copies import copy_of_the_method, linked_and_approved
+
+    older = copy_of_the_method(tmp_path / "older", changes={
+        "rew_tool/state/process.py": lambda text: text.replace("--json", "")})
+    car = tmp_path / "car"
+    linked_and_approved(car, older)
+
+    assert handoff.ask(car) == (None, str(process_writer.UnknownFlag("--json")))
+
+
 _CRASH = ("Traceback (most recent call last):\n  File \"process.py\", line 3990, in _main\n"
           "AttributeError: 'list' object has no attribute 'get'")
 

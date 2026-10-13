@@ -24,7 +24,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import app_log, method_cli, process_writer
+from autosound_tcc.core import app_log, method_binding, method_cli, process_writer
 
 #: What the window says for a check that got no answer: TCC's words around the method's or the
 #: system's. English, as every sentence `core` writes is — it does not import the ui.
@@ -35,9 +35,13 @@ CRASHED = "The method crashed on the handoff check: {why}"
 def ask(project_dir: Path) -> tuple[Optional[dict], Optional[str]]:
     """The method's answer and None — or None and why there is none, for the window to say:
 
-    * None — the method is too old for `handoff --json`: it answered with its usage text
-      (`process_writer.TooOld`), or its `process.py` does not know `--json` (`UnknownFlag`). The
-      one case «update the method» fixes; the window says that in the Arbiter's language.
+    * None — TCC's own copy of the method is too old for `handoff --json`: it answered with its
+      usage text (`process_writer.TooOld`), or its `process.py` does not know `--json`
+      (`UnknownFlag`). The one case «update the method» fixes; the window says that in the
+      Arbiter's language.
+    * the copy's own remedy — the same for a copy found installed or approved on this machine,
+      which TCC's update row does not update: update that copy, or re-link the project to TCC's
+      (M28; the end-of-branch review, code m1).
     * the binding's sentence — a copy of the method TCC will not run (#169): re-link it, or
       approve it. `method_cli` has logged it.
     * `NO_ANSWER` — a timeout, an interpreter that would not start, the script not there, the
@@ -48,6 +52,9 @@ def ask(project_dir: Path) -> tuple[Optional[dict], Optional[str]]:
         code, out, err = process_writer.handoff_json(Path(project_dir))
     except (process_writer.TooOld, process_writer.UnknownFlag) as exc:
         app_log.logger().info("handoff: the method is too old for the check: %s", exc)
+        if method_binding.for_project(Path(project_dir)).state in (method_binding.KNOWN,
+                                                                     method_binding.APPROVED):
+            return None, str(exc)  # that copy's remedy: TCC's update row does not reach it
         return None, None
     except process_writer.Refused as exc:
         return None, str(exc)
