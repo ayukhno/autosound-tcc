@@ -486,7 +486,8 @@ def test_every_other_launcher_answers_a_refused_binding_with_its_sentence_and_st
 def test_spawn_runs_what_resolve_answers(tmp_path, monkeypatch):
     """`spawn` takes its script and its environment from `resolve` — the resolver `contract_check`
     and `intake_form` ask for theirs — so a launcher that keeps a `Popen` of its own cannot run
-    another copy than `spawn` would (#169)."""
+    another copy than `spawn` would (#169). `spawn` adds one thing, the method's own lock wait,
+    to a copy: what `resolve` answered stays as it was."""
     script = tmp_path / "copy" / "rew_tool" / "contract.py"
     script.parent.mkdir(parents=True)
     script.write_text("", encoding="utf-8")
@@ -507,7 +508,8 @@ def test_spawn_runs_what_resolve_answers(tmp_path, monkeypatch):
     method_cli.spawn(car, "contract.py", ["check", car], timeout_s=5, lock=False)
 
     assert asked == [(car, "contract.py", ["check", str(car)])]
-    assert started == [([str(script), "check", str(car)], {"FROM": "resolve"})]
+    assert started == [([str(script), "check", str(car)],
+                        {"FROM": "resolve", method_cli.METHOD_LOCK_WAIT_ENV: "1.25"})]
 
 
 # ---- the one door, as a rule (#169) -------------------------------------------------------------
@@ -988,3 +990,97 @@ def test_a_script_missing_from_a_bound_copy_names_that_copy_and_its_remedy(tmp_p
     assert str(other) in said and "re-link" in said and str(_entry(car)) in said, said
     assert "submodule" not in said, said
 
+
+
+# ---- the method's own writer lock (v3.1.3, its CONTRACT.md item 8) ------------------------------
+
+_BUSY_LINE = ("busy: /car/.autosound/write.lock is held by another writer -- nothing was written, "
+              "safe to retry")
+
+
+def _a_child_that_exits(monkeypatch, code: int, err: str = "", out: str = "") -> list:
+    """`run_bounded` answering `code`, `out` and `err`; returns the environment each child was given."""
+    envs: list = []
+
+    def run(argv, **kw):
+        envs.append(kw["env"])
+        return subprocess.CompletedProcess(argv, code, out, err)
+
+    monkeypatch.setattr(method_cli.child, "run_bounded", run)
+    return envs
+
+
+@pytest.mark.parametrize("err, said", [(_BUSY_LINE, _BUSY_LINE),
+                                       ("", method_cli.BUSY_SAID)])
+def test_the_method_s_exit_75_is_busy_in_its_own_words(tmp_path, monkeypatch, app_log_warnings,
+                                                       err, said):
+    """From v3.1.3 the method's writers take a lock of their own and answer 75 when another writer
+    holds it past the wait: one `busy:` line, nothing written, safe to retry. That is TCC's `Busy` —
+    the same call will work in a moment, and a caller that stops a batch after a busy write stops
+    after this one — carrying the method's own line, or TCC's when the child printed none. The log
+    hears it once, in the busy line's form, as it hears TCC's own lock refusing."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    car = tmp_path / "car"
+    car.mkdir()
+    _a_child_that_exits(monkeypatch, method_cli.EXIT_BUSY, err)
+    app_log_warnings.clear()
+
+    with pytest.raises(method_cli.Busy) as busy:
+        method_cli.spawn(car, "state/process.py", [str(car / "process"), "add-step", "2.1"],
+                         timeout_s=20)
+
+    assert str(busy.value) == said
+    assert [record.getMessage() for record in app_log_warnings] == [
+        f"busy: `add-step` on {car} wrote nothing: {said}"]
+
+
+@pytest.mark.parametrize("lock_wait_s, timeout_s, sent", [
+    (5.0, 20, "5"),     # the GUI thread's own wait
+    (60.0, 20, "5"),    # a worker's, cut to a quarter of the child's bound
+    (60.0, 120, "30"),  # the capture check's longer bound
+    (0.2, 20, "0.2"),   # a caller that names its wait
+    (0.0, 20, "0"),     # try once
+])
+def test_the_method_s_lock_wait_is_set_per_call_within_the_child_s_bound(
+        tmp_path, monkeypatch, lock_wait_s, timeout_s, sent):
+    """`AUTOSOUND_LOCK_TIMEOUT_S`, on every call: the wait TCC gives its own lock, but never more
+    than a quarter of the child's bound — `capture-close` takes the method's lock twice, around its
+    read of REW, and a child cut at its bound is `TimedOut`, never the `busy` the method would have
+    said. Never in `child_env()`: an agent's session takes its environment from there, and its own
+    writers would inherit TCC's short wait."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    monkeypatch.delenv(method_cli.METHOD_LOCK_WAIT_ENV, raising=False)
+    car = tmp_path / "car"
+    car.mkdir()
+    envs = _a_child_that_exits(monkeypatch, 0)
+
+    method_cli.spawn(car, "state/process.py", [str(car / "process"), "show"],
+                     timeout_s=timeout_s, lock_wait_s=lock_wait_s)
+
+    assert envs[0][method_cli.METHOD_LOCK_WAIT_ENV] == sent
+    assert method_cli.METHOD_LOCK_WAIT_ENV not in vendor_loader.child_env()
+
+
+def test_a_note_on_a_write_that_landed_is_told_once_per_run(tmp_path, monkeypatch, app_log_told):
+    """v3.1.3: a `note:` line on stderr with exit 0 says what the write did not do — `<project>
+    cannot be locked`, a write that landed without the method's lock (a shared folder on Windows,
+    where TCC's own lock takes none across processes), or `capture-start`'s plan file not written.
+    The person hears it on the strip; the same line again in this run goes to the log alone, since
+    every write on such a folder prints it. Other lines on stderr are not notes, and the answer is
+    handed back as it was."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    car = tmp_path / "car"
+    car.mkdir()
+    note = (f"note: {car} cannot be locked (Operation not supported) -- writing without the "
+            "project lock; two writers at once can lose a write here")
+    err = f"reading the round\n{note}"
+    _a_child_that_exits(monkeypatch, 0, err, out="step 2.1 added")
+
+    answers = [method_cli.spawn(car, "state/process.py", [str(car / "process"), "add-step", "2.1"],
+                                timeout_s=20) for _ in range(2)]
+
+    assert answers == [(0, "step 2.1 added", err)] * 2
+    assert app_log_told == [note]

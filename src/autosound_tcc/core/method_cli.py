@@ -52,6 +52,14 @@ from autosound_tcc.core import app_log, child, method_binding, project_lock, ven
 GUI_LOCK_WAIT_S = 5.0
 LOCK_WAIT_S = 60.0
 
+#: The method's own writer lock, from v3.1.3 (its `rew_tool/write_lock.py`, `CONTRACT.md` item 8):
+#: a writer that meets another waits `AUTOSOUND_LOCK_TIMEOUT_S` seconds, read at each call, then
+#: exits 75 with one `busy:` line and nothing written.
+METHOD_LOCK_WAIT_ENV = "AUTOSOUND_LOCK_TIMEOUT_S"
+EXIT_BUSY = 75
+#: What `Busy` says when the busy write printed nothing of its own: TCC's lock past its wait.
+BUSY_SAID = "busy: another write to this project is still running — nothing was written, try again"
+
 #: The method's journal writer, relative to its `rew_tool/`: the one script whose flags are checked
 #: against its text before it starts (#169, N19).
 PROCESS_SCRIPT = "state/process.py"
@@ -268,6 +276,15 @@ def spawn(
     raises is the answer, with nothing started — the caller's own question about the project as
     it stands when its turn comes, which a read before the call cannot answer: another write may
     change the project while this one waits (`process_writer.check_captures`, the round asked for).
+
+    From v3.1.3 the method takes a lock of its own, which a bare CLI writer holds too (an agent's
+    session in a terminal). The child is told how long to wait for it, `METHOD_LOCK_WAIT_ENV`: the
+    wait TCC gives its own, at most a quarter of `timeout_s` — `capture-close` takes it twice,
+    around its read of REW, and a child cut at its bound is `TimedOut`, never the busy it would
+    have said. Never in `child_env()`: an agent's session takes its environment from there. Its
+    exit 75 is `Busy` in its own words, logged as TCC's own busy is; a `note:` line on stderr at
+    exit 0 — a write that landed without the method's lock, a plan file not written — is told to
+    the person (`_tell_notes`). Older copies print neither.
     """
     project_dir = Path(project_dir)
     args = [str(arg) for arg in args]
@@ -286,7 +303,8 @@ def spawn(
     if lock_wait_s is None:
         on_gui_thread = threading.current_thread() is threading.main_thread()
         lock_wait_s = GUI_LOCK_WAIT_S if on_gui_thread else LOCK_WAIT_S
-    held = project_lock.hold(project_dir, lock_wait_s) if lock else contextlib.nullcontext()
+    env = {**env, METHOD_LOCK_WAIT_ENV: f"{min(lock_wait_s, timeout_s / 4):g}"}
+    held =project_lock.hold(project_dir, lock_wait_s) if lock else contextlib.nullcontext()
     locking = lock  # until the lock is held: an OSError before that is the lock's
     proc = None  # once the child has come back: an OSError after that is the lock's release
     try:
@@ -318,9 +336,7 @@ def spawn(
         app_log.logger().warning(
             "busy: `%s` on %s was not run: %s", _named(script, args, project_dir), project_dir, exc
         )
-        raise Busy(
-            "busy: another write to this project is still running — nothing was written, try again"
-        ) from exc
+        raise Busy(BUSY_SAID) from exc
     except subprocess.TimeoutExpired as exc:
         # Logged as busy is, and more so: a child cut halfway may have written, and what it had
         # said on stderr goes nowhere else (#169 review I6).
@@ -345,4 +361,33 @@ def spawn(
             "failed: `%s` on %s ran (exit %s, its answer kept), then releasing the lock %s failed: "
             "%s", _named(script, args, project_dir), project_dir, proc.returncode,
             project_lock.lock_file(project_dir), exc)
-    return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+    code, out, err = proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+    if code == EXIT_BUSY:
+        said = err or BUSY_SAID
+        app_log.logger().warning(
+            "busy: `%s` on %s wrote nothing: %s", _named(script, args, project_dir), project_dir, said)
+        raise Busy(said)
+    if code == 0:
+        _tell_notes(err)
+    return code, out, err
+
+
+#: The `note:` lines told in this run (`_tell_notes`): every write on a folder the method cannot
+#: lock prints the same one.
+_NOTES_TOLD: set[str] = set()
+
+
+def _tell_notes(err: str) -> None:
+    """Each `note: ` line on the stderr of a run that exited 0, to the person (`app_log.report`)
+    the first time in this run and to the log alone after that. From v3.1.3 such a line says what a
+    write that landed did not do: `<project> cannot be locked` (a shared folder on Windows, where
+    TCC's own lock takes none across processes), `capture-start`'s plan file not written."""
+    for line in err.splitlines():
+        line = line.strip()
+        if not line.startswith("note: "):
+            continue
+        if line in _NOTES_TOLD:
+            app_log.logger().warning("%s", line)
+            continue
+        _NOTES_TOLD.add(line)
+        app_log.report(line)
