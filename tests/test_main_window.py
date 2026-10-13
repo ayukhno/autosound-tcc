@@ -6151,6 +6151,37 @@ def test_a_did_not_run_line_is_taken_back_when_its_cause_ends_without_tccs_check
         "a bad verdict is asked again; a fine one, or a closed round, is not"
 
 
+def test_a_check_refused_over_a_round_the_session_closed_is_not_said(monkeypatch):
+    """The re-review of G6+G7 fix A, I1's residual: the session closed the round while TCC's check
+    waited on the project's lock. The close's write fired the process refresh before the child's
+    refusal came, so «did not run: no capture round is open» was said over a closed round, and
+    stood until the next refresh or REW change. Its cause is over before it is said: not said,
+    and the title-fix offer keeps its slot. The real method's refusal, on a host with a real strip."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import workers
+    from autosound_tcc.ui.tcc.status_strip import StatusStrip
+    from tests import _rounds
+
+    process = _rounds.write_round(config.project_dir(), version=1, expected=["w-L_1 (sw)"],
+                                  taken=["w-L_1 (sw)"])
+    typed = [_rounds.as_typed("w-L_1 (sw)")]
+    process.close_capture()  # the session's, while TCC's check waited on the lock
+    with pytest.raises(process_writer.ProcessWriterError) as refused:
+        process_writer.check_captures(config.project_dir(), typed)
+    why = workers.capture_check_not_run(refused.value)
+    assert "no capture round is open" in why, why
+    _app()
+    strip, offered = StatusStrip(), frozenset({("wL_01 (sw)", typed[0])})
+    host = SimpleNamespace(_status_strip=strip, _capture_check=SimpleNamespace(titles=list(typed)),
+                           _title_fixes_said=offered, _on_rew_titles_changed=lambda: None)
+
+    MainWindow._on_capture_check_failed(host, why)
+
+    assert (strip.text(), strip.waiting()) == ("", []), "nothing said over a closed round"
+    assert getattr(host, "_capture_check_not_run", None) is None
+    assert host._title_fixes_said == offered, "the offer's slot was not taken"
+
+
 def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch):
     """Review M10 (tcc#21): the ledger write asks for a check of what it just recorded while the
     check the import itself set off is still running. "The next title change re-triggers it" held

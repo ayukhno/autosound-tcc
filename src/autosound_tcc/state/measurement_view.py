@@ -434,10 +434,15 @@ class NotRun:
     since: str = ""
 
     @classmethod
-    def at(cls, line: str, asked) -> "NotRun":
-        """The line, said now, about the round as it stands now (`process_view.capture_round`)."""
-        return cls(line, (process_view.capture_round() or {}).get("id"),
-                   tuple(str(t) for t in asked or ()),
+    def at(cls, line: str, asked) -> Optional["NotRun"]:
+        """The line, said now, about the round as it stands now (`process_view.capture_round`) — or
+        None when that round is closed already, its cause over before it is said: the session
+        closed it while the check waited on the project's lock, and the close's own refresh ran
+        before the refusal came (I1's residual, the re-review of the G6+G7 fix)."""
+        round_ = process_view.capture_round() or {}
+        if round_.get("closed"):
+            return None
+        return cls(line, round_.get("id"), tuple(str(t) for t in asked or ()),
                    datetime.now(timezone.utc).isoformat(timespec="seconds"))
 
     def ended(self, round_: Optional[dict], rew_titles, project_dir: Optional[Path] = None) -> bool:
