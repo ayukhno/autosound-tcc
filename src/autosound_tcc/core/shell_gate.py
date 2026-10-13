@@ -75,10 +75,25 @@ STRICTEST_SAID = ("{path} holds this project's gate and could not be read, so TC
 
 #: The same, for a store that did not parse and was set aside (`own_store`), with no gate written
 #: since (the end-of-branch review, code I1): the file reads again — absent, or the fresh one the
-#: next write lands — and the gate it held is gone with the old one, so only a pick ends it.
+#: next write lands — and the gate it held is gone with the old one, so only a pick ends it. Across
+#: a restart too: the next run finds the copy (`STRICTEST_COPY_SAID`).
 STRICTEST_ASIDE_SAID = ("{path} held this project's gate and could not be read, so it was set "
                         "aside and TCC asks before every write — the strictest gate — until a "
                         "gate is picked")
+
+#: The same, for a run that did not see it set aside: a store with no gate and a copy of it set
+#: aside beside it, left by an earlier run whose count went with it (Fable's re-review of the
+#: branch fix, I1). Before, the strictest the line above promised ended at the next launch, with
+#: nothing said. The copy stays until the person deletes it, so only a pick ends this either.
+STRICTEST_COPY_SAID = ("{path} holds no gate, and {copy} beside it is a copy of it set aside as "
+                       "broken, so TCC asks before every write — the strictest gate — until a "
+                       "gate is picked")
+
+#: The same, when the folder could not be listed for such a copy while the store itself reads:
+#: whether one is there is not known, and an unknown is the strictest, as for R-bt.
+STRICTEST_UNLISTED_SAID = ("{path} holds no gate, and its folder could not be looked in for a "
+                           "copy of it set aside as broken ({why}), so TCC asks before every "
+                           "write — the strictest gate — until a gate is picked")
 
 #: The stores the strictest gate has been said for in this stretch of answering it, with what was
 #: said: once per stretch, not once per permission judged — and again when why changes.
@@ -87,6 +102,10 @@ _strictest_said: dict[str, str] = {}
 #: was last read from it, or held for the run: set aside more often than that, no gate has been
 #: written since.
 _gate_seen: dict[str, int] = {}
+#: For each store, what looking beside it for a copy set aside found while it held no gate — the
+#: sentence to say (`STRICTEST_COPY_SAID`, `STRICTEST_UNLISTED_SAID`), or "" — looked for once a
+#: run, not at every permission judged; "" once a gate is picked, and a copy there then is history.
+_copy_seen: dict[str, str] = {}
 _strictest_lock = threading.Lock()
 
 
@@ -104,7 +123,11 @@ def project_gate(tcc_dir: Path, machine_choice: str = "",
     `{}` read as «no gate» ran the car on the machine's gate or `auto` (the end-of-branch review,
     code I1). Set aside with no gate read from the store or held since — a write of another field
     lands a fresh file with none in it — it is the strictest until a gate is picked
-    (`STRICTEST_ASIDE_SAID`). For this run: `own_store`'s count is the process's.
+    (`STRICTEST_ASIDE_SAID`). `own_store`'s count is the process's; what outlives it is the copy
+    set aside beside the store, so a store with no gate and such a copy beside it is the same in
+    a later run (`STRICTEST_COPY_SAID`, Fable's re-review of the branch fix, I1) — looked for once
+    a run, not at every permission. A folder that cannot be looked in leaves it unknown: the
+    strictest too (`STRICTEST_UNLISTED_SAID`).
 
     `on_strictest` hears that same first answer: the window pushes the strictest to a session
     already running on another gate, so the session, the menu and the strip agree (the re-review,
@@ -115,23 +138,40 @@ def project_gate(tcc_dir: Path, machine_choice: str = "",
     try:
         chosen = project_settings.get(tcc_dir, PROJECT_KEY, "", strict=True) or ""
     except own_store.StoreUnreadable:
-        return _strictest(store, STRICTEST_SAID, on_strictest)
+        return _strictest(store, STRICTEST_SAID.format(path=store), on_strictest)
     since = own_store.times_set_aside(path)
     with _strictest_lock:
         if chosen:  # read from the store, or held for the run: picked either way
             _gate_seen[store] = max(_gate_seen.get(store, 0), asides)
+            _copy_seen[store] = ""  # and a copy already beside it is history
         gone = not chosen and since > _gate_seen.get(store, 0)
-        if not gone:
-            _strictest_said.pop(store, None)
+        copy = "" if chosen or gone else _copy_seen.get(store)
+    if copy is None:
+        copy = _look_for_copy(path)
+        with _strictest_lock:
+            copy = _copy_seen.setdefault(store, copy)  # a pick meanwhile has the last word
     if gone:
-        return _strictest(store, STRICTEST_ASIDE_SAID, on_strictest)
+        return _strictest(store, STRICTEST_ASIDE_SAID.format(path=store), on_strictest)
+    if copy:
+        return _strictest(store, copy, on_strictest)
+    with _strictest_lock:
+        _strictest_said.pop(store, None)
     return effective_gate(chosen, machine_choice)
 
 
-def _strictest(store: str, sentence: str, on_strictest: Optional[Callable[[], None]]) -> str:
+def _look_for_copy(path: Path) -> str:
+    """What looking beside a store with no gate found: the sentence for the newest copy of it set
+    aside as broken, the one for a folder that cannot be looked in, or "" — no copy there."""
+    try:
+        copies = own_store.set_aside_copies(path)
+    except OSError as exc:
+        return STRICTEST_UNLISTED_SAID.format(path=path, why=exc.strerror or str(exc))
+    return STRICTEST_COPY_SAID.format(path=path, copy=copies[-1]) if copies else ""
+
+
+def _strictest(store: str, said: str, on_strictest: Optional[Callable[[], None]]) -> str:
     """`GATE_WRITES`, said when this stretch of it starts or its reason changes, and pushed
     (`on_strictest`) when the stretch starts."""
-    said = sentence.format(path=store)
     with _strictest_lock:
         before = _strictest_said.get(store)
         _strictest_said[store] = said

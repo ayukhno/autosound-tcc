@@ -11,7 +11,7 @@ else the file held was gone, and nothing said so (#173, F5). Here the three are 
   beside it (or into the folder its owner names, `aside_dir`), the person is told, and `{}`
   comes back. The next write starts a fresh file, and the original bytes are still there for
   whoever wants them. A reader to whom that `{}` is not «nothing here» asks `aside_said` and
-  `times_set_aside`;
+  `times_set_aside` — and, in a later run, `set_aside_copies`;
 * **there but unreadable** (any other `OSError`: no permission, a folder where the file should
   be, a broken file that could not be moved) — the person is told and `StoreUnreadable` is
   raised (`StoreNotSetAside`, a kind of it, for the broken file that could not be moved).
@@ -239,11 +239,31 @@ def times_set_aside(path: Path) -> int:
         return _asides.get(os.path.abspath(path), 0)
 
 
+def set_aside_copies(path: Path) -> list[str]:
+    """The names of the copies this store was set aside as beside it (`<name>.corrupt-*`), oldest
+    first: what a set-aside leaves once the run that counted it is over — the count is this
+    process's, the copy stays until the person deletes it (Fable's re-review of the branch fix,
+    I1). `[]` when the folder is not there; a folder that is there and cannot be listed raises
+    its `OSError`: whether a copy is in it is not known."""
+    path = Path(path)
+    prefix = _aside_prefix(path)
+    try:
+        with os.scandir(path.parent) as entries:
+            return sorted(entry.name for entry in entries if entry.name.startswith(prefix))
+    except FileNotFoundError:
+        return []
+
+
 def _forget_aside(path: Path) -> None:
     """A fresh file written, or a file read whole: the store is no longer the one set aside."""
     if _aside_said:
         with _said_lock:
             _aside_said.pop(os.path.abspath(path), None)
+
+
+def _aside_prefix(path: Path) -> str:
+    """What every copy `path` is set aside as is named from, beside it: `<name>.corrupt-`."""
+    return f"{path.name}.corrupt-"
 
 
 def _reserve_aside(path: Path, aside_dir: Optional[Path] = None) -> Path:
@@ -259,7 +279,7 @@ def _reserve_aside(path: Path, aside_dir: Optional[Path] = None) -> Path:
     if aside_dir is not None:
         folder = Path(aside_dir)
         folder.mkdir(parents=True, exist_ok=True)
-    stem = f"{path.name}.corrupt-{_stamp()}"
+    stem = f"{_aside_prefix(path)}{_stamp()}"
     n = 1
     while True:
         aside = folder / (stem if n == 1 else f"{stem}-{n}")

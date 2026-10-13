@@ -8,6 +8,8 @@ rule its direct form trips, and the one needless question (finding 123's class) 
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from autosound_tcc.core.shell_gate import bash_is_dangerous
@@ -729,3 +731,120 @@ def test_a_gate_read_that_loses_the_race_to_set_the_store_aside_runs_the_stricte
 
     assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
     assert raced
+
+
+def _restart(tcc_dir) -> None:
+    """What a restart forgets about this project's store: every memo this process keeps about it —
+    how often it was set aside and what was said, the gate last seen, a copy looked for, a pick held
+    for the run (Fable's re-review of the branch fix, I1)."""
+    import os
+
+    from autosound_tcc.core import own_store, project_settings, shell_gate
+
+    store = project_settings.path_for(tcc_dir)
+    key = os.path.abspath(store)
+    with own_store._said_lock:
+        own_store._asides.pop(key, None)
+        own_store._aside_said.pop(key, None)
+        for kind in ("read", "write"):
+            own_store._said.pop((key, kind), None)
+    with shell_gate._strictest_lock:
+        for memo in (shell_gate._gate_seen, shell_gate._strictest_said, shell_gate._copy_seen):
+            memo.pop(str(store), None)
+    with project_settings._held_lock:
+        project_settings._held.pop(project_settings._slot(tcc_dir, shell_gate.PROJECT_KEY), None)
+
+
+@pytest.mark.parametrize("landed", ["nothing", "an effort pick"])
+def test_a_store_set_aside_runs_the_strictest_gate_after_a_restart_until_a_gate_is_picked(
+        tmp_path, app_log_told, landed):
+    """Fable's re-review of the branch fix, I1. How often a store was set aside is the process's
+    count, so the strictest the strip promised «until a gate is picked» ended at the next launch:
+    the project ran on the machine's gate or `auto`, and nothing said so — whether the store was
+    left absent or an effort pick had landed a fresh one with no gate. The copy set aside stays
+    beside it on the disk: a store with no gate and such a copy is the strictest, said once for
+    the run with the copy named and pushed to a running session. A pick ends it, and the next
+    launch keeps the pick."""
+    from autosound_tcc.core import project_settings, shell_gate
+
+    store = project_settings.path_for(tmp_path)
+    store.write_text(_CUT, encoding="utf-8")
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
+    if landed == "an effort pick":
+        project_settings.set_value(tmp_path, "effort", "low")
+    [copy] = [path.name for path in tmp_path.iterdir() if ".corrupt-" in path.name]
+    assert store.exists() == (landed == "an effort pick")
+    told = len(app_log_told)
+    pushed: list = []
+
+    _restart(tmp_path)
+
+    for machine in ("", shell_gate.GATE_FOREIGN, shell_gate.GATE_AUTO):
+        assert shell_gate.project_gate(tmp_path, machine, on_strictest=lambda: pushed.append(1)) \
+            == shell_gate.GATE_WRITES, machine
+    said = shell_gate.STRICTEST_COPY_SAID.format(path=store, copy=copy)
+    assert app_log_told[told:] == [said], app_log_told[told:]
+    assert pushed == [1], "pushed once, with the first answer"
+
+    assert project_settings.pick(tmp_path, shell_gate.PROJECT_KEY, shell_gate.GATE_FOREIGN).landed
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_FOREIGN
+    _restart(tmp_path)
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_FOREIGN, \
+        "the pick is in the store: the copy beside it is history"
+    assert app_log_told[told:] == [said], "and nothing more said"
+
+
+def test_the_copy_beside_the_store_is_looked_for_once_not_at_every_permission(
+        tmp_path, monkeypatch, app_log_told):
+    """The gate is read at every permission judged. Looking beside the store for a copy set aside
+    is done once — not a folder read per permission, with a copy there or without — and not again
+    after a pick. The copy here is one an earlier run left: this process never saw the store."""
+    from autosound_tcc.core import own_store, project_settings, shell_gate
+
+    looked: list = []
+    real = own_store.set_aside_copies
+    monkeypatch.setattr(own_store, "set_aside_copies",
+                        lambda path: looked.append(path.parent.name) or real(path))
+
+    clean, kept = tmp_path / "clean", tmp_path / "kept"
+    clean.mkdir()
+    kept.mkdir()
+    (kept / "tcc-project.json.corrupt-20261012-221500").write_text(_CUT, encoding="utf-8")
+    for _ in range(3):
+        assert shell_gate.project_gate(clean, shell_gate.GATE_AUTO) == shell_gate.GATE_AUTO
+        assert shell_gate.project_gate(kept, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
+    assert looked == ["clean", "kept"], looked
+    assert app_log_told == [shell_gate.STRICTEST_COPY_SAID.format(
+        path=project_settings.path_for(kept), copy="tcc-project.json.corrupt-20261012-221500")]
+
+    assert project_settings.pick(kept, shell_gate.PROJECT_KEY, shell_gate.GATE_AUTO).landed
+    assert shell_gate.project_gate(kept, "") == shell_gate.GATE_AUTO  # the window reads it back
+    project_settings.set_value(kept, shell_gate.PROJECT_KEY, None)  # a gate gone by hand, say
+    assert shell_gate.project_gate(kept, shell_gate.GATE_FOREIGN) == shell_gate.GATE_FOREIGN, \
+        "picked: the copy is history for this run"
+    assert looked == ["clean", "kept"], looked
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
+                    reason="POSIX permissions, and root lists a folder whatever its mode")
+def test_a_store_whose_folder_cannot_be_looked_in_runs_the_strictest_gate(tmp_path,
+                                                                          app_log_told):
+    """Whether a copy set aside is beside the store is unknown when its folder cannot be listed,
+    while the store itself still reads by name: an unknown is the strictest, as a store that
+    cannot be read is (R-bt) — said, until a gate is picked."""
+    from autosound_tcc.core import project_settings, shell_gate
+
+    folder = tmp_path / ".tcc"
+    folder.mkdir()
+    store = project_settings.path_for(folder)
+    store.write_text('{"effort": "low"}', encoding="utf-8")
+    folder.chmod(0o300)  # write and enter, not list
+    try:
+        for _ in range(2):
+            assert shell_gate.project_gate(folder, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
+        assert project_settings.pick(folder, shell_gate.PROJECT_KEY, shell_gate.GATE_AUTO).landed
+        assert shell_gate.project_gate(folder, shell_gate.GATE_FOREIGN) == shell_gate.GATE_AUTO
+    finally:
+        folder.chmod(0o700)
+    assert app_log_told == [shell_gate.STRICTEST_UNLISTED_SAID.format(
+        path=store, why="Permission denied")], app_log_told
