@@ -33,7 +33,7 @@ read stops the step instead of reading as empty. The guide's method links follow
   naming it and what to do: a copy kept inside the project, a link to a folder that is not on this machine (a
   project shared between a Mac and a VM), a folder that is not the method, or a method newer than this TCC. The
   SDK session, handed the word «None» as its method when TCC's copy had no plugin folder, says why it cannot
-  start. A project with no link, or with the link TCC made, runs as before.
+  start. A project with no link, or with the link TCC made on this machine, runs as before.
 - **A write waits seconds for another, not minutes** (tcc#171): a write queued behind a long capture check
   waited for all of it — the window froze, and a quit could hang behind a queue of writes — while the import's
   renames took no turn at all. Every write takes its turn now, waits at most 5 s from the window and 60 s
@@ -44,8 +44,9 @@ read stops the step instead of reading as empty. The guide's method links follow
   the ledger took the new one, and the status said «The round now has the new title». Now «done» is only what
   the method changed; a refusal is said in the import's status, and a batch that stops halfway keeps what went
   through and names the rest. A failed retry without the round's list no longer reports «recorded as unplanned»
-  for a round that never opened. A handoff check that crashed, timed out, found the project busy or its copy
-  refused said «Update the method»; it says what happened now.
+  for a round that never opened. A handoff check that crashed, timed out or found its copy refused said
+  «Update the method»; it says what happened now — for an installed or approved copy too old for this TCC, to
+  update that copy or re-link the project to TCC's copy.
 - **The update press refuses a method newer than this TCC** (tcc#170): it installed any signed method release;
   one whose contract this TCC does not know — or whose contract file it cannot read — is refused now with «this
   method is newer than this TCC — update TCC first», and the button stays off. A release that could not be read
@@ -72,8 +73,9 @@ read stops the step instead of reading as empty. The guide's method links follow
   same rule, and the signal log skips a line that is not UTF-8 and keeps the rest. A Save says «on disk» only
   when it wrote, and says why when it did not.
 - **A gate the settings file cannot give is the strictest** (tcc#173): with `tcc-project.json` unreadable, the
-  session's gate fell back to the machine's — looser than the car was set. TCC asks before every write now, a
-  running session included, until a gate is picked or the file reads again, and says so. A gate or an effort
+  session's gate fell back to the machine's — looser than the car was set. A file broken by hand or by a sync
+  tool was set aside and read as a fresh one, with the same result. TCC asks before every write now, a running
+  session included, until a gate is picked or the file reads again, and says so. A gate or an effort
   picked while the file cannot be written holds until TCC is closed, says so, and lands at the next Save that
   can write.
 - **`.mcp.json` keeps the other servers, and one TCC no longer removes another's entry** (tcc#173): a
@@ -116,19 +118,23 @@ read stops the step instead of reading as empty. The guide's method links follow
   goes once its cause ends. The check runs over the round it was started for or not at all: one that waited for
   the project while the session opened the next round recorded the old round's capture as the new one's — a
   series-1 capture on series 2's card, Done lit. A title REW holds twice is no longer taken «as it is» and shown
-  green; by the method it is unusable until it is renamed.
+  green; by the method it is unusable until it is renamed. The import's own captures and their protection go
+  to the round the import was for, or nowhere: with the session opening the next round meanwhile, they were
+  recorded into it as unplanned, and the protection line called that «a defect in TCC». One line says what was
+  not recorded and why.
 - **The curve window never banks over delays it could not read** (tcc#177): with the delay bank unreadable as
   the curves loaded, every driver was drawn at 0, and once the file was fixed the next delay step wrote those
   zeros — and empty all-pass filters — over every banked driver on screen. Where the method's filter maths
   cannot run, a banked all-pass was erased by the next step on another driver. Now nothing is banked until the
   bank reads, the drivers are put back from it then, a filter this machine cannot draw is kept and said, and an
   unreadable bank reads «?» with the reason — not «Delays read (0)» — on the curve window's own line as well as
-  on the strip it covers.
+  on the strip it covers. A bank broken by hand or by a sync tool is set aside, and the window's line names the
+  copy the readings went to until the next step starts a fresh bank.
 - **The curve window does one write and one draw per step** (tcc#177): one delay step with seven traces wrote
   the delay bank seven times, loaded it nine times and drew the readout up to nine times; now once each. A
   marker move draws once, and in hx mode a move or a re-draw no longer leaves a second set of crossing dots. A
-  note about curves goes when the curves go. The main window starts without loading the plotting library, about
-  a third of a second sooner.
+  note about curves goes when the curves go. The main window starts without loading the plotting library,
+  about 0.15 s sooner.
 
 ### Changed
 
@@ -136,10 +142,12 @@ read stops the step instead of reading as empty. The guide's method links follow
   method at <path>, not TCC's own» when it does; for a refused copy, the reason with «Approve on this machine»
   (only for a copy outside the project) and «Re-link to TCC's copy», which keeps what was there under the
   project's `.tcc/method-aside/`. Neither is pressed by Enter, and an approval stays on this machine — it never
-  travels with the project.
+  travels with the project. A link names a folder on one machine, so a project folder used from both a Mac and a
+  VM asks for «Re-link to TCC's copy» each time it moves to the other one.
 - **The car is written by the method's own `set-car`** (tcc#169): the agent's `save_car` wrote `project.json`
   with TCC's code; the method writes it now, so a blank generation or body, or a body the method does not list,
-  is refused with the method's sentence and `project.json` is left as it was.
+  is refused with the method's sentence and `project.json` is left as it was. The other tools keep answering
+  while the method starts.
 - **A report on the strip stays until it is closed** (tcc#173): an error or a store set aside was written over
   by the next line — at launch within the same second, by the plan's own lines. A report stands until its ✕ now,
   later lines wait behind it with «+1 more», and a report made before the window opened reaches it when it does.
