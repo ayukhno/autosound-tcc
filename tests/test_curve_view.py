@@ -4930,6 +4930,72 @@ def test_a_restore_read_that_failed_once_does_not_bank_zeros_over_real_readings(
     assert delay_bank.references() == []
 
 
+def _series_dialog(names, series):
+    """`names` on screen, their curves back while the store cannot be read, under `series[0]` —
+    and the store readable again. `series` is the panel's series, moved by the test."""
+    from autosound_tcc.core import config, project_settings
+
+    dialog = _dialog(list(names), bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog.set_session_provider(lambda: series[0])
+    restore = _a_folder_in_the_store_s_place(project_settings.path_for(config.tcc_dir()))
+    try:
+        _curves_back(dialog, names)
+    finally:
+        restore()
+    assert dialog._view.delays()[:len(names)] == [0.0] * len(names), "nothing restored"
+    return dialog
+
+
+def test_a_series_switch_before_the_first_good_read_restores_from_the_series_drawn_under(
+        app_log_told):
+    """The re-review of G10 fix A, N1: the store could not be read while S1's curves came back,
+    the measurement panel moved to S2, and the store read again before any step. The step's
+    restore read S2's bank, which holds none of S1's titles (the bank is keyed by title), so the
+    zeros drawn for them stayed — and the step banked them into S2 over S1's readings. The drivers
+    are read where their curves came back from, and the step moves them to S2 with their values,
+    as it does after a read that worked."""
+    from autosound_tcc.core import delay_bank
+
+    names = _SIDE[:2]
+    delay_bank.put(names[0], 0.198, session="S1")
+    delay_bank.put(names[1], 0.300, session="S1")
+    series = ["S1"]
+    dialog = _series_dialog(names, series)
+    series[0] = "S2"
+    dialog.session_switched()
+
+    dialog._view.set_delay_target(0)
+    dialog._view.set_delay(0.05)
+
+    assert delay_bank.load(session="S2") == {names[0]: 0.05, names[1]: 0.300}
+    assert delay_bank.references(session="S2") == [], "no driver banked as a zero reference"
+    assert dialog._view.delays()[:2] == pytest.approx([0.05, 0.300])
+
+
+def test_curves_read_again_under_another_series_get_what_each_series_holds(app_log_told):
+    """The same switch, with the curves read again before any step (the kind changed, REW came
+    back). These curves came back under S2, so S2's bank is theirs; the drivers first drawn
+    without their bank under S1 still get what S1 holds, as two reads that worked would have put
+    them there — and neither is banked over as a zero."""
+    from autosound_tcc.core import delay_bank
+
+    names = _SIDE[:2]
+    delay_bank.put(names[0], 0.198, session="S1")
+    delay_bank.put(names[1], 0.300, session="S2")
+    series = ["S1"]
+    dialog = _series_dialog(names, series)
+    series[0] = "S2"
+    dialog.session_switched()
+
+    _curves_back(dialog, names)
+
+    assert dialog._view.delays()[:2] == pytest.approx([0.198, 0.300])
+    dialog._view.set_delay_target(0)
+    dialog._view.set_delay(0.05)
+    assert delay_bank.load(session="S2") == {names[0]: 0.05, names[1]: 0.300}
+
+
 # ---- one readout render per step (#177, TA-4) --------------------------------------------------
 
 

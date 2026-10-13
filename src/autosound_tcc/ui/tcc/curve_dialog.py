@@ -557,6 +557,9 @@ class CurveDialog(QDialog):
         #: for it then — `{title: (ms, Allpass | None)}` (G10 C1). What is drawn for them is not
         #: what is banked, so nothing is banked while any is here; see `_restore_bank`.
         self._unread: dict[str, tuple] = {}
+        #: The series their curves came back under: what a read that worked would have drawn for
+        #: them is that series' bank, whatever the panel shows by the time it reads (N1).
+        self._unread_series: Optional[str] = None
         #: The drivers whose banked all-pass the restore could not draw — no skill maths on this
         #: machine — `{title: why}` (G10 C3). The view holds no filter for them, so they are banked
         #: with their filter kept, never taken off.
@@ -1422,7 +1425,7 @@ class CurveDialog(QDialog):
         if self._unread:
             # The restore could not read the bank, so what is drawn is not what is banked: a read
             # now puts the bank back first. Still not read, nothing is banked (G10 C1).
-            self._restore_bank()
+            self._restore_bank(came_back=False)
         # All of them, every time. Each driver carries its own delay now, so there is nothing to
         # move from one entry to another — the radio only chooses which one you are typing into.
         # The arrival AS CAPTURED goes with it: a delay with no origin cannot be checked, and
@@ -1825,7 +1828,7 @@ class CurveDialog(QDialog):
         self._plotted = [str(trace.name) for trace in traces]
         self._render_chips()
 
-    def _restore_bank(self) -> None:
+    def _restore_bank(self, *, came_back: bool = True) -> None:
         """Put each driver's banked delay and all-pass back on what is on screen — read strictly.
 
         Restoring, not reading: `_bank_current_delay` must not see these calls, or the zeros they
@@ -1837,11 +1840,24 @@ class CurveDialog(QDialog):
         what is drawn for it, and the bank is not written. The read that succeeds puts the bank
         back — on every driver but where the person has moved its delay or filter since, which
         is theirs and stays — and the set is banked again from there.
+
+        Put back from the series their curves came back under (`_unread_series`), never from the
+        one the panel has moved to since: that one holds none of their titles, the bank being
+        keyed by title, and the step banked the zeros drawn for them into it over the first
+        series' readings (the re-review of G10 fix A, N1). `came_back` — the curves on screen
+        came back just now, under the series shown now, whose bank is theirs too; the step's
+        retry is not a read of curves, so it puts back only what the failed read missed.
         """
         series = self._session()
+        if not self._unread:
+            self._unread_series = series
+        sources = ([self._unread_series] if self._unread else []) + ([series] if came_back else [])
+        bank: dict = {}
+        apfs: dict = {}
         try:
-            bank = delay_bank.load(session=series, strict=True)
-            apfs = delay_bank.allpasses(session=series, strict=True)
+            for source in dict.fromkeys(sources):
+                bank.update(delay_bank.load(session=source, strict=True))
+                apfs.update(delay_bank.allpasses(session=source, strict=True))
         except own_store.StoreUnreadable:
             for index, trace in enumerate(self._view._traces):
                 self._unread.setdefault(
