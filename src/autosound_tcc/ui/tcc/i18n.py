@@ -424,6 +424,7 @@ answers the first five questions anybody would ask.",
         "captureCheckRewDown": "The capture check did not run: REW did not answer, so nothing was recorded. Start REW, then «Check again».",
         "captureCheckAgain": "Check again",
         "captureCheckUnread": "The capture check ran, and its verdicts could not be read back: process-state.json does not read. The cards follow it once it does.",
+        "captureCheckRoundGone": "The capture check did not run: it was asked for {round}, which is no longer the open round, so nothing was checked.",
         "processStateUnread": "The plan has stopped following process-state.json, which does not read ({why}). What is shown is the last plan read; it follows the file again once the file reads.",
         "capImportSelectAll": "Select all",
         "capImportSelectNone": "Clear selection",
@@ -1742,6 +1743,7 @@ Choose sweeps (sw) above to read this.",
         "captureCheckRewDown": "Перевірку замірів не запущено: REW не відповів, тож нічого не записано. Запустіть REW, тоді «Перевірити знову».",
         "captureCheckAgain": "Перевірити знову",
         "captureCheckUnread": "Перевірка замірів пройшла, але її вердикти не вдалося прочитати: process-state.json не читається. Картки підхоплять їх, щойно він прочитається.",
+        "captureCheckRoundGone": "Перевірку замірів не запущено: її просили для {round}, а це вже не відкритий раунд, тож нічого не перевірено.",
         "processStateUnread": "План більше не йде за process-state.json — файл не читається ({why}). Показано план, прочитаний востаннє; він знову йтиме за файлом, щойно той прочитається.",
         "capImportSelectAll": "Вибрати все",
         "capImportSelectNone": "Зняти вибір",
@@ -3014,6 +3016,8 @@ Choose sweeps (sw) above to read this.",
         "captureCheckAgain": "Check again",
         # #170: the English until the Advisor.
         "captureCheckUnread": "The capture check ran, and its verdicts could not be read back: process-state.json does not read. The cards follow it once it does.",
+        # #170: the English until the Advisor.
+        "captureCheckRoundGone": "The capture check did not run: it was asked for {round}, which is no longer the open round, so nothing was checked.",
         # #170: the English until the Advisor.
         "processStateUnread": "The plan has stopped following process-state.json, which does not read ({why}). What is shown is the last plan read; it follows the file again once the file reads.",
         "capImportSelectAll": "Zaznacz wszystko",
@@ -4350,6 +4354,8 @@ Choose sweeps (sw) above to read this.",
         "captureCheckAgain": "Check again",
         # #170: the English until the Advisor.
         "captureCheckUnread": "The capture check ran, and its verdicts could not be read back: process-state.json does not read. The cards follow it once it does.",
+        # #170: the English until the Advisor.
+        "captureCheckRoundGone": "The capture check did not run: it was asked for {round}, which is no longer the open round, so nothing was checked.",
         # #170: the English until the Advisor.
         "processStateUnread": "The plan has stopped following process-state.json, which does not read ({why}). What is shown is the last plan read; it follows the file again once the file reads.",
         "capImportSelectAll": "Alle auswählen",

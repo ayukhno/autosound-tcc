@@ -4048,7 +4048,7 @@ class MainWindow(QMainWindow):
             self._capture_check_again = True
             return
         self._capture_check_again = False
-        self._capture_check = _CaptureCheckWorker(config.project_dir(), titles=outstanding)
+        self._capture_check = _CaptureCheckWorker(config.project_dir(), outstanding, round_.get("id"))
         self._capture_check.result.connect(self._on_capture_check_done)
         self._capture_check.failed.connect(self._on_capture_check_failed)
         self._capture_check.finished.connect(self._on_capture_check_finished)

@@ -36,6 +36,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 from autosound_tcc.core import app_log, method_binding, method_cli
+# The round TCC's own check was asked for is read on the check's worker thread
+# (`_the_round_asked`), where an import is the defect `tests/conftest.py` refuses.
+from autosound_tcc.state import process_view
 
 # Local file I/O and a JSON rewrite; anything near this is a hang, not slowness.
 DEFAULT_TIMEOUT_S = 20.0
@@ -116,6 +119,19 @@ class RewUnavailable(ProcessWriterError):
     method's, whose advice names a command-line verb (the G6+G7 review's M4)."""
 
 
+class RoundGone(ProcessWriterError):
+    """TCC's own capture check was asked for round `asked`, and by its turn at the project's lock
+    that round was no longer the open one: closed, or another open (`now`, None for none). Nothing
+    was started, so nothing was checked or written (`check_captures`; the re-review of G6+G7 fix
+    B, OOS-1)."""
+
+    def __init__(self, asked: str, now: Optional[str]) -> None:
+        super().__init__(f"capture-check was not run: it was asked for {asked}, and "
+                         + (f"{now} is the open round now" if now else f"{asked} is not open now")
+                         + " -- nothing was checked")
+        self.asked, self.now = asked, now
+
+
 def script_path() -> Path:
     """TCC's own `process.py`, for a caller with no project: `is_available`, a bare CLI run beside
     TCC (`test_writer_race.py`). A write runs the PROJECT's bound copy (`method_cli.spawn`); this is
@@ -146,7 +162,7 @@ def _spawn(
 
 
 def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S,
-         answer_on_1: bool = False, logged: bool = False) -> str:
+         answer_on_1: bool = False, logged: bool = False, **kw) -> str:
     """One call, and a non-zero exit is a failure. Every command here works that way except
     `session-close`, whose exit code is an ANSWER — see `close_session` — and those sent with
     `answer_on_1`, whose exit 1 is their answer on stdout unless it is the method's refusal or a
@@ -156,8 +172,8 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
     traceback whole — for a caller whose only other trace of it is a line somebody can close
     (`check_captures`, the G6+G7 review's M2); a method too old for the command (`TooOld`) with
     TCC's sentence beside them. Not what `spawn` raises: it logs its own busy, timed-out, refused
-    and failed-to-start answers."""
-    code, out, err = _spawn(project_dir, args, timeout_s)
+    and failed-to-start answers. `kw` is spawn's own (`under_lock=`)."""
+    code, out, err = _spawn(project_dir, args, timeout_s, **kw)
     try:
         _refuse_if_too_old(project_dir, args[0], out, err)
     except TooOld as too_old:
@@ -633,7 +649,8 @@ def capture_knobs(project_dir: Path, positions: dict) -> str:
 
 
 def check_captures(
-    project_dir: Path, titles: list[str] | None = None, session: bool = False
+    project_dir: Path, titles: list[str] | None = None, session: bool = False,
+    round_id: Optional[str] = None,
 ) -> str:
     """Run the skill's verdict over the open round and record it (SCR-040).
 
@@ -653,12 +670,36 @@ def check_captures(
     is raised now recorded nothing whole: the method's refusal (`error: …`), REW not answering
     (exit 69), a crash, and what `spawn` raises — busy, refused, timed out. The first three are
     logged here, in the method's words and a crash with its traceback; `spawn` logs its own.
+
+    `round_id` is the round TCC's own check was started for: the check runs over that round or
+    not at all. The method checks whichever round is open, and the session's `capture-start` can
+    close this one and open the next while the call waits on the project's lock: the method then
+    recorded round A's capture as one round B took, `planned: False`, with A's verdict (the
+    re-review of G6+G7 fix B, OOS-1). So the round is read again under the lock, before the child
+    starts (`_the_round_asked`), and one closed or no longer open is `RoundGone`, nothing started.
+    The agent's own check passes none: it checks the round its session has open.
     """
     args = ["capture-check", *[str(t) for t in titles or []]]
     if session:
         args.append("--session")
+    kw = {} if round_id is None else {"under_lock": lambda: _the_round_asked(project_dir, round_id)}
     return _run(project_dir, args, timeout_s=max(DEFAULT_TIMEOUT_S, 120.0), answer_on_1=True,
-                logged=True)
+                logged=True, **kw)
+
+
+def _the_round_asked(project_dir: Path, round_id: str) -> None:
+    """`RoundGone`, said once in the log, unless the round `process-state.json` holds open now is
+    `round_id` (`check_captures`, under the lock). Read as the file stands, not through the method:
+    a state that does not read is left to the method, which refuses it and writes nothing."""
+    state = process_view.read_state_text(project_dir)
+    if state is None:
+        return
+    round_ = state.get("capture") if isinstance(state.get("capture"), dict) else {}
+    if round_.get("id") == round_id and not round_.get("closed"):
+        return
+    gone = RoundGone(round_id, None if round_.get("closed") else round_.get("id"))
+    app_log.logger().info("`capture-check` on %s: %s", project_dir, gone)
+    raise gone
 
 
 def record_capture(project_dir: Path, title: str) -> str:

@@ -5965,7 +5965,7 @@ def test_the_strip_after_a_check_reads_what_it_recorded_and_says_when_it_did_not
                                   taken=titles[:1])
     typed = [_rounds.as_typed(title) for title in titles]
 
-    def check(project, titles=None, session=False):
+    def check(project, titles=None, session=False, round_id=None):
         process.check_captures(titles, verifier=_Heard())
         return "\n".join(f"UNUSABLE {title} — не перевірено" for title in typed)  # not read
 
@@ -5986,13 +5986,13 @@ def test_the_strip_after_a_check_reads_what_it_recorded_and_says_when_it_did_not
     a_check(check)
     assert said == [i18n.t("unusableSummary").format(n=1, first=f"{typed[0]} — {_SILENCE}")], said
 
-    def busy(project, titles=None, session=False):
+    def busy(project, titles=None, session=False, round_id=None):
         raise process_writer.Busy("busy: another write to this project is still running")
 
     a_check(busy)  # w-L_1 is still bad: asked about again
     assert said[1:] == [i18n.t("captureCheckBusy")] and said[-1] in strip.text(), said
 
-    a_check(lambda project, titles=None, session=False: process.check_captures(
+    a_check(lambda project, titles=None, session=False, round_id=None: process.check_captures(
         titles, verifier=_Heard(valid=True)) and "")
     assert len(said) == 2 and strip.text() == "", "a check that ran takes «did not run» back"
 
@@ -6112,7 +6112,7 @@ def test_a_did_not_run_line_is_taken_back_when_its_cause_ends_without_tccs_check
     started: list = []
 
     class _Worker:
-        def __init__(self, project_dir, titles=None):
+        def __init__(self, project_dir, titles=None, round_id=None):
             started.append(titles)
             self.result = self.failed = self.finished = SimpleNamespace(connect=lambda *_a: None)
 
@@ -6198,7 +6198,7 @@ def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch)
     ended: list = []
 
     class _Worker:
-        def __init__(self, project_dir, titles=None):
+        def __init__(self, project_dir, titles=None, round_id=None):
             started.append(titles)
             self.running = True
             self.result = SimpleNamespace(connect=lambda *_a: None)
@@ -6235,18 +6235,20 @@ def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch)
 def test_the_check_is_handed_what_the_round_took_that_rew_still_holds(monkeypatch):
     """The G6+G7 tests review's G5: `to_check` is handed REW's titles (`known_titles`), never the
     round's own list. Read as held, a capture REW no longer has was asked about again on every
-    scan of REW — a spawn, a journal event and the project's lock each time. The window's own
-    method, with a host in the window's place, over a round the method recorded."""
+    scan of REW — a spawn, a journal event and the project's lock each time. And it is handed the
+    round it is asked about, which it checks or leaves alone (the re-review of G6+G7 fix B, OOS-1).
+    The window's own method, with a host in the window's place, over a round the method recorded."""
     from tests import _rounds
 
     titles = ["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"]
-    _rounds.write_round(config.project_dir(), version=1, expected=titles, taken=titles[:2])
+    process = _rounds.write_round(config.project_dir(), version=1, expected=titles,
+                                  taken=titles[:2])
     typed = [_rounds.as_typed(title) for title in titles]
     started: list = []
 
     class _Worker:
-        def __init__(self, project_dir, titles=None):
-            started.append(titles)
+        def __init__(self, project_dir, titles=None, round_id=None):
+            started.append((titles, round_id))
             self.result = self.failed = self.finished = SimpleNamespace(connect=lambda *_a: None)
 
         def start(self) -> None:
@@ -6262,31 +6264,33 @@ def test_the_check_is_handed_what_the_round_took_that_rew_still_holds(monkeypatc
 
     MainWindow._on_rew_titles_changed(host)
 
-    assert started == [typed[:1]], "taken and held is asked; taken and gone from REW is not"
+    assert started == [(typed[:1], process.load()["capture"]["id"])], \
+        "taken and held is asked, about this round; taken and gone from REW is not"
 
 
 def test_the_capture_check_worker_hands_the_method_its_titles(monkeypatch, tmp_path):
     """An empty title list is the method's "every expected title" — so the titles go over as given,
-    and come back with the answer: the verdicts are read for those (#175 TA-8)."""
+    and come back with the answer: the verdicts are read for those (#175 TA-8). The round it was
+    started for goes over too: checked, or not at all (the re-review of G6+G7 fix B, OOS-1)."""
     from autosound_tcc.core import process_writer
     from autosound_tcc.ui.tcc import workers
 
     asked, answered, failed = [], [], []
     monkeypatch.setattr(process_writer, "check_captures",
-                        lambda project, titles=None, session=False: asked.append((project, titles))
-                        or "")
-    worker = workers._CaptureCheckWorker(tmp_path, titles=["m-L_1 (sw)"])
+                        lambda project, titles=None, session=False, round_id=None:
+                        asked.append((project, titles, round_id)) or "")
+    worker = workers._CaptureCheckWorker(tmp_path, titles=["m-L_1 (sw)"], round_id="cap_001")
     worker.result.connect(answered.append)
     worker.failed.connect(failed.append)
 
     worker.run()
 
-    assert asked == [(tmp_path, ["m-L_1 (sw)"])]
+    assert asked == [(tmp_path, ["m-L_1 (sw)"], "cap_001")] and worker.round_id == "cap_001"
     assert (answered, failed) == ([["m-L_1 (sw)"]], [])
 
 
 @pytest.mark.parametrize("stopped", ["busy", "timed out", "refused", "the method's refusal",
-                                     "REW down", "a crash"])
+                                     "REW down", "a crash", "the round moved on"])
 def test_a_capture_check_that_did_not_run_says_so_and_why(monkeypatch, tmp_path, stopped):
     """R-ax (the G5+G8 review's I2): Busy, a refused binding, a timeout and the method's refusal all
     came back on the same signal as a verdict, with no `UNUSABLE` line in them — and vanished. The
@@ -6320,9 +6324,11 @@ def test_a_capture_check_that_did_not_run_says_so_and_why(monkeypatch, tmp_path,
                 "Traceback (most recent call last):\n  File \"process.py\", line 1\n"
                 "KeyError: 'taken'\nerror: unexpected KeyError: 'taken'"),
             i18n.t("captureCheckRefused").format(why="unexpected KeyError: 'taken'")),
+        "the round moved on": (process_writer.RoundGone("cap_001", "cap_002"),
+                               i18n.t("captureCheckRoundGone").format(round="cap_001")),
     }[stopped]
 
-    def check(project, titles=None, session=False):
+    def check(project, titles=None, session=False, round_id=None):
         raise error
 
     monkeypatch.setattr(process_writer, "check_captures", check)
@@ -6367,7 +6373,7 @@ def test_a_did_not_run_line_promises_only_what_tcc_does(lang):
     capture-check again», a verb TCC has no control for. What the person can do in TCC is said:
     start REW, then the line's own «Check again»."""
     for key in ("captureCheckBusy", "captureCheckTimedOut", "captureCheckRefused",
-                "captureCheckRewDown"):
+                "captureCheckRewDown", "captureCheckRoundGone"):
         said = i18n.T[lang][key]
         assert "capture-check" not in said and "list changes" not in said, (key, said)
     assert i18n.T[lang]["captureCheckAgain"] in i18n.T[lang]["captureCheckRewDown"]

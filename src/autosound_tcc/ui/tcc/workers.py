@@ -264,12 +264,15 @@ class _CaptureCheckWorker(QThread):
     #: The check did not run, or did not finish: the strip's line saying so, and why (R-ax).
     failed = Signal(str)
 
-    def __init__(self, project_dir, titles=None) -> None:
+    def __init__(self, project_dir, titles=None, round_id=None) -> None:
         super().__init__()
         self._project_dir = project_dir
         #: The titles to check — the ones the round TOOK (tcc#21). None is the method's own
         #: default, every expected title — a title REW merely shows among them.
         self._titles = list(titles) if titles is not None else None
+        #: The round it was started for: checked over that round or not at all
+        #: (`process_writer.check_captures`; the re-review of G6+G7 fix B, OOS-1).
+        self._round_id = round_id
         # Say who you were if you are destroyed before you finished (finding 35): Qt's own
         # fatal line names no class, and this app has eight kinds of worker.
         qt_shutdown.watch(self)
@@ -279,9 +282,14 @@ class _CaptureCheckWorker(QThread):
         """What it was handed — what a «did not run» line is about (`measurement_view.NotRun`)."""
         return list(self._titles or [])
 
+    @property
+    def round_id(self):
+        """The round it was started for — the round a «did not run» line is about."""
+        return self._round_id
+
     def run(self) -> None:
         try:
-            process_writer.check_captures(self._project_dir, self._titles)
+            process_writer.check_captures(self._project_dir, self._titles, round_id=self._round_id)
         except process_writer.ProcessWriterError as exc:
             self.failed.emit(capture_check_not_run(exc))
             return
@@ -296,12 +304,15 @@ def capture_check_not_run(exc: Exception) -> str:
     method's last line (`process_writer.last_words`) without its `error: `. Never «everything is
     bad»: nothing was recorded. REW not answering in TCC's words: the method's advice names its
     command-line verb, and what the person does in TCC is start REW and press the line's «Check
-    again» (the G6+G7 review's M4)."""
+    again» (the G6+G7 review's M4). A round no longer open by the check's turn, in TCC's words too
+    (`RoundGone`): the round asked for is named, and nothing was checked."""
     if isinstance(exc, process_writer.Busy):
         return i18n.t("captureCheckBusy")
     if isinstance(exc, process_writer.RewUnavailable):
         return i18n.t("captureCheckRewDown")
     if isinstance(exc, process_writer.TimedOut):
         return i18n.t("captureCheckTimedOut").format(seconds=f"{exc.seconds:g}")
+    if isinstance(exc, process_writer.RoundGone):
+        return i18n.t("captureCheckRoundGone").format(round=exc.asked)
     why = process_writer.last_words(0, "", str(exc))
     return i18n.t("captureCheckRefused").format(why=why.removeprefix("error: "))

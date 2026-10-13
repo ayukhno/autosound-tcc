@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import subprocess
 import threading
 import time
@@ -296,6 +297,69 @@ def test_tccs_own_check_on_a_method_too_old_for_it_is_logged_once(project, monke
     [logged] = [record.getMessage() for record in app_log_warnings]
     assert "capture-check" in logged and "w-L_1 (sw)" in logged and "exit 2" in logged, logged
     assert str(old.value) in logged and "usage: process.py" in logged, logged
+
+
+def _bytes_of(project_dir: Path) -> tuple[bytes, bytes]:
+    folder = project_dir / "process"
+    return (folder / "process-state.json").read_bytes(), (folder / "journal.jsonl").read_bytes()
+
+
+@pytest.mark.parametrize("meanwhile", ["the session opened the next round",
+                                       "the session closed the round", "nothing"])
+def test_tccs_own_check_runs_over_the_round_it_was_asked_for_or_not_at_all(
+        tmp_path, monkeypatch, app_log_heard, meanwhile):
+    """The re-review of G6+G7 fix B, OOS-1: TCC's check was handed round A's titles and no round,
+    and the method checks whichever round is open. The session's `capture-start` closed A and
+    opened B while the check waited on the project's lock, and the method recorded A's `w-L_01` as
+    a capture B took — `planned: False`, with A's verdict. The round is read again UNDER that lock,
+    before the child starts: one closed, or another open, is `RoundGone`, nothing started and
+    nothing written, and said once in the log. The round asked for, still open, is checked: REW is
+    down here (conftest), so the child ran and said so."""
+    from tests import _rounds
+
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    process = _rounds.write_round(tmp_path, version=1, expected=["w-L_1 (sw)"],
+                                  taken=["w-L_1 (sw)"])
+    asked, typed = process.load()["capture"]["id"], [_rounds.as_typed("w-L_1 (sw)")]
+    heard = app_log_heard(logging.INFO)
+    at_the_lock, hold = threading.Event(), project_lock.hold
+
+    def hold_once_said(project_dir, timeout_s):
+        at_the_lock.set()  # whatever the call read before the lock, it has read by now
+        return hold(project_dir, timeout_s)
+
+    monkeypatch.setattr(project_lock, "hold", hold_once_said)
+    answered: list[Exception] = []
+
+    def check() -> None:
+        try:
+            process_writer.check_captures(tmp_path, typed, round_id=asked)
+        except process_writer.ProcessWriterError as exc:
+            answered.append(exc)
+
+    with hold(tmp_path, 5):  # the session's write, holding the lock
+        worker = threading.Thread(target=check)
+        worker.start()
+        assert at_the_lock.wait(10)
+        if meanwhile == "the session opened the next round":
+            process.start_capture(2, expected=[_rounds.as_typed("w-L_2 (sw)")])
+        elif meanwhile == "the session closed the round":
+            process.close_capture()
+        before = _bytes_of(tmp_path)
+    worker.join(60)
+
+    [answer] = answered
+    if meanwhile == "nothing":
+        assert isinstance(answer, process_writer.RewUnavailable), answer
+        return
+    assert isinstance(answer, process_writer.RoundGone), answer
+    assert answer.asked == asked and asked in str(answer)
+    assert _bytes_of(tmp_path) == before, "nothing started, nothing written"
+    if meanwhile == "the session opened the next round":
+        assert process.load()["capture"].get("taken") == {}, "B took none of A's captures"
+    said = [record.getMessage() for record in heard if "capture-check" in record.getMessage()]
+    assert len(said) == 1 and asked in said[0], said
 
 
 def test_a_method_too_old_for_a_command_says_so_instead_of_dumping_usage(project, monkeypatch):
@@ -675,7 +739,9 @@ def _every_writer_with_every_option() -> list:
          {"step": "2.9", "origin": "passat-b8-2026:49", "plan": True, "optional": ["Ws_49 (sw)"],
           "start_method": "rta"}),
         (pw.capture_knobs, ({"SubRC": "4/4"},), {}),
-        (pw.check_captures, (), {"titles": ["m-L p1_49 (sw)"], "session": True}),
+        # `round_id` sends no flag: it is read against the state under the lock (none here).
+        (pw.check_captures, (), {"titles": ["m-L p1_49 (sw)"], "session": True,
+                                 "round_id": "cap_001"}),
         (pw.record_capture, ("m-L p1_49 (sw)",), {}),
         (pw.skip_capture, ("m-R p1_49 (sw)", "the tweeter is out"), {}),
         (pw.close_capture, (), {"reason": "done"}),

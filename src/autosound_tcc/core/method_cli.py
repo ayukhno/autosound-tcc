@@ -40,7 +40,7 @@ import re
 import subprocess
 import threading
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 from autosound_tcc.core import app_log, child, method_binding, project_lock, vendor_loader
 
@@ -241,6 +241,7 @@ def spawn(
     timeout_s: float,
     lock: bool = True,
     lock_wait_s: Optional[float] = None,
+    under_lock: Optional[Callable[[], None]] = None,
 ) -> tuple[int, str, str]:
     """Run `rew_tool/<script_rel> *args` of the project's bound copy and return `(exit code,
     stdout, stderr)`, both stripped.
@@ -262,6 +263,11 @@ def spawn(
     take — is a `ProcessWriterError` in its words. Each of these is logged once, as a refusal is.
     One raised giving the lock back, after the child ran, is logged too, and the child's answer
     handed back: it ran, and may have written (MA2).
+
+    `under_lock` is asked under the lock, once it is held and before the child starts: what it
+    raises is the answer, with nothing started — the caller's own question about the project as
+    it stands when its turn comes, which a read before the call cannot answer: another write may
+    change the project while this one waits (`process_writer.check_captures`, the round asked for).
     """
     project_dir = Path(project_dir)
     args = [str(arg) for arg in args]
@@ -286,6 +292,8 @@ def spawn(
     try:
         with held:
             locking = False
+            if under_lock is not None:
+                under_lock()
             proc = child.run_bounded(
                 # The CONSOLE interpreter, not ours. TCC is a GUI app, so `sys.executable` is
                 # `pythonw.exe`, which has no console — and the git this script runs then opens
