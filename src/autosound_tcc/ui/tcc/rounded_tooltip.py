@@ -40,10 +40,10 @@ def wrapped(text: str) -> str:
     tip `tip_html` does not lay out: the curve readout's paragraphs between its tables."""
     lines: list[str] = []
     for paragraph in str(text).split("\n"):
-        wrapped = textwrap.wrap(
+        parts = textwrap.wrap(
             paragraph, _TIP_WRAP_CHARS, break_long_words=False, break_on_hyphens=False
         )
-        lines.extend(html.escape(part) for part in (wrapped or [""]))
+        lines.extend(html.escape(part) for part in (parts or [""]))
     return "<br>".join(lines)
 
 
