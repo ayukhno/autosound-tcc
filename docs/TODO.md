@@ -2101,6 +2101,8 @@ the end-of-branch review (2026-10-13), each judged shippable for v1.1.3; the rep
 - Locks and rounds: the skill's bare CLI takes no project lock; the capture check's result slot reads the round open
   now; a worker that opens its own round reads its id without the lock after `capture-start`; the «aside» mark of a
   damaged settings file is per run (after a restart a fresh file with no gate reads the machine gate).
+- The curve window built after a gate pick has no set-aside line (the strip keeps it): the memo belongs one level
+  down, in `delay_bank` (Fable's re-review, round 2, m1).
 - To the skill: TCC-054 (hub #269) — the round matches titles raw, not by `name_key`.
 
 ### F-097 — W-8: the audit's first wave — released in v1.1.2
