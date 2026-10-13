@@ -721,7 +721,8 @@ def test_report_phase_writes_nothing_when_the_skill_has_no_phase(tmp_path):
 def test_report_phase_on_a_file_that_is_not_a_state_says_it_could_not_be_read(tmp_path):
     """#176: the method reads a cut-off `process-state.json` as the empty process, so the answer
     was «no active_phase -- call enter_phase», sending the agent to record a move it may well have
-    recorded. What is true is that the file did not read, and that is the answer."""
+    recorded. What is true is that the file did not read, and that is the answer. The window is not
+    told to re-read what does not read, and the file is left as it is (R-bw; Task 24's review, M5)."""
     bridge = RecordingBridge(allow=True)
     bridge.refreshes = 0
     mcp, _, registry = _server(tmp_path, bridge)
@@ -732,6 +733,8 @@ def test_report_phase_on_a_file_that_is_not_a_state_says_it_could_not_be_read(tm
 
     assert result == {"refreshed": False, "error": _UNREAD_HALF.format(dir=tmp_path / "process")}
     assert registry.current_phase() is None
+    assert bridge.refreshes == 0, "«refreshed: false» is not a refresh"
+    assert (tmp_path / "process" / "process-state.json").read_bytes() == b"{ half", "never written"
 
 
 #: What the agent is told about a `{ half` state (the G6+G7 review's M5): the cause in the read's
