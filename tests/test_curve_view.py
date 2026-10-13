@@ -5196,3 +5196,60 @@ def test_a_bank_that_cannot_be_read_is_said_on_the_curve_window_s_own_line(app_l
     assert len(app_log_told) == 1 and app_log_told[0] in status, (app_log_told, status)
     dialog._view.set_delay(0.2)
     assert dialog._status.isHidden(), dialog._status.text()
+
+
+# ---- a Clear the store refuses is said, and leaves the curves as banked (Task 30's review) -------
+
+
+def test_a_clear_the_bank_cannot_read_is_said_and_leaves_the_curves_as_banked(app_log_told):
+    """Task 30's review, Minor 1: `delay_bank.clear` raised out of Clear's slot on a store that
+    could not be read — after the slot had zeroed every curve on screen while the bank still held
+    the set, and before the bank was drawn again. The refusal is said as a step's is (R-cb), and
+    the curves stay where the bank has them. A folder in the store's place: every platform."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    delay_bank.put(_SIDE[0], 0.198)
+    delay_bank.put(_SIDE[1], 0.3)
+    dialog = _plotted(_SIDE[:2])
+    assert dialog._view.delays()[:2] == pytest.approx([0.198, 0.3])
+    restore = _a_folder_in_the_store_s_place(project_settings.path_for(config.tcc_dir()))
+    try:
+        dialog._bank_clear_btn.click()
+        delays, status = dialog._view.delays()[:2], dialog._status.text()
+    finally:
+        restore()
+
+    assert delays == pytest.approx([0.198, 0.3]), "the curves as banked"
+    assert len(app_log_told) == 1 and "could not be read" in app_log_told[0], app_log_told
+    assert app_log_told[0] in status, status
+    assert delay_bank.load() == {_SIDE[0]: 0.198, _SIDE[1]: 0.3}, "the bank as it was"
+    dialog.session_switched()  # the bank read again
+    dialog._bank_clear_btn.click()
+    assert delay_bank.load() == {} and dialog._view.delays()[:2] == [0.0, 0.0], "read: cleared"
+
+
+@pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                    reason="POSIX permissions, and root writes whatever the mode")
+def test_a_clear_the_bank_cannot_write_is_said_and_leaves_the_curves_as_banked(app_log_told):
+    """The same with a read-only `.tcc/`: the read is fine and the write refused. The curves were
+    zeroed and the bank kept the set, so the next step banked the zeros the person had not seen
+    land — and the slot had raised before the bank was drawn again."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    delay_bank.put(_SIDE[0], 0.198)
+    dialog = _plotted(_SIDE[:2])
+    store = project_settings.path_for(config.tcc_dir())
+    before = store.read_bytes()
+    config.tcc_dir().chmod(0o500)
+    try:
+        dialog._bank_clear_btn.click()
+        delays, status = dialog._view.delays()[:2], dialog._status.text()
+    finally:
+        config.tcc_dir().chmod(0o700)
+
+    assert store.read_bytes() == before, "the bank as it was"
+    assert delays == pytest.approx([0.198, 0.0]), "the curves as banked"
+    assert len(app_log_told) == 1 and "could not be written" in app_log_told[0], app_log_told
+    assert app_log_told[0] in status, status
+    dialog._bank_clear_btn.click()
+    assert delay_bank.load() == {} and dialog._view.delays()[:2] == [0.0, 0.0], "written: cleared"

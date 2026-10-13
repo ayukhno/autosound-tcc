@@ -1551,12 +1551,19 @@ class CurveDialog(QDialog):
     def _on_clear_bank(self) -> None:
         """Forget this series' readings, and put the curves on screen back where they were drawn.
 
-        Guarded and in this order for a reason. Clearing the store first and zeroing the plot
-        afterwards wrote the pair straight back in: zeroing emits `delayChanged`, the handler
-        banks EVERY curve on screen, and the ones that were not selected still held their delays.
-        The user pressed Clear and watched a single value survive — the other curve's
-        (2026-08-12). With a whole side plotted there would have been three survivors.
+        Guarded for a reason. Zeroing the plot emits `delayChanged`, the handler banks EVERY curve
+        on screen, and unguarded that wrote the pair straight back in after the clear. The user
+        pressed Clear and watched a single value survive — the other curve's (2026-08-12). With a
+        whole side plotted there would have been three survivors.
+
+        The store first, and the curves only when it took the clear. A store that cannot be read
+        or written refuses it: that is said once, as a step's refusal is (R-cb), and the curves
+        stay as banked. Zeroed first, they stood at zero over a bank that still held the set, and
+        the refusal left the slot before the bank was drawn again (Task 30's review, Minor 1).
         """
+        if not delay_bank.clear_or_say(session=self._session()):
+            self._render_bank()
+            return
         self._restoring = True
         try:
             target = self._view.delay_target()
@@ -1568,7 +1575,6 @@ class CurveDialog(QDialog):
             self._view.set_delay_target(target)
         finally:
             self._restoring = False
-        delay_bank.clear(session=self._session())
         # Nothing banked for this series now: what is drawn is the bank.
         self._unread, self._apf_unshown = {}, {}
         self._render_bank()
