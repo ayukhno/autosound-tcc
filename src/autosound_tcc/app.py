@@ -68,12 +68,14 @@ def _no_gui() -> str:
 def _make_splash(QtCore, QtGui, QtWidgets):
     """The window that says the app is starting, before there is a window to say it in.
 
-    Between a double-click and the first pixel of TCC there is about a second and a half of import
-    on a warm cache — `mcp`, `pyqtgraph`, PySide6, numpy — and then a `MainWindow.__init__` that
-    reads the project, runs git and binds the MCP server. The first start after an update is
-    longer still: `uv tool install --upgrade` rewrites the whole tool environment, so every one of
-    those modules is byte-compiled again on the way in. Nothing was on screen for any of it (user,
-    2026-09-06: "після оновлення довгий старт — добре показати щось").
+    Between a double-click and the first pixel of TCC there is the import of `mcp` and PySide6 —
+    about a second and a half on a warm cache when it was measured (2026-09-06), with pyqtgraph and
+    numpy still in it; they come with the first curve window now (#177) — and then a
+    `MainWindow.__init__` that reads the project, runs git and binds the MCP server. The first
+    start after an update is longer still: `uv tool install --upgrade` rewrites the whole tool
+    environment, so every one of those modules is byte-compiled again on the way in. Nothing was
+    on screen for any of it (user, 2026-09-06: "після оновлення довгий старт — добре показати
+    щось").
 
     Drawn here rather than loaded from a file: the artwork we ship is a 1024-pixel icon, and a
     splash is a small dark card with a line of text under the app's name.

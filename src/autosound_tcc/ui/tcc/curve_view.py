@@ -832,7 +832,7 @@ class CurveView(QWidget):
         # Negative is allowed again (user, 2026-08-12): on a later pass you correct a channel that
         # is already delayed, and taking time BACK off it is an ordinary move. What must not go
         # below zero is the channel's TOTAL — which this widget cannot know on its own, so the
-        # caller supplies it via `set_channel_delay()` and the readout says when the sum is
+        # caller supplies it via `set_channel_delays()` and the readout says when the sum is
         # impossible instead of the box refusing to express it.
         self._shift_box.setRange(-50.0, 50.0)
         self._shift_box.setSuffix(" ms")
@@ -1383,7 +1383,7 @@ class CurveView(QWidget):
         back off it is an ordinary move (user, 2026-08-12).
 
         The limit is on the SUM, not on this number: a channel cannot end up below zero. That is
-        a fact about the ledger, not about this widget, so `set_channel_delay()` feeds it in and
+        a fact about the ledger, not about this widget, so `set_channel_delays()` feeds it in and
         the readout reports an impossible total rather than the box quietly refusing to type it.
 
         On an impulse this slides the curve later in time. On a phase plot it is the same fact
