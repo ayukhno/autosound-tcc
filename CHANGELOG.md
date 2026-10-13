@@ -75,7 +75,8 @@ read stops the step instead of reading as empty. The guide's method links follow
 - **A gate the settings file cannot give is the strictest** (tcc#173): with `tcc-project.json` unreadable, the
   session's gate fell back to the machine's — looser than the car was set. A file broken by hand or by a sync
   tool was set aside and read as a fresh one, with the same result. TCC asks before every write now, a running
-  session included, until a gate is picked or the file reads again, and says so. A gate or an effort
+  session included, and says so — until the file reads again, or, for a file set aside as broken, until a gate
+  is picked, across restarts. A gate or an effort
   picked while the file cannot be written holds until TCC is closed, says so, and lands at the next Save that
   can write.
 - **`.mcp.json` keeps the other servers, and one TCC no longer removes another's entry** (tcc#173): a
