@@ -1285,6 +1285,34 @@ def test_a_close_without_outstanding_leaves_the_round_as_its_lines_folded_it(pro
     assert _rows(past, key, mv.STATUS_DONE) == {key("w-L_1 (sw)"), key("sw_1 (sw)")}
 
 
+def _live_extra(project, title: str) -> str:
+    """The live card's row for `title` with REW showing a curve under it and nothing taken in: the
+    next round asks for something else, so it is an extra — offered (blue) unless a round took it."""
+    return _item(mv.build_session("0", 1, [title], project, taken=[]), title).status
+
+
+def test_a_title_checked_but_never_taken_is_waiting_in_history_not_unusable(project):
+    """The G6+G7 tests review's G2: the agent's `check_captures` with no titles checks every
+    expected one, and the method takes nothing for a title REW does not hold (T-1) — but its
+    `capture_verified` lists it under `bad`, and the fold makes a row of that line. Only the
+    closing event's `outstanding` takes the row back (`_as_it_closed`'s `del`). Kept, the past card
+    said «taken, unusable» for a capture nobody took, and the live card «done» for a curve REW
+    shows under it — so nobody imported it, and the method never heard of it."""
+    titles = ["w-L_1 (sw)", "w-R_1 (sw)"]
+    process = _round(project, version=1, expected=titles, taken=titles[:1])
+    wl, wr = (_as_typed(t) for t in titles)
+    process.check_captures(None, verifier=_Answers({wl: _held("u-wl"), wr: _not_held(wr)}))
+    assert wr not in process.load()["capture"]["taken"], "the method took nothing for it"
+    process.start_capture(1, expected=[_as_typed("sw_1 (sw)")])  # closes cap_001
+    assert _closing(process, "cap_001")["outstanding"] == [wr]
+
+    past = _past(project, "cap_001")
+
+    assert (_item(past, wr).status, _item(past, wl).status) == (mv.STATUS_WAIT, mv.STATUS_DONE)
+    assert wr not in process_view.standing(_folded(project, "cap_001"))
+    assert _live_extra(project, wr) == mv.STATUS_FOUND
+
+
 # ---- «settled» is decided once, from the recorded verdicts (#175, TA-8) ------------------------
 # Three places decided whether a capture's verdict needs the Arbiter: the window's check loop, the
 # strip's parse of the check's text, and the card. Each is `verdict_state` now, read off a round
