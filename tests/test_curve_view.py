@@ -5595,6 +5595,109 @@ def test_a_change_of_the_bank_note_joins_what_the_read_said_never_replaces_it(
     assert "curve-status-bad" in colour and not dialog._status.isHidden()
 
 
+# ---- a note about what is drawn goes when what is drawn goes (G10 fix A round 2's re-review, R3) --
+
+
+def _is_red(dialog) -> bool:
+    return "curve-status-bad" in str(dialog._status.property("class") or "")
+
+
+def _emptied(dialog, online, how) -> str:
+    """The plot emptied the way `how` empties it, and the sentence the read says for itself."""
+    from autosound_tcc.ui.tcc.curve_dialog import _sentence
+
+    if how == "read-failed":
+        dialog._on_failed("KeyError: 'w-L_01 (sw)'")
+        return _sentence(i18n.t("curveFailed").format(error="KeyError: 'w-L_01 (sw)'"))
+    online[0] = False
+    dialog._reload()
+    return _sentence(i18n.t("curveRewOffline"))
+
+
+@pytest.mark.parametrize("how", ["read-failed", "offline"])
+def test_the_group_s_aside_is_not_said_over_a_plot_a_read_emptied(how):
+    """R3: a failed read, or REW gone offline, takes the curves off the plot, and the group's
+    aside — «… sw_01 (sw) — not in REW. What is drawn is the sum of a different set.» — stood
+    beside the failure, about curves no longer there. A note about what is drawn goes when what
+    is drawn goes. Held back, not dropped: the same set read again is the same aside."""
+    online = [True]
+    _project_glossary(_GLOSSARY)
+    dialog = _dialog(["w-L_02 (sw)", "w-R_02 (sw)"], bridge=_FrBridge(), kind="fr",
+                     available=_IN_REW, rew_online=lambda: online[0])
+    _fetch(dialog)
+    _pick_group(dialog, "SW+Ws")
+    dialog._version_combo.setCurrentIndex(dialog._version_combo.findData("01"))
+    _fetch(dialog)
+    assert "sw_01 (sw)" in dialog._status.text() and not _is_red(dialog), "drawn, with its aside"
+
+    said = _emptied(dialog, online, how)
+
+    assert dialog._view._traces == []
+    assert dialog._status.text() == said and _is_red(dialog), dialog._status.text()
+    online[0] = True
+    dialog._reload()
+    _fetch(dialog)
+    assert dialog._view._traces and "sw_01 (sw)" in dialog._status.text(), \
+        "read again, drawn again, said again"
+    assert not _is_red(dialog)
+
+
+@pytest.mark.parametrize("how", ["read-failed", "offline"])
+def test_drivers_drawn_without_their_bank_are_not_named_over_a_plot_a_read_emptied(
+        app_log_told, how):
+    """R3's twin on the bank's note: the drivers the restore could not read the bank for are named
+    as drawn without it, and the names stood over the emptied plot. The store's own sentence is
+    about the store, and stands while the store cannot be read; the names go with the curves."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    names = _SIDE[:2]
+    delay_bank.put(names[0], 0.198)
+    online = [True]
+    dialog = _dialog(list(names), bridge=_FakeBridge(), rew_online=lambda: online[0])
+    dialog._worker.wait(4000)
+    restore = _a_folder_in_the_store_s_place(project_settings.path_for(config.tcc_dir()))
+    try:
+        _curves_back(dialog, names)
+        assert "w-L_01, w-R_01" in dialog._status.text(), dialog._status.text()
+        said = _emptied(dialog, online, how)
+        status = dialog._status.text()
+    finally:
+        restore()
+
+    assert status.startswith(said) and app_log_told[0] in status, status
+    assert "w-L_01, w-R_01" not in status, status
+    online[0] = True
+    _curves_back(dialog, names)
+    assert dialog._view.delays()[:2] == pytest.approx([0.198, 0.0]), "read: the bank put back"
+
+
+@pytest.mark.parametrize("then", ["a round with rows", "a series"])
+def test_an_empty_round_s_note_goes_when_another_choice_is_made(monkeypatch, then):
+    """Seen beside R2 (G10 fix A round 3): a round REW holds nothing of says so, in red. Picking a
+    round that has rows, with no group, drew its curves under that red line, still naming the round
+    that was left; so did a series picked instead. The note is about the choice it was said for,
+    and goes when another is made."""
+    from autosound_tcc.ui.tcc import curve_dialog
+
+    rounds = [{"id": "cap_000", "expected": ["gone_09 (sw)"], "taken": {}},
+              {"id": "cap_006", "expected": ["w-L_01 (sw)", "w-R_01 (sw)"],
+               "taken": {"w-L_01 (sw)": {}, "w-R_01 (sw)": {}}}]
+    monkeypatch.setattr(curve_dialog.process_view, "capture_rounds", lambda *a, **k: rounds)
+    dialog = _group_dialog(chosen=("w-L_02 (sw)", "w-R_02 (sw)"))
+    _fetch(dialog)
+    combo = dialog._version_combo
+    combo.setCurrentIndex(combo.findData("round:cap_000"))
+    assert "cap_000" in dialog._status.text() and _is_red(dialog), dialog._status.text()
+
+    combo.setCurrentIndex(combo.findData("round:cap_006" if then == "a round with rows" else "01"))
+    _fetch(dialog)
+
+    assert "cap_000" not in dialog._status.text(), dialog._status.text()
+    assert not _is_red(dialog)
+    if then == "a round with rows":
+        assert sorted(dialog._chosen()) == ["w-L_01 (sw)", "w-R_01 (sw)"], "its curves drawn"
+
+
 # ---- a Clear the store refuses is said, and leaves the curves as banked (Task 30's review) -------
 
 

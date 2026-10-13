@@ -1220,7 +1220,12 @@ class CurveDialog(QDialog):
             return
         if self._group is not None:
             self._apply_group()
-        elif round_id:
+            return
+        # With no group, the only note the group's slot holds is an empty round's, about the
+        # choice just replaced: it stood in red over the next round's curves (G10 fix A round 3).
+        self._group_note, self._note_bad = "", False
+        self._render_note()
+        if round_id:
             self._set_selection(self._same_rows_in(round_id))
 
     def _same_rows_in(self, round_id: str) -> list:
@@ -1706,8 +1711,13 @@ class CurveDialog(QDialog):
         others stand beside it: a bank note that changed after a failed read replaced «could not
         read» over the empty plot (N3).
         """
+        # The group's aside — «what is drawn is the sum of a different set» — is about what is
+        # drawn, and is held back while nothing is: a failed read or REW offline left it over the
+        # empty plot (R3). Held, not dropped: the same set read again is the same aside. A group
+        # or round that cannot be shown at all is a refusal, and stands whatever is drawn.
+        group = self._group_note if self._note_bad or self._view._traces else ""
         self._note = " ".join(
-            _sentence(part) for part in (self._read_note, self._refused_note, self._group_note,
+            _sentence(part) for part in (self._read_note, self._refused_note, group,
                                          self._twice_note, self._bank_note) if part
         )
         self._status.setText(self._note)
@@ -1812,9 +1822,8 @@ class CurveDialog(QDialog):
         # tcc#61). The read happens when it is back (`rew_state_changed`).
         self._waiting_for_rew = self._rew_online is not None and self._rew_online() is False
         if self._waiting_for_rew:
-            self._view.set_traces([])
             self._read_note, self._read_bad = i18n.t("curveRewOffline"), True
-            self._render_note()
+            self._empty_plot()
             return
         self._read_note, self._read_bad = i18n.t("curveLoading"), False
         self._render_note()
@@ -1828,15 +1837,17 @@ class CurveDialog(QDialog):
 
     def _on_curves(self, traces: list) -> None:
         # Red is a state, not a stain: a read that works takes it off again. The status line ends
-        # up carrying the other notes, if there are any, and disappears when there are not.
+        # up carrying the other notes, if there are any, and disappears when there are not —
+        # drawn after the curves, because a note about what is drawn stands only while something
+        # is (R3).
         self._read_note, self._read_bad = "", False
-        self._render_note()
         if [t.name for t in self._view._traces] != [t.name for t in traces]:
             # A new selection: the view puts every driver back at nothing, so what was drawn for
             # a driver the bank could not be read for, and what the person set on it since, is
             # gone with it.
             self._unread = {}
         self._view.set_traces(traces)
+        self._render_note()
         # A curve already argued about comes back with its answer on it. `set_traces` clears the
         # delays by design (a new selection is a new question); the bank is what makes coming BACK
         # to a driver different from meeting it for the first time — and over a whole side that is
@@ -2085,12 +2096,23 @@ class CurveDialog(QDialog):
         NOT the same as `_apply_group`'s `curveGroupEmpty`, which keeps the curves on purpose:
         there nothing was fetched and the selection did not move.
         """
-        self._view.set_traces([])
         # A pair REW holds is said as such, not as `<title>: KeyError` (tcc#94); "could not read"
         # stays for whatever else failed beside it. Both stand on the line as notes, so a note
         # that changes after them joins them (N3).
         self._read_note = i18n.t("curveFailed").format(error=message) if message else ""
         self._read_bad = True
+        self._empty_plot()
+
+    def _empty_plot(self) -> None:
+        """Take every curve off the plot — a read that failed, REW offline — and every note about
+        them with them (R3). The drivers drawn without their bank go: nothing is drawn for them
+        now, and the next curves are a new selection to the view, which empties `_unread` anyway;
+        an empty plot banks nothing, so only the words change. The group's aside is held back by
+        `_render_note` while nothing is drawn. What the store says stands — it is about the store.
+        """
+        self._view.set_traces([])
+        self._unread = {}
+        self._render_bank()
         self._render_note()
 
     def _on_send(self, reading: str) -> None:
