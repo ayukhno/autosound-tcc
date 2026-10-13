@@ -8,6 +8,7 @@ because a checklist with impossible rows in it stops being read.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -1684,12 +1685,31 @@ def test_a_check_with_nothing_named_ends_only_with_its_round(project):
     titles = ["w-L_1 (sw)"]
     process = _round(project, version=1, expected=titles, taken=titles)
     typed = [_as_typed(t) for t in titles]
-    not_run = mv.NotRun.at("did not run", ())
+    not_run = mv.NotRun.at("did not run", SimpleNamespace(
+        titles=(), round_id=process.load()["capture"]["id"]))
 
     assert not not_run.ended(_check(process, {"w-L_1 (sw)": _held("u-wl", _SILENCE)}), typed,
                              project)
     process.start_capture(2, expected=[_as_typed("w-L_2 (sw)")])
     assert not_run.ended(process.load()["capture"], typed, project), "another round is open"
+
+
+def test_a_line_is_said_only_while_the_round_its_check_was_started_for_is_open(project):
+    """The re-review of G6+G7 fix B: `NotRun.at` read the round as it stood when the failure came
+    and held the line against it — the next round, when the session had opened one meanwhile. The
+    round the check was started for decides: still open, the line is said and held against it;
+    closed, or another round open, it is not said, its cause over already."""
+    process = _round(project, version=1, expected=["w-L_1 (sw)"], taken=["w-L_1 (sw)"])
+    asked = process.load()["capture"]["id"]
+    check = SimpleNamespace(titles=[_as_typed("w-L_1 (sw)")], round_id=asked)
+
+    held = mv.NotRun.at("did not run", check)
+    assert (held.round_id, held.asked) == (asked, tuple(check.titles))
+    process.start_capture(2, expected=[_as_typed("w-L_2 (sw)")])
+    assert mv.NotRun.at("did not run", check) is None, "the next round is open"
+    then = SimpleNamespace(titles=check.titles, round_id=process.load()["capture"]["id"])
+    process.close_capture()
+    assert mv.NotRun.at("did not run", then) is None, "its round is closed"
 
 
 # The series the captures are named with (`capture_version`, out of the window in W-9).

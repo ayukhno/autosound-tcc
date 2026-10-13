@@ -424,9 +424,9 @@ class NotRun:
     ordinary ends of a round run none: the session's own `check_captures` recording every title
     asked (nothing left to check), and the session closing the round.
 
-    `line` is what the strip said; `round_id` the round it was about; `asked` the titles the
-    check was handed; `since` when it did not run, as the method stamps a verdict (`at`, UTC to
-    the second) — or "" for any verdict at all."""
+    `line` is what the strip said; `round_id` the round it was about — the one the check was
+    started for; `asked` the titles the check was handed; `since` when it did not run, as the
+    method stamps a verdict (`at`, UTC to the second) — or "" for any verdict at all."""
 
     line: str
     round_id: Optional[str]
@@ -434,15 +434,18 @@ class NotRun:
     since: str = ""
 
     @classmethod
-    def at(cls, line: str, asked) -> Optional["NotRun"]:
-        """The line, said now, about the round as it stands now (`process_view.capture_round`) — or
-        None when that round is closed already, its cause over before it is said: the session
-        closed it while the check waited on the project's lock, and the close's own refresh ran
-        before the refusal came (I1's residual, the re-review of the G6+G7 fix)."""
-        round_ = process_view.capture_round() or {}
-        if round_.get("closed"):
+    def at(cls, line: str, check) -> Optional["NotRun"]:
+        """The line, said now, about `check` — the check that did not run: the round it was started
+        for (`round_id`) and the titles it was handed (`titles`) — or None when that round is not
+        the open one now (`process_view.capture_round`), its cause over before it is said: the
+        session closed it, or opened the next, while the check waited on the project's lock, and
+        the refresh that read it ran before the failure came (I1's residual, the re-review of the
+        G6+G7 fix; «another round open», the re-review of fix B). The rule `ended` takes a line
+        back by. A round that cannot be read says the line: nothing is known then."""
+        round_ = process_view.capture_round()
+        if round_ is not None and (round_.get("closed") or round_.get("id") != check.round_id):
             return None
-        return cls(line, round_.get("id"), tuple(str(t) for t in asked or ()),
+        return cls(line, check.round_id, tuple(str(t) for t in check.titles or ()),
                    datetime.now(timezone.utc).isoformat(timespec="seconds"))
 
     def ended(self, round_: Optional[dict], rew_titles, project_dir: Optional[Path] = None) -> bool:

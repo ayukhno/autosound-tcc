@@ -6075,7 +6075,8 @@ def test_a_did_not_run_line_waiting_behind_a_report_is_taken_back_when_a_check_r
     strip = StatusStrip()
     host = SimpleNamespace(_status_strip=strip, _refresh_capture_task=lambda state: None,
                            _show_unusable=lambda lines: None, _on_rew_titles_changed=lambda: None,
-                           _capture_check=SimpleNamespace(titles=list(typed)))
+                           _capture_check=SimpleNamespace(
+                               titles=list(typed), round_id=process.load()["capture"]["id"]))
 
     strip.notify("a report", level="warn", sticky=True)
     MainWindow._on_capture_check_failed(host, i18n.t("captureCheckBusy"))
@@ -6126,7 +6127,9 @@ def test_a_did_not_run_line_is_taken_back_when_its_cause_ends_without_tccs_check
     _app()
     strip = StatusStrip()
     host = SimpleNamespace(
-        _status_strip=strip, _capture_check=SimpleNamespace(titles=list(typed)), _closing=False,
+        _status_strip=strip, _closing=False,
+        _capture_check=SimpleNamespace(titles=list(typed),
+                                       round_id=process.load()["capture"]["id"]),
         _refresh_capture_task=lambda state: None, _offer_title_fixes=lambda round_: None,
         _show_unusable=lambda lines: None,
         _meas_panel=SimpleNamespace(known_titles=lambda: list(typed)),
@@ -6151,12 +6154,17 @@ def test_a_did_not_run_line_is_taken_back_when_its_cause_ends_without_tccs_check
         "a bad verdict is asked again; a fine one, or a closed round, is not"
 
 
-def test_a_check_refused_over_a_round_the_session_closed_is_not_said(monkeypatch):
+@pytest.mark.parametrize("meanwhile", ["the session closed the round",
+                                       "the session opened the next round"])
+def test_a_check_refused_over_a_round_the_session_closed_is_not_said(monkeypatch, meanwhile):
     """The re-review of G6+G7 fix A, I1's residual: the session closed the round while TCC's check
     waited on the project's lock. The close's write fired the process refresh before the child's
     refusal came, so «did not run: no capture round is open» was said over a closed round, and
     stood until the next refresh or REW change. Its cause is over before it is said: not said,
-    and the title-fix offer keeps its slot. The real method's refusal, on a host with a real strip."""
+    and the title-fix offer keeps its slot. The real method's refusal, on a host with a real strip.
+    And so when the session opened the next round, which closes this one (the re-review of fix B):
+    the line was said over the next round, and held against it. The round the check was started
+    for is not the open one: not said either — here TCC's own `RoundGone`, from under the lock."""
     from autosound_tcc.core import process_writer
     from autosound_tcc.ui.tcc import workers
     from autosound_tcc.ui.tcc.status_strip import StatusStrip
@@ -6164,20 +6172,26 @@ def test_a_check_refused_over_a_round_the_session_closed_is_not_said(monkeypatch
 
     process = _rounds.write_round(config.project_dir(), version=1, expected=["w-L_1 (sw)"],
                                   taken=["w-L_1 (sw)"])
-    typed = [_rounds.as_typed("w-L_1 (sw)")]
-    process.close_capture()  # the session's, while TCC's check waited on the lock
-    with pytest.raises(process_writer.ProcessWriterError) as refused:
-        process_writer.check_captures(config.project_dir(), typed)
+    typed, asked = [_rounds.as_typed("w-L_1 (sw)")], process.load()["capture"]["id"]
+    if meanwhile == "the session closed the round":
+        process.close_capture()  # the session's, while TCC's check waited on the lock
+        with pytest.raises(process_writer.ProcessWriterError) as refused:
+            process_writer.check_captures(config.project_dir(), typed)
+        assert "no capture round is open" in str(refused.value), refused.value
+    else:
+        process.start_capture(2, expected=[_rounds.as_typed("w-L_2 (sw)")])
+        with pytest.raises(process_writer.RoundGone) as refused:
+            process_writer.check_captures(config.project_dir(), typed, round_id=asked)
     why = workers.capture_check_not_run(refused.value)
-    assert "no capture round is open" in why, why
     _app()
     strip, offered = StatusStrip(), frozenset({("wL_01 (sw)", typed[0])})
-    host = SimpleNamespace(_status_strip=strip, _capture_check=SimpleNamespace(titles=list(typed)),
-                           _title_fixes_said=offered, _on_rew_titles_changed=lambda: None)
+    host = SimpleNamespace(_status_strip=strip, _title_fixes_said=offered,
+                           _capture_check=SimpleNamespace(titles=list(typed), round_id=asked),
+                           _on_rew_titles_changed=lambda: None)
 
     MainWindow._on_capture_check_failed(host, why)
 
-    assert (strip.text(), strip.waiting()) == ("", []), "nothing said over a closed round"
+    assert (strip.text(), strip.waiting()) == ("", []), "nothing said over a round now closed"
     assert getattr(host, "_capture_check_not_run", None) is None
     assert host._title_fixes_said == offered, "the offer's slot was not taken"
 
@@ -6386,7 +6400,8 @@ def test_a_did_not_run_line_offers_the_check_again(monkeypatch):
 
     _app()
     strip, asked = StatusStrip(), []
-    host = SimpleNamespace(_status_strip=strip, _capture_check=SimpleNamespace(titles=[]),
+    host = SimpleNamespace(_status_strip=strip,
+                           _capture_check=SimpleNamespace(titles=[], round_id=None),
                            _on_rew_titles_changed=lambda: asked.append("asked"))
 
     MainWindow._on_capture_check_failed(host, i18n.t("captureCheckBusy"))
@@ -6415,8 +6430,9 @@ def test_the_title_fix_offer_is_said_again_once_a_failed_checks_line_goes(monkey
     _app()
     strip = StatusStrip()
     host = SimpleNamespace(
-        _status_strip=strip, _capture_check=SimpleNamespace(titles=list(typed)),
-        _on_rew_titles_changed=lambda: None,
+        _status_strip=strip, _on_rew_titles_changed=lambda: None,
+        _capture_check=SimpleNamespace(titles=list(typed),
+                                       round_id=process.load()["capture"]["id"]),
         _meas_panel=SimpleNamespace(rew_titles=lambda: ["wL_01 (sw)"], open_import=lambda: None,
                                     known_titles=lambda: list(typed)))
     host._offer_title_fixes = lambda round_: MainWindow._offer_title_fixes(host, round_)

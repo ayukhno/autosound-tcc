@@ -4111,7 +4111,7 @@ class MainWindow(QMainWindow):
         """The check did not run, or did not finish — said, with why (R-ax), never «everything is
         bad» (`workers.capture_check_not_run`), unless its cause is over (`NotRun.at`); held till it
         ends, with the action it names (M4). It takes the title-fix offer's slot, said again (M1)."""
-        if (not_run := measurement_view.NotRun.at(why, self._capture_check.titles)) is not None:
+        if (not_run := measurement_view.NotRun.at(why, self._capture_check)) is not None:
             self._capture_check_not_run, self._title_fixes_said = not_run, None
             self._status_strip.notify(why, level="warn", action=(i18n.t("captureCheckAgain"),
                                                                  self._on_rew_titles_changed))
