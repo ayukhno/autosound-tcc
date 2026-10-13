@@ -229,6 +229,10 @@ def test_the_dsp_header_names_the_configuration_in_the_processor(tmp_path, monke
     window._show_version(view, {"dsp_profile": {"vendor": "Audiotec", "name": "Helix"}})
     assert window._dsp_section.sub_text() == "SQ-2 · v_006"
     assert not window._cfg_btn.isHidden(), "the save is offered on the per-project line"
+    # The window hands `compare_offer`'s labels to the pane (Task 32's review, Minor 1): the one
+    # window build of a project with saved names, so the pin rides here.
+    window._offer_compare(root, "SQ", {}, "v_006")
+    assert "SQ-1" in window._detail._compare_combo.currentText(), "the saved name reaches the list"
 
 
 def test_compare_offers_this_preset_first_then_the_others_on_the_old_layout(tmp_path):

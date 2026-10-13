@@ -1764,8 +1764,9 @@ def test_a_line_is_said_only_while_the_round_its_check_was_started_for_is_open(p
 
 # The series the captures are named with (`capture_version`, out of the window in W-9), asked of
 # real rounds the method wrote, in a project of their own (#179): the project `config` answers is
-# another, empty folder (`conftest._isolated_project_dir`), so a read that forgot `project_dir`
-# answers from there.
+# another, empty folder (`conftest._isolated_project_dir`), so a round read that forgot
+# `project_dir` answers from there. The glossary read (`series_of`) is not pinned this way: on these
+# titles the default glossary reads the same series as the project's.
 
 
 def test_the_capture_series_comes_from_the_plan_not_the_ledger(tmp_path):
@@ -1777,7 +1778,7 @@ def test_the_capture_series_comes_from_the_plan_not_the_ledger(tmp_path):
     state = {
         "active_phase": "0",
         "plan": [
-            {"id": "m0-w-L", "phase": "0", "name": "Baseline solo: w-L_1 (sw) + w-L_1 (rta)"},
+            {"id": "m0-tw-L", "phase": "0", "name": "Baseline solo: tw-L_1 (sw) + tw-L_1 (rta)"},
         ],
     }
 

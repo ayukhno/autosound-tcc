@@ -269,8 +269,8 @@ def compare_offer(root, preset: str, current: Optional[str]) -> CompareOffer:
     own = groups[0][1] if groups else []
     names = saved_names(root)
     labels = {v: label(root, v, names) for v in own}
-    others = [(p, [(f"{p}/{v}", label(root, v, names)) for v in versions])
-              for p, versions in groups[1:]]
+    others = [(p, [(f"{p}/{v}", label(root, v, names)) for v in theirs])
+              for p, theirs in groups[1:]]
     previous = previous_of(root, preset, current)
     if previous in own:
         default = previous
