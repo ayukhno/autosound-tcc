@@ -2245,6 +2245,33 @@ def test_a_car_the_method_refuses_comes_back_as_its_own_sentence(tmp_path, monke
     assert not (tmp_path / "project.json").exists(), "nothing was written"
 
 
+def test_the_car_is_recorded_off_the_servers_loop(tmp_path, monkeypatch):
+    """The end-of-branch review, code m3: since #169 N9 `car_library.record` is the method's
+    `intake.py set-car` in a child, bounded at 20 s — seconds to start on Windows — and `save_car`
+    ran it on the server's own loop thread, so every other MCP call waited behind it. It runs on a
+    call thread of its own (`_in_thread`), as every other tool's blocking work does (#176, Fable
+    m2)."""
+    from autosound_tcc.core import car_library
+
+    ran_on: list = []
+
+    def record(project_dir, make, model, generation, body, year):
+        ran_on.append(threading.current_thread())
+        return {"make": make, "model": model, "generation": generation, "body": body}
+
+    monkeypatch.setattr(car_library, "record", record)
+    monkeypatch.setattr(mcp_server.config, "project_dir", lambda: tmp_path)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+    loop_thread = threading.current_thread()  # where `asyncio.run` runs the server's loop
+
+    said = json.loads(_text(asyncio.run(mcp.call_tool(
+        "save_car", {"make": "VW", "model": "Passat", "generation": "B8", "body": "sedan"}))))
+
+    assert said["recorded"] is True, said
+    assert [thread.name for thread in ran_on] == [mcp_server._CALL_THREAD], ran_on
+    assert ran_on[0] is not loop_thread
+
+
 def test_an_unwritable_advertisement_does_not_take_the_server_down(tmp_path, monkeypatch, caplog):
     """From the user's own log (2026-09-06): `PermissionError` on `.mcp.json` escaped `start()`,
     the window said "the MCP server did not start" — about a server that was SERVING — and the

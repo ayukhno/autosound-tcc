@@ -908,16 +908,21 @@ def build_server(
         nothing is written, and `error` is the method's own sentence -- it names what to ask the
         person for.
         """
-        try:
-            car = car_library.record(
-                config.project_dir(), make, model, generation, body, year
-            )
-        except car_library.CarLibraryError as exc:
-            # The sentence itself (#169, N9): the part to ask for, or why the copy did not run.
-            return json.dumps({"error": str(exc)}, ensure_ascii=False)
-        except Exception as exc:  # noqa: BLE001 — any other failure is an answer too, by its class
-            return json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False)
-        return json.dumps({"recorded": True, "car": car}, ensure_ascii=False)
+        def _save() -> str:
+            try:
+                car = car_library.record(
+                    config.project_dir(), make, model, generation, body, year
+                )
+            except car_library.CarLibraryError as exc:
+                # The sentence itself (#169, N9): the part to ask for, or why the copy did not run.
+                return json.dumps({"error": str(exc)}, ensure_ascii=False)
+            except Exception as exc:  # noqa: BLE001 — any other failure is an answer too
+                return json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False)
+            return json.dumps({"recorded": True, "car": car}, ensure_ascii=False)
+
+        # The method's `set-car` in a child, bounded at 20 s (#169, N9): off the loop, or every
+        # other MCP call waits for it to start (the end-of-branch review, code m3).
+        return await _in_thread(_save)
 
     # The one tool whose instructions have to be COMPUTED — the field vocabulary comes off the
     # skill's own writer — and, until 2026-09-01, the one tool that reached the model with nothing
