@@ -6,6 +6,7 @@ back, and the reason a disagreement about an impulse onset had nowhere to be set
 
 from __future__ import annotations
 
+import errno
 import math
 import os
 import pathlib
@@ -4925,6 +4926,56 @@ def test_a_bank_that_cannot_be_written_is_said_once_however_many_steps_fail(app_
     assert len(app_log_told) == 1, app_log_told
     assert str(store) in app_log_told[0] and "could not be written" in app_log_told[0]
     assert dialog._view.delay_ms() == pytest.approx(0.3), "and the curves still move"
+    dialog._view.set_delay(0.4)
+    assert delay_bank.load()["w-L_01 (sw)"] == pytest.approx(0.4), \
+        "writable again: the next step lands (Task 30's review, Minor 2)"
+    assert len(app_log_told) == 1, "and nothing more is said"
+
+
+def test_a_full_disk_is_said_once_and_the_steps_go_on_to_the_total_and_the_line(
+        app_log_told, monkeypatch):
+    """A write refused by something other than a POSIX permission — a full disk — and the form of
+    the window's write branch that runs on Windows too (G10 tests, G5). Said once however many
+    steps fail, the store as it was, no temp file left. The steps go on past the refusal (Task
+    30's review, Minor 2): the curves move, a ledger that moved meanwhile reaches the channel's
+    total, and the window's own line says what was said. With room again, the next step lands
+    and nothing more is said."""
+    from autosound_tcc.core import config, delay_bank, own_store, project_settings
+
+    delay_bank.put("w-L_01 (sw)", 0.198)
+    store = project_settings.path_for(config.tcc_dir())
+    before = store.read_bytes()
+    ledger = dict(_LEDGER)
+    dialog = _plotted(_SIDE)
+    dialog.set_delays_provider(lambda: dict(ledger))
+    view = dialog._view
+    target = view.delay_target()
+
+    def full(_fd):
+        raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+
+    with monkeypatch.context() as patched:
+        patched.setattr(own_store.os, "fsync", full)
+        for ms in (0.1, 0.2, 0.3):
+            view.set_delay(ms)
+        ledger[_SIDE[target].split("_")[0]] = 2.0  # set elsewhere while the steps are refused
+        view.set_delay(0.31)
+        status = dialog._status.text()
+
+    assert store.read_bytes() == before, "the bank as it was"
+    assert [p.name for p in store.parent.iterdir() if p.suffix == ".tmp"] == [], "no temp file"
+    assert len(app_log_told) == 1, app_log_told
+    assert "could not be written" in app_log_told[0], app_log_told
+    assert os.strerror(errno.ENOSPC) in app_log_told[0], app_log_told
+    assert view.delay_ms() == pytest.approx(0.31), "the curves still move"
+    assert view.total_delay_ms() == pytest.approx(2.0 + view.proposed_delays()[target]), \
+        "the refused step still reads the ledger"
+    assert app_log_told[0] in status, "and the window's own line says it"
+
+    view.set_delay(0.4)
+
+    assert delay_bank.load()[_SIDE[target]] == pytest.approx(0.4), "room again: the step lands"
+    assert len(app_log_told) == 1, "and nothing more is said"
 
 
 def test_one_step_after_one_failed_read_keeps_every_banked_driver(monkeypatch, app_log_told):
@@ -5454,6 +5505,7 @@ def test_a_refused_bank_write_is_said_on_the_curve_window_s_own_line_until_one_l
     dialog._view.set_delay(0.4)
     assert app_log_told[0] not in dialog._status.text() and dialog._status.isHidden()
     assert delay_bank.load()["w-L_01 (sw)"] == pytest.approx(0.4), "and that step was kept"
+    assert len(app_log_told) == 1, "with nothing more said"
 
 
 def test_a_bank_that_cannot_be_read_is_said_on_the_curve_window_s_own_line(app_log_told):
