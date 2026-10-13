@@ -730,6 +730,49 @@ def test_a_contract_git_could_not_read_refuses_until_it_is_tried_again(monkeypat
     assert "a session's patch" in (clone / "a.txt").read_text()
 
 
+@pytest.mark.parametrize("git_did", ["time out", "fail", "fail, and could not list the tag"])
+def test_an_updater_git_could_not_read_is_not_a_release_without_one(monkeypatch, tmp_path,
+                                                                    app_log_warnings, git_did):
+    """The end-of-branch review, silent m1: `git show` of the tag's `scripts/upkeep.py` that timed
+    out (the 12 s bound, an antivirus holding git) or failed read as «the tag has no such file»,
+    so the press said «this release of the method has no updater of its own yet — update the
+    method once with its installer» about v3.0.11, which has one, and logged nothing. A read that
+    failed is `read_failed` — try again — in git's words, and logged, as `contract.py`'s is (R-ar);
+    a tag that really has no `upkeep.py` is still the installer's job
+    (`test_a_target_tag_without_upkeep_is_the_installer_s_job`). Nothing of the tag runs."""
+    import subprocess
+
+    clone, log, temp = _skill_repos(monkeypatch, tmp_path)
+    real = updates.child.run_bounded
+
+    def flaky(argv, *args, **kwargs):
+        if ("ls-tree" in argv and str(argv[-1]).endswith("scripts/upkeep.py")
+                and git_did.endswith("could not list the tag")):
+            return subprocess.CompletedProcess(argv, 128, "", "fatal: not a tree object")
+        if "show" in argv and str(argv[-1]).endswith("scripts/upkeep.py"):
+            if git_did == "time out":
+                raise subprocess.TimeoutExpired(argv, 12.0)
+            return subprocess.CompletedProcess(argv, 128, b"", b"fatal: unable to read 0123abcd")
+        return real(argv, *args, **kwargs)
+
+    monkeypatch.setattr(updates.child, "run_bounded", flaky)
+
+    found = updates.local_changes("v3.0.11")
+    done = updates.apply_skill("v3.0.11", keep_local=True)
+
+    said = "TimeoutExpired" if git_did == "time out" else "fatal: unable to read 0123abcd"
+    if git_did.endswith("could not list the tag"):
+        said += "; fatal: not a tree object"
+    for answer in (found, done):
+        assert (answer.ok, answer.reason) == (False, "read_failed"), answer
+        assert answer.detail.startswith("v3.0.11: ") and said in answer.detail, answer.detail
+    assert _runs(log) == [] and list(temp.iterdir()) == []
+    warned = [r.getMessage() for r in app_log_warnings
+              if "upkeep.py could not be read" in r.getMessage()]
+    assert len(warned) == 2 and all(said in line for line in warned), (
+        "once per press", [r.getMessage() for r in app_log_warnings])
+
+
 def test_a_release_whose_signature_does_not_check_out_runs_nothing(monkeypatch, tmp_path):
     """The installers verify the fetched tag BEFORE they run anything from it (install.sh:
     `verify_tag` before `keep_local`), and so does TCC: the script about to run comes from that
@@ -807,6 +850,7 @@ def test_a_git_too_old_to_check_is_not_called_a_bad_signature(monkeypatch, tmp_p
     ran = []
     monkeypatch.setattr(updates, "_run_upkeep", lambda argv, timeout: ran.append(argv))
     monkeypatch.setattr(updates, "_git_blob", lambda repo, spec: pytest.fail("nothing extracted"))
+    monkeypatch.setattr(updates, "_git_show", lambda repo, spec: pytest.fail("nothing extracted"))
 
     def fake_git(*args, cwd=None, timeout=None, base_env=None):
         if "verify-tag" in args:

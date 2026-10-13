@@ -939,9 +939,20 @@ def _git_show(repo: Path, spec: str) -> tuple[Optional[bytes], str]:
 
 def _git_blob(repo: Path, spec: str) -> Optional[bytes]:
     """`_git_show`'s bytes, or None when the tag has no such file — or git could not show it: the
-    installers' `|| true` for what `upkeep.py` takes along. Not for `contract.py`, where a failed
-    read is not the same as no file (`_tag_contract`)."""
+    installers' `|| true` for what `upkeep.py` takes along. Not for `contract.py` or `upkeep.py`
+    itself, where a failed read is not the same as no file (`_tag_contract`, `_extract_upkeep`)."""
     return _git_show(repo, spec)[0]
+
+
+def _tag_lacks(repo: Path, tag: str, path: str) -> tuple[Optional[bool], str]:
+    """Whether `tag`'s tree has no `path` — True, or False when it has one — or `(None, why)` when
+    git could not say. `ls-tree` tells the two apart where `show` cannot: it fails alike for a
+    path that is not there and for a read that broke, and only its messages differ, in the
+    language git speaks here (`_tag_contract`)."""
+    listed, said = _git("ls-tree", "--full-tree", f"refs/tags/{tag}", "--", path, cwd=repo)
+    if not listed:
+        return None, said or "git ls-tree failed"
+    return not any(line.partition("\t")[2] == path for line in said.splitlines()), ""
 
 
 def _tag_contract(repo: Path, tag: str) -> tuple[Optional[method_binding.Contract], str]:
@@ -1031,15 +1042,30 @@ def _extract_upkeep(repo: Path, tag: str, root: Path) -> Extracted:
         _log.warning("skill tag %s: not one this TCC drives (contract %s) — not installed: %s",
                      tag, known, detail)
         return Extracted(None, "newer_contract", detail, signature=line)
+    unread = ""
     for name in _UPKEEP_FILES:
-        blob = _git_blob(repo, f"refs/tags/{tag}:{_SKILL_IN_REPO}/{name}")
+        spec = f"refs/tags/{tag}:{_SKILL_IN_REPO}/{name}"
+        if name == _UPKEEP_FILES[0]:
+            blob, unread = _git_show(repo, spec)
+        else:
+            blob = _git_blob(repo, spec)
         if blob is None:
             continue  # the installers' `|| true`: only upkeep.py itself is required
         target = root / _SKILL_IN_REPO / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(blob)
-    script = root / _SKILL_IN_REPO / "scripts" / "upkeep.py"
+    script = root / _SKILL_IN_REPO / _UPKEEP_FILES[0]
     if not script.is_file():
+        # A `git show` that timed out or failed is not a tag without the script: «update once
+        # with the installer» about a release that has one, with nothing in the log (the
+        # end-of-branch review, silent m1). Asked as `contract.py` is: try again, in git's words.
+        path = f"{_SKILL_IN_REPO}/{_UPKEEP_FILES[0]}"
+        lacks, said = _tag_lacks(repo, tag, path)
+        if not lacks:
+            failed = unread if lacks is False else f"{unread}; {said}"
+            _log.warning("skill tag %s: its %s could not be read — not installed: %s", tag,
+                         _UPKEEP_FILES[0], failed)
+            return Extracted(None, "read_failed", f"{tag}: {failed}", signature=line)
         # A release from before the script (v3.0.64): nothing to run, and no git fallback — the
         # skill's installer is the one way across, once.
         return Extracted(None, "no_upkeep", signature=line)
