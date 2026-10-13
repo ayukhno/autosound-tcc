@@ -2053,9 +2053,9 @@ every screen in about two minutes.
 
 Not shown: the diagnostics dialog. Its project check does not finish offscreen.
 
-### F-099 — W-9: the audit's second wave — at review
+### F-099 — W-9: the audit's second wave — released in v1.1.3
 
-**Статус**: open · stage 3 started 2026-10-07 — **all 12 `ok`, one milestone** (the Arbiter, 2026-10-07: «ок. ок.»); the architects' step is the audit's own design passes (§5, «Balance» named in every issue the Arbiter OK'd), not run again; four code maps against `80519f1` (`.superpowers/sdd/PLAN-W-9/map-*.md`); **the plan is written** — `docs/PLAN-W-9.md`, 32 tasks in five groups (G5+G8 1–14, G9+G3+G4 15–23, G6+G7 24–29, G10 30–31, G13 32), 11 rulings, about 30–35 h of session time; **the Arbiter's «го» on the plan** (2026-10-07, «Го, спершу /compact»); the build on `wave-9` from Task 1, the SDD ledger `.superpowers/sdd/PLAN-W-9/progress.md` · milestone `W-9 · v1.1.3` (#9), 12
+**Статус**: done 2026-10-13 · released in **v1.1.3** (the tag on the merge of `wave-9`, method `v3.1.2`); what the reviews left is F-100 · was: open · stage 3 started 2026-10-07 — **all 12 `ok`, one milestone** (the Arbiter, 2026-10-07: «ок. ок.»); the architects' step is the audit's own design passes (§5, «Balance» named in every issue the Arbiter OK'd), not run again; four code maps against `80519f1` (`.superpowers/sdd/PLAN-W-9/map-*.md`); **the plan is written** — `docs/PLAN-W-9.md`, 32 tasks in five groups (G5+G8 1–14, G9+G3+G4 15–23, G6+G7 24–29, G10 30–31, G13 32), 11 rulings, about 30–35 h of session time; **the Arbiter's «го» on the plan** (2026-10-07, «Го, спершу /compact»); the build on `wave-9` from Task 1, the SDD ledger `.superpowers/sdd/PLAN-W-9/progress.md` · milestone `W-9 · v1.1.3` (#9), 12
 issues: G5 S1 #169, G5 S2 #170, G8 phase 0 #171 · G9 S1 #172, G3 #173, G4 part 1 #174 · G6 slice 1
 #175, G7 now #176 · G10 S #177 · the re-pin to the skill's W-8 tag #178 · a G13 slice #179 · N2 #164 · from
 `docs/PLAN-AUDIT-2026-10.md` §3's W-9 row (~70 h of TCC work); the collected findings (F-094, F-096, F-098's
@@ -2103,6 +2103,9 @@ the end-of-branch review (2026-10-13), each judged shippable for v1.1.3; the rep
   damaged settings file is per run (after a restart a fresh file with no gate reads the machine gate).
 - The curve window built after a gate pick has no set-aside line (the strip keeps it): the memo belongs one level
   down, in `delay_bank` (Fable's re-review, round 2, m1).
+- The gate's copy memo is blind to a store that was absent when this process last looked and was then written,
+  broken and set aside by another process between two permissions here — fold the folder's `st_mtime_ns` into the
+  memo's key (Fable's re-review, round 3, m1).
 - To the skill: TCC-054 (hub #269) — the round matches titles raw, not by `name_key`.
 
 ### F-097 — W-8: the audit's first wave — released in v1.1.2

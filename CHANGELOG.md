@@ -15,10 +15,12 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [Unreleased]
+## [v1.1.3] — 2026-10-13 · one method per project, waits with a deadline, stores that never read broken as empty, the method's answers on screen, a delay bank that never writes over what it could not read, the method at v3.1.2
+
+Paired with method `d9633fa7900c474e8a334c0b45d29c1a5a7f3a9c` — the tag on that commit is **`v3.1.2`**.
 
 The wave W-9 · v1.1.3, the audit's second wave (`docs/PLAN-AUDIT-2026-10.md` §2: G3 to G10 and G13's second
-step; `docs/PLAN-W-9.md`), reviewed group by group. The method moves to v3.1.2 (tcc#178), its own first audit
+step; `docs/PLAN-W-9.md`), reviewed group by group and once more as a whole branch. The method moves to v3.1.2 (tcc#178), its own first audit
 wave: REW down and REW answering an error are told apart, every filter write is read back, and a file nobody can
 read stops the step instead of reading as empty. The guide's method links follow it.
 
