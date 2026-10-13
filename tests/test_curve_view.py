@@ -5147,3 +5147,52 @@ def test_a_bank_that_cannot_be_read_says_so_and_never_reads_as_empty(app_log_tol
     dialog._view.set_delay(0.33)
     assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=2), "read again: the bank"
     assert dialog._bank_ask_btn.isEnabled() and not _tip(dialog._bank_ask_btn)
+
+
+# ---- the curve window says itself what the strip it covers says (G10 I2, #177) -------------------
+
+
+@pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                    reason="POSIX permissions, and root writes whatever the mode")
+def test_a_refused_bank_write_is_said_on_the_curve_window_s_own_line_until_one_lands(
+        app_log_told):
+    """G10 I2: a refused bank was said once, on the main window's strip — which the curve window,
+    a tool window opened maximised, covers. A whole pass could go unsaved with nothing in sight.
+    The standing sentence is on the window's own status line now, while it stands: a landed write
+    takes it off, as it takes the memo off. The strip still hears it once."""
+    from autosound_tcc.core import config, delay_bank
+
+    delay_bank.put("sub_01 (sw)", 1.5)  # the folder and the store exist
+    dialog = _plotted(_SIDE[:2])
+    assert dialog._status.isHidden(), "nothing to say yet"
+    folder = config.tcc_dir()
+    folder.chmod(0o500)
+    try:
+        for ms in (0.1, 0.2, 0.3):
+            dialog._view.set_delay(ms)
+        status, hidden = dialog._status.text(), dialog._status.isHidden()
+    finally:
+        folder.chmod(0o700)
+
+    assert len(app_log_told) == 1 and "could not be written" in app_log_told[0], app_log_told
+    assert not hidden and app_log_told[0] in status, status
+    dialog._view.set_delay(0.4)
+    assert app_log_told[0] not in dialog._status.text() and dialog._status.isHidden()
+    assert delay_bank.load()["w-L_01 (sw)"] == pytest.approx(0.4), "and that step was kept"
+
+
+def test_a_bank_that_cannot_be_read_is_said_on_the_curve_window_s_own_line(app_log_told):
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    delay_bank.put("sub_01 (sw)", 1.5)
+    dialog = _plotted(_SIDE[:2])
+    restore = _a_folder_in_the_store_s_place(project_settings.path_for(config.tcc_dir()))
+    try:
+        dialog._view.set_delay(0.1)
+        status = dialog._status.text()
+    finally:
+        restore()
+
+    assert len(app_log_told) == 1 and app_log_told[0] in status, (app_log_told, status)
+    dialog._view.set_delay(0.2)
+    assert dialog._status.isHidden(), dialog._status.text()

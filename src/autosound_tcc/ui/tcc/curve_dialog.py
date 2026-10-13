@@ -1486,15 +1486,21 @@ class CurveDialog(QDialog):
                 head = i18n.t("curveBankLabelIn").format(set=series)
         else:
             shown = i18n.t("curveBankEmpty")
-        note = ""
+        # Said on this window's own line as well as on the strip, which this window covers (G10
+        # I2): the strip's report is said once and stands until its ✕, out of sight. This stands
+        # while the sentence does — a good read or a landed write takes both off.
+        notes = []
+        said = own_store.said_about(project_settings.path_for(config.tcc_dir()))
+        if said:
+            notes.append(i18n.t("curveBankNotKept").format(why=said))
         if self._unread:
-            # Said in the window, which covers the strip (I2): the drivers drawn without their bank.
-            note = i18n.t("curveBankUnread").format(
-                names=", ".join(title.split(" ")[0] for title in self._unread))
+            notes.append(i18n.t("curveBankUnread").format(
+                names=", ".join(title.split(" ")[0] for title in self._unread)))
         elif self._apf_unshown:
-            note = i18n.t("curveApfUnshown").format(
+            notes.append(i18n.t("curveApfUnshown").format(
                 names=", ".join(title.split(" ")[0] for title in self._apf_unshown),
-                why=next(iter(self._apf_unshown.values())))
+                why=next(iter(self._apf_unshown.values()))))
+        note = " ".join(notes)
         if note != self._bank_note:
             self._bank_note = note
             self._render_note()
