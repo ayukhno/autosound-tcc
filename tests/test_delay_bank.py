@@ -298,3 +298,47 @@ def test_a_bank_write_for_the_window_says_a_write_that_fails_once_and_returns(
     full.clear()
     assert _OR_SAY[write](tmp_path) is True
     assert path.read_bytes() != before, "and that one landed"
+
+
+# ---- what the bank cannot read is carried through a write, never erased by it (G10 M2, #177) -----
+
+
+#: Entries this TCC cannot read: a delay that is not a number (a hand edit), and a filter of a kind
+#: it does not know (a newer TCC's) — beside a field of the entry it has never heard of.
+_UNREAD = {
+    "c_01 (sw)": {"ms": "0.4 ms", "at": None, "set": "S1"},
+    "sub_01 (sw)": {"ms": 1.5, "at": 9.6, "set": "S1", "apf": {"type": "APF3", "f": 60.0},
+                    "note": "kept"},
+}
+
+
+def _stored(folder) -> dict:
+    return json.loads(project_settings.path_for(folder).read_text(encoding="utf-8"))[delay_bank.KEY]
+
+
+def test_a_step_carries_what_the_bank_cannot_read_through_unchanged(tmp_path):
+    """G10 M2: the step re-wrote the whole bank from what `_parsed` read, and what it could not
+    read went: the hand-edited delay skipped, the unknown filter read as none and written as
+    none, the unknown field dropped — on the first step on any other driver, with no word. Every
+    entry the readings do not touch is written back as it was read."""
+    project_settings.set_value(tmp_path, delay_bank.KEY, _UNREAD)
+
+    delay_bank.put_many([delay_bank.Reading("w-L_01 (sw)", 0.2)], tmp_path, session="S1")
+
+    stored = _stored(tmp_path)
+    assert {title: stored[title] for title in _UNREAD} == _UNREAD
+    assert stored["w-L_01 (sw)"] == {"ms": 0.2, "at": None, "set": "S1"}
+
+
+def test_a_clear_of_one_series_carries_another_s_entries_it_cannot_read(tmp_path):
+    """The same for Clear of one series: the other series' entries are kept as they were read, not
+    as `_parsed` read them. This series' own go with it, read or not."""
+    other = {title: {**entry, "set": "S2"} for title, entry in _UNREAD.items()}
+    project_settings.set_value(tmp_path, delay_bank.KEY, {
+        **other, "w-L_01 (sw)": {"ms": 0.2, "at": None, "set": "S1"},
+        "tw-L_01 (sw)": {"ms": "late", "set": "S1"},
+    })
+
+    delay_bank.clear(tmp_path, session="S1")
+
+    assert _stored(tmp_path) == other

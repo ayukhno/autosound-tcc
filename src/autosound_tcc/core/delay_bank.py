@@ -223,16 +223,31 @@ def put_many(
         return load(tcc_dir)
     banked: dict[str, float] = {}
 
-    def change(raw: Any) -> dict[str, dict]:
+    def change(raw: Any) -> dict[str, Any]:
         entries = _parsed(raw)
         for reading in readings:
             title = str(reading.title)
             entries[title] = _entry(entries.get(title) or {}, reading, session)
         banked.update((name, entry["ms"]) for name, entry in entries.items() if entry["ms"])
-        return _serialised(entries)
+        return _carried(raw, _serialised(entries), {str(reading.title) for reading in readings})
 
     project_settings.update_value(tcc_dir, KEY, change)
     return banked
+
+
+def _carried(raw: Any, rows: dict[str, dict], touched: set) -> dict[str, Any]:
+    """`rows`, with every entry of `raw` the readings did not touch put back exactly as read.
+
+    The write was the bank as `_parsed` read it, and what it could not read went with the next
+    step on any other driver: a delay that is not a number, a filter of a kind this TCC does not
+    know (`Allpass.from_dict` gives None), a field it has never heard of (G10 M2). Only what a
+    reading changes is written anew.
+    """
+    if not isinstance(raw, dict):
+        return rows
+    out = {title: rows[title] if title in touched else value for title, value in raw.items()}
+    out.update((title, row) for title, row in rows.items() if title not in out)
+    return out
 
 
 def put_many_or_say(readings: Iterable[Reading], tcc_dir: Optional[Path] = None,
@@ -281,12 +296,16 @@ def clear(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> None
         project_settings.set_value(tcc_dir, KEY, None)
         return
 
-    def change(raw: Any) -> Optional[dict[str, dict]]:
+    def change(raw: Any) -> Optional[dict[str, Any]]:
+        # Another series' entries as they were read, not as `_parsed` reads them: one it cannot
+        # read is still that series' (G10 M2). An entry with no series is shown under every one,
+        # so it goes with this one, as it always has.
         keep = {
-            title: entry for title, entry in _parsed(raw).items()
-            if entry["set"] is not None and entry["set"] != session
+            title: value for title, value in (raw if isinstance(raw, dict) else {}).items()
+            if isinstance(value, dict) and value.get("set") is not None
+            and str(value["set"]) != session
         }
-        return _serialised(keep) or None
+        return keep or None
 
     project_settings.update_value(tcc_dir, KEY, change)
 
