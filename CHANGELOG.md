@@ -3,14 +3,152 @@
 What changed in Autosound TCC, the desktop app for the
 [autosound-tuning](https://github.com/ayukhno/autosound-tuning-skill) method. The app's update
 button follows the tags below, so a version here is what somebody actually receives when they press
-it. A FRESH install still takes `main` — until the installer follows the same tag, the two can
-differ, and the newer of them is the fresh install.
+it. A fresh install takes the same tags: the paired method's installer (`install.sh` and
+`install.ps1` at v3.1.2) asks for TCC's newest release by its tag and checks the tag's signature
+first; a tag that does not check is not installed, and the method is installed without the app. Only
+when the installer cannot read TCC's releases at all — no network, or no tags yet — does it fall
+back to `main`, and it says so: that copy has no signature to check.
 
 Between tags, what has landed is written under `## [Unreleased]` at the top. In the commit a release
 is cut from, that heading is renamed to `## [vX.Y.Z] — date · title`, with its `Paired with method`
 line. The heading is written by hand; `make ship` only checks it. A `### Breaking` section marks a
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
+
+## [Unreleased]
+
+The wave W-9 · v1.1.3, the audit's second wave (`docs/PLAN-AUDIT-2026-10.md` §2: G3 to G10 and G13's second
+step; `docs/PLAN-W-9.md`), reviewed group by group. The method moves to v3.1.2 (tcc#178), its own first audit
+wave: REW down and REW answering an error are told apart, every filter write is read back, and a file nobody can
+read stops the step instead of reading as empty. The guide's method links follow it.
+
+### Fixed
+
+- **A project runs the method copy it is linked to, or is refused with the reason** (tcc#169): every write TCC
+  made to the plan and the journal — and the car, the DSP profile, the config, the backup, the contract check
+  and the intake form — ran TCC's own copy of the method whatever the project's
+  `.claude/skills/autosound-tuning` linked, while an omp session ran the link. Now all of them, and the SDK, omp
+  and terminal sessions, run the one copy the project is bound to, and a flag that copy does not know is refused
+  instead of being read as a title. A link TCC cannot trust is refused before anything runs, with a sentence
+  naming it and what to do: a copy kept inside the project, a link to a folder that is not on this machine (a
+  project shared between a Mac and a VM), a folder that is not the method, or a method newer than this TCC. The
+  SDK session, handed the word «None» as its method when TCC's copy had no plugin folder, says why it cannot
+  start. A project with no link, or with the link TCC made, runs as before.
+- **A write waits seconds for another, not minutes** (tcc#171): a write queued behind a long capture check
+  waited for all of it — the window froze, and a quit could hang behind a queue of writes — while the import's
+  renames took no turn at all. Every write takes its turn now, waits at most 5 s from the window and 60 s
+  elsewhere, then answers «busy: another write to this project is still running — nothing was written, try
+  again». At quit, a session close still busy after 5 s is dropped and logged.
+- **The import's renames and the handoff check say what the method answered** (tcc#169): a rename the method
+  refused, or one that crashed, was counted as done — the round kept the old title as taken while the store and
+  the ledger took the new one, and the status said «The round now has the new title». Now «done» is only what
+  the method changed; a refusal is said in the import's status, and a batch that stops halfway keeps what went
+  through and names the rest. A failed retry without the round's list no longer reports «recorded as unplanned»
+  for a round that never opened. A handoff check that crashed, timed out, found the project busy or its copy
+  refused said «Update the method»; it says what happened now.
+- **The update press refuses a method newer than this TCC** (tcc#170): it installed any signed method release;
+  one whose contract this TCC does not know — or whose contract file it cannot read — is refused now with «this
+  method is newer than this TCC — update TCC first», and the button stays off. A release that could not be read
+  says «could not read the release — try again».
+- **A failure inside the method is not taken for an older method** (tcc#170): a curve read that raised a
+  `TypeError` inside the method was quietly repeated at REW's own view; the error is said now. A capture verdict
+  that raised dropped out of the import window with nothing logged; its row says «could not judge: <error>», the
+  log has the traceback, and an Apply that waited keeps the window open once to show it.
+- **The update press reads tags and signatures right** (tcc#174): a stray tag such as `v1.2.0-wip` outranked the
+  newest release and the press refused it as a bad signature; only release-shaped tags count now, for TCC and
+  for the method. A signing helper in git's settings (1Password's), or a git that answers in another language,
+  made a good release read as a bad signature; the check always runs `ssh-keygen` now and reads git's English. A
+  check that could not run, and a listing with no release in it, are said as what they are.
+- **Every install hint is the whole install command, for the release that is running** (tcc#174): the window's
+  refusal when the GUI cannot load and the missing-scipy sentence asked for `[gui]` alone, the missing-SDK
+  message for `[claude]` alone, and the macOS app's «not installed» alert had no git address and no Python
+  version — it could not have worked. All four give the installer's own command now, pinned to the running
+  release's tag, and the README's by-hand install line names its tag.
+- **A settings file TCC cannot read is set aside and said, never written over** (tcc#173): a damaged
+  `tcc-project.json`, or one TCC could not open, read as empty, and the next change wrote it back holding one
+  field — model choices, ticks, delays and import answers gone, nothing said. Now a damaged file is moved aside
+  beside it as `tcc-project.json.corrupt-<date-time>` with its bytes, one TCC cannot open is left alone, either
+  is said on the strip, and a write lands whole or not at all. The import store and `sessions.json` follow the
+  same rule, and the signal log skips a line that is not UTF-8 and keeps the rest. A Save says «on disk» only
+  when it wrote, and says why when it did not.
+- **A gate the settings file cannot give is the strictest** (tcc#173): with `tcc-project.json` unreadable, the
+  session's gate fell back to the machine's — looser than the car was set. TCC asks before every write now, a
+  running session included, until a gate is picked or the file reads again, and says so. A gate or an effort
+  picked while the file cannot be written holds until TCC is closed, says so, and lands at the next Save that
+  can write.
+- **`.mcp.json` keeps the other servers, and one TCC no longer removes another's entry** (tcc#173): a
+  `.mcp.json` TCC could not read was replaced by TCC's entry alone, losing the person's other MCP servers, and
+  quitting one TCC took out the entry of another still serving the same folder. Now a damaged file is set aside
+  into the project's `.tcc/` and said, an unreadable one is left alone, a quit removes only its own entry, and
+  an omp session refused over the file names it.
+- **The terminal route cannot hang on macOS's Automation question** (tcc#172): `osascript` had no time limit,
+  and the «may TCC control Terminal?» prompt could hold it for good. It is cut at 30 s now, with a sentence that
+  names the app and says to allow it in System Settings → Privacy & Security → Automation.
+- **A reload asks git twice, and choices that are not about git ask it nothing** (tcc#172): a reload started six
+  to nine git children, and picking a reviewer, a generator, an effort or a gate, or switching the language,
+  paid the same. A reload starts two now, and those five none. The reviewer's log, the ledger's version files
+  and the stale-channel check are read again only when their files change, and a journal that could not be read
+  is said, not shown as nothing stale.
+- **The new-project dialog's seed note waits for the typing to stop** (tcc#172): every keystroke in the
+  seed-source field, every tick and every seat or profile choice ran a whole seed on the window's thread — six
+  to eight git children, and a question to GitHub where git has no identity. One runs 250 ms after the last
+  change now, and an unchanged note is not seeded again.
+- **A half-written plan file does not blank the plan** (tcc#176): a `process-state.json` caught mid-write read
+  as an empty process, and the plan blanked to seven empty phases. The plan keeps what it showed and goes on
+  watching the file; the agent's `report_phase` and `get_tcc_state` say «process-state.json could not be read»,
+  with why, instead of «no active phase».
+- **`write_rew_filters` says what failed** (tcc#176): it ran on the MCP server's own loop, and a title REW does
+  not hold, or REW down, came back as a bare tool error. It runs off the loop now and answers `applied: false`
+  with the method's words or «REW: <message>», and its description tells the agent what v3.1.2 does: REW keeps
+  the slots a write does not name, a gain key is refused, and the filters are read back before saying that
+  nothing changed.
+- **The DSP profiles are the method's library** (tcc#175): the new-project picker read TCC's own older Helix
+  file, so the method's richer Helix was never offered and its Musway could not be picked. It lists the method's
+  library now — Helix, Musway, then «Add new» — and a library that could not be read is said, never «no match».
+- **A superseded capture is not done** (tcc#175): a typo superseded by its right title still counted as taken —
+  on both measurement cards, in the Done button, in the capture-ready signal and its count, and in the series
+  the capture card names (a superseded `w-L_70` named series 70). TCC reads a round by the method's own rule
+  now: a superseded row is not taken, a take clears its skip, a closed round is read as it closed, and both
+  cards wait for exactly what the method's outstanding list holds, whatever spelling was taken.
+- **A capture check that did not run says so** (tcc#175): when TCC's own capture check was busy, refused, timed
+  out or found REW down, its answer vanished — the strip read only the lines it could parse. The strip is built
+  from the verdicts the method recorded now; a check that did not run says why, with «Check again», and the line
+  goes once its cause ends. The check runs over the round it was started for or not at all: one that waited for
+  the project while the session opened the next round recorded the old round's capture as the new one's — a
+  series-1 capture on series 2's card, Done lit. A title REW holds twice is no longer taken «as it is» and shown
+  green; by the method it is unusable until it is renamed.
+- **The curve window never banks over delays it could not read** (tcc#177): with the delay bank unreadable as
+  the curves loaded, every driver was drawn at 0, and once the file was fixed the next delay step wrote those
+  zeros — and empty all-pass filters — over every banked driver on screen. Where the method's filter maths
+  cannot run, a banked all-pass was erased by the next step on another driver. Now nothing is banked until the
+  bank reads, the drivers are put back from it then, a filter this machine cannot draw is kept and said, and an
+  unreadable bank reads «?» with the reason — not «Delays read (0)» — on the curve window's own line as well as
+  on the strip it covers.
+- **The curve window does one write and one draw per step** (tcc#177): one delay step with seven traces wrote
+  the delay bank seven times, loaded it nine times and drew the readout up to nine times; now once each. A
+  marker move draws once, and in hx mode a move or a re-draw no longer leaves a second set of crossing dots. A
+  note about curves goes when the curves go. The main window starts without loading the plotting library, about
+  a third of a second sooner.
+
+### Changed
+
+- **Diagnostics names the method copy a project runs, and offers the fixes** (tcc#169): «This project runs the
+  method at <path>, not TCC's own» when it does; for a refused copy, the reason with «Approve on this machine»
+  (only for a copy outside the project) and «Re-link to TCC's copy», which keeps what was there under the
+  project's `.tcc/method-aside/`. Neither is pressed by Enter, and an approval stays on this machine — it never
+  travels with the project.
+- **The car is written by the method's own `set-car`** (tcc#169): the agent's `save_car` wrote `project.json`
+  with TCC's code; the method writes it now, so a blank generation or body, or a body the method does not list,
+  is refused with the method's sentence and `project.json` is left as it was.
+- **A report on the strip stays until it is closed** (tcc#173): an error or a store set aside was written over
+  by the next line — at launch within the same second, by the plan's own lines. A report stands until its ✕ now,
+  later lines wait behind it with «+1 more», and a report made before the window opened reaches it when it does.
+- **TCC is tried against the newest method every night** (tcc#170, tcc#178): a nightly run of TCC's tests on the
+  newest method tag shows within a day a method release that would break TCC, and the names TCC reads from the
+  method — the method's contract 1 — are held by a test on TCC's side too.
+- **Two more decisions leave the main window** (tcc#179): the capture series a project is at, and what the
+  compare offers, are plain functions tested without a window. The wave took `main_window.py` from 6270 to 6190
+  lines.
 
 ## [v1.1.2] — 2026-10-07 · boundaries that say what happened, the session told what is on screen, the menu as data, the method at v3.1.1
 
