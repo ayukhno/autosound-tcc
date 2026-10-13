@@ -1338,6 +1338,20 @@ def test_an_optional_capture_nobody_took_is_waiting_in_history_not_done(project)
     assert _live_extra(project, wr) == mv.STATUS_FOUND
 
 
+def test_a_skip_standing_at_the_close_keeps_its_reason_in_history(project):
+    """The G6+G7 tests review's G4: the closing event names a skip still standing, and its reason
+    is the skip's own line's. Dropped, the past card's grey row said no why."""
+    process = _round(project, version=1, expected=["w-L_1 (sw)", "sw_1 (sw)"],
+                     taken=["w-L_1 (sw)"], skipped={"sw_1 (sw)": "sub disconnected"})
+    sw = _as_typed("sw_1 (sw)")
+    process.start_capture(1, expected=[_as_typed("w-R_1 (sw)")])  # closes cap_001
+    assert _closing(process, "cap_001")["skipped"] == [sw]
+
+    row = _item(_past(project, "cap_001"), sw)
+
+    assert (row.status, row.extra) == (mv.STATUS_SKIPPED, "sub disconnected")
+
+
 # ---- «settled» is decided once, from the recorded verdicts (#175, TA-8) ------------------------
 # Three places decided whether a capture's verdict needs the Arbiter: the window's check loop, the
 # strip's parse of the check's text, and the card. Each is `verdict_state` now, read off a round
