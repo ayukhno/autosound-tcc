@@ -1210,7 +1210,34 @@ def test_a_typo_spelled_as_the_cards_name_lends_the_corrected_row_no_verdict(pro
     assert mv.STATUS_STALE not in {i.status for g in past.groups for i in g.items}
 
 
-@pytest.mark.parametrize("how", ["taken so", "corrected to it", "taken so, judged silent"])
+_L, _R, _R0 = "w-L_1 (sw)", "w-R_1 (sw)", "w-R_01 (sw)"
+_DONE, _WAIT, _BAD, _SKIP = mv.STATUS_DONE, mv.STATUS_WAIT, mv.STATUS_STALE, mv.STATUS_SKIPPED
+
+#: A round asking for `w-R_1 (sw)` and `w-L_1 (sw)`, and what became of `w-R_1` under another
+#: spelling (`w-R_01`): `(the round, then, the rows both cards show)`. `then` is what follows the
+#: takes: «silent» — the check judges `w-R_01` silent — and «silent, then its own», which takes
+#: `w-R_1` after that verdict. The first three are the re-review of G6+G7 fix B's; the rest are the
+#: end-of-branch review's (tests I1), where a6a27ea dropped the other spelling off the live card.
+_SPELLINGS = {
+    "taken so": (dict(taken=[_L, _R0]), "", {_R: _WAIT, _L: _DONE, _R0: _DONE}),
+    "corrected to it": (dict(taken=[_L, _R], superseded={_R: _R0}), "",
+                        {_R: _WAIT, _L: _DONE, _R0: _DONE}),
+    "taken so, judged silent": (dict(taken=[_L, _R0]), "silent",
+                                {_R: _WAIT, _L: _DONE, _R0: _BAD}),
+    "both spellings": (dict(taken=[_L, _R0, _R]), "", {_R: _DONE, _L: _DONE, _R0: _DONE}),
+    "the other judged silent, then its own": (dict(taken=[_L, _R0]), "silent, then its own",
+                                              {_R: _DONE, _L: _DONE, _R0: _BAD}),
+    "its own, then the other": (dict(taken=[_L, _R, _R0]), "",
+                                {_R: _DONE, _L: _DONE, _R0: _DONE}),
+    "skipped, then the other": (dict(taken=[_L, _R0], skipped={_R: "no driver"}), "",
+                                {_R: _SKIP, _L: _DONE, _R0: _DONE}),
+    "a typo superseded by its own": (dict(taken=[_L, "w-R_9 (sw)"],
+                                          superseded={"w-R_9 (sw)": _R}), "",
+                                     {_R: _DONE, _L: _DONE}),
+}
+
+
+@pytest.mark.parametrize("how", list(_SPELLINGS))
 def test_the_live_card_waits_for_what_the_method_waits_for_under_another_spelling(project, how):
     """The re-review of G6+G7 fix B, the parity gap: the round asks for `w-R_1 (sw)` and holds
     `w-R_01 (sw)` — taken so, or as the target of a supersede of `w-R_1 (sw)`. The method compares
@@ -1218,27 +1245,28 @@ def test_the_live_card_waits_for_what_the_method_waits_for_under_another_spellin
     close. The live card read its rows by `name_key` and said «done»; history, after the close,
     said «waiting», with an extra «done» row. One source for «done» now
     (`process_view.outstanding`): both cards wait as the method does, the other spelling a row of
-    its own — and its verdict is its own row's, never lent to the row that waits."""
-    corrected = how == "corrected to it"
-    taken = ["w-L_1 (sw)", "w-R_1 (sw)" if corrected else "w-R_01 (sw)"]
-    process = _round(project, version=1, expected=["w-R_1 (sw)", "w-L_1 (sw)"], taken=taken,
-                     pad=False)
-    if corrected:
-        process.supersede_capture("w-R_1 (sw)", "w-R_01 (sw)", "typed without its zero")
-    if how == "taken so, judged silent":
-        process.check_captures(["w-R_01 (sw)"], verifier=_Silent())
-    assert process.capture_outstanding() == ["w-R_1 (sw)"]
-    other = mv.STATUS_STALE if how == "taken so, judged silent" else mv.STATUS_DONE
+    its own — and its verdict is its own row's, never lent to the row that waits.
+
+    The end-of-branch review, tests I1: a6a27ea built that row only while the list's own spelling
+    still waited, so once it was taken too, or skipped, the other spelling left the live card —
+    a red `w-R_01` among them — while history kept it. The row is there whatever became of the
+    list's spelling, and reads its skip by its own title, as the method does."""
+    fields, then, rows = _SPELLINGS[how]
+    process = _round(project, version=1, expected=[_R, _L], pad=False, **fields)
+    if then.startswith("silent"):
+        process.check_captures([_R0], verifier=_Silent())
+    if then == "silent, then its own":
+        process.record_capture(_R)
+    assert process.capture_outstanding() == ([_R] if rows[_R] == _WAIT else [])
 
     live = mv.build_session("0", 1, [], project, taken=[])
     process.start_capture(1, expected=["sw_1 (sw)"])  # closes cap_001: history now
     past = _past(project, "cap_001")
 
     for which, card in (("live", live), ("past", past)):
-        assert {i.name: i.status for g in card.groups for i in g.items} == {
-            "w-R_1 (sw)": mv.STATUS_WAIT, "w-L_1 (sw)": mv.STATUS_DONE,
-            "w-R_01 (sw)": other}, which
-    assert _item(live, "w-R_01 (sw)").additional, "on the live card, a row the round did not ask"
+        assert {i.name: i.status for g in card.groups for i in g.items} == rows, which
+    if _R0 in rows:
+        assert _item(live, _R0).additional, "on the live card, a row the round did not ask"
 
 
 def test_a_round_opened_with_no_list_shows_each_take_once(project):

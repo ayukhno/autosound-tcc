@@ -692,10 +692,12 @@ def build_session(
     def own_range_for(name: str) -> bool:
         return verdict_for(name)[1] == VERDICT_OWN_RANGE
 
-    def status_for(name: str) -> str:
+    def status_for(name: str, skip_by_key: bool = True) -> str:
+        """`skip_by_key=False` for a take under another spelling of a name the round asks for:
+        a skip of that name is not a skip of this title (the end-of-branch review, tests I1)."""
         entry = naming.parse_name(name, glossary)
         key = naming.name_key(entry) if entry else None
-        if name in recorded_skipped or (key is not None and key in skipped_keys):
+        if name in recorded_skipped or (skip_by_key and key is not None and key in skipped_keys):
             return STATUS_SKIPPED  # a decision, and it outranks both REW and the derivation
         state = verdict_for(name)[1]
         if state == VERDICT_ABSENT:
@@ -774,16 +776,20 @@ def build_session(
             for title in sorted(recorded_taken - listed) if _key(title) is None
         )
         # Taken under another spelling of a name the round asks for (`w-R_01` for `w-R_1`): the
-        # method holds it beside that name, unplanned, and the name still waits (`waiting`). A
-        # row of its own, as history shows it — read by key, it was neither row. Only for a name
-        # that still waits: a take that answered its row is that row, not an extra beside it (a
-        # round opened with no list draws the phase's plan; the re-review of G6+G7 fix C, N1).
-        asked_keys = {_key(n) for n in waiting} - {None}
+        # method holds it beside that name, unplanned — whether the name still waits, was taken
+        # under its own spelling too, or skipped. A row of its own, as history shows it: read by
+        # key, it was neither row. Keyed by the round's own list, never the phase's plan a round
+        # opened with no list draws, and never for a title already a row: a take that answered
+        # its row is that row, not an extra beside it (the re-review of G6+G7 fix C, N1). Built
+        # only for names that still waited, it left the card once the list's spelling was taken
+        # or skipped, a red `w-R_01` among them, while history kept it (the end-of-branch review,
+        # tests I1). Its skip is read by its own title, as the method and history read it.
         expected_raw = {str(t) for t in round_.get("expected") or []}
+        asked_keys = {_key(n) for n in expected_raw} - {None}
         extras += tuple(
-            _row(title, status_for(title), issues_for(title), as_is_for(title),
-                 own_range_for(title), additional=True)
-            for title in sorted(recorded_taken - expected_raw) if _key(title) in asked_keys
+            _row(title, status_for(title, skip_by_key=False), issues_for(title),
+                 as_is_for(title), own_range_for(title), additional=True)
+            for title in sorted(recorded_taken - listed) if _key(title) in asked_keys
         )
     if extras:
         # Ours, at this version, but not on the checklist -- an experiment tag, a channel the
