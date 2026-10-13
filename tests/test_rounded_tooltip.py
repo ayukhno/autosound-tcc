@@ -11,6 +11,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
 from PySide6.QtCore import QPoint  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -18,12 +19,16 @@ from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip, tip_html  # noq
 from autosound_tcc.ui.tcc.theme import apply_theme, current_theme  # noqa: E402
 
 
+@pytest.fixture(scope="module", autouse=True)
 def _app() -> QApplication:
+    """The app before any widget, as the other Qt test files have it: a QWidget built first aborts
+    the process, and which test a fresh `-n` worker runs first is not this file's to choose (G10
+    fix A round 3: `_owner()` built its widget before the app whenever it ran first)."""
     return QApplication.instance() or QApplication([])
 
 
-def test_show_at_paints_an_opaque_rounded_box_not_a_fully_transparent_one():
-    app = _app()
+def test_show_at_paints_an_opaque_rounded_box_not_a_fully_transparent_one(_app):
+    app = _app
     apply_theme(app, "dark", scale=1.0)
     tip = RoundedTooltip.instance()
     tip.show_at(QPoint(0, 0), "<b>A · Front L Full</b><br>Gain +0.0dB")
@@ -44,14 +49,13 @@ def test_show_at_paints_an_opaque_rounded_box_not_a_fully_transparent_one():
     tip.hide_tip()
 
 
-def test_show_at_does_not_raise_the_tip_because_on_macos_that_activates_tcc(monkeypatch):
+def test_show_at_does_not_raise_the_tip_because_on_macos_that_activates_tcc(monkeypatch, _app):
     """Finding 79 again (tcc#71): «Налаштувати omp…» opened the terminal, and TCC came back over
     it a moment later. The button's hover tip was shown with `raise_()`, and Qt's macOS `raise()`
     activates the whole application (`QT_MAC_SET_RAISE_PROCESS`, on by default). Measured on the
     Arbiter's Mac 2026-09-27: the terminal in front, a tip shown with `raise_()` 0.3 s later put
     the app in front again, and the same tip shown without it did not. A `ToolTip` window is
     already above the others, so the raise bought nothing."""
-    _app()
     tip = RoundedTooltip.instance()
     raised = []
     monkeypatch.setattr(tip, "raise_", lambda: raised.append(True))
@@ -60,24 +64,25 @@ def test_show_at_does_not_raise_the_tip_because_on_macos_that_activates_tcc(monk
     assert raised == []
 
 
-def _owner():
+def _owner(app: QApplication):
+    """A shown widget for a tip to belong to. Takes the app so that it cannot be built before one."""
     from PySide6.QtWidgets import QWidget
 
     owner = QWidget()
     owner.setGeometry(100, 100, 200, 60)
     owner.show()
-    _app().processEvents()
+    app.processEvents()
     return owner
 
 
-def test_a_tip_hides_when_tcc_stops_being_the_active_app():
+def test_a_tip_hides_when_tcc_stops_being_the_active_app(_app):
     """Finding 87 (tcc#78): switched to another app, the tip stayed on top of it. It hides only on
     the owner's leave event, and switching apps sends none."""
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QCursor
 
-    app = _app()
-    owner = _owner()
+    app = _app
+    owner = _owner(app)
     QCursor.setPos(owner.mapToGlobal(owner.rect().center()))
     tip = RoundedTooltip.instance()
     tip.show_at(QCursor.pos(), "tip", owner=owner)
@@ -87,12 +92,12 @@ def test_a_tip_hides_when_tcc_stops_being_the_active_app():
     owner.close()
 
 
-def test_a_tip_hides_when_its_owner_is_gone_or_the_cursor_has_left_it():
+def test_a_tip_hides_when_its_owner_is_gone_or_the_cursor_has_left_it(_app):
     """Finding 87: «висить над ТСС хоч миша вже в іншому місці» — a dialog closed or a row rebuilt
     under the cursor sends no leave either. While shown, the tip checks its owner."""
     from PySide6.QtGui import QCursor
 
-    owner = _owner()
+    owner = _owner(_app)
     tip = RoundedTooltip.instance()
     QCursor.setPos(owner.mapToGlobal(owner.rect().center()))
     tip.show_at(QCursor.pos(), "tip", owner=owner)
@@ -111,13 +116,13 @@ def test_a_tip_hides_when_its_owner_is_gone_or_the_cursor_has_left_it():
     owner.close()
 
 
-def test_hover_tip_names_its_widget_as_the_owner():
+def test_hover_tip_names_its_widget_as_the_owner(_app):
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QCursor, QEnterEvent
 
     from autosound_tcc.ui.tcc.rounded_tooltip import attach
 
-    owner = _owner()
+    owner = _owner(_app)
     attach(owner, "hint")
     QCursor.setPos(owner.mapToGlobal(owner.rect().center()))
     local = QPointF(owner.rect().center())
