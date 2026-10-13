@@ -5161,6 +5161,39 @@ def test_a_banked_all_pass_this_machine_cannot_draw_is_kept_and_said(monkeypatch
     assert not dialog._status.isHidden() and "m-L_01" in status and "no skill" in status, status
 
 
+def test_a_kept_all_pass_this_machine_cannot_draw_is_said_in_the_quiet_colour(
+        monkeypatch, app_log_told):
+    """The re-review of G10 fix A, N4: C3's note says the filter IS kept, and the line was red,
+    as it is for every bank note — on every open of such a project on a machine without the
+    skill. Red is for a failure the person must act on (the Arbiter, 2026-09-20, `_status_bad`):
+    a read that failed, or what is set here not being kept. A filter kept that this machine
+    cannot draw is information. Beside a note that is not kept, the line is red again."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+    from autosound_tcc.core.allpass import Allpass
+
+    delay_bank.put("m-L_01 (sw)", 0.0, allpass=Allpass(1, 80.0))
+
+    def no_maths(self, freqs):
+        raise RuntimeError("no skill")
+
+    monkeypatch.setattr(Allpass, "response", no_maths)
+    dialog = _plotted(["w-L_01 (sw)", "m-L_01 (sw)"])
+
+    def red():
+        return "curve-status-bad" in str(dialog._status.property("class") or "")
+
+    assert "m-L_01" in dialog._status.text() and "no skill" in dialog._status.text()
+    assert not red(), "kept, and said in the quiet colour"
+    restore = _a_folder_in_the_store_s_place(project_settings.path_for(config.tcc_dir()))
+    try:
+        dialog._view.set_delay(0.1)  # refused: what is set here is not being kept
+        status, refused = dialog._status.text(), red()
+    finally:
+        restore()
+    assert app_log_told[0] in status and "no skill" in status, status
+    assert refused, "not kept is red"
+
+
 # ---- a bank that cannot be read is not an empty one (G10 I1, #177) -------------------------------
 
 
@@ -5291,6 +5324,8 @@ def test_the_unread_line_says_each_fact_once_and_ends_each_sentence(app_log_told
     dialog.session_switched()  # the store reads: its sentence no longer stands
     assert dialog._status.text() == \
         i18n.t("curveBankUnread").format(names="w-L_01, w-R_01") + ".", dialog._status.text()
+    assert "curve-status-bad" in str(dialog._status.property("class") or ""), \
+        "drawn without their bank and not banked: red (N4 keeps it)"
 
 
 def _read_failed():

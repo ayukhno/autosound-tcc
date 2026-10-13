@@ -577,8 +577,10 @@ class CurveDialog(QDialog):
         #: machine — `{title: why}` (G10 C3). The view holds no filter for them, so they are banked
         #: with their filter kept, never taken off.
         self._apf_unshown: dict[str, str] = {}
-        #: What the status line says about the bank (`_render_bank`), beside the notes above.
+        #: What the status line says about the bank (`_render_bank`), beside the notes above, and
+        #: whether it says that what is set here is not being kept — the part of it that is red.
         self._bank_note = ""
+        self._bank_bad = False
         #: `() -> {channel code: ms}` — what the DSP is set to now, supplied by the window because
         #: this dialog has no business loading a ledger. Without it the panel simply does not
         #: state a total, which is honest; with it, it can say when a correction would take a
@@ -1528,8 +1530,11 @@ class CurveDialog(QDialog):
                 names=", ".join(title.split(" ")[0] for title in self._apf_unshown),
                 why=next(iter(self._apf_unshown.values()))))
         note = " ".join(_sentence(part) for part in notes)
-        if note != self._bank_note:
-            self._bank_note = note
+        # Red only while what is set here is not being kept. A filter kept in the bank that this
+        # machine cannot draw is information, and keeps the quiet colour (N4).
+        bad = bool(said or self._unread)
+        if (note, bad) != (self._bank_note, self._bank_bad):
+            self._bank_note, self._bank_bad = note, bad
             self._render_note()
         self._bank_btn.setText(i18n.t("curveBankBtn").format(n="?" if unreadable else len(titles)))
         if getattr(self._bank_btn, "hover_tip", None) is not None:
@@ -1708,10 +1713,10 @@ class CurveDialog(QDialog):
         # Red when the note means NOTHING can be shown — which from the tuner's seat is the same
         # event as a failed read, and was the quiet grey until he said so (2026-09-20). The split
         # is not failure-versus-success: a group drawn with one member missing keeps the quiet
-        # colour, because the plot does answer. The bank's note is red: what is on screen is not
-        # being kept.
+        # colour, because the plot does answer. The bank's note is red while what is set here is
+        # not being kept; a filter kept that this machine cannot draw is information (N4).
         self._status_bad(bool(self._note) and (
-            self._read_bad or self._note_bad or bool(self._bank_note)))
+            self._read_bad or self._note_bad or self._bank_bad))
 
     def _apply_kind(self) -> None:
         spec = KINDS[self._kind]
