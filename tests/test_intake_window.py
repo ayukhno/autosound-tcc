@@ -281,6 +281,12 @@ def test_done_on_the_capture_card_follows_the_open_round_and_signals_the_ai(tmp_
     assert kind == main_window.signal_bus.CAPTURE_READY
     assert payload == {"round": "cap_006", "titles": ["m-L_1 (sw)", "m-R_1 (sw)"]}
     assert pushed[-1] == "nudged"
+    # A round closed with captures in it — by the method, or a terminal session — takes no write,
+    # and the button is the only gate on CAPTURE_READY: dark, whatever it took (the G6+G7 tests
+    # review's G3).
+    round_["closed"] = "2026-10-09T01:00:00+00:00"
+    window._sync_capture_ready()
+    assert not window._capture_ready_btn.isEnabled()
 
 
 def test_a_reviewer_refused_by_region_turns_the_closed_picker_red(tmp_path, monkeypatch):
