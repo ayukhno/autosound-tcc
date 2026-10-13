@@ -6039,6 +6039,25 @@ def test_unusable_captures_are_one_line_with_the_rest_behind_a_link(monkeypatch)
         i18n.t("unusableSummary").format(n=17, first=""))
 
 
+def test_show_all_lists_every_unusable_capture_in_the_checkers_words(monkeypatch):
+    """The G6+G7 tests review's G7: the «show all» behind the strip's one line had no test. Its
+    summary is the strip's line, the first capture named whole (T28 dropped the `UNUSABLE` cut),
+    and its detail every line, word for word. The window's own method, with no window to parent;
+    the title is not read back, as macOS keeps none on a message box."""
+    from PySide6.QtWidgets import QMessageBox
+
+    lines = (f"w-L_01 (sw) — {_SILENCE}", "sw_01 (sw) — covers 200-2000 Hz, asked for 20-20000")
+    shown = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: shown.append(
+        (box.icon(), box.text(), box.detailedText())))
+    _app()
+
+    MainWindow._show_unusable(None, lines)
+
+    assert shown == [(QMessageBox.Icon.Warning,
+                      i18n.t("unusableSummary").format(n=2, first=lines[0]), "\n".join(lines))]
+
+
 def test_a_did_not_run_line_waiting_behind_a_report_is_taken_back_when_a_check_runs():
     """The review of TA-8, I1: a report (`app_log.report`) stands on the strip until its ✕, and
     the «did not run» line waits behind it. A check then ran and found nothing bad, so nothing
@@ -6180,6 +6199,39 @@ def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch)
         callback()
 
     assert started == [typed[:1], typed]
+
+
+def test_the_check_is_handed_what_the_round_took_that_rew_still_holds(monkeypatch):
+    """The G6+G7 tests review's G5: `to_check` is handed REW's titles (`known_titles`), never the
+    round's own list. Read as held, a capture REW no longer has was asked about again on every
+    scan of REW — a spawn, a journal event and the project's lock each time. The window's own
+    method, with a host in the window's place, over a round the method recorded."""
+    from tests import _rounds
+
+    titles = ["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"]
+    _rounds.write_round(config.project_dir(), version=1, expected=titles, taken=titles[:2])
+    typed = [_rounds.as_typed(title) for title in titles]
+    started: list = []
+
+    class _Worker:
+        def __init__(self, project_dir, titles=None):
+            started.append(titles)
+            self.result = self.failed = self.finished = SimpleNamespace(connect=lambda *_a: None)
+
+        def start(self) -> None:
+            pass
+
+    monkeypatch.setattr(main_window, "_CaptureCheckWorker", _Worker)
+    host = SimpleNamespace(
+        _capture_check=None, _refresh_capture_task=lambda state: None,
+        _sync_capture_ready=lambda: None, _offer_title_fixes=lambda round_: None,
+        _meas_panel=SimpleNamespace(known_titles=lambda: [typed[0], typed[2]]),  # w-R_1 is gone
+        _on_capture_check_done=lambda titles: None, _on_capture_check_failed=lambda why: None,
+        _on_capture_check_finished=lambda: None)
+
+    MainWindow._on_rew_titles_changed(host)
+
+    assert started == [typed[:1]], "taken and held is asked; taken and gone from REW is not"
 
 
 def test_the_capture_check_worker_hands_the_method_its_titles(monkeypatch, tmp_path):
