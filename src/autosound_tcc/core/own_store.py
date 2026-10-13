@@ -339,6 +339,12 @@ def _forget(path: Path, kind: str = "read") -> None:
             _said.pop((os.path.abspath(path), kind), None)
 
 
+def file_state(path: Path) -> tuple:
+    """`_state`, for a caller that keeps its own memo of a store: `shell_gate` looks beside the
+    project's store again when this changes."""
+    return _state(path)
+
+
 def _state(path: Path) -> tuple:
     """Which file this is, as far as `stat` can tell: a changed file is a new thing to say. The
     mode is in it because `chmod` moves neither the size nor the mtime."""

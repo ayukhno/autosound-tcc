@@ -749,7 +749,8 @@ def _restart(tcc_dir) -> None:
         for kind in ("read", "write"):
             own_store._said.pop((key, kind), None)
     with shell_gate._strictest_lock:
-        for memo in (shell_gate._gate_seen, shell_gate._strictest_said, shell_gate._copy_seen):
+        for memo in (shell_gate._gate_seen, shell_gate._strictest_said, shell_gate._copy_seen,
+                     shell_gate._copy_history):
             memo.pop(str(store), None)
     with project_settings._held_lock:
         project_settings._held.pop(project_settings._slot(tcc_dir, shell_gate.PROJECT_KEY), None)
@@ -797,8 +798,9 @@ def test_a_store_set_aside_runs_the_strictest_gate_after_a_restart_until_a_gate_
 def test_the_copy_beside_the_store_is_looked_for_once_not_at_every_permission(
         tmp_path, monkeypatch, app_log_told):
     """The gate is read at every permission judged. Looking beside the store for a copy set aside
-    is done once — not a folder read per permission, with a copy there or without — and not again
-    after a pick. The copy here is one an earlier run left: this process never saw the store."""
+    is done once — not a folder read per permission, with a copy there or without — and again only
+    when the store changed, where a copy seen before a pick stays history. The copy here is one an
+    earlier run left: this process never saw the store."""
     from autosound_tcc.core import own_store, project_settings, shell_gate
 
     looked: list = []
@@ -822,7 +824,48 @@ def test_the_copy_beside_the_store_is_looked_for_once_not_at_every_permission(
     project_settings.set_value(kept, shell_gate.PROJECT_KEY, None)  # a gate gone by hand, say
     assert shell_gate.project_gate(kept, shell_gate.GATE_FOREIGN) == shell_gate.GATE_FOREIGN, \
         "picked: the copy is history for this run"
-    assert looked == ["clean", "kept"], looked
+    assert shell_gate.project_gate(kept, shell_gate.GATE_FOREIGN) == shell_gate.GATE_FOREIGN
+    assert looked == ["clean", "kept", "kept"], "looked again once: the store changed"
+
+
+def _another_process_sets_it_aside(store) -> str:
+    """What a second TCC on the same folder (the Mac and the VM over a shared folder), or the CLI,
+    does to a store it finds broken: moves it beside itself and counts and says it in ITS process.
+    `os.replace` here, not `own_store`, so nothing in this process is counted or said."""
+    copy = store.parent / "tcc-project.json.corrupt-20261013-200000"
+    os.replace(store, copy)
+    return copy.name
+
+
+@pytest.mark.parametrize("held", ['{"gate": "writes", "effort": "high"}', '{"effort": "high"}',
+                                  "picked in this run"])
+def test_a_store_another_process_set_aside_runs_the_strictest_gate_here_too(tmp_path,
+                                                                           app_log_told, held):
+    """Fable's re-review of the branch fix, round 2, I1. The count of set-asides is this process's
+    and the look beside the store was once a run, so a store another process set aside after that
+    look — a second TCC on a shared folder, `autosound-tcc --check` — left this one answering the
+    machine's gate or `auto`, with nothing said here: whether the store held `writes`, held no gate,
+    or held a gate picked in this run. The store changing is a reason to look again; a copy made
+    after a pick is not the history the pick ended."""
+    from autosound_tcc.core import project_settings, shell_gate
+
+    store = project_settings.path_for(tmp_path)
+    if held == "picked in this run":
+        store.write_text(_CUT, encoding="utf-8")
+        assert shell_gate.project_gate(tmp_path, "") == shell_gate.GATE_WRITES  # set aside here
+        assert project_settings.pick(tmp_path, shell_gate.PROJECT_KEY, shell_gate.GATE_WRITES).landed
+    else:
+        store.write_text(held, encoding="utf-8")
+    first = shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO)
+    assert first == (shell_gate.GATE_AUTO if held == '{"effort": "high"}' else shell_gate.GATE_WRITES)
+    told = len(app_log_told)
+
+    copy = _another_process_sets_it_aside(store)
+
+    assert not store.exists()
+    for machine in ("", shell_gate.GATE_FOREIGN):
+        assert shell_gate.project_gate(tmp_path, machine) == shell_gate.GATE_WRITES, machine
+    assert app_log_told[told:] == [shell_gate.STRICTEST_COPY_SAID.format(path=store, copy=copy)]
 
 
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,

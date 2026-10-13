@@ -102,10 +102,15 @@ _strictest_said: dict[str, str] = {}
 #: was last read from it, or held for the run: set aside more often than that, no gate has been
 #: written since.
 _gate_seen: dict[str, int] = {}
-#: For each store, what looking beside it for a copy set aside found while it held no gate — the
-#: sentence to say (`STRICTEST_COPY_SAID`, `STRICTEST_UNLISTED_SAID`), or "" — looked for once a
-#: run, not at every permission judged; "" once a gate is picked, and a copy there then is history.
-_copy_seen: dict[str, str] = {}
+#: For each store, what looking beside it for a copy set aside found while it held no gate: the
+#: store as `stat` saw it then (`own_store.file_state`), the sentence to say (`STRICTEST_COPY_SAID`,
+#: `STRICTEST_UNLISTED_SAID`) or "", and the copies seen. Looked again only when the store changed
+#: — another process can set it aside after this one looked (Fable's re-review of the branch fix,
+#: round 2, I1) — not at every permission judged. Dropped when a gate is picked.
+_copy_seen: dict[str, tuple[tuple, str, frozenset]] = {}
+#: For each store, the copies beside it when a gate was picked: history the pick ended, never the
+#: strictest again this run. A copy made after the pick — another TCC setting the store aside — is.
+_copy_history: dict[str, frozenset] = {}
 _strictest_lock = threading.Lock()
 
 
@@ -143,13 +148,21 @@ def project_gate(tcc_dir: Path, machine_choice: str = "",
     with _strictest_lock:
         if chosen:  # read from the store, or held for the run: picked either way
             _gate_seen[store] = max(_gate_seen.get(store, 0), asides)
-            _copy_seen[store] = ""  # and a copy already beside it is history
+            seen = _copy_seen.pop(store, None)  # and a copy already beside it is history
+            if seen:
+                _copy_history[store] = _copy_history.get(store, frozenset()) | seen[2]
         gone = not chosen and since > _gate_seen.get(store, 0)
-        copy = "" if chosen or gone else _copy_seen.get(store)
-    if copy is None:
-        copy = _look_for_copy(path)
-        with _strictest_lock:
-            copy = _copy_seen.setdefault(store, copy)  # a pick meanwhile has the last word
+        seen = None if chosen or gone else _copy_seen.get(store)
+        history = _copy_history.get(store, frozenset())
+    copy = ""
+    if not chosen and not gone:
+        state = own_store.file_state(path)
+        if seen is not None and seen[0] == state:
+            copy = seen[1]
+        else:
+            copy, names = _look_for_copy(path, history)
+            with _strictest_lock:
+                _copy_seen[store] = (state, copy, names)
     if gone:
         return _strictest(store, STRICTEST_ASIDE_SAID.format(path=store), on_strictest)
     if copy:
@@ -159,14 +172,17 @@ def project_gate(tcc_dir: Path, machine_choice: str = "",
     return effective_gate(chosen, machine_choice)
 
 
-def _look_for_copy(path: Path) -> str:
-    """What looking beside a store with no gate found: the sentence for the newest copy of it set
-    aside as broken, the one for a folder that cannot be looked in, or "" — no copy there."""
+def _look_for_copy(path: Path, history: frozenset) -> tuple[str, frozenset]:
+    """What looking beside a store with no gate found, and the copies seen: the sentence for the
+    newest copy of it set aside as broken that a pick has not ended (`history`), the one for a
+    folder that cannot be looked in, or "" — no such copy there."""
     try:
         copies = own_store.set_aside_copies(path)
     except OSError as exc:
-        return STRICTEST_UNLISTED_SAID.format(path=path, why=exc.strerror or str(exc))
-    return STRICTEST_COPY_SAID.format(path=path, copy=copies[-1]) if copies else ""
+        return STRICTEST_UNLISTED_SAID.format(path=path, why=exc.strerror or str(exc)), frozenset()
+    live = [name for name in copies if name not in history]
+    said = STRICTEST_COPY_SAID.format(path=path, copy=live[-1]) if live else ""
+    return said, frozenset(copies)
 
 
 def _strictest(store: str, said: str, on_strictest: Optional[Callable[[], None]]) -> str:
