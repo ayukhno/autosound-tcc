@@ -2069,6 +2069,16 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   cutting what is left into the next wave if G5+G8 run long.
 - Found while mapping, not on the milestone: `model_overrides.save/load` and `model_choices` (the machine
   `models.json`) read an unparseable file as empty and write over it — G3's bug class (`PLAN-W-9.md` ruling 11).
+- **Progress 2026-10-13** (ledger `.superpowers/sdd/PLAN-W-9/progress.md`): Tasks 1–31 built; G6+G7 fix A, B, C
+  built (C: the check re-reads its round under the project lock — `RoundGone`; both cards read the method's
+  outstanding list), C in re-review; G10 fix A rounds 1–2 built and reviewed, round 3 (R1: the retry reads every
+  series a curve read came back under; R2) building. Next: G10 fix B (tests, + R3), Task 32 (G13), Fable's final
+  review (G7's refusal paths, G10's bank-store paths, fix C's lock hook), the end-of-branch review, v1.1.3.
+  For the branch review's list: M3 (no install command when pyqtgraph is missing; `main_window.py` at its bound),
+  M2 on screen, O4 (the bank keeps one entry per title, so a step after a series switch moves on-screen entries
+  out of the old series — against the rule of 2026-08-12; predates G10), the hx `apply_theme` level reset. To the
+  skill: TCC-054 (hub #269, the round's raw-title matching vs `name_key`). Resume:
+  `hub/bin/role tcc --resume 530f0561-3f1c-4b26-a240-c7149565668c`.
 
 ### F-097 — W-8: the audit's first wave — released in v1.1.2
 
