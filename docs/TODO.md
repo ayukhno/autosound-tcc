@@ -2080,6 +2080,29 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   skill: TCC-054 (hub #269, the round's raw-title matching vs `name_key`). Resume:
   `hub/bin/role tcc --resume 530f0561-3f1c-4b26-a240-c7149565668c`.
 
+### F-100 — W-9's review findings left for the next wave
+
+**Статус**: чекає · the next wave's collection takes them in · from W-9's group reviews, the two Fable seats and
+the end-of-branch review (2026-10-13), each judged shippable for v1.1.3; the reports are in W-9's ledger folder
+(`.superpowers/sdd/PLAN-W-9/`, local), ruling R-cm in its `progress.md`.
+
+- **O4 — the delay bank keeps one entry per title, not per series** (`core/delay_bank.py:17-22` says per series, the
+  Arbiter's rule of 2026-08-12): one step after a series switch moves every on-screen driver's entry to the new
+  series; back on the old series those drivers read 0, and the next step loses the reading. Its everyday symptom:
+  the bank button drops to «(0)» right after the session opens the next round. Start with a strict xfail.
+- M3: no install command when pyqtgraph is missing (the catch belongs in `MainWindow._open_curves`, the ratchet has
+  no slack). M2 on screen: an on-screen driver whose own entry cannot be parsed is banked from the view.
+- The curve window: the hx `apply_theme` level reset; N-B1 an all-pass note from an earlier selection after the plot
+  empties; the «different set» note over the previous curves while a group loads; Fable m2 (Clear with a raising
+  series provider wipes every series — unreachable today), m3 (a driver zeroed while the store was out comes back
+  from the bank).
+- The cards: a padded hand-typed list holding the unpadded take shows two rows of one name; «unasked extra» differs
+  live vs history (as on `main`).
+- Locks and rounds: the skill's bare CLI takes no project lock; the capture check's result slot reads the round open
+  now; a worker that opens its own round reads its id without the lock after `capture-start`; the «aside» mark of a
+  damaged settings file is per run (after a restart a fresh file with no gate reads the machine gate).
+- To the skill: TCC-054 (hub #269) — the round matches titles raw, not by `name_key`.
+
 ### F-097 — W-8: the audit's first wave — released in v1.1.2
 
 **Статус**: done 2026-10-07 · released in **v1.1.2** (the tag on the merge of `wave-8`, method `v3.1.1`) · N2 (#164) **moved to W-9** (the Arbiter, 2026-10-07: «не чекаємо скіла — переносимо на W-9»), off W-8's milestone, which is closed (13 of 13) · was: open · stage 3, the work, paused 2026-10-06 by the Arbiter for the token limit, **resumed 2026-10-07 07:00** by the scheduled continuation · milestone `W-8 · v1.1.2` (#8), 14 issues, all `ok` · branch `wave-8`, plan `docs/PLAN-W-8.md`: 18 tasks — G2 1–3 (#151–#153), G1 4–9 (#154–#159), G13 step 0 10 (#160), G13's seams 11–18 (#161–#163, the Arbiter's choice «Balance» of three architects' designs) · done: Task 1 #151 (ca101a0, reviewed clean) · Task 2 #152 done (5b95cec, 530ce7c, f709f03 — the review's Important fixed: Cancel on close clears `_closing`; its re-review rides in the G2 group review) · Task 3 #153 done (900eb47) · Task 4 #156 done (ec9c0fc) · Task 5 #157 done (fe82e74) · Task 6 #154 done (7e957b9) · Task 7 #155 done (32433b2) · Task 8 #158 done (a3ae82d) · Task 9 #159 done (d8633ed) · Task 10 #160 done (aad1760: the ratchet at 6506 lines / 223 window builds) · Task 11 #162 B1 done (038c844) · Task 12 #162 B2 done (57fe891) · Task 16 #163 C1 done (0fb5b75) · Task 18 #162 B3 done (8d05f36: 39 np* keys moved, the table's hash unchanged) · Task 17 #163 C2 done (eadcd30) · Task 13 #161 A1 done (f16fce7: the menu registry; today's menu pinned line by line first) · Task 14 #161 A2 done (2ef0414: one renderer) · Task 15 #161 A3 done (f5c985c: the window draws the registry; main_window.py 6506 → 6270 lines, window builds 223 → 218) · **all 18 tasks built** · Task 2's last fix and Tasks 3–18 were built by the session itself, without a task review, to save the token limit — the group reviews (G2 of Tasks 1–3, G1 of Tasks 4–9) are their gate · the group reviews ran 07.10 (7 seats, reports `review-G*.md` in the ledger folder; Critical 0 in all) and their **fix round is done** (07.10, 11:10): 2f8b0af and 6b2f68c (G13: a failing car source refuses the copy instead of an empty project; every menu line's action pinned; problems, providers and predicates said), b52c65f and fa1ddee (G1: SDK and omp ends said by cause, a Stop not an error; the server, the gate, the contract report and the children say what failed), cdb6877 (the window side: a timed-out confirmation is no longer recorded as allowed, omp refused without `.mcp.json`, a quit during a save closes, Cancel replays the skipped re-read; `main_window.py` held at 6270 by moving the gate choice and the open signals' ids out), 4596034 (the timers' tests) · deferred to W-9, in the ledger: `refresh_requested` and `view_shown` (agent contract), a typed confirmation failure, uvicorn's loggers, G3's config read · next: the end-of-branch review, CHANGELOG and v1.1.2, the full suite once (the VM suspended), one PR with the full CI; before the release one live Stop in a session (no «reported an error» line) · resume: `hub/bin/role tcc --resume 6727cc78-880d-4190-93a5-3e54eca2a0df`
