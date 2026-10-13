@@ -932,11 +932,14 @@ def test_the_ask_package_is_the_question_then_the_sessions_context():
 
 # ---- the run's own model, by the method's `--model` (tcc#113, hub #226) ------------------------
 
-#: The method's usage line from v3.0.65 (`main()`, naming `--model`) and the one before it. Pinned
-#: to the vendored source below, as `test_reviewer_key` pins the usage `key help` prints.
-_USAGE_WITH_MODEL = ("Використання: python3 scripts/autosound_ai.py [critic|advisor|ask|doctor] "
-                     "<package_file.md> [trace.csv] [--via api|cli|omp|clipboard] [--model <id>] "
-                     "[--provider google|anthropic|openai]")
+#: The method's usage line as the vendored copy prints it (`main()`: `--model` from v3.0.65, the
+#: `key|selftest` verbs and `--record` from v3.1.3), and v3.0.64's, before `--model`. The first is
+#: pinned to the vendored source below, as `test_reviewer_key` pins the usage `key help` prints;
+#: v3.0.64's stays as that copy printed it.
+_USAGE_WITH_MODEL = ("Використання: python3 scripts/autosound_ai.py "
+                     "[critic|advisor|ask|doctor|key|selftest] <package_file.md> [trace.csv] "
+                     "[--via api|cli|omp|clipboard] [--model <id>] "
+                     "[--provider google|anthropic|openai] [--record]")
 _USAGE_BEFORE = ("Використання: python3 scripts/autosound_ai.py [critic|advisor|ask|doctor] "
                  "<package_file.md> [trace.csv]")
 
@@ -1116,7 +1119,7 @@ def test_the_fake_usage_and_pins_line_are_the_vendored_methods_own():
         pytest.skip("the method's submodule is not checked out")
     source = script.read_text(encoding="utf-8")
     assert _USAGE_WITH_MODEL[_USAGE_WITH_MODEL.index("[--via"):] in source
-    assert _USAGE_BEFORE.split("[trace.csv]")[0] in source
+    assert _USAGE_WITH_MODEL.split("[trace.csv]")[0] in source
     for words in ('f">> {flags}: рецензент цього запуску — ', "(провайдер {provider}); ",
                   'f"не діють для нього: " + "; ".join(lost) + ". Для інших запусків закріплене '
                   'лишається типовим"',

@@ -4,7 +4,7 @@ What changed in Autosound TCC, the desktop app for the
 [autosound-tuning](https://github.com/ayukhno/autosound-tuning-skill) method. The app's update
 button follows the tags below, so a version here is what somebody actually receives when they press
 it. A fresh install takes the same tags: the paired method's installer (`install.sh` and
-`install.ps1` at v3.1.2) asks for TCC's newest release by its tag and checks the tag's signature
+`install.ps1` at v3.1.3) asks for TCC's newest release by its tag and checks the tag's signature
 first; a tag that does not check is not installed, and the method is installed without the app. Only
 when the installer cannot read TCC's releases at all — no network, or no tags yet — does it fall
 back to `main`, and it says so: that copy has no signature to check.
@@ -15,14 +15,15 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [v1.1.3] — 2026-10-13 · one method per project, waits with a deadline, stores that never read broken as empty, the method's answers on screen, a delay bank that never writes over what it could not read, the method at v3.1.2
+## [v1.1.3] — 2026-10-13 · one method per project, waits with a deadline, stores that never read broken as empty, the method's answers on screen, a delay bank that never writes over what it could not read, the method at v3.1.3
 
-Paired with method `d9633fa7900c474e8a334c0b45d29c1a5a7f3a9c` — the tag on that commit is **`v3.1.2`**.
+Paired with method `fd4e08b6a14f276a0e94288651c2d8f7cf85165d` — the tag on that commit is **`v3.1.3`**.
 
 The wave W-9 · v1.1.3, the audit's second wave (`docs/PLAN-AUDIT-2026-10.md` §2: G3 to G10 and G13's second
-step; `docs/PLAN-W-9.md`), reviewed group by group and once more as a whole branch. The method moves to v3.1.2 (tcc#178), its own first audit
-wave: REW down and REW answering an error are told apart, every filter write is read back, and a file nobody can
-read stops the step instead of reading as empty. The guide's method links follow it.
+step; `docs/PLAN-W-9.md`), reviewed group by group and once more as a whole branch. The method moves to v3.1.3 (tcc#178), its own first two
+audit waves: REW down and REW answering an error are told apart, every filter write is read back, a file nobody
+can read stops the step instead of reading as empty, and the method's writers take a lock of their own. TCC's
+suite ran against the method's candidate before its release. The guide's method links follow it.
 
 ### Fixed
 
@@ -133,6 +134,15 @@ read stops the step instead of reading as empty. The guide's method links follow
   unreadable bank reads «?» with the reason — not «Delays read (0)» — on the curve window's own line as well as
   on the strip it covers. A bank broken by hand or by a sync tool is set aside, and the window's line names the
   copy the readings went to until the next step starts a fresh bank.
+- **A write from a terminal no longer saves over TCC's** (tcc#178): the method run by hand, or by an agent in a
+  terminal, took no lock, so a write it made while TCC wrote saved the plan it had loaded over TCC's step. From
+  v3.1.3 the method locks its own writes. TCC gives that lock at most 5 s — a quarter of a write's time limit —
+  and a write that still meets it answers «busy» in the method's words: nothing written, try again. A write that
+  landed without the lock (a shared folder on Windows) and a capture plan the method could not write are said on
+  the strip, once each per run.
+- **A git set to ask for ultimate trust no longer refuses a good release** (tcc#178): with `gpg.minTrustLevel`
+  at `ultimate` in git's settings, the update press read a release the method's installers accept as a bad
+  signature. The check holds the level at `fully`, as the installers do.
 - **The curve window does one write and one draw per step** (tcc#177): one delay step with seven traces wrote
   the delay bank seven times, loaded it nine times and drew the readout up to nine times; now once each. A
   marker move draws once, and in hx mode a move or a re-draw no longer leaves a second set of crossing dots. A

@@ -5,7 +5,7 @@ parameters it passes — is the `IMPORTABLE` table of the method's `rew_tool/con
 item 9 of its `rew_tool/CONTRACT.md`. The method's guard holds its code to the table frozen for
 contract 1, and the frozen table to its digest, and stops there: the table and its digest edited in
 one commit pass it (item 12). This file is the hold item 12 asks of TCC: TCC's own copy of the
-table, every module and every entry as v3.1.2 declares it, and the method TCC's tests run held to
+table, every module and every entry as v3.1.3 declares it, and the method TCC's tests run held to
 it.
 
 Read, never imported: `CONTRACT_VERSION` through `method_binding`'s reader, `IMPORTABLE` as the
@@ -32,7 +32,7 @@ from autosound_tcc.core import method_binding, vendor_loader
 #: The number this table is the table of.
 CONTRACT = 1
 
-#: Contract 1's `IMPORTABLE`, as the method's v3.1.2 declares it — TCC's own copy, written out and
+#: Contract 1's `IMPORTABLE`, as the method's v3.1.3 declares it — TCC's own copy, written out and
 #: never read from the method, so an edit there is a difference here. An entry is a name, a
 #: function with the parameters TCC passes, a class with its constructor's, or a member. It is the
 #: table in `contract.py`, which every copy carries, not the guard's `FROZEN[1]` (frozen at the
@@ -81,6 +81,8 @@ CONTRACT_1 = {
     "project.py": (
         "Project(root)", "Project.load()", "Project.save(data)", "Project.parse_impact(impact)",
         "PROJECT_TYPES", "project_type(data)",
+        # v3.1.3, growth contract 1 allows: a load and a save under one hold of the method's lock.
+        "Project.update(fn)", "UNCHANGED",
     ),
     "dsp_math.py": ("apf1_response(freqs_hz, f0)", "apf2_response(freqs_hz, f0, q)"),
     "resonalyze_vc.py": (
@@ -241,7 +243,7 @@ def test_the_method_tcc_runs_declares_contract_1():
 
 def test_its_importable_table_is_contract_1s_entry_for_entry():
     """CONTRACT.md item 12: the method's guard cannot catch its frozen table and the table's digest
-    edited in one commit. TCC's copy of the table can: every module and every entry, as v3.1.2
+    edited in one commit. TCC's copy of the table can: every module and every entry, as v3.1.3
     declares it, and a difference named by module and entry."""
     contract_py = _the_copy() / "rew_tool" / "contract.py"
 
@@ -296,7 +298,7 @@ def test_a_difference_is_named_by_its_module_and_entry():
         "dsp_math.py: 'apf2_response(freqs_hz, f0, q)' changed by the copy to "
         "'apf2_response(freqs_hz, f0, q=0.7)'",
         "dsp_profile.py: 'profile_rate(data)' added by the copy",
-        "project.py: 'project_type(data)' removed by the copy",
+        "project.py: 'UNCHANGED' removed by the copy",
         "state/process.py: the same entries in another order: "
         f"{list(reversed(CONTRACT_1['state/process.py']))}",
     ]

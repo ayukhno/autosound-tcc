@@ -3,15 +3,14 @@
 `project_lock.hold` orders TCC's own writers — its threads, and a second TCC — and nothing else.
 The method's `process.py` run by a person or another agent takes no lock: it loads the state, and
 when TCC's write lands before it saves, it saves what it loaded over it — the step TCC added is gone
-from the plan. That holds until the method locks itself (G8 phase 1, W-11), so the test saying so is
-an expected failure until then. On a copy whose `rew_tool/write_lock.py` declares `PROTOCOL = 1`
-the mark's condition is False and the test runs as a plain one; a copy that closes the race some
-other way passes it under the mark, and `strict` turns that into a red. Either way the mark comes
-off in that commit.
+from the plan. The method's v3.1.3 locks itself (its `rew_tool/write_lock.py` declares
+`PROTOCOL = 1`): the bare writer holds the method's lock from its load to its save, TCC's write waits
+for it, and both steps land. The test was an expected failure until the re-pin to v3.1.3 took its
+mark off; it runs as a plain one now.
 
-The order is forced, never timed. On a copy that does not lock itself — every copy today — the bare
-writer is let go only once TCC's write has returned, however long that takes. Only on a copy that
-locks itself, where TCC's write cannot land while the bare one is held, is it let go after
+The order is forced, never timed. On a copy that does not lock itself — every copy up to v3.1.2 —
+the bare writer is let go only once TCC's write has returned, however long that takes. On a copy
+that locks itself, where TCC's write cannot land while the bare one is held, it is let go after
 `TCC_LANDS_S`.
 """
 
@@ -37,9 +36,10 @@ BARE_STEP = ("2.7", "added by the bare CLI")
 
 #: Only where the method locks itself: when the held bare writer is let go. Such a method holds its
 #: lock across load → write → append, so TCC's write cannot land while the bare one is held, and
-#: waiting for it would wait out the lock. Short of the 10 s a locking child waits for its lock
-#: (PLAN-AUDIT-2026-10 §5.4). Today it plays no part: «go» waits for TCC's write.
-TCC_LANDS_S = 5.0
+#: waiting for it would wait out the lock. Half the wait TCC gives the method's lock on a worker
+#: (`method_cli.spawn`: a quarter of the write's bound, 5 s), so TCC's child is still waiting when
+#: the bare one is let go, and never answers busy first.
+TCC_LANDS_S = min(method_cli.LOCK_WAIT_S, process_writer.DEFAULT_TIMEOUT_S / 4) / 2
 
 #: TCC's write is bounded on its own: the lock wait off the GUI thread, then the child's timeout.
 #: One that has not returned by this point never will, and the test fails saying so instead of
@@ -173,15 +173,9 @@ def _added(project: Path) -> list[str]:
     return [e["step"] for e in map(json.loads, lines) if e.get("type") == "step_added"]
 
 
-@pytest.mark.xfail(
-    not project_lock.locks_itself(vendor_loader.skill_dir()),
-    strict=True,
-    raises=AssertionError,
-    reason="TCC's lock does not bind the skill's own CLI until the skill locks itself "
-           "(G8 phase 1, W-11)",
-)
 def test_a_bare_cli_write_keeps_the_step_tcc_added_meanwhile(project, tmp_path):
-    """Today it does not: the bare writer saves the plan it loaded, and TCC's step is gone."""
+    """From v3.1.3 it does: TCC's write waits for the method's lock the bare writer holds. Up to
+    v3.1.2 the bare writer saved the plan it loaded, and TCC's step was gone."""
     _tcc_writes_while_the_bare_cli_is_held(project, tmp_path / "race")
 
     plan = _plan(project)
@@ -201,23 +195,20 @@ def test_the_journal_holds_both_writes_through_the_race(project, tmp_path):
 
 
 def test_only_a_copy_whose_write_lock_declares_protocol_1_locks_itself(tmp_path):
-    """The vendored v3.1.2 has no `rew_tool/write_lock.py`. A copy of it with one that declares
-    `PROTOCOL = 1` locks itself; one that declares another protocol, or cannot be read as text,
-    does not — and the answer is read from the text, never by importing the method."""
+    """The vendored v3.1.3 locks itself: its `rew_tool/write_lock.py` declares `PROTOCOL = 1`. A
+    copy whose file declares another protocol, cannot be read as text, or is not there (every copy
+    up to v3.1.2) does not — and the answer is read from the text, never by importing the method."""
     vendored = vendor_loader._SUBMODULE_DIR
     if not (vendored / "rew_tool" / "state" / "process.py").is_file():
         pytest.skip("skill submodule not checked out")
-    assert project_lock.locks_itself(vendored) is False, (
-        "the vendored method locks itself: the re-pin that brought it takes the race test's "
-        "xfail off, and this line with it")
+    assert project_lock.locks_itself(vendored) is True
 
     copy = tmp_path / "skill"
     shutil.copytree(vendored, copy, ignore=shutil.ignore_patterns("__pycache__"))
     write_lock = copy / "rew_tool" / "write_lock.py"
-    write_lock.write_text('"""The skill\'s own writer lock."""\n\nPROTOCOL = 1\n', encoding="utf-8")
-    assert project_lock.locks_itself(copy) is True
-
     write_lock.write_text("PROTOCOL = 2\n", encoding="utf-8")
     assert project_lock.locks_itself(copy) is False
     write_lock.write_bytes(b"PROTOCOL = 1\n# \xff\xfe\n")  # not UTF-8
+    assert project_lock.locks_itself(copy) is False
+    write_lock.unlink()  # every copy up to v3.1.2
     assert project_lock.locks_itself(copy) is False

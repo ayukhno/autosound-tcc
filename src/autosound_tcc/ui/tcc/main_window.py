@@ -228,11 +228,11 @@ _ACTIVE_OMP_KEY = "ai/active_omp"     # per user: selectors marked usable on thi
 # The rule itself travels in the opener (`core.openers`), because a rule only we can read is not a
 # rule the model follows. What decided it: a system command and the person's own words must not
 # look alike, and in one language they eventually do.
-# The order is the method's own stopping order (SKILL.md, Pre-Session step 4), not one invented
-# here: `session_close` first because it NAMES what is open, then the capture round, then the
-# steps, then anything ruled out loud, then the bank, then the log. TCC used to ask for a shorter
-# list — steps, report_phase, the context file — which left the capture round out entirely, and an
-# open round's status lives in REW's measurement list and goes when REW does (SKL-025).
+# The order is the method's own stopping order (`references/core/process-control.md` from v3.1.3),
+# not one invented here: `session_close` first because it NAMES what is open, then the capture
+# round, the steps, anything ruled out loud, the bank, the log. TCC used to ask for a shorter list
+# — steps, report_phase, the context file — which left the capture round out entirely, and an open
+# round's status lives in REW's measurement list and goes when REW does (SKL-025).
 _HANDOFF_PROMPT = (
     "This session is ending now and a different model will continue this project. Do not "
     "summarise for me — write the state down where the next session will read it, in this order. "
