@@ -1240,6 +1240,24 @@ def test_the_live_card_waits_for_what_the_method_waits_for_under_another_spellin
     assert _item(live, "w-R_01 (sw)").additional, "on the live card, a row the round did not ask"
 
 
+def test_a_round_opened_with_no_list_shows_each_take_once(project):
+    """The re-review of G6+G7 fix C, N1: a round opened with no list (a bare `capture-start N`;
+    TCC's own import when `--plan` is refused) draws the phase's plan. A take under the plan's own
+    spelling answered its row and was drawn again as «additional» — the extra rows were built for
+    every name the plan asks, not for the ones that still wait. History shows it once."""
+    _intake.seed(project)
+    process = vendor_loader.load_process().Process(str(process_view.process_dir(project)))
+    process.enter_phase("0")
+    process.start_capture(1)  # no list
+    process.record_capture("w-L_1 (sw)")
+    assert process.load()["capture"]["expected"] == []
+
+    live = mv.build_session("0", 1, [], project, taken=[])
+
+    rows = [(i.status, i.additional) for g in live.groups for i in g.items if i.name == "w-L_1 (sw)"]
+    assert rows == [(mv.STATUS_DONE, False)], rows
+
+
 def test_an_older_round_after_a_supersede_waits_for_what_its_close_named(project):
     """#175: the last round is read from `process-state.json`, which carries `superseded_by`; an
     OLDER one only from the journal, whose fold had no `capture_superseded`. Two rounds, so the

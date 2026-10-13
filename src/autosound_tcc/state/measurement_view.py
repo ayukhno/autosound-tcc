@@ -772,8 +772,10 @@ def build_session(
         )
         # Taken under another spelling of a name the round asks for (`w-R_01` for `w-R_1`): the
         # method holds it beside that name, unplanned, and the name still waits (`waiting`). A
-        # row of its own, as history shows it — read by key, it was neither row.
-        asked_keys = {_key(n) for spec in groups_spec for n in spec["names"]} - {None}
+        # row of its own, as history shows it — read by key, it was neither row. Only for a name
+        # that still waits: a take that answered its row is that row, not an extra beside it (a
+        # round opened with no list draws the phase's plan; the re-review of G6+G7 fix C, N1).
+        asked_keys = {_key(n) for n in waiting} - {None}
         expected_raw = {str(t) for t in round_.get("expected") or []}
         extras += tuple(
             _row(title, status_for(title), issues_for(title), as_is_for(title),
