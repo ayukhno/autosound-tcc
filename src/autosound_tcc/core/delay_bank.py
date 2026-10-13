@@ -235,6 +235,15 @@ def put_many(
     return banked
 
 
+def put_many_or_say(readings: Iterable[Reading], tcc_dir: Optional[Path] = None,
+                    session: Optional[str] = None) -> bool:
+    """`put_many` for the curve window, which banks on every step of the box and must not be
+    stopped by the store: True when written, False when not — said once for this state of the
+    file, by the window's one rule (`project_settings.written_or_said`, R-cb)."""
+    tcc_dir = tcc_dir or config.tcc_dir()
+    return project_settings.written_or_said(tcc_dir, lambda: put_many(readings, tcc_dir, session))
+
+
 def _entry(was: dict, reading: Reading, session: Optional[str]) -> dict:
     """The entry `reading` leaves, over what the bank held for its title (`was`, or `{}`)."""
     at = reading.arrival_ms if reading.arrival_ms is not None else was.get("at")
@@ -280,6 +289,13 @@ def clear(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> None
         return _serialised(keep) or None
 
     project_settings.update_value(tcc_dir, KEY, change)
+
+
+def clear_or_say(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> bool:
+    """`clear` for the curve window's Clear, as `put_many_or_say` is `put_many` for its steps: True
+    when cleared, False when the store refused — said once, and nothing cleared."""
+    tcc_dir = tcc_dir or config.tcc_dir()
+    return project_settings.written_or_said(tcc_dir, lambda: clear(tcc_dir, session))
 
 
 def as_sentence(

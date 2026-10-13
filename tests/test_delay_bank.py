@@ -242,3 +242,59 @@ def test_a_read_that_fails_once_writes_nothing_though_a_second_read_would_succee
     _ONE_CHANGE[change](tmp_path)  # the next one reads fine, and lands
     assert delay_bank.seen(tmp_path, session="S1") == {"sub_01 (sw)", "m-L_01 (sw)"}, "S1 kept"
     assert delay_bank.allpasses(tmp_path) == {"m-L_01 (sw)": Allpass(1, 80.0)}
+
+
+# ---- the window's bank writes say a refusal by the one rule the window's writes keep (#177) ------
+
+
+_OR_SAY = {
+    "put_many_or_say": lambda folder: delay_bank.put_many_or_say(_seven(), folder, session="S1"),
+    "clear_or_say": lambda folder: delay_bank.clear_or_say(folder, session="S1"),
+}
+
+
+@pytest.mark.parametrize("write", sorted(_OR_SAY))
+def test_a_bank_write_for_the_window_says_a_store_it_cannot_read_once_and_returns(
+        tmp_path, app_log_told, write):
+    """Task 30's review, Minors 1 and 3: the window's rule for its own writes — a store that cannot
+    be read was said where it was read, a write that failed is said once for this state of the
+    file, and the window carries on (`project_settings.set_value_or_say`, R-bl) — was written a
+    second time in the curve window for its steps, and its Clear had none: `delay_bank.clear`
+    raised out of the slot. Both bank writes keep the one rule now. A folder where the store
+    should be: every platform."""
+    intact = _a_folder_where_the_store_is(tmp_path)
+
+    assert _OR_SAY[write](tmp_path) is False
+    assert _OR_SAY[write](tmp_path) is False
+
+    assert intact(), "never written over"
+    path = project_settings.path_for(tmp_path)
+    assert len(app_log_told) == 1 and str(path) in app_log_told[0], app_log_told
+    assert "could not be read" in app_log_told[0]
+
+
+@pytest.mark.parametrize("write", sorted(_OR_SAY))
+def test_a_bank_write_for_the_window_says_a_write_that_fails_once_and_returns(
+        tmp_path, monkeypatch, app_log_told, write):
+    """A full disk fails the write itself — the read before it is fine. Said once for this state of
+    the file, however many steps fail, and the next write that lands is True."""
+    path = _seeded(tmp_path)
+    before = path.read_bytes()
+    real_write, full = own_store.write_json, [True]
+
+    def write_json(target, data):
+        if full:
+            raise OSError(28, "No space left on device")
+        real_write(target, data)
+
+    monkeypatch.setattr(own_store, "write_json", write_json)
+
+    assert _OR_SAY[write](tmp_path) is False
+    assert _OR_SAY[write](tmp_path) is False
+
+    assert path.read_bytes() == before
+    assert len(app_log_told) == 1, app_log_told
+    assert str(path) in app_log_told[0] and "No space left on device" in app_log_told[0]
+    full.clear()
+    assert _OR_SAY[write](tmp_path) is True
+    assert path.read_bytes() != before, "and that one landed"

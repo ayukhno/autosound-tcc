@@ -135,8 +135,20 @@ def set_value_or_say(tcc_dir: Path, key: str, value: Any = None) -> bool:
     every quit while it lasted (the review of Task 17). `set_value` itself still raises (R-l): a
     caller outside the window decides.
     """
+    return written_or_said(tcc_dir, lambda: set_value(tcc_dir, key, value))
+
+
+def written_or_said(tcc_dir: Path, write: Callable[[], Any]) -> bool:
+    """`write` — a write to this project's store — for a caller that carries on without it: True
+    when it landed; False when not, and then said once for this state of the file.
+
+    The one copy of the rule (`set_value_or_say`, R-bl, and the curve window's bank writes, R-cb).
+    A store that cannot be read was said by `own_store` where it was read; a write that failed is
+    said here. It was written twice — here and in the curve window's steps — and the window's
+    Clear kept neither: its refusal left the slot (Task 30's review, Minors 1 and 3).
+    """
     try:
-        set_value(tcc_dir, key, value)
+        write()
     except own_store.StoreUnreadable:
         return False
     except OSError as exc:

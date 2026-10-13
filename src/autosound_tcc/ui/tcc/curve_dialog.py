@@ -1421,26 +1421,13 @@ class CurveDialog(QDialog):
                 reading = reading._replace(allpass=self._view.allpass(index))
             readings.append(reading)
         if readings and not self._unread:
-            self._bank_or_say(readings)
+            # A store that cannot be read or written is said once for this state of the file, and
+            # the step goes on (R-cb). Raised out of the slot, the refusal reached the strip on
+            # every step — a write to a read-only `.tcc/` with a temp name of its own each time,
+            # so a new sentence per step, and a report stands until its ✕.
+            delay_bank.put_many_or_say(readings, session=self._session())
         self._sync_channel_delay()
         self._render_bank()
-
-    def _bank_or_say(self, readings: list) -> None:
-        """`put_many`, for a slot that runs on every step of the box: a store that cannot be read
-        or written is said once for this state of the file, and the step goes on.
-
-        Raised out of the slot, the refusal reached the strip on every step — a write to a
-        read-only `.tcc/` with a temp name of its own each time, so a new sentence per step, and a
-        report stands until its ✕. One that cannot be read was said where it was read
-        (`own_store`); a write that failed is said here, as the window's other writes say it
-        (`project_settings.set_value_or_say`, R-bl).
-        """
-        try:
-            delay_bank.put_many(readings, session=self._session())
-        except own_store.StoreUnreadable:
-            pass  # said by `own_store` when the bank read it, once for this state of the file
-        except OSError as exc:
-            own_store.say_unwritten(project_settings.path_for(config.tcc_dir()), exc)
 
     def _render_bank(self) -> None:
         """The banked set behind its own button, and the same numbers beside the titles in the

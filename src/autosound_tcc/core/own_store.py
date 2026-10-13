@@ -198,7 +198,7 @@ def _stamp() -> str:
 def say_unwritten(path: Path, exc: OSError) -> None:
     """Say that a write to the store failed — once for this state of the file, naming it and why.
 
-    For a writer that carries on without the write (`project_settings.set_value_or_say`, R-bl):
+    For a writer that carries on without the write (`project_settings.written_or_said`, R-bl):
     a read-only folder or a full disk fails every write the same way, and the window writes on
     every pick. `write_json` itself raises, and says nothing."""
     _say_once(Path(path), f"{path} could not be written ({_why(exc)}); the change was not saved",
