@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import sys
 from concurrent.futures import Future
 
@@ -879,7 +880,9 @@ def test_omp_reads_the_roots_the_binding_gives_not_wherever_the_link_points(tmp_
     link.parent.mkdir(parents=True)
     link.symlink_to(elsewhere, target_is_directory=True)
     session = _session(project, allow=False)
-    command = f"cat {elsewhere / 'notes.md'}"
+    # Quoted as a shell needs it: unquoted, bash drops a Windows path's backslashes (and so does
+    # the gate, reading as bash does), and the command names a file inside the project.
+    command = f"cat {shlex.quote(str(elsewhere / 'notes.md'))}"
 
     asyncio.run(session._gate({**PERMISSION_FRAME, "title": f"Allow tool: bash\nCommand: {command}"}))
 

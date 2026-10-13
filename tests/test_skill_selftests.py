@@ -67,17 +67,38 @@ def _discover() -> list[tuple[str, tuple[str, ...]]]:
 
 _SELFTESTS = _discover() if vendor_loader.is_available() else []
 
+#: v3.1.3's selftests that fail on Windows over a path said the way Windows writes it — a link's
+#: target with `\\?\` in front, a missing file's path as a repr, backslashes doubled — where the
+#: check builds the plain path (hub #274, TCC-055). The method's to mend; `strict`, so the re-pin
+#: to the tag that mends them turns these red and takes them off.
+_FAIL_ON_WINDOWS = {"contract.py", "dsp_profile.py", "naming.py"}
 
-@pytest.mark.parametrize(
-    "module,argv", _SELFTESTS, ids=[m for m, _ in _SELFTESTS] or ["none-discovered"]
-)
+
+def _params():
+    windows = sys.platform == "win32"
+    return [
+        pytest.param(module, argv, id=module, marks=pytest.mark.xfail(
+            strict=True, raises=AssertionError,
+            reason="a path said as Windows writes it (hub #274, TCC-055)"))
+        if windows and module in _FAIL_ON_WINDOWS else pytest.param(module, argv, id=module)
+        for module, argv in _SELFTESTS
+    ]
+
+
+@pytest.mark.parametrize("module,argv", _params())
 def test_skill_selftest_passes(module, argv):
+    """Each run as TCC runs the method (`vendor_loader.child_env`): UTF-8 on every platform. With
+    the runner's own code page a Windows check that reads the text report saw `- !` for `- ⚠️`, the
+    method folding what that console cannot draw (TCC's CI on #193)."""
     root = _rew_tool_dir()
     proc = subprocess.run(
         [sys.executable, str(root / module), *argv],
         cwd=str(root),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=vendor_loader.child_env(),
         timeout=180,
     )
     # Both streams: some of them print their summary on stdout and their failures on stderr, and a

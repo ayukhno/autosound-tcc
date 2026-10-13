@@ -1606,6 +1606,10 @@ def test_a_critique_reaches_the_journal_with_a_pointer_to_its_text(tmp_path, mon
 
     bridge = _Bridge(allow=True)
     mcp, _, _ = _server(tmp_path, bridge)
+    # A project, as the new-project dialog leaves one: from v3.1.3 the method refuses a first write
+    # but the intake's into a folder with no `project.json` and no `process/` — which on macOS and
+    # Linux TCC's own lock had made, and on Windows, where that lock is a thread lock, had not.
+    (tmp_path / "project.json").write_text("{}", encoding="utf-8")
     asyncio.run(mcp.call_tool("enter_phase", {"phase": "2"}))
     monkeypatch.setattr(
         critic,

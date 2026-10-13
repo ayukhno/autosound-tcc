@@ -2086,6 +2086,7 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 the end-of-branch review (2026-10-13), each judged shippable for v1.1.3; the reports are in W-9's ledger folder
 (`.superpowers/sdd/PLAN-W-9/`, local), ruling R-cm in its `progress.md`.
 
+- **TCC's lock makes `process/` on macOS and Linux, not on Windows** (found by #193's Windows CI, told to the skill in hub #274): from v3.1.3 the method refuses a first write but `session-start` / `enter-phase -1` into a folder with no `project.json` and no `process/`, so on Windows such a folder refuses what the Mac takes. TCC's in-app start and a seeded project pass on both. Decide one behaviour: make `process/` on Windows too, or stop making it ahead of the method on POSIX.
 - **A method note on the strip reads as an error** (the re-pin to v3.1.3, Fable's M3): `method_cli._tell_notes` goes through `app_log.report`, so the strip says «Something went wrong: note: … cannot be locked …» over a write that landed. A warning path for the strip (`app_log` and the window's sink), then notes on it.
 - **O4 — the delay bank keeps one entry per title, not per series** (`core/delay_bank.py:17-22` says per series, the
   Arbiter's rule of 2026-08-12): one step after a series switch moves every on-screen driver's entry to the new

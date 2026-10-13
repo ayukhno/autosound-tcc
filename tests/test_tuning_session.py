@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import sys
 from concurrent.futures import Future
 from pathlib import Path
@@ -933,7 +934,9 @@ def test_a_link_to_a_folder_that_is_not_the_method_grants_no_reads(tmp_path):
 
     assert _decide(session, "Read", {"file_path": str(secret)}) == "deny"
     assert [request.tool for request in arbiter.asked] == ["Read"]
-    assert not bash_is_read_only(f"cat {secret}", session._read_roots)
+    # Quoted as a shell needs it: unquoted, bash — and the gate, reading as bash does — drop a
+    # Windows path's backslashes, and `cat C:Users…` names a file inside the project.
+    assert not bash_is_read_only(f"cat {shlex.quote(str(secret))}", session._read_roots)
 
 
 # --- "don't ask" must not mean "don't look" (HUB-028 ask 3) ---------------------------------
