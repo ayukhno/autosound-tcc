@@ -1212,7 +1212,9 @@ def test_an_older_round_after_a_supersede_waits_for_what_its_close_named(project
 def test_an_older_round_after_a_skip_then_a_take_reads_taken(project):
     """#175, N16: a capture skipped and then taken after all — the method pops the skip when it
     takes (`record_capture`); the fold did not, so history kept the round's grey «skipped» over a
-    capture it had."""
+    capture it had. The closing event's `skipped` rebuilds the round whatever the fold did, so the
+    fold's own pop is read once more over the same close as a method older than that field wrote
+    it (the G6+G7 tests review's W1: with the pop gone, this test passed)."""
     process = _round(project, version=1, expected=_THREE, skipped={"w-R_1 (sw)": "rears later"})
     process.record_capture(_as_typed("w-R_1 (sw)"))  # taken after all
     process.start_capture(1, expected=[_as_typed("w-L_1 (sw)")])
@@ -1220,12 +1222,16 @@ def test_an_older_round_after_a_skip_then_a_take_reads_taken(project):
     closed = _closing(process, "cap_001")
     assert closed["skipped"] == []
 
-    past = _past(project, "cap_001")
+    for older in (False, True):
+        if older:
+            _as_an_older_method_closed_it(project, "cap_001", "skipped")
+        past = _past(project, "cap_001")
 
-    assert _item(past, _as_typed("w-R_1 (sw)")).status == mv.STATUS_DONE
-    assert _rows(past, key, mv.STATUS_SKIPPED) == set()
-    assert _rows(past, key, mv.STATUS_WAIT, mv.STATUS_FOUND) == {key(t) for t in closed["outstanding"]}
-    assert _folded(project, "cap_001")["skipped"] == {}
+        assert _item(past, _as_typed("w-R_1 (sw)")).status == mv.STATUS_DONE, older
+        assert _rows(past, key, mv.STATUS_SKIPPED) == set(), older
+        assert _rows(past, key, mv.STATUS_WAIT, mv.STATUS_FOUND) == {
+            key(t) for t in closed["outstanding"]}, older
+        assert _folded(project, "cap_001")["skipped"] == {}, older
 
 
 def test_an_older_round_reads_what_its_close_said_was_still_outstanding(project):
