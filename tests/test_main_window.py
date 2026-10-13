@@ -5191,7 +5191,12 @@ def test_the_ear_button_follows_the_active_phase(tmp_path, monkeypatch):
 
 def test_the_card_hears_which_titles_were_left_for_a_retake(tmp_path, monkeypatch):
     """Finding 147: the card is built here, and a title the import window left on «Re-take» is
-    the panel's to name — passed in beside what REW shows and what the project took."""
+    the panel's to name — passed in beside what REW shows and what the project took.
+
+    And the series is asked of the process state the window holds (the end-of-branch review,
+    tests m1): with no round open, a plan step is the only thing that names it, and a window that
+    handed `capture_version` an empty state said «series not known» and asked an import for the
+    number. Task 32 removed the window test that pinned it."""
     from autosound_tcc.state import measurement_view, process_view
 
     monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
@@ -5202,15 +5207,19 @@ def test_the_card_hears_which_titles_were_left_for_a_retake(tmp_path, monkeypatc
     _app()
     window = MainWindow()
     _KEEP_WINDOWS.append(window)
-    asked = {}
+    asked, versioned = {}, []
     monkeypatch.setattr(window._meas_panel, "retake_titles", lambda: ["sw_7 (rta)"])
-    monkeypatch.setattr(measurement_view, "capture_version", lambda state=None: 7)
+    monkeypatch.setattr(measurement_view, "capture_version",
+                        lambda state=None, **_k: versioned.append(state) or 7)
     monkeypatch.setattr(measurement_view, "build_sessions",
                         lambda *a, **k: asked.update(k) or None)
+    state = {"active_phase": "0",
+             "plan": [{"id": "0.2", "phase": "0", "name": "Baseline solo: tw-L_7 (sw)"}]}
 
-    window._refresh_capture_task({"active_phase": "0"})
+    window._refresh_capture_task(state)
 
     assert asked["retake"] == ["sw_7 (rta)"]
+    assert versioned == [state], "the series is asked of the state the window holds"
 
 
 def test_a_refusal_naming_a_long_path_does_not_widen_the_left_column(tmp_path, monkeypatch):
