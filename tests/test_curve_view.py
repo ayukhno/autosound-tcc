@@ -5564,6 +5564,91 @@ def test_a_bank_set_aside_as_broken_says_so_on_the_window_s_own_line_not_nothing
     assert len(app_log_told) == 1, "nothing more said"
 
 
+def _a_bank_set_aside(told, banked=(("w-L_01 (sw)", 0.198), ("sub_01 (sw)", 1.5))):
+    """A curve window over a bank whose store was cut by a hand edit and set aside as it was read
+    again: the dialog, the store, and what the strip was told (`app_log_told`) as it was. The two
+    drivers drawn come back with what `banked` held for them."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    for title, ms in banked:
+        delay_bank.put(title, ms)
+    dialog = _plotted(_SIDE[:2])
+    store = project_settings.path_for(config.tcc_dir())
+    store.write_text('{"delays": {"w-L_01 (sw)": 0.198,', encoding="utf-8")
+    dialog.session_switched()
+    [said] = told
+    return dialog, store, said
+
+
+def _says_the_bank_was_set_aside(dialog, said) -> None:
+    status, tip = dialog._status.text(), _tip(dialog._bank_btn)
+    assert not dialog._status.isHidden(), "the window's own line"
+    assert i18n.t("curveBankAside").format(why=said).rstrip(".") in status, status
+    assert "curve-status-bad" in str(dialog._status.property("class") or ""), "red"
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n="?")
+    assert i18n.t("curveBankEmpty") not in tip and said.rstrip(".") in tip, tip
+
+
+@pytest.mark.parametrize("key, value", [("gate", "auto"), ("effort", "low"),
+                                        ("generator", "sdk:claude-opus-5")])
+def test_a_pick_of_another_field_leaves_the_bank_s_set_aside_line_on_the_window(
+        app_log_told, key, value):
+    """Fable's re-review of the branch fix, m1. The strip asks for a gate to be picked, and the pick
+    — or an effort or a model pick — lands a fresh file, which took the store's set-aside sentence
+    with it for any field: the window's red line went, the button read «(0)» and the tip «no delays
+    read yet», the copy with the afternoon's readings named nowhere on the window, before any step
+    of the person's. The window keeps the sentence it read until the bank's own write lands."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    dialog, store, said = _a_bank_set_aside(app_log_told)
+    _says_the_bank_was_set_aside(dialog, said)
+
+    assert project_settings.pick(config.tcc_dir(), key, value).landed
+    assert store.exists() and not delay_bank.load(), "a fresh file, with no readings in it"
+    dialog._render_bank()
+
+    _says_the_bank_was_set_aside(dialog, said)
+    dialog._view.set_delay(0.3)  # the person's step: the bank's own write
+    assert dialog._status.isHidden(), dialog._status.text()
+    assert delay_bank.load()["w-L_01 (sw)"] == pytest.approx(0.3)
+
+
+def test_the_bank_s_own_write_takes_the_set_aside_line_off_even_with_nothing_moved(
+        app_log_told):
+    """The bank's own write is what ends the line, not readings coming back: a step that banks the
+    curves as drawn — both at zero, which `load` does not count — still starts the fresh bank the
+    line said the next step would."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    dialog, store, said = _a_bank_set_aside(app_log_told, banked=(("sub_01 (sw)", 1.5),))
+    assert project_settings.pick(config.tcc_dir(), "gate", "auto").landed
+    dialog._render_bank()
+    _says_the_bank_was_set_aside(dialog, said)
+
+    dialog._bank_current_delay()  # the step, with the two drivers drawn as they came: at zero
+
+    assert dialog._status.isHidden(), dialog._status.text()
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=0)
+    assert not delay_bank.load() and delay_bank.references(), "a fresh bank, all at zero"
+
+
+def test_the_set_aside_line_is_about_its_own_project_s_bank(tmp_path, monkeypatch, app_log_told):
+    """The sentence the window keeps is about one store: in another project there is nothing set
+    aside to say, and back in the first, its bank is still the one set aside."""
+    dialog, store, said = _a_bank_set_aside(app_log_told)
+    first, other = os.environ["AUTOSOUND_PROJECT_DIR"], tmp_path / "another-car"
+    other.mkdir()
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(other))
+    dialog._render_bank()
+    assert dialog._status.isHidden(), dialog._status.text()
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=0)
+
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", first)
+    dialog._render_bank()
+    _says_the_bank_was_set_aside(dialog, said)
+
+
 def test_the_unread_line_says_each_fact_once_and_ends_each_sentence(app_log_told):
     """The re-review of G10 fix A, N2: with the bank unread when the curves came back, the line
     ran the store's sentence into the next with no stop between — «…TCC will not write over it

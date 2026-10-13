@@ -583,6 +583,11 @@ class CurveDialog(QDialog):
         #: whether it says that what is set here is not being kept — the part of it that is red.
         self._bank_note = ""
         self._bank_bad = False
+        #: The store whose bank was set aside as broken and the sentence said then, as this window
+        #: read them (`_render_bank`), or `("", "")`: kept until the bank's own write lands or a
+        #: read finds readings — any other write, a gate or an effort pick, lands a fresh file and
+        #: takes `own_store`'s sentence with it (Fable's re-review of the branch fix, m1).
+        self._bank_aside: tuple[str, str] = ("", "")
         #: `() -> {channel code: ms}` — what the DSP is set to now, supplied by the window because
         #: this dialog has no business loading a ledger. Without it the panel simply does not
         #: state a total, which is honest; with it, it can say when a correction would take a
@@ -1470,7 +1475,10 @@ class CurveDialog(QDialog):
             # the step goes on (R-cb). Raised out of the slot, the refusal reached the strip on
             # every step — a write to a read-only `.tcc/` with a temp name of its own each time,
             # so a new sentence per step, and a report stands until its ✕.
-            delay_bank.put_many_or_say(readings, session=self._session())
+            if delay_bank.put_many_or_say(readings, session=self._session()):
+                # The fresh bank the set-aside line said the next step would start — readings at
+                # zero too, which `load` does not count.
+                self._bank_aside = ("", "")
         self._sync_channel_delay()
         self._render_bank()
 
@@ -1501,9 +1509,17 @@ class CurveDialog(QDialog):
         titles = sorted(set(bank) | set(apfs))
         # Set aside as broken (a hand edit: TCC's writes are atomic) and read as `{}` since — not
         # an empty bank either: what was banked is in the copy the sentence names, until the
-        # person's next step lands a fresh bank (Fable m1). Asked after the reads above.
+        # person's next step lands a fresh bank (Fable m1). Asked after the reads above, and kept
+        # here: a pick of another field clears the store's own (Fable's re-review, m1).
         store = project_settings.path_for(config.tcc_dir())
-        aside = "" if unreadable or titles else own_store.aside_said(store)
+        if titles:
+            self._bank_aside = ("", "")  # readings: a fresh bank, or the file put back
+        aside = ""
+        if not unreadable and not titles:
+            kept, said_then = self._bank_aside
+            aside = own_store.aside_said(store) or (said_then if kept == str(store) else "")
+            if aside:
+                self._bank_aside = (str(store), aside)
         if unreadable:
             shown, head = unreadable, i18n.t("curveBankNotRead")
         elif aside:
