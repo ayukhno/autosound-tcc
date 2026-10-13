@@ -690,6 +690,34 @@ def test_a_round_closed_between_the_read_and_the_supersede_is_not_said_done(tmp_
     assert "superseded_by" not in str(process.load()["capture"]["taken"]), "nothing changed"
 
 
+def test_a_typo_the_open_round_already_corrected_is_not_asked_to_supersede_again(
+        tmp_path, monkeypatch):
+    """Task 27's review, Minor 3: the open round's rows are read through `standing()`. A typo it
+    already corrected (`w-L_09` → `w-L_01`) is a trace, not a capture it holds under that title:
+    renamed in REW once more, it is asked nothing — the method would mark the trace again and take
+    the new title beside the right one. The import records the title REW now has."""
+    from autosound_tcc.core import config, process_writer, vendor_loader
+
+    from tests import _rounds
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    _rounds.write_round(tmp_path, version=1, expected=["w-L_1 (sw)"], taken=["w-L_9 (sw)"],
+                        superseded={"w-L_9 (sw)": "w-L_1 (sw)"})
+    asked = []
+    monkeypatch.setattr(process_writer, "supersede_capture",
+                        lambda project_dir, wrong, right: asked.append((wrong, right)) or (0, "", ""))
+    panel = MeasurementPanel()
+    panel._taking = capture_import.candidates(
+        {"1": {"title": "w-L_09 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:10:00"}}, tmp_path)
+
+    answer = panel._supersede_renamed(panel._taking, {"u1": "w-L_02 (sw)"})
+
+    assert (asked, answer) == ([], ([], [], [])), "a trace is asked nothing, and nothing is done"
+
+
 def test_method_channel_pairs_uses_meas_order_by_default():
     _app()
     panel = MeasurementPanel()

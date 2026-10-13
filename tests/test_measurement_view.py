@@ -1189,6 +1189,25 @@ def test_a_same_key_supersede_never_colours_the_corrected_row(project, pad):
         typed("w-R_1 (sw)"): mv.STATUS_DONE}, "the typo's trace is no row, and nothing is red"
 
 
+def test_a_typo_spelled_as_the_cards_name_lends_the_corrected_row_no_verdict(project):
+    """Task 27's review, Minor 2: above, the corrected row's own verdict is empty, so the card's
+    lookup by its name falls through to the one by key, and only that one is ever tried with a
+    typo's verdict. Here the typo IS the card's name — `w-R_1 (sw)`, judged silent, corrected to
+    `w-R_01 (sw)` — so the lookup by name itself would hand the row the typo's red verdict, had it
+    read a superseded row. Not red, live or once the round is history; whether the row is done or
+    waiting is not this test's (the method waits for the raw title, the card reads by key)."""
+    process = _round(project, version=1, expected=["w-R_1 (sw)"], taken=["w-R_1 (sw)"], pad=False)
+    process.check_captures(["w-R_1 (sw)"], verifier=_Silent())
+    process.supersede_capture("w-R_1 (sw)", "w-R_01 (sw)", "typed without its zero")
+
+    live = _item(mv.build_session("0", 1, [], project, taken=[]), "w-R_1 (sw)")
+    process.start_capture(1, expected=["sw_1 (sw)"])  # closes cap_001: history now
+    past = _past(project, "cap_001")
+
+    assert live.status != mv.STATUS_STALE and live.extra is None, (live.status, live.extra)
+    assert mv.STATUS_STALE not in {i.status for g in past.groups for i in g.items}
+
+
 def test_an_older_round_after_a_supersede_waits_for_what_its_close_named(project):
     """#175: the last round is read from `process-state.json`, which carries `superseded_by`; an
     OLDER one only from the journal, whose fold had no `capture_superseded`. Two rounds, so the
@@ -1725,3 +1744,21 @@ def test_with_no_round_open_the_highest_series_among_the_rounds(monkeypatch):
     ])
 
     assert mv.capture_version({"active_phase": "0", "plan": []}) == 49
+
+
+def test_a_superseded_typo_names_no_series(project):
+    """Task 27's review, Minor 3: `w-R_9 (sw)` taken in a series-1 round and corrected to
+    `w-R_1 (sw)` is a typo's trace, never a capture of series 9. It does not lift the highest series
+    to 9, and the round is not at 9 by it. `_round_is_at` is asked on its own: through
+    `build_session` a round wrongly at 9 credits only its standing rows, whose keys carry their
+    own `_N`, so no row of series 9 could change."""
+    process = _round(project, version=1, expected=["w-R_1 (sw)"], taken=["w-R_9 (sw)"],
+                     superseded={"w-R_9 (sw)": "w-R_1 (sw)"})
+    process.close_capture()
+    [round_] = process_view.capture_rounds(project)
+    naming = vendor_loader.load_naming()
+    glossary = naming.Glossary.for_project(str(project))
+
+    assert mv.highest_series(project) == 1
+    assert mv.capture_version({"active_phase": "0", "plan": []}) == 1
+    assert [mv._round_is_at(round_, n, naming, glossary) for n in (1, 9)] == [True, False]
