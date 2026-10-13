@@ -620,6 +620,13 @@ def build_session(
     # What the round took that still STANDS (#175): a superseded row is a typo's trace — taken
     # under the wrong title and corrected — and every read below asks the method's rule of it.
     recorded_taken = {str(t) for t in process_view.standing(round_)}
+    # What the open round still waits for, as the method says it (`process_view.outstanding`):
+    # by the raw title, so a capture taken under another spelling of a row's name answers for
+    # nothing. Read by key, the row said «done» where the method, the agent and the close said
+    # «outstanding», and history said «waiting» (the re-review of G6+G7 fix B). The past card asks
+    # the same, so «done» has one source; the other spelling is a row of its own (below).
+    waiting = ({_canonical(naming, glossary, t) for t in process_view.outstanding(round_)}
+               if round_open else set())
     # A skip and a verdict are keyed the same way "taken" is — BY KEY, not by the string. The
     # round records the title as somebody typed it in REW (`sw_01 (sw)`); the checklist derives
     # `sw_1 (sw)`. The taken half was corrected on the live project; these two are the same fault
@@ -709,6 +716,11 @@ def build_session(
         codes = {(entry or {}).get("code"), (entry or {}).get("code_current")} - {None}
         return STATUS_STALE if codes & set(stale) else STATUS_DONE
 
+    def listed_status(name: str) -> str:
+        """A row the open round asks for waits while the method waits for it (`waiting`) —
+        whatever another spelling of it took, skipped or was judged — as on the past card."""
+        return not_taken(_key(name)) if name in waiting else status_for(name)
+
     def issues_for(name: str) -> Optional[str]:
         """Why a capture is unusable, in the checker's own words — the panel shows it on hover.
 
@@ -739,8 +751,8 @@ def build_session(
     groups = []
     for spec in groups_spec:
         items = tuple(
-            _row(name, status_for(name), issues_for(name), as_is_for(name), own_range_for(name),
-                 protective=protective_for(name))
+            _row(name, listed_status(name), issues_for(name), as_is_for(name),
+                 own_range_for(name), protective=protective_for(name))
             for name in spec["names"]
         )
         groups.append(MeasGroup(type=spec["label"], items=items, method=spec.get("method")))
@@ -757,6 +769,16 @@ def build_session(
             _row(title, status_for(title), issues_for(title), as_is_for(title),
                  own_range_for(title), additional=True, unread=True)
             for title in sorted(recorded_taken - listed) if _key(title) is None
+        )
+        # Taken under another spelling of a name the round asks for (`w-R_01` for `w-R_1`): the
+        # method holds it beside that name, unplanned, and the name still waits (`waiting`). A
+        # row of its own, as history shows it — read by key, it was neither row.
+        asked_keys = {_key(n) for spec in groups_spec for n in spec["names"]} - {None}
+        expected_raw = {str(t) for t in round_.get("expected") or []}
+        extras += tuple(
+            _row(title, status_for(title), issues_for(title), as_is_for(title),
+                 own_range_for(title), additional=True)
+            for title in sorted(recorded_taken - expected_raw) if _key(title) in asked_keys
         )
     if extras:
         # Ours, at this version, but not on the checklist -- an experiment tag, a channel the
@@ -825,6 +847,7 @@ def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict
     expected = [str(t) for t in (round_.get("expected") or [])]
     taken = {str(k): v for k, v in process_view.standing(round_).items()}
     skipped = {str(k) for k in (round_.get("skipped") or {})}
+    waiting = set(process_view.outstanding(round_))  # the live card's source too
     if not expected and not taken:
         return None
     for title in taken:
@@ -850,7 +873,7 @@ def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict
     def status_for(name: str) -> str:
         if name in skipped:
             return STATUS_SKIPPED
-        if name not in taken:
+        if name in waiting:
             return STATUS_WAIT  # asked for, never taken, and the round closed anyway
         state = state_for(name)
         if state == VERDICT_ABSENT:

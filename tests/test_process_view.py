@@ -875,6 +875,26 @@ def test_standing_of_no_round_or_no_taken_is_nothing(round_):
     assert process_view.standing(round_) == {}
 
 
+def test_outstanding_is_the_methods_own_list_required_and_optional(project, process):
+    """The re-review of G6+G7 fix B, the parity gap: what a round still waits for is the method's
+    own list, `_outstanding` — by the raw title, its required and its optional titles alike — and
+    both cards read it from here. A capture taken under another spelling of the same `name_key`
+    answers for none of it, nor does a supersede's trace; a skip does. Asked of the same round side
+    by side, so a rule that drifts from the method's fails here first."""
+    module = vendor_loader.load_process()
+    process.start_capture("1", ["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"], optional=["w-L_1 (rta)"])
+    process.record_capture("w-R_1 (sw)")
+    process.supersede_capture("w-R_1 (sw)", "w-L_1 (sw)", "it was the left")
+    process.record_capture("w-R_01 (sw)")  # the name w-R_1 asks for, typed with its zero
+    process.skip_capture("sw_1 (sw)", "sub later")
+    round_ = process.load()["capture"]
+
+    said = module._outstanding(round_) + module._outstanding_optional(round_)
+    assert sorted(process_view.outstanding(round_)) == sorted(said)
+    assert sorted(said) == ["w-L_1 (rta)", "w-R_1 (sw)"]
+    assert process_view.outstanding(None) == process_view.outstanding({}) == []
+
+
 # ---- `standing()` is the only reader of `taken` (#175) -----------------------------------------
 #
 # A reader that counts the rows itself is the defect `standing()` was written against: it reads a

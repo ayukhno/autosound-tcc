@@ -161,6 +161,23 @@ def standing(round_: Optional[dict]) -> dict[str, dict]:
             if isinstance(row, dict) and not row.get("superseded_by")}
 
 
+def outstanding(round_: Optional[dict]) -> list[str]:
+    """What a round asked for and neither took nor skipped, in its own order: the method's
+    `_outstanding` (`process.py`), its required and its optional titles alike — an optional one
+    left untaken is no gap to the method, and no capture either (skill #80).
+
+    By the raw title, as the method compares: a capture taken under another spelling of the same
+    `name_key` answers for none of these, in the method's record, the agent's words or the close,
+    until the read against REW (`reconcile_captures`) takes it under the list's own. The live card
+    read its rows by key and said «done» where all three said «outstanding», and history said
+    «waiting» after the close (the re-review of G6+G7 fix B). Both cards ask this, so «done» has
+    one source."""
+    round_ = round_ or {}
+    held, skipped = standing(round_), round_.get("skipped") or {}
+    return [str(title) for title in round_.get("expected") or []
+            if str(title) not in held and str(title) not in skipped]
+
+
 def journal_file(project_dir: Optional[Path] = None) -> Path:
     return process_dir(project_dir) / "journal.jsonl"
 

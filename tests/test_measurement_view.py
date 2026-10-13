@@ -1195,8 +1195,8 @@ def test_a_typo_spelled_as_the_cards_name_lends_the_corrected_row_no_verdict(pro
     lookup by its name falls through to the one by key, and only that one is ever tried with a
     typo's verdict. Here the typo IS the card's name — `w-R_1 (sw)`, judged silent, corrected to
     `w-R_01 (sw)` — so the lookup by name itself would hand the row the typo's red verdict, had it
-    read a superseded row. Not red, live or once the round is history; whether the row is done or
-    waiting is not this test's (the method waits for the raw title, the card reads by key)."""
+    read a superseded row. Not red, live or once the round is history; that the row waits on both,
+    as the method waits for the raw title, is the parity test's (`…_under_another_spelling`)."""
     process = _round(project, version=1, expected=["w-R_1 (sw)"], taken=["w-R_1 (sw)"], pad=False)
     process.check_captures(["w-R_1 (sw)"], verifier=_Silent())
     process.supersede_capture("w-R_1 (sw)", "w-R_01 (sw)", "typed without its zero")
@@ -1207,6 +1207,37 @@ def test_a_typo_spelled_as_the_cards_name_lends_the_corrected_row_no_verdict(pro
 
     assert live.status != mv.STATUS_STALE and live.extra is None, (live.status, live.extra)
     assert mv.STATUS_STALE not in {i.status for g in past.groups for i in g.items}
+
+
+@pytest.mark.parametrize("how", ["taken so", "corrected to it", "taken so, judged silent"])
+def test_the_live_card_waits_for_what_the_method_waits_for_under_another_spelling(project, how):
+    """The re-review of G6+G7 fix B, the parity gap: the round asks for `w-R_1 (sw)` and holds
+    `w-R_01 (sw)` — taken so, or as the target of a supersede of `w-R_1 (sw)`. The method compares
+    raw titles: `capture_outstanding()` still lists `w-R_1 (sw)`, and so do the agent and the
+    close. The live card read its rows by `name_key` and said «done»; history, after the close,
+    said «waiting», with an extra «done» row. One source for «done» now
+    (`process_view.outstanding`): both cards wait as the method does, the other spelling a row of
+    its own — and its verdict is its own row's, never lent to the row that waits."""
+    corrected = how == "corrected to it"
+    taken = ["w-L_1 (sw)", "w-R_1 (sw)" if corrected else "w-R_01 (sw)"]
+    process = _round(project, version=1, expected=["w-R_1 (sw)", "w-L_1 (sw)"], taken=taken,
+                     pad=False)
+    if corrected:
+        process.supersede_capture("w-R_1 (sw)", "w-R_01 (sw)", "typed without its zero")
+    if how == "taken so, judged silent":
+        process.check_captures(["w-R_01 (sw)"], verifier=_Silent())
+    assert process.capture_outstanding() == ["w-R_1 (sw)"]
+    other = mv.STATUS_STALE if how == "taken so, judged silent" else mv.STATUS_DONE
+
+    live = mv.build_session("0", 1, [], project, taken=[])
+    process.start_capture(1, expected=["sw_1 (sw)"])  # closes cap_001: history now
+    past = _past(project, "cap_001")
+
+    for which, card in (("live", live), ("past", past)):
+        assert {i.name: i.status for g in card.groups for i in g.items} == {
+            "w-R_1 (sw)": mv.STATUS_WAIT, "w-L_1 (sw)": mv.STATUS_DONE,
+            "w-R_01 (sw)": other}, which
+    assert _item(live, "w-R_01 (sw)").additional, "on the live card, a row the round did not ask"
 
 
 def test_an_older_round_after_a_supersede_waits_for_what_its_close_named(project):
