@@ -5253,3 +5253,37 @@ def test_a_clear_the_bank_cannot_write_is_said_and_leaves_the_curves_as_banked(a
     assert app_log_told[0] in status, status
     dialog._bank_clear_btn.click()
     assert delay_bank.load() == {} and dialog._view.delays()[:2] == [0.0, 0.0], "written: cleared"
+
+
+# ---- one set of crossing dots in hx, whatever re-draws them (Task 31's review, Minor 1) ----------
+
+
+_DOT_REDRAWS = {
+    "cross pair": lambda view: view.set_cross_pair(1, 0),
+    "markers into view": lambda view: view.bring_markers_into_view(force=True),
+    "theme": lambda view: view.apply_theme(),
+    "vx to hx": lambda view: (view.set_axes_mode("vx"), view.set_axes_mode("hx")),
+}
+
+
+@pytest.mark.parametrize("redraw", sorted(_DOT_REDRAWS))
+def test_a_redraw_of_the_crossing_dots_in_hx_leaves_one_set_on_the_plot(redraw):
+    """Task 31 stopped a marker move in hx from leaving its dots behind (R-cd): re-placing the dots
+    moves the auto-ranged view, and the view's own handler drew them again from inside the first
+    draw, which then forgot the set the second one drew. Every other re-draw of the dots goes the
+    same way round. A switch from vx left a second set on the plot that nothing removes; the other
+    three re-draws leave one only where taking the dots off moves the view, and are pinned with
+    it because the guard is the same."""
+    import pyqtgraph as pg
+
+    view = _view()
+    view.set_y_unit("dB")
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+    view.set_axes_mode("hx")
+    view._h_markers[0].setValue(0.0)
+
+    _DOT_REDRAWS[redraw](view)
+
+    dots = [item for item in view._plot.getPlotItem().items
+            if isinstance(item, pg.ScatterPlotItem)]
+    assert len(dots) == 1 and dots[0] is view._crossing_dots, dots

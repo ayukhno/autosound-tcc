@@ -1063,7 +1063,8 @@ class CurveView(QWidget):
         self._step_ms = _DEFAULT_STEP_MS
         self._crossing_dots = None
         self._syncing = False
-        #: True while one marker move is being drawn — see `_on_marker_moved`.
+        #: True while this widget moves its own view: one marker move being drawn, or the crossing
+        #: dots — see `_on_marker_moved` and `_render_crossings`.
         self._moving = False
         self._marker_names: list[str] = []
         #: Which two traces the cross modes compare — see `cross_pair` for why it is two.
@@ -2998,7 +2999,22 @@ class CurveView(QWidget):
         self.set_cross_pair(int(chosen[0]), int(chosen[1]))
 
     def _render_crossings(self) -> None:
-        """Dots where the single line meets each curve. Nothing to draw outside the cross modes."""
+        """Dots where the single line meets each curve. Nothing to draw outside the cross modes.
+
+        Drawn under `_moving`, as a marker move is (R-cd). Taking the old dots off and putting the
+        new ones on moves an auto-ranged view, and in hx `_on_view_changed` drew the dots again
+        from inside this draw — which then forgot the set the inner one had drawn and left it on
+        the plot for good: a switch from vx, a new cross pair, the markers brought into view, a
+        theme (Task 31's review, Minor 1). The flag is put back, not cleared: a marker move draws
+        through here with its own flag up.
+        """
+        was, self._moving = self._moving, True
+        try:
+            self._draw_crossings()
+        finally:
+            self._moving = was
+
+    def _draw_crossings(self) -> None:
         if self._crossing_dots is not None:
             self._plot.removeItem(self._crossing_dots)
             self._crossing_dots = None
