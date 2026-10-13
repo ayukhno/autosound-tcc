@@ -5287,3 +5287,48 @@ def test_a_redraw_of_the_crossing_dots_in_hx_leaves_one_set_on_the_plot(redraw):
     dots = [item for item in view._plot.getPlotItem().items
             if isinstance(item, pg.ScatterPlotItem)]
     assert len(dots) == 1 and dots[0] is view._crossing_dots, dots
+
+
+# ---- a provider that raises is logged, once while it goes on raising (G10 M1, #177) --------------
+
+
+def test_a_provider_that_raises_is_logged_with_its_cause_once_until_it_answers(app_log_warnings):
+    """G10 M1: the curve window asks the panel which series is on screen and the window what the
+    ledger holds, and a broad catch keeps it up when either raises. Nothing reached the log: a
+    series that raised banks new titles with no series, so they show under every one, and a
+    ledger that raised drops every channel total and the below-zero warning — with no trace of
+    why. Each is logged with its traceback when it starts raising, not on every step, and again
+    when it raises after it has answered."""
+    import logging
+
+    dialog = _plotted(_SIDE[:2])
+    broken = [True]
+
+    def series():
+        if broken:
+            raise RuntimeError("the panel is gone")
+        return "S1"
+
+    def ledger():
+        if broken:
+            raise KeyError("ta_ms")
+        return {}
+
+    dialog.set_session_provider(series)
+    dialog.set_delays_provider(ledger)
+    for ms in (0.1, 0.2, 0.3):
+        dialog._view.set_delay(ms)
+
+    def logged():
+        return [record.exc_info[0].__name__ for record in app_log_warnings
+                if "provider raised" in record.getMessage() and record.exc_info]
+
+    assert sorted(logged()) == ["KeyError", "RuntimeError"], [r.getMessage() for r in app_log_warnings]
+    assert all(r.levelno == logging.WARNING for r in app_log_warnings
+               if "provider raised" in r.getMessage())
+    broken.clear()
+    dialog._view.set_delay(0.4)
+    broken.append(True)
+    dialog._view.set_delay(0.5)
+    assert sorted(logged()) == ["KeyError", "KeyError", "RuntimeError", "RuntimeError"], \
+        "said again once it had answered"

@@ -572,6 +572,8 @@ class CurveDialog(QDialog):
         #: back to an earlier series brings that series' own curves, so it must bring that series'
         #: own corrections too (user, 2026-08-12).
         self._session_provider = None
+        #: Which of the two providers raised when last asked (`_provider_raised`, G10 M1).
+        self._providers_raising: set = set()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 12)
@@ -1364,17 +1366,35 @@ class CurveDialog(QDialog):
         if not self._session_provider:
             return None
         try:
-            return self._session_provider() or None
+            series = self._session_provider() or None
         except Exception:  # noqa: BLE001 — a curve window must not die on a panel read
+            self._provider_raised("series", "the bank is read and written with no series")
             return None
+        self._providers_raising.discard("series")
+        return series
 
     def _current_delay_of(self, title: str):
         if not self._delays_provider or not title:
             return None
         try:
-            return (self._delays_provider() or {}).get(delay_bank.code_of(title))
+            ms = (self._delays_provider() or {}).get(delay_bank.code_of(title))
         except Exception:  # noqa: BLE001 — a curve window must not die on a ledger read
+            self._provider_raised("ledger", "no channel total and no below-zero warning")
             return None
+        self._providers_raising.discard("ledger")
+        return ms
+
+    def _provider_raised(self, which: str, so: str) -> None:
+        """Log a provider that raised, with its traceback — when it starts raising, not on every
+        step while it goes on (G10 M1). The broad catches keep the window up; they kept the cause
+        out of the log too, while a series that raised banked new titles with no series (shown
+        under every one) and a ledger that raised dropped every total and the below-zero warning.
+        Called from inside the `except`, so the traceback is the provider's."""
+        if which in self._providers_raising:
+            return
+        self._providers_raising.add(which)
+        app_log.logger().warning("curve window: the %s provider raised; %s", which, so,
+                                 exc_info=True)
 
     def _sync_channel_delay(self) -> None:
         """What each channel on screen is set to now — every one of them, because every one may
