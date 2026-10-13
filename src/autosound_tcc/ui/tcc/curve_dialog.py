@@ -546,6 +546,11 @@ class CurveDialog(QDialog):
         self._held_twice: set = set()
         #: The same pairs as a sentence on the status line, for the LAST read only.
         self._twice_note = ""
+        #: What the read says for itself — reading, REW not answering, or what failed — and
+        #: whether that is a failure. A note like the others: written straight to the line, it
+        #: was replaced by the next note that changed (the re-review of G10 fix A, N3).
+        self._read_note = ""
+        self._read_bad = False
         #: Why what is on screen is not what was asked for, in words. Empty when nothing was
         #: refused — the status line is then free to disappear, as it did before. `_note` is the
         #: whole line; `_refused_note` and `_group_note` are the two things that can be on it.
@@ -1688,13 +1693,15 @@ class CurveDialog(QDialog):
     def _render_note(self) -> None:
         """Everything the window has to say about what it is showing, on the one status line.
 
-        Both notes, not one: a group with a member missing and a kind that had to be overruled are
+        Every note, not one: a group with a member missing and a kind that had to be overruled are
         two independent facts about the same selection, and whichever is dropped is the one the
-        tuner needed.
+        tuner needed. The read's own note leads — the read failed, or is under way — and the
+        others stand beside it: a bank note that changed after a failed read replaced «could not
+        read» over the empty plot (N3).
         """
         self._note = " ".join(
-            _sentence(part) for part in (self._refused_note, self._group_note, self._twice_note,
-                                         self._bank_note) if part
+            _sentence(part) for part in (self._read_note, self._refused_note, self._group_note,
+                                         self._twice_note, self._bank_note) if part
         )
         self._status.setText(self._note)
         self._status.setVisible(bool(self._note))
@@ -1703,7 +1710,8 @@ class CurveDialog(QDialog):
         # is not failure-versus-success: a group drawn with one member missing keeps the quiet
         # colour, because the plot does answer. The bank's note is red: what is on screen is not
         # being kept.
-        self._status_bad(bool(self._note) and (self._note_bad or bool(self._bank_note)))
+        self._status_bad(bool(self._note) and (
+            self._read_bad or self._note_bad or bool(self._bank_note)))
 
     def _apply_kind(self) -> None:
         spec = KINDS[self._kind]
@@ -1791,19 +1799,19 @@ class CurveDialog(QDialog):
         if not titles:
             return
         _stop_worker(self._worker)
-        self._status.setVisible(True)
+        self._twice_note = ""  # about the read before this one
         # REW known to be offline — the window's red indicator — is said at once: every curve was
         # read anyway, the timeout waited out, and a «URLError» listed per curve (finding 56,
         # tcc#61). The read happens when it is back (`rew_state_changed`).
         self._waiting_for_rew = self._rew_online is not None and self._rew_online() is False
         if self._waiting_for_rew:
             self._view.set_traces([])
-            self._status.setText(i18n.t("curveRewOffline"))
-            self._status_bad(True)
+            self._read_note, self._read_bad = i18n.t("curveRewOffline"), True
+            self._render_note()
             return
-        self._status.setText(i18n.t("curveLoading"))
+        self._read_note, self._read_bad = i18n.t("curveLoading"), False
+        self._render_note()
         self._sync_protection_button()
-        self._twice_note = ""
         self._worker = _CurveWorker(self._bridge, titles, self._kind, self._legs_by_title())
         self._worker.done.connect(self._on_curves)
         self._worker.failed.connect(self._on_failed)
@@ -1812,11 +1820,9 @@ class CurveDialog(QDialog):
         self._worker.start()
 
     def _on_curves(self, traces: list) -> None:
-        # Red is a state, not a stain: a read that works takes it off again.
-        self._status_bad(False)
-        # The status line ends up carrying the notes, if there are any, and disappears when there
-        # are not. It is written HERE as well as where each note is decided, because `_reload` puts
-        # "Reading the curves from REW…" over whatever was there.
+        # Red is a state, not a stain: a read that works takes it off again. The status line ends
+        # up carrying the other notes, if there are any, and disappears when there are not.
+        self._read_note, self._read_bad = "", False
         self._render_note()
         if [t.name for t in self._view._traces] != [t.name for t in traces]:
             # A new selection: the view puts every driver back at nothing, so what was drawn for
@@ -2069,12 +2075,12 @@ class CurveDialog(QDialog):
         there nothing was fetched and the selection did not move.
         """
         self._view.set_traces([])
-        self._status.setVisible(True)
         # A pair REW holds is said as such, not as `<title>: KeyError` (tcc#94); "could not read"
-        # stays for whatever else failed beside it.
-        parts = [i18n.t("curveFailed").format(error=message)] if message else []
-        self._status.setText(" ".join(parts + ([self._twice_note] if self._twice_note else [])))
-        self._status_bad(True)
+        # stays for whatever else failed beside it. Both stand on the line as notes, so a note
+        # that changes after them joins them (N3).
+        self._read_note = i18n.t("curveFailed").format(error=message) if message else ""
+        self._read_bad = True
+        self._render_note()
 
     def _on_send(self, reading: str) -> None:
         if reading:

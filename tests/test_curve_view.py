@@ -5293,6 +5293,40 @@ def test_the_unread_line_says_each_fact_once_and_ends_each_sentence(app_log_told
         i18n.t("curveBankUnread").format(names="w-L_01, w-R_01") + ".", dialog._status.text()
 
 
+def _read_failed():
+    dialog = _plotted(_SIDE[:2])
+    dialog._on_failed("KeyError: 'w-L_01 (sw)'")
+    return dialog, i18n.t("curveFailed").format(error="KeyError: 'w-L_01 (sw)'")
+
+
+def _rew_offline():
+    return (_dialog(list(_SIDE[:2]), bridge=_FakeBridge(), rew_online=lambda: False),
+            i18n.t("curveRewOffline"))
+
+
+@pytest.mark.parametrize("standing", [_read_failed, _rew_offline], ids=["read-failed", "offline"])
+def test_a_change_of_the_bank_note_joins_what_the_read_said_never_replaces_it(
+        app_log_told, standing):
+    """The re-review of G10 fix A, N3: the bank's note redraws the status line when it changes,
+    and «could not read from REW» and «REW is not answering» were written straight to the line,
+    outside the notes — so a series switch with the store unreadable put the bank's note in
+    their place, over an empty plot. The line keeps every sentence that stands, and stays red."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    delay_bank.put("sub_01 (sw)", 1.5)
+    dialog, said = standing()
+    assert said in dialog._status.text()
+    restore = _a_folder_in_the_store_s_place(project_settings.path_for(config.tcc_dir()))
+    try:
+        dialog.session_switched()  # the bank's note changes
+        status, colour = dialog._status.text(), str(dialog._status.property("class") or "")
+    finally:
+        restore()
+
+    assert said in status and app_log_told[0] in status, status
+    assert "curve-status-bad" in colour and not dialog._status.isHidden()
+
+
 # ---- a Clear the store refuses is said, and leaves the curves as banked (Task 30's review) -------
 
 
