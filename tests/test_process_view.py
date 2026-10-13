@@ -901,7 +901,9 @@ def _within(node: ast.AST, outer: str | None = None):
 
 
 def _taken_reads(root: Path, readers=_TAKEN_READERS) -> list[str]:
-    """`path:line` of each `.get("taken"…)` and `["taken"]` under `root`, outside `readers`.
+    """`path:line` of each read of a round's `taken` under `root`, outside `readers`:
+    `["taken"]`, `.get("taken"…)`, `.setdefault("taken"…)`, `.pop("taken"…)` and `"taken" in`
+    (Task 29's review: the last three went unseen).
 
     Read off the syntax tree, not the text: a key is the same key in either quote style, a comment
     or a docstring that names `taken` reads nothing, and `"taken_at"` is another key."""
@@ -915,7 +917,10 @@ def _taken_reads(root: Path, readers=_TAKEN_READERS) -> list[str]:
         for function, node in _within(ast.parse(path.read_text(encoding="utf-8"))):
             read = (isinstance(node, ast.Subscript) and is_taken(node.slice)) or (
                 isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "get" and bool(node.args) and is_taken(node.args[0]))
+                and node.func.attr in ("get", "setdefault", "pop") and bool(node.args)
+                and is_taken(node.args[0])) or (
+                isinstance(node, ast.Compare) and is_taken(node.left)
+                and any(isinstance(op, (ast.In, ast.NotIn)) for op in node.ops))
             if read and (where, function) not in readers:
                 found.add((where, node.lineno))
     return [f"{where}:{line}" for where, line in sorted(found)]
@@ -944,8 +949,13 @@ def test_the_taken_scan_names_each_read_and_leaves_the_lookalikes(tmp_path):
         '    d = r.get("taken_at"), r["mistaken"], r["taken_titles"], r.taken\n'
         '    # r.get("taken") and r["taken"] in a comment\n'
         '    """r.get("taken") in a string"""\n'
+        '    e = r.setdefault("taken", {})\n'
+        "    g = r.pop('taken', None)\n"
+        '    h = "taken" in r or "taken" not in r\n'
+        '    i = r.setdefault("taken_at"), r.pop("taken_titles"), "taken_at" in r, r in "taken"\n'
         '    return {"taken": {}}\n',
         encoding="utf-8")
 
-    assert _taken_reads(tmp_path) == ["pkg/m.py:2", "pkg/m.py:3", "pkg/m.py:4"]
+    assert _taken_reads(tmp_path) == ["pkg/m.py:2", "pkg/m.py:3", "pkg/m.py:4", "pkg/m.py:8",
+                                      "pkg/m.py:9", "pkg/m.py:10"]
     assert _taken_reads(tmp_path, readers={("pkg/m.py", "f")}) == []
