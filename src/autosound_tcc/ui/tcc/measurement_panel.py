@@ -927,9 +927,9 @@ class MeasurementPanel(QWidget):
         captured" rather than "nothing known", and the mock it used to fall back to read as a
         series someone had already taken.
 
-        `version` is the ledger series the checklist was derived at — the window works it out
-        (`main_window._capture_version`) and the panel needs it to OPEN a capture round when the
-        tuner takes measurements without a session having opened one (2026-09-06).
+        `version` is the series `_N` the checklist was derived at — the window asks
+        `measurement_view.capture_version` for it — and the panel needs it to OPEN a capture round
+        when the tuner takes measurements without a session having opened one (2026-09-06).
         """
         if version is not None:
             self._capture_version = version
