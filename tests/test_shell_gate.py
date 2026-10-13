@@ -656,3 +656,54 @@ def test_the_first_strictest_answer_is_handed_to_whoever_runs_a_session(tmp_path
     store.mkdir()
     shell_gate.project_gate(tmp_path, "", on_strictest=lambda: pushed.append(3))
     assert pushed == [1, 3]
+
+
+#: The code seat's probe: a `tcc-project.json` cut off by a hand edit, or a sync tool's conflict
+#: copy — TCC's own writes are atomic, so this is how one gets broken.
+_CUT = '{"gate": "writes", "effort": "high",'
+
+
+def test_a_store_set_aside_as_broken_runs_the_strictest_gate_until_a_gate_is_picked(
+        tmp_path, app_log_told):
+    """The end-of-branch review, code I1. A store that does not parse is set aside and read as
+    `{}` (G3), and `project_gate` read that `{}` as «no gate», so a car set to ask about every
+    write ran on the machine's gate or `auto`: R-bt bypassed, and the strip said only that the
+    file was kept aside. The gate it held went with it: the strictest, said once and pushed once
+    to a running session, as for a store that cannot be read — and a write of another field (an
+    effort pick, a bank step) lands a fresh file that holds no gate, so it stays the strictest
+    until a gate is picked."""
+    from autosound_tcc.core import own_store, project_settings, shell_gate
+
+    store = project_settings.path_for(tmp_path)
+    store.write_text(_CUT, encoding="utf-8")
+    pushed: list = []
+
+    for _ in range(2):
+        assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO,
+                                       on_strictest=lambda: pushed.append(1)) \
+            == shell_gate.GATE_WRITES
+    said = shell_gate.STRICTEST_ASIDE_SAID.format(path=store)
+    assert app_log_told == [own_store.aside_said(store), said], app_log_told
+    assert pushed == [1], "pushed once, with the first answer"
+
+    project_settings.set_value(tmp_path, "effort", "low")
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES, \
+        "a fresh file with no gate in it is no gate picked"
+    project_settings.set_value(tmp_path, shell_gate.PROJECT_KEY, shell_gate.GATE_FOREIGN)
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_FOREIGN
+    assert app_log_told.count(said) == 1, app_log_told
+
+
+def test_a_store_set_aside_by_a_write_s_own_read_runs_the_strictest_gate(tmp_path, app_log_told):
+    """The read that finds the store broken may be a write's own — a bank step, an effort pick:
+    set aside and the fresh file landed in one call, before the gate is next asked. Still the
+    strictest: the gate the file held is as unknown."""
+    from autosound_tcc.core import project_settings, shell_gate
+
+    project_settings.path_for(tmp_path).write_text(_CUT, encoding="utf-8")
+    project_settings.set_value(tmp_path, "effort", "low")
+
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
+    assert shell_gate.STRICTEST_ASIDE_SAID.format(
+        path=project_settings.path_for(tmp_path)) in app_log_told
+

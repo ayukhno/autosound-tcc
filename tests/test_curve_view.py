@@ -5530,6 +5530,40 @@ def test_a_bank_that_cannot_be_read_is_said_on_the_curve_window_s_own_line(app_l
     assert dialog._status.isHidden(), dialog._status.text()
 
 
+def test_a_bank_set_aside_as_broken_says_so_on_the_window_s_own_line_not_nothing_banked(
+        app_log_told):
+    """Fable m1 (`fable-g6g7-g10.md`), with the end-of-branch review's code I1: a store that does
+    not parse — a hand edit — is set aside and read as `{}`, and the bank read that as a good,
+    empty read: «Delays read (0)», «no delays read yet», the curves at zero, and only the strip,
+    which this window covers, heard where the afternoon's readings went. The window's own line
+    says it now, in red, the count is «?» and the tip names the copy — until the person's next
+    step lands a fresh bank, which is the rule's: nothing is written from the set-aside state but
+    that change."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    delay_bank.put("w-L_01 (sw)", 0.198)
+    delay_bank.put("sub_01 (sw)", 1.5)
+    dialog = _plotted(_SIDE[:2])
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=2), "good store: 2"
+    store = project_settings.path_for(config.tcc_dir())
+    store.write_text('{"delays": {"w-L_01 (sw)": 0.198,', encoding="utf-8")
+
+    dialog.session_switched()  # the bank is read again
+
+    [said] = app_log_told
+    status, tip = dialog._status.text(), _tip(dialog._bank_btn)
+    assert i18n.t("curveBankAside").format(why=said).rstrip(".") in status, status
+    assert "curve-status-bad" in str(dialog._status.property("class") or ""), "red"
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n="?")
+    assert i18n.t("curveBankEmpty") not in tip and said.rstrip(".") in tip, tip
+    assert not store.exists(), "nothing written from the set-aside state"
+
+    dialog._view.set_delay(0.3)  # the person's change: a fresh bank
+    assert dialog._status.isHidden(), dialog._status.text()
+    assert delay_bank.load()["w-L_01 (sw)"] == pytest.approx(0.3)
+    assert len(app_log_told) == 1, "nothing more said"
+
+
 def test_the_unread_line_says_each_fact_once_and_ends_each_sentence(app_log_told):
     """The re-review of G10 fix A, N2: with the bank unread when the curves came back, the line
     ran the store's sentence into the next with no stop between — «…TCC will not write over it

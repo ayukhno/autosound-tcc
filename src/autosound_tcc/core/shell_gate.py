@@ -73,9 +73,20 @@ STRICTEST_SAID = ("{path} holds this project's gate and could not be read, so TC
                   "every write — the strictest gate — until a gate is picked or the file can be "
                   "read again")
 
-#: The stores the strictest gate has been said for since each was last read: said once per
-#: stretch of not being readable, not once per permission judged.
-_strictest_said: set[str] = set()
+#: The same, for a store that did not parse and was set aside (`own_store`), with no gate written
+#: since (the end-of-branch review, code I1): the file reads again — absent, or the fresh one the
+#: next write lands — and the gate it held is gone with the old one, so only a pick ends it.
+STRICTEST_ASIDE_SAID = ("{path} held this project's gate and could not be read, so it was set "
+                        "aside and TCC asks before every write — the strictest gate — until a "
+                        "gate is picked")
+
+#: The stores the strictest gate has been said for in this stretch of answering it, with what was
+#: said: once per stretch, not once per permission judged — and again when why changes.
+_strictest_said: dict[str, str] = {}
+#: For each store, how many times it had been set aside (`own_store.times_set_aside`) when a gate
+#: was last read from it, or held for the run: set aside more often than that, no gate has been
+#: written since.
+_gate_seen: dict[str, int] = {}
 _strictest_lock = threading.Lock()
 
 
@@ -89,24 +100,46 @@ def project_gate(tcc_dir: Path, machine_choice: str = "",
     with nothing said (I2). So the strictest, `writes`, until it can be read (R-bt) — and said,
     once for each stretch of not being readable, with the store's own refusal said beside it.
 
+    A store that did not parse is the same: `own_store` sets it aside and answers `{}`, and that
+    `{}` read as «no gate» ran the car on the machine's gate or `auto` (the end-of-branch review,
+    code I1). Set aside with no gate read from the store or held since — a write of another field
+    lands a fresh file with none in it — it is the strictest until a gate is picked
+    (`STRICTEST_ASIDE_SAID`). For this run: `own_store`'s count is the process's.
+
     `on_strictest` hears that same first answer: the window pushes the strictest to a session
     already running on another gate, so the session, the menu and the strip agree (the re-review,
     N1). Called after the stretch is marked, so a push that reads the gate again is not a first."""
-    store = str(project_settings.path_for(tcc_dir))
+    path = project_settings.path_for(tcc_dir)
+    store = str(path)
+    asides = own_store.times_set_aside(path)  # before the read: one during it comes after
     try:
         chosen = project_settings.get(tcc_dir, PROJECT_KEY, "", strict=True) or ""
     except own_store.StoreUnreadable:
-        with _strictest_lock:
-            new = store not in _strictest_said
-            _strictest_said.add(store)
-        if new:
-            app_log.report(STRICTEST_SAID.format(path=store))
-            if on_strictest is not None:
-                on_strictest()
-        return GATE_WRITES
+        return _strictest(store, STRICTEST_SAID, on_strictest)
+    since = own_store.times_set_aside(path)
     with _strictest_lock:
-        _strictest_said.discard(store)
+        if chosen:  # read from the store, or held for the run: picked either way
+            _gate_seen[store] = max(_gate_seen.get(store, 0), asides)
+        gone = not chosen and since > _gate_seen.get(store, 0)
+        if not gone:
+            _strictest_said.pop(store, None)
+    if gone:
+        return _strictest(store, STRICTEST_ASIDE_SAID, on_strictest)
     return effective_gate(chosen, machine_choice)
+
+
+def _strictest(store: str, sentence: str, on_strictest: Optional[Callable[[], None]]) -> str:
+    """`GATE_WRITES`, said when this stretch of it starts or its reason changes, and pushed
+    (`on_strictest`) when the stretch starts."""
+    said = sentence.format(path=store)
+    with _strictest_lock:
+        before = _strictest_said.get(store)
+        _strictest_said[store] = said
+    if before != said:
+        app_log.report(said)
+        if before is None and on_strictest is not None:
+            on_strictest()
+    return GATE_WRITES
 
 
 # Read-only commands the skill runs constantly. Anything outside this set still works -- it just

@@ -1499,8 +1499,15 @@ class CurveDialog(QDialog):
         # button is how many drivers have a proposal on them, which is what decides whether the
         # set is worth sending yet.
         titles = sorted(set(bank) | set(apfs))
+        # Set aside as broken (a hand edit: TCC's writes are atomic) and read as `{}` since — not
+        # an empty bank either: what was banked is in the copy the sentence names, until the
+        # person's next step lands a fresh bank (Fable m1). Asked after the reads above.
+        store = project_settings.path_for(config.tcc_dir())
+        aside = "" if unreadable or titles else own_store.aside_said(store)
         if unreadable:
             shown, head = unreadable, i18n.t("curveBankNotRead")
+        elif aside:
+            shown, head = aside, i18n.t("curveBankAsideHead")
         elif titles:
             shown = ", ".join(
                 " ".join(
@@ -1522,9 +1529,11 @@ class CurveDialog(QDialog):
         # I2): the strip's report is said once and stands until its ✕, out of sight. This stands
         # while the sentence does — a good read or a landed write takes both off.
         notes = []
-        said = own_store.said_about(project_settings.path_for(config.tcc_dir()))
+        said = own_store.said_about(store)
         if said:
             notes.append(i18n.t("curveBankNotKept").format(why=said))
+        if aside:
+            notes.append(i18n.t("curveBankAside").format(why=aside))
         if self._unread:
             # The store's sentence, while the read it is about still fails, has said the bank
             # cannot be read and nothing set here is kept: the drivers are named, the fact is not
@@ -1537,13 +1546,15 @@ class CurveDialog(QDialog):
                 names=", ".join(title.split(" ")[0] for title in self._apf_unshown),
                 why=next(iter(self._apf_unshown.values()))))
         note = " ".join(_sentence(part) for part in notes)
-        # Red only while what is set here is not being kept. A filter kept in the bank that this
-        # machine cannot draw is information, and keeps the quiet colour (N4).
-        bad = bool(said or self._unread)
+        # Red only while what is set here is not being kept, or what was banked is out of reach
+        # (set aside). A filter kept in the bank that this machine cannot draw is information,
+        # and keeps the quiet colour (N4).
+        bad = bool(said or aside or self._unread)
         if (note, bad) != (self._bank_note, self._bank_bad):
             self._bank_note, self._bank_bad = note, bad
             self._render_note()
-        self._bank_btn.setText(i18n.t("curveBankBtn").format(n="?" if unreadable else len(titles)))
+        self._bank_btn.setText(i18n.t("curveBankBtn").format(
+            n="?" if unreadable or aside else len(titles)))
         if getattr(self._bank_btn, "hover_tip", None) is not None:
             self._bank_btn.hover_tip.set_text(tip_html(shown, head=head))
         off = tip_html(i18n.t("curveBankOff").format(why=unreadable)) if unreadable else ""

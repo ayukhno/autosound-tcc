@@ -10,7 +10,8 @@ else the file held was gone, and nothing said so (#173, F5). Here the three are 
   byte-order mark is not broken) — the file is moved to `<name>.corrupt-<YYYYMMDD-HHMMSS>`
   beside it (or into the folder its owner names, `aside_dir`), the person is told, and `{}`
   comes back. The next write starts a fresh file, and the original bytes are still there for
-  whoever wants them;
+  whoever wants them. A reader to whom that `{}` is not «nothing here» asks `aside_said` and
+  `times_set_aside`;
 * **there but unreadable** (any other `OSError`: no permission, a folder where the file should
   be, a broken file that could not be moved) — the person is told and `StoreUnreadable` is
   raised (`StoreNotSetAside`, a kind of it, for the broken file that could not be moved).
@@ -60,6 +61,14 @@ class StoreNotSetAside(StoreUnreadable):
 #: and a good read forgetting a failed write would say that write again on every call.
 _said: dict[tuple[str, str], tuple] = {}
 _said_lock = threading.Lock()
+
+#: The stores set aside this run, by absolute path: the sentence said when one was moved, until a
+#: write lands a fresh file there or the file is read whole again (`aside_said`), and how many
+#: times each was set aside, which never goes back (`times_set_aside`). A store set aside read as
+#: `{}`, and every reader after it took that for a good, empty store: the gate it held for no gate,
+#: the bank for «nothing banked» (the end-of-branch review, code I1; Fable m1). Under `_said_lock`.
+_aside_said: dict[str, str] = {}
+_asides: dict[str, int] = {}
 
 #: What a `misshapen` look trips on when the object is not the shape it assumed: a list where a
 #: map was, a missing key, a value of the wrong type, nesting too deep to walk (R-bo).
@@ -117,6 +126,7 @@ def read_json(path: Path, *,
     if wrong:
         return _set_aside(path, f"valid JSON, but {wrong}", aside_dir)
     _forget(path)
+    _forget_aside(path)  # read whole: a file put back where the broken one was
     return data
 
 
@@ -140,30 +150,91 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
         Path(tmp).unlink(missing_ok=True)
         raise
     _forget(path, "write")
+    _forget_aside(path)  # a fresh file is there now
 
 
 def _set_aside(path: Path, why: str, aside_dir: Optional[Path] = None) -> dict[str, Any]:
     """Move a broken store out of the way — beside it, or into `aside_dir` — keeping its bytes,
-    and say so. `{}` once it is moved."""
+    and say so. `{}` once it is moved.
+
+    Marked set aside BEFORE the move (`aside_said`, `times_set_aside`): a reader that loses the
+    race to it finds the file gone and answers `{}` the moment the move lands, and must find the
+    mark already there — and a write that follows that `{}` must come after the mark, or it would
+    clear nothing and the mark would stand over the fresh file. A move refused takes the mark
+    back; a move that finds the file gone keeps the count — the bytes read were broken all the
+    same, whoever moved them — and gives the sentence back to whoever had it."""
     aside: Optional[Path] = None
+    marked: Optional[tuple[str, Optional[str]]] = None
     try:
         aside = _reserve_aside(path, aside_dir)
+        # Beside the store, its name is where it is; anywhere else, only its whole path says that.
+        kept = aside.name if aside_dir is None else str(aside)
+        message = (f"{path} could not be read ({why}); it is kept as {kept}, "
+                   "and the next save starts it afresh")
+        marked = _mark_aside(path, message)
         os.replace(path, aside)
     except OSError as exc:
         if aside is not None:
             with contextlib.suppress(OSError):
                 aside.unlink()  # the reserved name, still empty: given back
+        if marked is not None:
+            _unmark_aside(path, marked, count=not isinstance(exc, FileNotFoundError))
         if isinstance(exc, FileNotFoundError):
             return {}  # another reader moved it between our read and this move, and said so
         message = (f"{path} could not be read ({why}) and could not be set aside "
                    f"({_why(exc)}); TCC will not write over it")
         _say_once(path, message)
         raise StoreNotSetAside(message) from exc
-    # Beside the store, its name is where it is; anywhere else, only its whole path says that.
-    kept = aside.name if aside_dir is None else str(aside)
-    app_log.report(f"{path} could not be read ({why}); it is kept as {kept}, "
-                   "and the next save starts it afresh")
+    app_log.report(message)
     return {}
+
+
+def _mark_aside(path: Path, message: str) -> tuple[str, Optional[str]]:
+    """Mark `path` set aside with `message`; what `_unmark_aside` needs to take it back."""
+    key = os.path.abspath(path)
+    with _said_lock:
+        before = _aside_said.get(key)
+        _aside_said[key] = message
+        _asides[key] = _asides.get(key, 0) + 1
+    return message, before
+
+
+def _unmark_aside(path: Path, marked: tuple[str, Optional[str]], *, count: bool) -> None:
+    """Take back `_mark_aside`'s sentence — only while it is still this reader's: another reader
+    that marked after it has the store's sentence — and, with `count`, its count."""
+    key = os.path.abspath(path)
+    message, before = marked
+    with _said_lock:
+        if _aside_said.get(key) == message:
+            if before is None:
+                _aside_said.pop(key, None)
+            else:
+                _aside_said[key] = before
+        if count:
+            _asides[key] = _asides.get(key, 1) - 1
+
+
+def aside_said(path: Path) -> str:
+    """The sentence said when this store was set aside as broken — while no write has landed a
+    fresh file there and it has not been read whole since — or "". For a reader to whom `{}` from
+    a store just set aside is not «nothing here»: the curve window's bank (Fable m1)."""
+    with _said_lock:
+        return _aside_said.get(os.path.abspath(path), "")
+
+
+def times_set_aside(path: Path) -> int:
+    """How many times this store has been set aside as broken this run. Never goes back: a write
+    lands a fresh file, not what the old one held — the gate (`shell_gate.project_gate`, code
+    I1)."""
+    with _said_lock:
+        return _asides.get(os.path.abspath(path), 0)
+
+
+def _forget_aside(path: Path) -> None:
+    """A fresh file written, or a file read whole: the store is no longer the one set aside."""
+    if _aside_said:
+        with _said_lock:
+            _aside_said.pop(os.path.abspath(path), None)
 
 
 def _reserve_aside(path: Path, aside_dir: Optional[Path] = None) -> Path:

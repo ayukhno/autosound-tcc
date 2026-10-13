@@ -364,3 +364,59 @@ def test_a_store_nested_too_deep_to_parse_is_broken_json(store, app_log_told):
     assert len(left) == 1 and _ASIDE.fullmatch(left[0]), left
     assert (store.parent / left[0]).read_bytes() == body, "the original bytes are kept"
     assert len(app_log_told) == 1 and str(store) in app_log_told[0], app_log_told
+
+
+# ---- what was set aside, asked after the move (the end-of-branch review, code I1, Fable m1) -----
+
+
+def test_a_store_set_aside_is_named_so_until_a_write_lands_there(store, app_log_told):
+    """Code I1, Fable m1: a store set aside answered `{}`, and every reader after it read that as
+    a good, empty store — the gate it held as no gate (`auto`), the bank as «nothing banked». The
+    sentence said when it was moved stands until a write lands a fresh file there (`aside_said`):
+    an absent read after the move is the move's own doing, not news. How many times it was set
+    aside this run (`times_set_aside`) never goes back: a write lands a fresh file, not the gate
+    the old one held."""
+    store.write_bytes(b'{"gate": "writes", "effort": "high",')
+
+    assert own_store.read_json(store) == {}
+    assert own_store.read_json(store) == {}, "absent now: still the store that was set aside"
+
+    assert own_store.aside_said(store) == app_log_told[0] != "", app_log_told
+    assert own_store.times_set_aside(store) == 1
+    own_store.write_json(store, {"effort": "low"})
+    assert own_store.aside_said(store) == "", "a fresh file is there now"
+    assert own_store.times_set_aside(store) == 1, "and still it was set aside once"
+    store.write_bytes(b"{ broken again")
+    own_store.read_json(store)
+    assert own_store.times_set_aside(store) == 2
+    assert own_store.aside_said(store) == app_log_told[-1]
+
+
+def test_a_set_aside_store_put_back_whole_is_no_longer_named_set_aside(store, app_log_told):
+    """A good file put back by hand where the broken one was is read whole: what was said about
+    setting the old one aside no longer describes the store. The count stays."""
+    store.write_bytes(b"{ broken")
+    own_store.read_json(store)
+    store.write_text('{"gate": "foreign"}', encoding="utf-8")
+
+    assert own_store.read_json(store) == {"gate": "foreign"}
+    assert own_store.aside_said(store) == ""
+    assert own_store.times_set_aside(store) == 1
+
+
+def test_a_broken_store_whose_move_is_refused_is_not_named_set_aside(store, monkeypatch,
+                                                                    app_log_told):
+    """Refused, it is the unreadable case (`StoreNotSetAside`), and nothing was set aside: neither
+    the sentence nor the count says otherwise."""
+    store.write_bytes(b"{ broken")
+
+    def refuse(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(own_store.os, "replace", refuse)
+    with pytest.raises(own_store.StoreNotSetAside):
+        own_store.read_json(store)
+
+    assert own_store.aside_said(store) == ""
+    assert own_store.times_set_aside(store) == 0
+

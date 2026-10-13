@@ -705,8 +705,10 @@ def test_a_config_change_reaches_the_status_strip(tmp_path, monkeypatch):
     And a settings file broken by hand, set aside as the header is built, is said and stays said
     (#173, I1): the process state's own lines come later in the same `__init__`, the contract
     check's a few seconds after, and each replaced the store's sentence before anyone read it. It
-    stands until its ✕; the latest line waits behind it, counted, and comes when it is closed."""
-    from autosound_tcc.core import project_settings, vendor_loader
+    stands until its ✕; the latest line waits behind it, counted, and comes when it is closed —
+    after the gate's: the gate the file held went with it, so the strictest runs, said as a report
+    is (the end-of-branch review, code I1)."""
+    from autosound_tcc.core import project_settings, shell_gate, vendor_loader
     from autosound_tcc.core.contract_check import ContractReport
 
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
@@ -737,6 +739,8 @@ def test_a_config_change_reaches_the_status_strip(tmp_path, monkeypatch):
     window._on_contract_result(ContractReport(ok=False, project_dir=str(tmp_path), files=(
         {"file": "project.json", "exists": True, "valid": False, "issues": ["bad"]},)))
     assert str(store) in strip.text(), "the contract check's line waits behind it too"
+    strip._close.click()
+    assert shell_gate.STRICTEST_ASIDE_SAID.format(path=store) in strip.text(), strip.text()
     strip._close.click()
     assert strip.text() == i18n.t("diagStripIssues").format(n=1), strip.text()
 
@@ -1869,18 +1873,14 @@ def test_the_left_column_is_one_scroll_and_the_tree_does_not_have_its_own(tmp_pa
     window.close()
 
 
-def test_the_gate_mode_is_a_project_setting_and_defaults_to_not_asking(monkeypatch):
-    """`auto` first (user, 2026-08-21). "Every write" was the default on the argument that a
-    strict gate teaches; what it taught was clicking through, and the writes that reach the car
-    confirm inside TCC's own tools whatever this is set to. Narrowing it is now the choice
-    someone makes deliberately.
-
-    The default is asserted through `GATE_DEFAULT` and not by naming a mode, because the point of
-    the constant is that six call sites cannot drift apart again.
-
-    A settings file broken by hand falls back to that default — and is said on the strip, though
-    the gate's tick reads it while the header is still being built, before the window has
-    registered its sink (the review of Task 17)."""
+def test_the_gate_mode_is_a_project_setting_and_a_store_broken_by_hand_runs_the_strictest(
+        monkeypatch):
+    """The gate is the project's, kept in its own store. A settings file broken by hand is set
+    aside, and the gate it held went with it: the strictest, until a gate is picked (R-bt, the
+    end-of-branch review's code I1) — it fell back to the default, `auto`, with nothing said of the
+    gate. Said on the strip, though the gate's tick reads it while the header is still being built,
+    before the window has registered its sink (the review of Task 17). The default itself is the
+    fresh project's (`…_a_fourth_choice_that_asks_about_nothing`)."""
     from autosound_tcc.core import omp_session, project_settings
 
     store = project_settings.path_for(config.tcc_dir())
@@ -1891,9 +1891,8 @@ def test_the_gate_mode_is_a_project_setting_and_defaults_to_not_asking(monkeypat
     window = MainWindow()
 
     assert str(store) in window._status_strip.text(), window._status_strip.text()
-    assert omp_session.GATE_DEFAULT == omp_session.GATE_AUTO
-    assert window._gate_actions[omp_session.GATE_DEFAULT].isChecked()
-    assert not window._gate_actions[omp_session.GATE_WRITES].isChecked()
+    assert window._gate_actions[omp_session.GATE_WRITES].isChecked()
+    assert not window._gate_actions[omp_session.GATE_DEFAULT].isChecked()
 
     window._set_gate_mode(omp_session.GATE_FOREIGN)
 
@@ -1906,7 +1905,12 @@ def test_the_gate_menu_has_a_fourth_choice_that_asks_about_nothing(monkeypatch):
     """The Arbiter, 2026-10-01: «для нього треба додати пункт вибору "взагалі не питати"» (tcc#115).
     It sits after `auto`, says by its name what it lifts, and its tooltip names the delete or
     overwrite outside the project that now goes unasked. Kept per project like the other three,
-    and shown in the system params under its own name."""
+    and shown in the system params under its own name.
+
+    A fresh project starts on `auto` (user, 2026-08-21). "Every write" was the default on the
+    argument that a strict gate teaches; what it taught was clicking through, and the writes that
+    reach the car confirm inside TCC's own tools whatever this is set to. Asserted through
+    `GATE_DEFAULT`, not by naming a mode: six call sites must not drift apart again."""
     from autosound_tcc.core import omp_session, project_settings
     from autosound_tcc.ui.tcc import i18n
 
@@ -1914,6 +1918,8 @@ def test_the_gate_menu_has_a_fourth_choice_that_asks_about_nothing(monkeypatch):
     _app()
     window = MainWindow()
 
+    assert omp_session.GATE_DEFAULT == omp_session.GATE_AUTO
+    assert window._gate_actions[omp_session.GATE_DEFAULT].isChecked(), "a fresh project"
     assert list(window._gate_actions) == [omp_session.GATE_WRITES, omp_session.GATE_FOREIGN,
                                           omp_session.GATE_AUTO, omp_session.GATE_NEVER]
     never = window._gate_actions[omp_session.GATE_NEVER]
