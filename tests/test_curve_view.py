@@ -4705,6 +4705,43 @@ def test_a_note_that_means_nothing_can_be_shown_is_red_too():
         "a partial answer is still an answer"
 
 
+@pytest.mark.parametrize("let_go", ["no group", "a row by hand"])
+def test_a_group_let_go_takes_its_red_with_it(monkeypatch, app_log_told, let_go):
+    """The re-review of G10 fix A round 2, R2: a group with nothing at this version is red — nothing
+    can be shown. Let go, by «— no group —» or by a row ticked by hand, it took its note off and
+    left the red: C3's quiet «kept, cannot draw» note and «Reading the curves from REW…» on the
+    next read were drawn as if a read had failed. Red stands only while a fault note does."""
+    from autosound_tcc.core import delay_bank
+    from autosound_tcc.core.allpass import Allpass
+
+    def no_maths(self, freqs):
+        raise RuntimeError("no skill")
+
+    def red():
+        return "curve-status-bad" in str(dialog._status.property("class") or "")
+
+    delay_bank.put("w-L_01 (sw)", 0.0, allpass=Allpass(1, 80.0))
+    monkeypatch.setattr(Allpass, "response", no_maths)
+    dialog = _group_dialog(chosen=("w-L_01 (sw)", "w-R_01 (sw)"))
+    _fetch(dialog)
+    assert "no skill" in dialog._status.text() and not red(), "kept, in the quiet colour"
+    _pick_group(dialog, "TWs")
+    assert "TWs" in dialog._status.text() and red(), "nothing at this version can be shown"
+
+    if let_go == "no group":
+        dialog._group_combo.setCurrentIndex(0)
+        assert "TWs" not in dialog._status.text() and "no skill" in dialog._status.text()
+        assert not red(), "the all-pass note alone is information"
+        dialog._kind_combo.setCurrentIndex(dialog._kind_combo.findData("phase"))
+    else:
+        dialog._on_choose_toggled("w-R_01 (sw)", False)
+    assert dialog._status.text().startswith(i18n.t("curveLoading")), dialog._status.text()
+    assert "TWs" not in dialog._status.text()
+    assert not red(), "reading is not a failure"
+    _fetch(dialog)
+    assert "no skill" in dialog._status.text() and not red()
+
+
 def test_a_rew_known_to_be_offline_is_said_at_once_not_waited_for(monkeypatch):
     """Finding 56 (tcc#61): with the REW indicator red the window still read every curve, waited
     for the timeout and listed «URLError» per curve. The window already knows REW is offline."""

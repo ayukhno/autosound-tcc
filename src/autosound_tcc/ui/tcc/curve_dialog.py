@@ -560,8 +560,8 @@ class CurveDialog(QDialog):
         #: them every time the picker moves.
         self._touched_protection = False
         self._refused_note = ""
-        #: Whether the note on the status line means "nothing can be shown". Set beside every note
-        #: that says so; `_render_note` is what colours it.
+        #: Whether the group's note means "nothing can be shown". Set beside every note that says
+        #: so, and cleared with it; `_render_note` is what colours it.
         self._note_bad = False
         #: Which measurement the delay currently on screen is banked against, so that moving the
         #: radio moves the entry instead of leaving one behind on the other curve.
@@ -1190,9 +1190,9 @@ class CurveDialog(QDialog):
         if not isinstance(at, int) or at < 0 or at >= len(groups):
             # Back to "no group". What is plotted does not change — the tuner is saying the
             # selection is theirs now, not the glossary's — but a note about a group nobody has
-            # chosen has to go with it.
+            # chosen has to go with it — and its red: the next note was drawn as a failure (R2).
             self._group = None
-            self._group_note = ""
+            self._group_note, self._note_bad = "", False
             self._render_note()
             return
         self._group = groups[at]
@@ -1315,7 +1315,7 @@ class CurveDialog(QDialog):
         remove one driver and look at what the joint does without it.
         """
         self._group = None
-        self._group_note = ""
+        self._group_note, self._note_bad = "", False  # the note's red goes with it (R2)
         combo = getattr(self, "_group_combo", None)
         if combo is not None and combo.currentIndex() != 0:
             blocked = combo.blockSignals(True)
