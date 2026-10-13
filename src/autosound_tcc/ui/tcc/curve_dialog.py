@@ -553,7 +553,7 @@ class CurveDialog(QDialog):
         self._read_bad = False
         #: Why what is on screen is not what was asked for, in words. Empty when nothing was
         #: refused — the status line is then free to disappear, as it did before. `_note` is the
-        #: whole line; `_refused_note` and `_group_note` are the two things that can be on it.
+        #: whole line, which `_render_note` joins from every `_…_note` the window keeps.
         self._note = ""
         #: Whether a person has moved the protection toggle themselves. Until they do, the round
         #: decides (`protective.default_corrected`); after they do, the window stops overruling
