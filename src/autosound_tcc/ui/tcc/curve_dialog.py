@@ -282,6 +282,14 @@ def _peak_x(trace) -> float:
     return float(np.asarray(trace.x, dtype=float)[int(np.argmax(np.abs(y)))])
 
 
+def _sentence(text: str) -> str:
+    """`text` ended as a sentence, so the next one on the status line starts as one. `own_store`'s
+    sentences and the bank's notes end on a name or a reason, and two of them ran together with
+    no stop between (the re-review of G10 fix A, N2)."""
+    text = text.rstrip()
+    return text if not text or text[-1] in ".!?…" else f"{text}."
+
+
 #: How long a closing window waits for its own REW worker. Bounded for the reason `qt_shutdown`
 #: gives: a teardown that hangs is worse than the crash it prevents, and every call in flight is
 #: timeout-bounded already. Shorter than the old 4 s because the worker is asked to stop first.
@@ -1504,13 +1512,17 @@ class CurveDialog(QDialog):
         if said:
             notes.append(i18n.t("curveBankNotKept").format(why=said))
         if self._unread:
-            notes.append(i18n.t("curveBankUnread").format(
-                names=", ".join(title.split(" ")[0] for title in self._unread)))
+            # The store's sentence, while the read it is about still fails, has said the bank
+            # cannot be read and nothing set here is kept: the drivers are named, the fact is not
+            # said twice (the re-review of G10 fix A, N2).
+            notes.append(i18n.t(
+                "curveBankUnreadNames" if said and unreadable else "curveBankUnread").format(
+                    names=", ".join(title.split(" ")[0] for title in self._unread)))
         elif self._apf_unshown:
             notes.append(i18n.t("curveApfUnshown").format(
                 names=", ".join(title.split(" ")[0] for title in self._apf_unshown),
                 why=next(iter(self._apf_unshown.values()))))
-        note = " ".join(notes)
+        note = " ".join(_sentence(part) for part in notes)
         if note != self._bank_note:
             self._bank_note = note
             self._render_note()
@@ -1681,8 +1693,8 @@ class CurveDialog(QDialog):
         tuner needed.
         """
         self._note = " ".join(
-            part for part in (self._refused_note, self._group_note, self._twice_note,
-                              self._bank_note) if part
+            _sentence(part) for part in (self._refused_note, self._group_note, self._twice_note,
+                                         self._bank_note) if part
         )
         self._status.setText(self._note)
         self._status.setVisible(bool(self._note))

@@ -5264,6 +5264,35 @@ def test_a_bank_that_cannot_be_read_is_said_on_the_curve_window_s_own_line(app_l
     assert dialog._status.isHidden(), dialog._status.text()
 
 
+def test_the_unread_line_says_each_fact_once_and_ends_each_sentence(app_log_told):
+    """The re-review of G10 fix A, N2: with the bank unread when the curves came back, the line
+    ran the store's sentence into the next with no stop between — «…TCC will not write over it
+    The delay bank could not be read…» — and said twice that the bank could not be read and
+    nothing is kept. Each fact once now, each sentence ended. Once the store reads, its sentence
+    is gone, and the line still says why those drivers are drawn without their bank."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    names = _SIDE[:2]
+    delay_bank.put(names[0], 0.198)
+    delay_bank.put(names[1], 0.300)
+    dialog = _dialog(list(names), bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    restore = _a_folder_in_the_store_s_place(project_settings.path_for(config.tcc_dir()))
+    try:
+        _curves_back(dialog, names)
+        status = dialog._status.text()
+    finally:
+        restore()
+
+    said = app_log_told[0]
+    assert status.count(said) == 1 and f"{said}. " in status, status
+    assert status.count("could not be read") == 1, status
+    assert "w-L_01, w-R_01" in status and status.endswith("."), status
+    dialog.session_switched()  # the store reads: its sentence no longer stands
+    assert dialog._status.text() == \
+        i18n.t("curveBankUnread").format(names="w-L_01, w-R_01") + ".", dialog._status.text()
+
+
 # ---- a Clear the store refuses is said, and leaves the curves as banked (Task 30's review) -------
 
 
