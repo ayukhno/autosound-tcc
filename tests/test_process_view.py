@@ -951,11 +951,14 @@ def test_the_taken_scan_names_each_read_and_leaves_the_lookalikes(tmp_path):
         '    """r.get("taken") in a string"""\n'
         '    e = r.setdefault("taken", {})\n'
         "    g = r.pop('taken', None)\n"
-        '    h = "taken" in r or "taken" not in r\n'
+        '    h = "taken" in r\n'
+        '    k = "taken" not in r\n'
         '    i = r.setdefault("taken_at"), r.pop("taken_titles"), "taken_at" in r, r in "taken"\n'
         '    return {"taken": {}}\n',
         encoding="utf-8")
 
+    # `in` and `not in` each on a line of their own: the report is a set of `path:line`, so on
+    # one line a scan that missed `not in` named that line all the same (the fix B re-review, m1).
     assert _taken_reads(tmp_path) == ["pkg/m.py:2", "pkg/m.py:3", "pkg/m.py:4", "pkg/m.py:8",
-                                      "pkg/m.py:9", "pkg/m.py:10"]
+                                      "pkg/m.py:9", "pkg/m.py:10", "pkg/m.py:11"]
     assert _taken_reads(tmp_path, readers={("pkg/m.py", "f")}) == []
