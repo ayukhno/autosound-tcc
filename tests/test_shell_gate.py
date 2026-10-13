@@ -707,3 +707,25 @@ def test_a_store_set_aside_by_a_write_s_own_read_runs_the_strictest_gate(tmp_pat
     assert shell_gate.STRICTEST_ASIDE_SAID.format(
         path=project_settings.path_for(tmp_path)) in app_log_told
 
+def test_a_gate_read_that_loses_the_race_to_set_the_store_aside_runs_the_strictest_gate(
+        tmp_path, monkeypatch, app_log_told):
+    """The end-of-branch review, tests m2, on the gate: the gate's own read finds the store broken,
+    and another reader moves it first — the reader that loses answers `{}`, and the gate must not
+    read that `{}` as «no gate» either."""
+    from autosound_tcc.core import own_store, project_settings, shell_gate
+
+    store = project_settings.path_for(tmp_path)
+    store.write_text(_CUT, encoding="utf-8")
+    real = own_store.os.replace
+    raced: list = []
+
+    def the_other_reader_first(src, dst, *args, **kwargs):
+        if not raced:
+            raced.append(1)
+            real(src, store.parent / "tcc-project.json.corrupt-theirs")
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(own_store.os, "replace", the_other_reader_first)
+
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
+    assert raced

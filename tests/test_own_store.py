@@ -420,3 +420,42 @@ def test_a_broken_store_whose_move_is_refused_is_not_named_set_aside(store, monk
     assert own_store.aside_said(store) == ""
     assert own_store.times_set_aside(store) == 0
 
+@pytest.mark.parametrize("other", ["a reader in this process", "another process"])
+def test_two_readers_setting_one_broken_store_aside_at_once(store, monkeypatch, app_log_told,
+                                                            other):
+    """The end-of-branch review, tests m2: `sessions.json` and `.mcp.json` are read from the MCP
+    loop's thread and from the window at once. The reader that loses the race to move the broken
+    store finds it gone (`FileNotFoundError`) and answers `{}`, says nothing — the other reader
+    said it — and leaves no reserved `.corrupt-*` name behind. Without that branch it raised
+    `StoreNotSetAside`, and its write was refused as «could not be set aside» over a store that
+    was. Whoever moved it, the store stands as set aside for this process (code I1): the bytes
+    the loser read were broken all the same, and the gate they held is as unknown."""
+    store.write_bytes(b'{"gate": "writes",')
+    real = os.replace
+    raced: list = []
+
+    def the_other_reader_first(src, dst, *args, **kwargs):
+        if not raced:
+            raced.append(other)
+            if other == "a reader in this process":
+                assert own_store.read_json(store) == {}, "the other reader sets it aside"
+            else:
+                real(src, store.parent / "store.json.corrupt-theirs")  # and says so in its own log
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(own_store.os, "replace", the_other_reader_first)
+
+    assert own_store.read_json(store) == {}
+
+    assert raced, "the race was run"
+    left = _left(store)
+    assert len(left) == 1 and left[0].startswith("store.json.corrupt-"), (
+        "one copy, the winner's: the loser's reserved name is given back", left)
+    assert (store.parent / left[0]).read_bytes() == b'{"gate": "writes",'
+    if other == "a reader in this process":
+        assert len(app_log_told) == 1 and left[0] in app_log_told[0], "said once, by the winner"
+        assert own_store.aside_said(store) == app_log_told[0], "its sentence, not the loser's"
+    else:
+        assert app_log_told == [], "said in the other process, not here"
+        assert own_store.aside_said(store) == "", "no copy of this process's to name"
+    assert own_store.times_set_aside(store) >= 1, "set aside, whoever moved it"
