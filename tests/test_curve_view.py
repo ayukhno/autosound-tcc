@@ -1389,24 +1389,30 @@ def test_with_no_ledger_the_lines_are_readings_alone():
 
 def test_the_window_reads_the_ledger_fresh_every_time_it_is_asked():
     """The window is open across a whole pass; a snapshot taken when it opened would be checking
-    tonight's proposal against an hour-old ledger."""
+    tonight's proposal against an hour-old ledger.
+
+    Asked by the next step of the box, not by a hand call: nothing tells the window the ledger
+    moved, so the step's own read is the one that carries it into the total, the sentence that
+    leaves the window and the button (G10 tests, G1)."""
 
     ledger = {"w-L": 1.0}
     dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge())
     dialog._worker.wait(4000)
-    dialog.set_delays_provider(lambda: dict(ledger))
+    dialog.set_delays_provider(lambda: dict(ledger))  # read fresh on every use, as the window's is
     # One curve: a negative proposal is rebased away the moment there are two of them to be
     # relative to, and what this test is about is the ledger being re-read, not the sign.
     dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52))])
+    view = dialog._view
 
-    dialog._view.set_delay(-0.2)
-    assert dialog._view.total_delay_ms() == pytest.approx(0.8)
+    view.set_delay(-0.2)
+    assert view.total_delay_ms() == pytest.approx(0.8)
 
-    ledger["w-L"] = 0.1
-    dialog._sync_channel_delay()
+    ledger["w-L"] = 0.1  # set elsewhere while the window stays open
+    view.set_delay(-0.25)  # the next step; nothing else re-reads the ledger
 
-    assert dialog._view.total_delay_ms() == pytest.approx(-0.1)
-    assert i18n.t("curveDelayBelowZero") in dialog._view.reading()
+    assert view.total_delay_ms() == pytest.approx(-0.15)
+    assert i18n.t("curveDelayBelowZero") in view.reading(), "the sentence that leaves the window"
+    assert current_theme().warn in view._readout_btn.styleSheet(), "and the button, unhovered"
 
 
 def test_an_impossible_total_is_coloured_not_just_worded():
@@ -5131,15 +5137,23 @@ def test_one_delay_step_renders_the_readout_once_in_a_window_that_knows_the_ledg
 
 
 def test_a_ledger_that_moved_still_reaches_the_reading():
-    dialog = _side_dialog()
+    """The step skips its render when the ledger did not move, so what does move has to come in
+    through the step itself: the provider is the one installed when the window opened, and the
+    ledger moves under it, every channel to its own value (G10 tests, G1 and W1 — re-installing
+    the provider synced at install, and proved nothing about the step). Every channel's total,
+    which also pins the order the set goes in."""
+    ledger = dict(_LEDGER)
+    dialog = _plotted(_SIDE)
+    dialog.set_delays_provider(lambda: dict(ledger))
     view = dialog._view
-    target = view.delay_target()
-    moved = dict(_LEDGER, **{_SIDE[target].split("_")[0]: 2.0})
-    dialog.set_delays_provider(lambda: dict(moved))
+    for code in ledger:
+        ledger[code] += 0.5  # each still its own value: the order is pinned too
 
     view.set_delay(0.26)
 
-    assert view.total_delay_ms(target) == pytest.approx(2.26)
+    proposed = view.proposed_delays()
+    assert [view.total_delay_ms(i) for i in range(len(_SIDE))] == pytest.approx(
+        [ledger[name.split("_")[0]] + proposed[i] for i, name in enumerate(_SIDE)])
 
 
 def test_the_set_of_channel_delays_goes_in_with_one_render(monkeypatch):
