@@ -249,26 +249,31 @@ def test_a_capture_check_that_ran_answers_its_verdict_even_on_exit_1(monkeypatch
     (70, "", "Traceback (most recent call last):\nKeyError: 'taken'\n"
              "error: unexpected KeyError: 'taken'"),
     (1, _VERDICT, "Traceback (most recent call last):\nKeyError: 'taken'"),
-], ids=["refused", "REW down", "crashed", "crashed after its verdict"])
+    (1, _VERDICT, "error: REW's measurement list was not read (HTTP 500) -- nothing was recorded"),
+    (1, "", ""),
+], ids=["refused", "REW down", "crashed", "crashed after its verdict", "refused after a verdict",
+        "exit 1 with nothing said"])
 def test_a_capture_check_that_did_not_run_is_raised_in_its_own_words(monkeypatch, code, out, err,
                                                                      app_log_warnings):
     """The method's refusal, REW not answering and a crash recorded nothing (or nothing whole):
     each is raised, in the words it was said in, for the caller to say the check did not run. And
     each is logged once, in those words, a crash with its traceback (the G6+G7 review's M2): the
     strip's line was the only trace, and once it was closed nothing said what had refused or
-    crashed, nor which titles were asked."""
+    crashed, nor which titles were asked. A refusal is one whatever stdout holds, and an exit 1
+    that printed nothing is no verdict (the G6+G7 tests review's G6)."""
     monkeypatch.setattr(process_writer, "_spawn",
                         lambda project_dir, args, timeout_s=None, **_kw: (code, out, err))
+    said = err or f"process.py exited {code}"
 
     with pytest.raises(process_writer.ProcessWriterError) as failed:
         process_writer.check_captures(Path("car"), ["w-L_1 (sw)"])
 
-    assert str(failed.value) == err
+    assert str(failed.value) == said
     assert isinstance(failed.value, process_writer.RewUnavailable) == (code == 69), \
         "REW not answering is told apart by its exit, not its words (the G6+G7 review's M4)"
     [logged] = [record.getMessage() for record in app_log_warnings]
     assert "capture-check" in logged and "w-L_1 (sw)" in logged and f"exit {code}" in logged
-    assert err.splitlines()[-1] in logged, logged
+    assert said.splitlines()[-1] in logged, logged
     if "Traceback" in err:
         assert err in logged, "a crash is logged with its traceback whole"
 
