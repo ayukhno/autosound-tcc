@@ -4834,6 +4834,54 @@ def test_one_delay_step_writes_the_bank_once_however_many_drivers_are_on_screen(
     assert delay_bank.seen() == set(_SIDE), "every driver on screen is still banked"
 
 
+def test_one_step_banks_every_driver_its_own_delay_and_its_own_arrival():
+    """One step banks the whole side in one write, each driver from its own trace: the delay the
+    box holds for it, and the arrival read off its own impulse — what the banked delay is measured
+    from and what the sentence states it against. Pinned by the titles alone, a step that banked
+    the first trace's arrival on all seven passed (G10 tests, G2 and W3)."""
+    from autosound_tcc.core import delay_bank
+    from autosound_tcc.ui.tcc import curve_dialog
+
+    dialog = _plotted(_SIDE)
+    view = dialog._view
+    view.set_delay_target(3)
+
+    view.set_delay(0.26)
+
+    arrivals = delay_bank.arrivals()
+    assert arrivals == pytest.approx(
+        {trace.name: round(curve_dialog._peak_x(trace), 4) for trace in view._traces})
+    assert len(set(arrivals.values())) == len(_SIDE), "seven drivers, seven arrivals"
+    assert delay_bank.load() == {_SIDE[3]: 0.26}, "the delay on the driver that carries it"
+    assert delay_bank.references() == sorted(name for name in _SIDE if name != _SIDE[3])
+
+
+@pytest.mark.parametrize("kind", ["fr", pytest.param("phase", marks=_needs_skill)])
+def test_a_step_on_a_frequency_plot_keeps_the_arrival_read_off_the_impulse(kind):
+    """An arrival is a time read off the impulse. A step on the frequency response, or an all-pass
+    dialled where it is dialled — on the phase — has none to give and keeps the banked one: taken
+    off this plot's peak it was a frequency banked as milliseconds (G10 tests, G2)."""
+    from autosound_tcc.core import delay_bank
+    from autosound_tcc.core.allpass import Allpass
+
+    names = ["w-L_01 (sw)", "w-R_01 (sw)"]
+    delay_bank.put(names[0], 0.2, arrival_ms=4.52)
+    delay_bank.put(names[1], 0.0, arrival_ms=4.78)
+    dialog = _dialog(names, kind=kind, bridge=_FrBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves([_fr_trace(names[0]), _fr_trace(names[1])])
+    assert dialog._kind == kind
+
+    if kind == "fr":
+        dialog._view.set_delay(0.3)
+        assert delay_bank.load() == {names[0]: 0.3}, "the step was banked"
+    else:
+        dialog._view.set_allpass(Allpass(1, 80.0), 1)
+        assert delay_bank.allpasses() == {names[1]: Allpass(1, 80.0)}, "the step was banked"
+
+    assert delay_bank.arrivals() == {names[0]: 4.52, names[1]: 4.78}
+
+
 def test_a_bank_that_cannot_be_read_is_said_once_and_the_steps_go_on(app_log_told):
     """A store that is there and cannot be read refuses the write (Task 17). The refusal raised
     out of the slot on every step of the box; it is said once, where it was read, and the window
