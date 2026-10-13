@@ -99,20 +99,32 @@ def test_a_version_is_named_by_what_it_was_saved_under(tmp_path):
     assert ledger_line.dsp_preset(tmp_path, "SQ") == "1"
 
 
-def test_the_window_compares_with_the_previous_configuration_by_default(tmp_path, monkeypatch):
-    from autosound_tcc.core import config
-    from autosound_tcc.ui.tcc.main_window import MainWindow
+def test_compare_offers_the_previous_configuration_by_default(tmp_path):
+    """«Порівняти з» for SQ-2 (v_006): its own versions with the names they were saved under, then
+    FULL's, keyed by their preset; selected by default the PREVIOUS configuration — SQ-1's v_003,
+    not v_005 (the Arbiter, 2026-09-23: «за замовчанням попередній»)."""
+    _arbiter_example(tmp_path)
+    offer = ledger_line.compare_offer(tmp_path, "SQ", "v_006")
+    assert offer.own == ["v_006", "v_003", "v_002", "v_001"]
+    assert offer.default == "v_003", "SQ-2 continues SQ-1, not v_005"
+    assert offer.labels["v_003"] == "v_003 · SQ-1"
+    assert offer.others == [("FULL", [("FULL/v_005", "v_005"), ("FULL/v_004", "v_004 · FULL-1")])]
 
-    QApplication.instance() or QApplication([])
-    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
-    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
-    root = tmp_path / "ledger"
-    _arbiter_example(root)
-    window = MainWindow()
-    window._offer_compare(root, "SQ", {}, "v_006")
-    combo = window._detail._compare_combo
-    assert combo.currentData() == "v_003", "SQ-2 continues SQ-1, not v_005"
-    assert "SQ-1" in combo.currentText()
+
+def test_a_previous_made_for_another_preset_is_selected_in_that_preset_s_group(tmp_path):
+    """The project line: a configuration may continue another preset's. FULL-1 (v_004) continues
+    SQ-1 (v_003), made for SQ and so not in FULL's own group: the default is SQ's row, keyed
+    `SQ/v_003` as the loader reads it from its own preset. With nothing before the version open
+    now, nothing is selected."""
+    line, old = tmp_path / "line", tmp_path / "old"
+    _arbiter_example(line)
+    offer = ledger_line.compare_offer(line, "FULL", "v_004")
+    assert "v_003" not in offer.own
+    assert offer.default == "SQ/v_003"
+    assert ("SQ/v_003", "v_003 · SQ-1") in dict(offer.others)["SQ"]
+
+    _old_layout(old)
+    assert ledger_line.compare_offer(old, "SQ", "v_001").default is None
 
 
 def _the_method_answers(monkeypatch, code: int, out: str = "", err: str = "") -> list:
@@ -353,6 +365,7 @@ def test_the_window_offers_other_presets_versions_after_its_own(tmp_path, monkey
     assert keys[:5] == [None, None, None, "v_002", "v_001"], \
         "this preset's own group comes first, headed and with its current version greyed"
     assert keys.index("FULL/v_002") > keys.index("v_001")
+    assert combo.currentData() == "v_002", "`compare_offer`'s default is the one selected"
     header = next(i for i in range(combo.count())
                   if combo.itemData(i) is None and "FULL" in combo.itemText(i))
     assert not combo.model().item(header).isEnabled(), "the preset's name heads its versions"

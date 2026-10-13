@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 SLOTS_FILE = "slots.json"
 VERSIONS_DIR = "versions"
@@ -248,3 +248,33 @@ def label(root, version: str, names: Optional[dict[str, list[str]]] = None) -> s
     names = saved_names(root) if names is None else names
     codes = names.get(version) or []
     return f"{version} · {', '.join(codes)}" if codes else version
+
+
+class CompareOffer(NamedTuple):
+    """What «порівняти з» offers, as plain data (#179: decided here, out of the window)."""
+
+    own: list[str]
+    default: Optional[str]
+    labels: dict[str, str]
+    others: list[tuple[str, list[tuple[str, str]]]]
+
+
+def compare_offer(root, preset: str, current: Optional[str]) -> CompareOffer:
+    """`compare_groups` named for the list: `preset`'s own versions with their `label`s, each other
+    preset's as `(key, label)` keyed `SQ/v_004` (finding 66), and selected by default the PREVIOUS
+    one (the Arbiter, 2026-09-23: «за замовчанням попередній») — `previous_of`, the ancestry. On
+    the project line a configuration may continue another preset's, and its previous is then
+    selected in that preset's group; with nothing before `current`, nothing is."""
+    groups = compare_groups(root, preset, current)
+    own = groups[0][1] if groups else []
+    names = saved_names(root)
+    labels = {v: label(root, v, names) for v in own}
+    others = [(p, [(f"{p}/{v}", label(root, v, names)) for v in versions])
+              for p, versions in groups[1:]]
+    previous = previous_of(root, preset, current)
+    if previous in own:
+        default = previous
+    else:
+        default = next((key for _p, items in others for key, _label in items
+                        if previous and key.split("/", 1)[1] == previous), None)
+    return CompareOffer(own, default, labels, others)

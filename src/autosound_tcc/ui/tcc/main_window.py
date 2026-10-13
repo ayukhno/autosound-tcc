@@ -2453,18 +2453,7 @@ class MainWindow(QMainWindow):
         After this preset's versions come the other presets' (the Arbiter, 2026-09-25, finding 66:
         «порівнювати не тільки v_xxx в поточній конфігурації, але і з іншими конфігураціями»),
         keyed `SQ/v_004` so the loader reads each from its own preset."""
-        groups = ledger_line.compare_groups(root, preset, current)
-        own = groups[0][1] if groups else []
-        names = ledger_line.saved_names(root)
-        labels = {v: ledger_line.label(root, v, names) for v in own}
-        others = [(p, [(f"{p}/{v}", ledger_line.label(root, v, names)) for v in versions])
-                  for p, versions in groups[1:]]
-        previous = ledger_line.previous_of(root, preset, current)
-        if previous in own:
-            default = previous
-        else:  # the project line: a configuration may continue another preset's
-            default = next((key for _p, items in others for key, _label in items
-                            if previous and key.split("/", 1)[1] == previous), None)
+        own, default, labels, others = ledger_line.compare_offer(root, preset, current)
 
         def load(key: str, _root=str(root), _preset=preset, _profile=profile):
             of, version = key.split("/", 1) if is_other_preset(key) else (_preset, key)
