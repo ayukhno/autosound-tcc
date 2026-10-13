@@ -570,9 +570,11 @@ class CurveDialog(QDialog):
         #: for it then — `{title: (ms, Allpass | None)}` (G10 C1). What is drawn for them is not
         #: what is banked, so nothing is banked while any is here; see `_restore_bank`.
         self._unread: dict[str, tuple] = {}
-        #: The series their curves came back under: what a read that worked would have drawn for
-        #: them is that series' bank, whatever the panel shows by the time it reads (N1).
-        self._unread_series: Optional[str] = None
+        #: Every series their curves came back under while unread, in that order: what reads that
+        #: worked would have drawn for them is those series' banks, whatever the panel shows by
+        #: the time one reads (N1, R1). One list serves every driver in `_unread`: a new
+        #: selection empties both, so each came back under each of these.
+        self._unread_series: list[Optional[str]] = []
         #: The drivers whose banked all-pass the restore could not draw — no skill maths on this
         #: machine — `{title: why}` (G10 C3). The view holds no filter for them, so they are banked
         #: with their filter kept, never taken off.
@@ -1864,21 +1866,25 @@ class CurveDialog(QDialog):
         back — on every driver but where the person has moved its delay or filter since, which
         is theirs and stays — and the set is banked again from there.
 
-        Put back from the series their curves came back under (`_unread_series`), never from the
-        one the panel has moved to since: that one holds none of their titles, the bank being
+        Put back from every series their curves came back under (`_unread_series`), never from
+        the one the panel has moved to since: that one holds none of their titles, the bank being
         keyed by title, and the step banked the zeros drawn for them into it over the first
-        series' readings (the re-review of G10 fix A, N1). `came_back` — the curves on screen
-        came back just now, under the series shown now, whose bank is theirs too; the step's
-        retry is not a read of curves, so it puts back only what the failed read missed.
+        series' readings (the re-review of G10 fix A, N1). Every one, not the first: curves read
+        again under a second series while the store still failed were put back from the first
+        alone, and the step banked the zero drawn for a driver the second holds over its reading
+        (round 2, R1). `came_back` — the curves on screen came back just now, under the series
+        shown now, whose bank is theirs too; the step's retry is not a read of curves, so it puts
+        back only what the failed reads missed.
         """
         series = self._session()
         if not self._unread:
-            self._unread_series = series
-        sources = ([self._unread_series] if self._unread else []) + ([series] if came_back else [])
+            self._unread_series = []
+        if came_back and series not in self._unread_series:
+            self._unread_series.append(series)
         bank: dict = {}
         apfs: dict = {}
         try:
-            for source in dict.fromkeys(sources):
+            for source in self._unread_series:
                 bank.update(delay_bank.load(session=source, strict=True))
                 apfs.update(delay_bank.allpasses(session=source, strict=True))
         except own_store.StoreUnreadable:

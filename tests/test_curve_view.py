@@ -4996,6 +4996,43 @@ def test_curves_read_again_under_another_series_get_what_each_series_holds(app_l
     assert delay_bank.load(session="S2") == {names[0]: 0.05, names[1]: 0.300}
 
 
+def test_curves_read_again_under_another_series_while_still_unread_are_put_back_from_both(
+        app_log_told):
+    """The re-review of G10 fix A round 2, R1: the store could not be read while S1's curves came
+    back, the panel moved to S2, and the same curves came back again — a kind change — while the
+    store still could not be read. A read that worked there would have drawn w-R from S2's bank.
+    The step's retry read only S1, the series of the first failure, so w-R stayed at the 0 drawn
+    for it and the step banked that 0 into S2 over its 0.300. The retry reads every series the
+    curves came back under while unread, and nothing is banked until it has."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    names = _SIDE[:2]
+    delay_bank.put(names[0], 0.198, session="S1")
+    delay_bank.put(names[1], 0.300, session="S2")
+    series = ["S1"]
+    dialog = _dialog(list(names), bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog.set_session_provider(lambda: series[0])
+    restore = _a_folder_in_the_store_s_place(project_settings.path_for(config.tcc_dir()))
+    try:
+        _curves_back(dialog, names)  # under S1, not read
+        series[0] = "S2"
+        dialog.session_switched()
+        _curves_back(dialog, names)  # the same curves under S2, still not read
+        assert set(dialog._unread) == set(names), "drawn without their bank"
+        dialog._view.set_delay_target(0)
+        dialog._view.set_delay(0.04)  # refused: nothing is banked while the store cannot be read
+    finally:
+        restore()
+    assert delay_bank.load(session="S2") == {names[1]: 0.300}, "untouched while unread"
+
+    dialog._view.set_delay(0.05)
+
+    assert dialog._view.delays()[:2] == pytest.approx([0.05, 0.300])
+    assert delay_bank.load(session="S2") == {names[0]: 0.05, names[1]: 0.300}
+    assert delay_bank.references(session="S2") == [], "no driver banked as a zero reference"
+
+
 # ---- one readout render per step (#177, TA-4) --------------------------------------------------
 
 
