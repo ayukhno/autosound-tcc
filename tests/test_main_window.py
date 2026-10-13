@@ -5919,7 +5919,7 @@ def test_the_window_module_starts_without_pyqtgraph(tmp_path):
 
         import autosound_tcc.ui.tcc.main_window
 
-        print(sorted(m for m in sys.modules if m.split(".")[0] == "pyqtgraph"))
+        print(sorted(m for m in sys.modules if m.split(".")[0] in ("pyqtgraph", "numpy")))
     """)
     env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
 
@@ -5927,7 +5927,7 @@ def test_the_window_module_starts_without_pyqtgraph(tmp_path):
                           env=env, cwd=str(tmp_path), timeout=120)
 
     assert done.returncode == 0, f"exit {done.returncode}: {done.stderr[-2000:]}"
-    assert done.stdout.strip().splitlines()[-1] == "[]", "pyqtgraph is loaded at start"
+    assert done.stdout.strip().splitlines()[-1] == "[]", "pyqtgraph or numpy is loaded at start"
 
 
 # ---- the capture check: which titles it asks about is `measurement_view.to_check`, what the strip

@@ -5221,6 +5221,8 @@ def test_one_delay_step_renders_the_readout_once(monkeypatch):
     _KEEP.append(bare)
     assert _readout_renders(bare, lambda: bare.set_delay(0.26), monkeypatch) == 1, \
         "with no traces it is the only render"
+    assert _readout_renders(bare, lambda: bare.set_allpass(None, 0), monkeypatch) == 1, \
+        "and so it is for an all-pass taken off, which needs no skill (G10 tests, G7)"
 
 
 def test_one_delay_step_renders_the_readout_once_in_a_window_that_knows_the_ledger(monkeypatch):
@@ -5259,12 +5261,15 @@ def test_the_set_of_channel_delays_goes_in_with_one_render(monkeypatch):
     view = _side_view()
     values = [0.1 * i for i in range(len(_SIDE))]
 
+    def totals():
+        return [view.total_delay_ms(i) for i in range(len(_SIDE))]
+
     assert _readout_renders(view, lambda: view.set_channel_delays(values), monkeypatch) == 1
-    assert view._channel_delays[:len(_SIDE)] == pytest.approx(values)
+    assert totals() == pytest.approx(values), "nothing dragged: each total is its channel's own"
     assert _readout_renders(view, lambda: view.set_channel_delays(values), monkeypatch) == 0, \
         "nothing moved, nothing to render"
     assert _readout_renders(view, lambda: view.set_channel_delays([None] * 7), monkeypatch) == 1
-    assert view._channel_delays[:len(_SIDE)] == [None] * len(_SIDE)
+    assert totals() == [None] * len(_SIDE)
 
 
 @_needs_skill
