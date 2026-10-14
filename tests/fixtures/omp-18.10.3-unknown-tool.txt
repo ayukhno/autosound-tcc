@@ -1,0 +1,3 @@
+Error: Unknown tool in --tools: inspect_image.
+Built-in tools: read, bash, edit, ast_grep, ast_edit, ask, debug, ida, eval, github, glob, grep, find, lsp, checkpoint, rewind, context_notes, new_context, security_scan, task, wait, todo, web_search, write, memory_edit, retain, recall, reflect, learn, manage_skill. Other registered tools: goal, init_experiment, run_experiment, log_experiment, update_notes.
+Run `omp --help` for available flags.

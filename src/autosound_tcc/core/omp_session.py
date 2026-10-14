@@ -87,6 +87,8 @@ DEFAULT_MODEL = model_choices.DEFAULT_OMP_MODEL
 # checking before the turn because the failure is silent -- no key means an empty answer and no
 # error -- and because a double-clicked app bundle inherits almost no environment at all.
 _GOOGLE_KEY_VARS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+#: omp's providers that take those keys; any other provider prefix has a login of its own.
+_GOOGLE_KEY_PROVIDERS = frozenset({"google", "gemini"})
 
 # omp's built-in tools a tuning session may use. An allowlist because of what the *rest* of them
 # do to the method, and `todo` is the case that proves it: given a checklist to hold, the model
@@ -104,7 +106,14 @@ _ENABLED_TOOLS = (
     "read", "write", "edit", "glob", "grep", "bash", "ask", "inspect_image",
 )
 
-_UNKNOWN_TOOL = re.compile(r"Unknown tool in --tools: (\S+?)\.\s*Valid tools: ([^\n]+)")
+#: omp's refusal of one `--tools` name, and the names it offers instead. Two wordings, both read:
+#: 17.x/18.3 — «Unknown tool in --tools: inspect_image. Valid tools: read, write, ….» on one line;
+#: 18.10 — the reason, then «Built-in tools: read, bash, ….» on the NEXT line and «Other registered
+#: tools: goal, …» after it (tcc#165: only the first wording matched, so no retry, no session). The
+#: list is the run of comma-separated names, so the sentence after it is not read as a tool.
+_UNKNOWN_TOOL = re.compile(
+    r"Unknown tools? in --tools:\s*(\S+?)\.?\s+(?:Valid|Built-in) tools:\s*"
+    r"((?:[\w-]+,\s*)*[\w-]+)")
 
 #: What omp's runtime prints around an error: `at fn (file:line:col)` frames, and the source excerpt
 #: (`14767 |   throw …` and its `^`). omp 18 puts five frames after the reason, and the stderr tail
@@ -123,7 +132,7 @@ def tools_omp_takes(said: str, wanted) -> Optional[list[str]]:
     found = _UNKNOWN_TOOL.search(said or "")
     if not found:
         return None
-    valid = {name.strip().rstrip(".") for name in found.group(2).split(",")}
+    valid = {name.strip() for name in found.group(2).split(",")}
     kept = [tool for tool in wanted if tool in valid]
     return kept if kept and kept != list(wanted) else None
 
@@ -1057,6 +1066,12 @@ class OmpSession:
         evidence that it works when double-clicked.
         """
         if "gemini" not in self.model.lower() and "google" not in self.model.lower():
+            return None
+        # A provider named before the model that is not the API-key one (`google-antigravity/…`,
+        # `google-gemini-cli/…`) signs in through omp's own login, which no variable here shows —
+        # warning over it was a false alarm on a session that answered (tcc#165).
+        provider = self.model.split("/", 1)[0].lower() if "/" in self.model else ""
+        if provider and provider not in _GOOGLE_KEY_PROVIDERS:
             return None
         if any(os.environ.get(name) for name in _GOOGLE_KEY_VARS):
             return None

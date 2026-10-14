@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import pathlib
 import shlex
 import sys
 from concurrent.futures import Future
@@ -731,6 +732,17 @@ def test_the_key_omp_actually_reads_counts(tmp_path, monkeypatch):
     assert session.credential_warning() is None
 
 
+@pytest.mark.parametrize("model", ["google-antigravity/gemini-3.8-flash",
+                                   "google-gemini-cli/gemini-3.1-pro-preview"])
+def test_a_google_model_behind_an_omp_login_is_not_flagged(tmp_path, monkeypatch, model):
+    """tcc#165: `google-antigravity/…` signs in through omp's own login, not an environment key —
+    the warning said «nothing to authenticate with» over a session that answered."""
+    for name in omp_session_module._GOOGLE_KEY_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+    assert OmpSession(project_dir=tmp_path, model=model).credential_warning() is None
+
+
 def test_a_non_google_model_is_not_second_guessed(tmp_path, monkeypatch):
     """omp has its own broker for everything else; TCC does not audit it."""
     for name in omp_session_module._GOOGLE_KEY_VARS:
@@ -1275,6 +1287,44 @@ def test_omp_18s_refusal_behind_a_stack_is_still_read_and_retried(tmp_path, monk
 
     assert session._saw_ready
     assert "inspect_image" not in session._tools
+
+
+#: omp 18.10.3's refusal, captured from the real binary on 2026-10-14 (`omp --mode rpc-ui --tools
+#: read,…,ask,inspect_image`, exit 2): no stack any more, and «Valid tools:» became «Built-in tools:»
+#: on a line of its own, followed by «Other registered tools:» (tcc#165).
+_OMP_18_10_REFUSAL = (
+    pathlib.Path(__file__).parent / "fixtures" / "omp-18.10.3-unknown-tool.txt"
+).read_text(encoding="utf-8")
+
+
+def test_omp_18_10s_refusal_names_the_tools_it_takes():
+    """tcc#165: the refusal regex wanted «Valid tools:», omp 18.10 says «Built-in tools:» on the next
+    line — no match, no retry, and omp did not start at all."""
+    wanted = list(omp_session_module._ENABLED_TOOLS)
+
+    kept = omp_session_module.tools_omp_takes(_OMP_18_10_REFUSAL, wanted)
+
+    assert kept == [tool for tool in wanted if tool != "inspect_image"]
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="a POSIX script stands in for omp")
+def test_omp_18_10s_refusal_is_retried_and_the_session_starts(tmp_path, monkeypatch):
+    """tcc#165: with omp 18.10.3's exact words on stderr, the start is retried without the tool."""
+    import asyncio as aio
+
+    _fake_omp(tmp_path, monkeypatch, _OMP_18_10_REFUSAL)
+    session = OmpSession(project_dir=tmp_path)
+
+    async def start_and_close():
+        try:
+            await session._start_process()
+        finally:
+            await session.close()
+
+    aio.run(start_and_close())
+
+    assert session._saw_ready
+    assert set(session._tools) == {"read", "write", "edit", "glob", "grep", "bash", "ask"}
 
 
 def test_a_failure_names_omps_reason_not_its_stack_frames(tmp_path):
