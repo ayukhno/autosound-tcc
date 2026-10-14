@@ -3697,3 +3697,17 @@ was checked and turned green: the critic's check works where the main model's sw
 **Weight.** High: the agreed switch did not happen, and the window keeps showing a model TCC itself called gone.
 
 **Task.** W-10's pool (collection).
+
+### 158. The update installs dependencies newer than the ones CI tested: PySide6 6.12.0 against the lock's 6.11.2
+
+**What.** The Arbiter, 2026-10-14, the installer walk for v1.1.3 on the VM (TCC's update window, 1.1.2 → 1.1.3 at
+`8dc1087`): `uv` resolved 38 packages afresh and installed `pyside6-essentials` and `shiboken6` 6.12.0,
+`claude-agent-sdk` 0.2.166, `starlette` 1.8.0, `pydantic` 2.14.1 among nine. `uv.lock` on the same commit holds
+PySide6 6.11.2, claude-agent-sdk 0.2.145, starlette 1.6.0, and CI runs `uv run --locked` — so the set on the
+Arbiter's machine is one CI never ran; `pyproject.toml` allows `PySide6-Essentials>=6.6,<7`.
+
+**Where.** Windows VM, the update window's output (pasted by the Arbiter).
+
+**Weight.** High: a new Qt minor reaches users untested; the update itself finished clean.
+
+**Task.** W-10's pool (collection).
