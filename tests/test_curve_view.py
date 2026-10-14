@@ -1203,6 +1203,38 @@ def test_a_delay_set_in_code_shows_in_the_control():
 # ---- the delay bank (user, 2026-08-12) --------------------------------------------------------
 
 
+def test_a_kept_window_banks_into_the_folder_it_shows_after_a_cancelled_switch(tmp_path,
+                                                                                  monkeypatch):
+    """#206, the group review's I1: Cancel on a project switch keeps the old window over the new
+    process-wide folder, and its curve window wrote the bank into the NEW folder's `.tcc/`. Its
+    bank is the window's folder's, where the session it sits beside writes too."""
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QWidget
+
+    from autosound_tcc.core import config, delay_bank
+    from autosound_tcc.ui.tcc import window_folder
+
+    _app()
+    owner = QWidget()
+    owner._built_on = window_folder.pin()
+    owner._status_strip = SimpleNamespace(notify=lambda *_a, **_k: None)
+    _KEEP.append(owner)
+    old = config.tcc_dir()
+    dialog = _dialog(["w-L_01 (sw)", "w-R_01 (sw)"], bridge=_FakeBridge(), parent=owner)
+    dialog._worker.wait(4000)
+    dialog._on_curves([Trace("w-L_01 (sw)", *_impulse(4.52)),
+                       Trace("w-R_01 (sw)", *_impulse(4.78))])
+    new = tmp_path / "new-car"
+    new.mkdir()
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(new))
+
+    dialog._view.set_delay(0.26)
+
+    assert delay_bank.load(old) == {"w-L_01 (sw)": 0.26}
+    assert delay_bank.load() == {}, "nothing written into the new folder"
+
+
 def test_a_delay_is_kept_against_the_measurement_it_was_read_on():
     """Aligning a car is six pairs, not one, and this window used to drop each reading as the next
     pair loaded — "було б здорово мати збереження затримки по кожному каналу"."""

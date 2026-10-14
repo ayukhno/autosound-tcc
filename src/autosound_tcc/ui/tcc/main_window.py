@@ -1726,14 +1726,12 @@ class MainWindow(QMainWindow):
         """
         self._safe_load_project()
         self._start_contract_check()
-        # And REW, which is the other half of "what changed since I looked": it is a separate
-        # application, and the answer used to survive only a restart of this one.
+        # And REW, the other half of "what changed since I looked": a separate application whose
+        # answer used to survive only a restart of this one.
         self._ping_rew()
-        # And a third half, for the same reason: a login happens in a terminal, and TCC asked
-        # `claude auth status` once at startup. The Arbiter logged in, pressed this, and nothing
-        # moved (user, 2026-09-09). `force`, because a press is not an alt-tab: the quiet period
-        # exists to stop window switching from spawning probes, not to make a button do nothing.
-        # ↻ is the explicit re-check: what refused earlier in this launch gets another chance.
+        # And the logins, for the same reason: one happens in a terminal, and nothing moved on a
+        # press (user, 2026-09-09). `force`: the quiet period stops alt-tabs spawning probes, not a
+        # button; ↻ is the explicit re-check, what refused earlier gets another chance.
         availability.forget_refusals()
         self._refresh_cli_catalogue(force=True)
 
@@ -1761,13 +1759,10 @@ class MainWindow(QMainWindow):
     def _safe_load_project(self) -> None:
         """Re-read the project without letting a bad file take the window with it.
 
-        The ledger is written by a language model, and one wrote `slot: 1` where the schema says a
-        letter. `QLabel(int)` raised inside a Qt slot -- which does not propagate, it aborts the
-        process -- and the whole app went with it mid-session, after eight measurements.
-
-        Nothing here decides the file is wrong or repairs it: TCC does not write project data. It
-        keeps the last good view on screen and says what happened, which is the difference between
-        a panel that cannot draw and a session that ends.
+        A model-written ledger once said `slot: 1` where the schema says a letter; `QLabel(int)`
+        raised inside a Qt slot, which aborts the process, mid-session after eight measurements.
+        Nothing here repairs the file (TCC does not write project data): the last good view stays
+        on screen and what happened is said — a panel that cannot draw, not a session that ends.
         """
         try:
             self._load_project()
@@ -1787,7 +1782,7 @@ class MainWindow(QMainWindow):
         gates the MCP server and the REW ping); spawning a Python subprocess per constructed window
         belongs behind the same one.
         """
-        if os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0":
+        if os.environ.get("AUTOSOUND_TCC_MCP", "1") == "0" or not window_folder.ours(self, "a check"):
             return
         if self._contract_worker is not None and self._contract_worker.isRunning():
             # Asked again while one runs: it goes when that one ends. Its report may be out
@@ -2166,7 +2161,9 @@ class MainWindow(QMainWindow):
     # ---- project loading ----------------------------------------------------
 
     def _load_project(self) -> None:
-        """Load the project, then tell the agent what is now on screen (TA-5)."""
+        """Load the project, then tell the agent what is now on screen (TA-5); its own folder (I1)."""
+        if not window_folder.ours(self, "a project load"):
+            return
         self._loaded_preset = None
         try:
             self._load_project_inner()
@@ -2559,7 +2556,8 @@ class MainWindow(QMainWindow):
         nobody opened the form on needs it. REW is skipped: the gate is about the files.
         """
         form = getattr(self, "_intake_form", None)
-        if form is None or not form.was_opened or getattr(self, "_agent_worker", None) is not None:
+        if (form is None or not form.was_opened or getattr(self, "_agent_worker", None) is not None
+                or not window_folder.ours(self, "the intake gate")):
             return
         worker = getattr(self, "_gate_worker", None)
         if worker is not None and worker.isRunning():
@@ -3600,13 +3598,12 @@ class MainWindow(QMainWindow):
         self._project_reload.start()
 
     def _set_project_setting(self, key: str, value) -> bool:
-        """A choice made in this window, saved into its project's `.tcc/` — unless the window is on
-        its way out (TODO F-053): one a test left behind made `.tcc/` in the NEXT test's folder, and
-        the flush on close writes directly (`_flush_own_state`). A pick that did not land is in
-        force for the run all the same (`project_settings.pick`) and answers as a Save does (I2)."""
+        """A choice made in this window, saved into its own folder's `.tcc/` (#206) — unless it is
+        on its way out (F-053: a test's left-behind window wrote into the NEXT test's folder). A pick
+        that did not land is in force for the run all the same and answers as a Save does (I2)."""
         if getattr(self, "_closing", False):
             return False
-        if (picked := project_settings.pick(config.tcc_dir(), key, value)).say:
+        if (picked := project_settings.pick(window_folder.tcc_dir(self), key, value)).say:
             self._say_saved(False, i18n.t("pickThisRun"))
         return picked.landed
 
@@ -3629,6 +3626,8 @@ class MainWindow(QMainWindow):
         path = str(process_view.state_file())
         if watcher is not None and path not in watcher.files() and Path(path).is_file():
             watcher.addPath(path)
+        if not window_folder.ours(self, "the plan's reload"):  # a cancelled switch (#206, I1)
+            return
         # The round is in the process state, so «Готово» follows every write to it (finding 31).
         self._sync_capture_ready()
         state = process_view.load_state()
@@ -5669,7 +5668,7 @@ class MainWindow(QMainWindow):
         across a dozen handlers has a dozen chances to be the one that got missed. Re-asserting the
         pickers costs a file write and removes the whole class of question.
         """
-        tcc_dir, wrote = config.tcc_dir(), True
+        tcc_dir, wrote = window_folder.tcc_dir(self), True  # its folder's, not the switch's (I1)
         for key, value in ((_GENERATOR_KEY, self._ai_main_combo.currentData()),
                            (_CRITIC_KEY, self._ai_critic_combo.currentData()),
                            (_EFFORT_KEY, self._ai_effort_combo.currentData()),
@@ -5702,7 +5701,7 @@ class MainWindow(QMainWindow):
     def _say_saved(self, wrote: bool, failed: str = "") -> None:
         """A Save always answers, on the strip too: «on disk», or what kept it off (#173, N1)."""
         said = i18n.t("savedTccOnly") if wrote else (failed or i18n.t("savedTccFailed")).format(
-            why=project_settings.why_not_saved(config.tcc_dir()))
+            why=project_settings.why_not_saved(window_folder.tcc_dir(self)))
         self._dialog._add_system_message(said)
         self._status_strip.notify(said, level="info" if wrote else "warn")
 

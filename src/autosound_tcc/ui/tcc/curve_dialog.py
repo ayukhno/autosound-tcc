@@ -37,7 +37,7 @@ from autosound_tcc.core import (
 from autosound_tcc.state import process_view
 from autosound_tcc.core.allpass import AllpassError
 from autosound_tcc.core.rew_bridge import RewBridge
-from autosound_tcc.ui.tcc import i18n, qt_shutdown
+from autosound_tcc.ui.tcc import i18n, qt_shutdown, window_folder
 from autosound_tcc.ui.tcc.flow_layout import FlowLayout as _FlowLayout
 from autosound_tcc.ui.tcc.curve_view import (
     CurveView,
@@ -1491,7 +1491,7 @@ class CurveDialog(QDialog):
             # so a new sentence per step, and a report stands until its ✕.
             # A write that lands ends the set-aside line (`delay_bank.aside_said`): the fresh bank
             # it said the next step would start — readings at zero too, which `load` does not count.
-            delay_bank.put_many_or_say(readings, session=self._session())
+            delay_bank.put_many_or_say(readings, window_folder.tcc_dir(self), session=self._session())
         self._sync_channel_delay()
         self._render_bank()
 
@@ -1506,8 +1506,8 @@ class CurveDialog(QDialog):
         """
         series = self._session()
         try:
-            bank = delay_bank.load(session=series, strict=True)
-            apfs = delay_bank.allpasses(session=series, strict=True)
+            bank = delay_bank.load(window_folder.tcc_dir(self), series, strict=True)
+            apfs = delay_bank.allpasses(window_folder.tcc_dir(self), series, strict=True)
             unreadable = ""
         except own_store.StoreUnreadable as exc:
             # Not an empty bank: one that is there and cannot be read, and while it cannot,
@@ -1525,10 +1525,10 @@ class CurveDialog(QDialog):
         # person's next step lands a fresh bank (Fable m1). Asked after the reads above, and kept
         # by the bank: a pick of another field clears the store's own, and a window opened after
         # it read nothing (Fable's re-review, rounds 1 and 2, m1).
-        store = project_settings.path_for(config.tcc_dir())
+        store = project_settings.path_for(window_folder.tcc_dir(self))
         if titles:
-            delay_bank.forget_aside()  # readings: a fresh bank, or the file put back
-        aside = delay_bank.aside_said() if not unreadable and not titles else ""
+            delay_bank.forget_aside(window_folder.tcc_dir(self))  # readings: a fresh bank, or the file put back
+        aside = delay_bank.aside_said(window_folder.tcc_dir(self)) if not unreadable and not titles else ""
         if unreadable:
             shown, head = unreadable, i18n.t("curveBankNotRead")
         elif aside:
@@ -1609,14 +1609,14 @@ class CurveDialog(QDialog):
         picture holds together, not to apply it (user, 2026-08-12: "відправити на аналіз ШІ (не
         для запису)").
         """
-        series = self._session()
-        bank = delay_bank.load(session=series)
+        series, own = self._session(), window_folder.tcc_dir(self)
+        bank = delay_bank.load(own, series)
         text = delay_bank.as_sentence(
             bank, self._processing_rate_hz(), i18n.t, self._current_delay_of,
-            at=delay_bank.arrivals(session=series),
-            unplaced=self._unplaced(delay_bank.seen(session=series)),
-            reference=delay_bank.references(session=series),
-            allpasses=delay_bank.allpasses(session=series),
+            at=delay_bank.arrivals(own, series),
+            unplaced=self._unplaced(delay_bank.seen(own, series)),
+            reference=delay_bank.references(own, series),
+            allpasses=delay_bank.allpasses(own, series),
         )
         if text:
             self.readingSent.emit(text)
@@ -1660,7 +1660,7 @@ class CurveDialog(QDialog):
         # A series that could not be read is not «no series»: with none, the clear takes every
         # series' readings, last week's included (Fable m2, #209). Refused and said instead.
         self._clear_refused = "series" in self._providers_raising
-        if self._clear_refused or not delay_bank.clear_or_say(session=series):
+        if self._clear_refused or not delay_bank.clear_or_say(window_folder.tcc_dir(self), series):
             self._render_bank()
             return
         self._restoring = True
@@ -1712,7 +1712,7 @@ class CurveDialog(QDialog):
 
             from autosound_tcc.core import vendor_loader
 
-            raw = json.loads(config.dsp_profile_path().read_text(encoding="utf-8"))
+            raw = json.loads(config.dsp_profile_path(window_folder.folder(self)).read_text(encoding="utf-8"))
             profile = raw.get("dsp_profile") if isinstance(raw.get("dsp_profile"), dict) else raw
             delay = profile.get("delay")
             if isinstance(delay, dict):
@@ -1950,11 +1950,12 @@ class CurveDialog(QDialog):
         bank: dict = {}
         apfs: dict = {}
         odd: dict = {}
+        own = window_folder.tcc_dir(self)  # the folder this window's own shows (#206, I1)
         try:
             for source in self._unread_series:
-                bank.update(delay_bank.load(session=source, strict=True))
-                apfs.update(delay_bank.allpasses(session=source, strict=True))
-                odd.update(delay_bank.unread_entries(session=source))
+                bank.update(delay_bank.load(own, source, strict=True))
+                apfs.update(delay_bank.allpasses(own, source, strict=True))
+                odd.update(delay_bank.unread_entries(own, source))
         except own_store.StoreUnreadable:
             for index, trace in enumerate(self._view._traces):
                 self._unread.setdefault(

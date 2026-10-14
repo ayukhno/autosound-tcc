@@ -8237,6 +8237,30 @@ def test_a_window_closing_before_the_agents_reread_reloads_nothing(monkeypatch):
     assert loads == [] and checks == []
 
 
+def _after_a_cancelled_switch(monkeypatch, window, old, real_check) -> None:
+    """The group review's I1 (#206): the header's ↻, a preset pick, the plan's reload and the
+    contract check read the NEW folder into the kept window too, and its picks went to the new
+    folder's `.tcc/`. Each reader passes `window_folder`; TCC's own writes go to its folder."""
+    from autosound_tcc.core import config, project_settings
+
+    new, loads, checks = old / "new-car", [], []
+    monkeypatch.setattr(MainWindow, "_load_project_inner", lambda self: loads.append(1))
+    monkeypatch.setattr(main_window._ContractWorker, "start", lambda self: checks.append(1))
+    monkeypatch.setattr(main_window.contract_check, "is_available", lambda: True)
+    monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")  # the check runs as in the app
+    window._contract_worker = None
+    MainWindow._load_project(window)  # what ↻ and every re-read reach
+    window._preset_combo.addItem("other", "other-preset")
+    window._on_preset_index(window._preset_combo.count() - 1)
+    window._refresh_process()
+    real_check(window)
+    assert loads == [] and checks == [], "the new folder is not read into this window"
+
+    assert window._set_project_setting("effort", "high")
+    assert project_settings.load(config.tcc_dir(old)).get("effort") == "high"
+    assert "effort" not in project_settings.load(config.tcc_dir(new)), "not into the new folder"
+
+
 @pytest.mark.parametrize("switched", [False, True])
 def test_a_cancelled_close_still_rereads_after_an_agent_write(monkeypatch, tmp_path, switched):
     """Review of #152: `closeEvent` sets `_closing` before it asks whether to save, and Cancel kept
@@ -8262,6 +8286,7 @@ def test_a_cancelled_close_still_rereads_after_an_agent_write(monkeypatch, tmp_p
     _KEEP_WINDOWS.append(window)
     window._agent_worker = SimpleNamespace(shutdown=lambda: None)
     loads, checks, gates, said = [], [], [], []
+    real_check = MainWindow._start_contract_check
     monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: loads.append(1))
     monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: checks.append(1))
     monkeypatch.setattr(MainWindow, "_check_intake_gate", lambda self: gates.append(1))
@@ -8286,7 +8311,9 @@ def test_a_cancelled_close_still_rereads_after_an_agent_write(monkeypatch, tmp_p
         if switched:
             _pump_until(lambda: False, seconds=(main_window._AGENT_REFRESH_MS + 600) / 1000)
             assert loads == checks == gates == [], "the new folder is not read into this window"
-            assert said.count(i18n.t("projectReopen")) == 1, said
+            assert said.count(i18n.t("projectStillShows").format(
+                old=tmp_path, new=tmp_path / "new-car")) == 1, said
+            _after_a_cancelled_switch(monkeypatch, window, tmp_path, real_check)
             return
         assert _pump_until(lambda: len(loads) == 2, seconds=3), "Cancel re-reads what landed"
         assert checks == [1] and gates == [1], "each replay ran: the agent's and the watcher's"
