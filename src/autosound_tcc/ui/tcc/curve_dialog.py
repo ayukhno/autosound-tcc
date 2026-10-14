@@ -575,6 +575,10 @@ class CurveDialog(QDialog):
         #: the time one reads (N1, R1). One list serves every driver in `_unread`: a new
         #: selection empties both, so each came back under each of these.
         self._unread_series: list[Optional[str]] = []
+        #: The last step's write did not land (a read-only `.tcc/`, a full disk): what is drawn is
+        #: the person's and nowhere else, and a series switch does not put the bank over it
+        #: (#197's review, M1). Said on the window's line already (`curveBankNotKept`).
+        self._unsaved = False
         #: The drivers in `_unread` the person has set since — touched, whatever the value is now:
         #: one moved and put back at the value drawn is still theirs (Fable m3, #209).
         self._touched_unread: set[str] = set()
@@ -1398,10 +1402,13 @@ class CurveDialog(QDialog):
         series holds nothing for keeps what is drawn, and the next step carries it into this
         series, as a new round starts from the last.
 
-        Not while drivers wait for a read of the bank (`_unread`): the step's retry puts them back
-        from every series their curves came back under (the re-review of G10 fix A, N1 and R1).
+        Not while drivers wait for a read of the bank (`_unread`): the step's retry puts them back,
+        this series last (the re-review of G10 fix A, N1 and R1; #197's review, I2). Not over a
+        value whose write did not land either (`_unsaved`): it is on screen and nowhere else, and
+        putting the bank over it lost it (#197's review, M1) — the next step that lands banks it
+        under the series shown then.
         """
-        if self._view._traces and not self._unread:
+        if self._view._traces and not self._unread and not self._unsaved:
             self._restore_bank()
             self._sync_channel_delay()
         self._render_bank()
@@ -1500,7 +1507,8 @@ class CurveDialog(QDialog):
             # so a new sentence per step, and a report stands until its ✕.
             # A write that lands ends the set-aside line (`delay_bank.aside_said`): the fresh bank
             # it said the next step would start — readings at zero too, which `load` does not count.
-            delay_bank.put_many_or_say(readings, window_folder.tcc_dir(self), session=self._session())
+            self._unsaved = not delay_bank.put_many_or_say(
+                readings, window_folder.tcc_dir(self), session=self._session())
         self._sync_channel_delay()
         self._render_bank()
 
@@ -1685,7 +1693,7 @@ class CurveDialog(QDialog):
             self._restoring = False
         # Nothing banked for this series now: what is drawn is the bank.
         self._unread, self._apf_unshown, self._kept_raw = {}, {}, {}
-        self._touched_unread = set()
+        self._touched_unread, self._unsaved = set(), False
         self._render_bank()
 
     def _processing_rate_hz(self):
@@ -1941,31 +1949,36 @@ class CurveDialog(QDialog):
         back — on every driver but where the person has moved its delay or filter since, which
         is theirs and stays — and the set is banked again from there.
 
-        Put back from every series their curves came back under (`_unread_series`), never from
-        the one the panel has moved to since: that one need hold none of their entries, and the
-        step banked the zeros drawn for them into it over the first series' readings (the
-        re-review of G10 fix A, N1). Every one, not the first: curves read again under a second
-        series while the store still failed were put back from the first alone, and the step
-        banked the zero drawn for a driver the second holds over its reading (round 2, R1). `came_back` — the curves on screen came back just now, under the series
-        shown now, whose bank is theirs too; the step's retry is not a read of curves, so it puts
-        back only what the failed reads missed.
+        Put back from every series their curves came back under while unread (`_unread_series`)
+        — a series that holds none of their entries would leave the zeros drawn for them, and the
+        step banked those over the first series' readings (the re-review of G10 fix A, N1); every
+        one, not the first (round 2, R1) — and from the series shown now, LAST, so that its own
+        entries win: the step banks under it. Without it, a switch while unread put back the
+        first series' values alone, and the step banked them over the new series' own readings of
+        the same titles, which since #197 it holds (#197's review, I2). Each series' entries
+        whole: a zero and «no filter» are put back too, or a later series' reference was drawn
+        at an earlier one's delay.
         """
         series = self._session()
         if not self._unread:
             self._unread_series = []
-        if came_back and series not in self._unread_series:
-            self._unread_series.append(series)
-        bank: dict = {}
-        apfs: dict = {}
+        if series in self._unread_series:
+            self._unread_series.remove(series)
+        self._unread_series.append(series)
+        put_back: dict = {}  # {title: (delay, Allpass or None)}, a later series over an earlier
         odd: dict = {}
-        held: set = set()  # every driver with an entry, at zero and with no filter too (#197)
         own = window_folder.tcc_dir(self)  # the folder this window's own shows (#206, I1)
         try:
             for source in self._unread_series:
-                bank.update(delay_bank.load(own, source, strict=True))
-                apfs.update(delay_bank.allpasses(own, source, strict=True))
-                held.update(delay_bank.seen(own, source, strict=True))
-                odd.update(delay_bank.unread_entries(own, source))
+                delays = delay_bank.load(own, source, strict=True)
+                filters = delay_bank.allpasses(own, source, strict=True)
+                for title in delay_bank.seen(own, source, strict=True):
+                    put_back[title] = (delays.get(title, 0.0), filters.get(title))
+                    odd.pop(title, None)
+                for title, (what, why) in delay_bank.unread_entries(own, source).items():
+                    odd[title] = (what, why)
+                    if what == "ms":
+                        put_back.pop(title, None)  # this series' own, unread: not another's
         except own_store.StoreUnreadable:
             for index, trace in enumerate(self._view._traces):
                 self._unread.setdefault(
@@ -1984,11 +1997,12 @@ class CurveDialog(QDialog):
                 # A zero and «no filter» are put back too: after a series switch what is drawn is
                 # the other series', and a reference left at its value was banked over this one's
                 # zero by the next step (#197). After `set_traces` they are what is drawn already.
-                if trace.name in held and (drawn is None or self._view.delay_ms(index) == drawn[0]):
+                back = put_back.get(trace.name)
+                if back is not None and (drawn is None or self._view.delay_ms(index) == drawn[0]):
                     self._view.set_delay_target(index)
-                    self._view.set_delay(bank.get(trace.name, 0.0))
-                apf = apfs.get(trace.name)
-                if (trace.name in held and (apf is not None or self._view.allpass(index) is not None)
+                    self._view.set_delay(back[0])
+                apf = back[1] if back is not None else None
+                if (back is not None and (apf is not None or self._view.allpass(index) is not None)
                         and (drawn is None or self._view.allpass(index) == drawn[1])):
                     # The filter comes back with the driver for the same reason the delay does —
                     # and it is the one of the two that is lost on the first × otherwise (a

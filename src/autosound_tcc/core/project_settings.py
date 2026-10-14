@@ -110,18 +110,28 @@ def update_value(tcc_dir: Path, key: str, change: Callable[[Any], Any]) -> Any:
     every banked delay but the ones on screen (G10 C2). Here a store that cannot be read raises
     before `change` is called, and an exception out of `change` stops the write before it starts.
     """
+    return update_values(tcc_dir, (key,), lambda old: {key: change(old[key])})[key]
+
+
+def update_values(tcc_dir: Path, keys: tuple, change: Callable[[dict], dict]) -> dict:
+    """`update_value` for fields that change together: `change({key: old})` is given what each
+    of `keys` holds now (None when absent) and returns `{key: new}`, None removing a field. One
+    strict read and one write for all of them, so the store never holds one changed without the
+    other — the delay bank's per-title field and its per-series one (#197)."""
     target = path_for(tcc_dir)
     data = own_store.read_json(target)
-    value = change(data.get(key))
-    if value is None:
-        data.pop(key, None)
-    else:
-        data[key] = value
+    values = change({key: data.get(key) for key in keys})
+    for key in keys:
+        if values.get(key) is None:
+            data.pop(key, None)
+        else:
+            data[key] = values[key]
     data["schema_version"] = SCHEMA_VERSION
     own_store.write_json(target, data)
     with _held_lock:
-        _held.pop(_slot(tcc_dir, key), None)  # on the disk now: what was held is no longer news
-    return value
+        for key in keys:
+            _held.pop(_slot(tcc_dir, key), None)  # on the disk now: what was held is no longer news
+    return values
 
 
 def set_value_or_say(tcc_dir: Path, key: str, value: Any = None) -> bool:

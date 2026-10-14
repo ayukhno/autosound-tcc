@@ -1716,7 +1716,66 @@ def test_the_set_sent_for_analysis_is_the_series_shown():
     dialog._bank_ask_btn.click()
 
     assert len(sent) == 1 and "+0.700" in sent[0] and "+0.500" not in sent[0], sent
-    assert wr in sent[0], "B's reference is named as one"
+    assert i18n.t("curveBankAtZero").format(names=wr) in sent[0], "B's reference, named as one"
+    assert i18n.t("curveBankUnplaced").split("{")[0] not in sent[0], "and not as unplaced"
+    assert f"{wr}: +" not in sent[0], "nor as a delay"
+
+
+def test_a_switch_while_the_bank_is_unread_banks_nothing_over_the_new_series_own(app_log_told):
+    """#197's review, I2 (probe P4): curves came back under S1 while the store could not be read,
+    it reads again, and the panel moves to S2, which holds the same titles. The step's retry read
+    S1 alone and banked its values over S2's own. The series shown is read last, its own win, and
+    nothing is banked under it that it did not read."""
+    from autosound_tcc.core import delay_bank
+
+    names = _SIDE[:2]
+    delay_bank.put_many([delay_bank.Reading(names[0], 0.198), delay_bank.Reading(names[1], 0.300)],
+                        session="S1")
+    delay_bank.put_many([delay_bank.Reading(names[0], 0.7), delay_bank.Reading(names[1], 0.0)],
+                        session="S2")
+    series = ["S1"]
+    dialog = _series_dialog(names, series)
+    series[0] = "S2"
+    dialog.session_switched()
+
+    dialog._view.set_delay_target(0)
+    dialog._view.set_delay(0.05)
+
+    assert delay_bank.load(session="S2") == {names[0]: 0.05}, "S2's own w-R zero, not S1's 0.3"
+    assert delay_bank.references(session="S2") == [names[1]]
+    assert delay_bank.load(session="S1") == {names[0]: 0.198, names[1]: 0.300}, "S1 untouched"
+    assert dialog._view.delays()[:2] == pytest.approx([0.05, 0.0])
+
+
+def test_a_switch_does_not_put_the_bank_over_a_value_whose_write_did_not_land(
+        monkeypatch, app_log_told):
+    """#197's review, M1: a store that reads and refuses writes (a read-only `.tcc/`, a full
+    disk). The person's step is on screen and nowhere else; a switch away and back put the stored
+    value over it. It stays, and the next step that lands banks it."""
+    from autosound_tcc.core import delay_bank, own_store
+
+    dialog, series, wl, wr = _two_series_window()
+    real_write, full = own_store.write_json, [True]
+
+    def write_json(path, data):
+        if full:
+            raise OSError(28, "No space left on device")
+        real_write(path, data)
+
+    monkeypatch.setattr(own_store, "write_json", write_json)
+    dialog._view.set_delay_target(0)
+    dialog._view.set_delay(0.6)  # not kept
+    assert delay_bank.load(session="A") == {wl: 0.5, wr: 0.2}
+
+    series[0] = "B"
+    dialog.session_switched()
+    series[0] = "A"
+    dialog.session_switched()
+
+    assert dialog._view.delays()[:2] == pytest.approx([0.6, 0.2]), "the person's value stays"
+    full.clear()
+    dialog._view.set_delay(0.61)
+    assert delay_bank.load(session="A") == {wl: 0.61, wr: 0.2}, "and the step that lands banks it"
 
 
 def test_a_driver_with_no_reading_is_named_not_assumed_to_be_at_zero():

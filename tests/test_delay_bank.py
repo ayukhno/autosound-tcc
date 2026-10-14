@@ -75,17 +75,21 @@ def test_put_many_stores_exactly_what_one_put_per_reading_stores(tmp_path):
     bank = stored[delay_bank.KEY]
     assert bank["w-L_01 (sw)"] == {"ms": 0.3, "at": 4.52, "set": "cap_002"}, "filter off, arrival kept"
     assert bank["tw-L_01 (sw)"]["apf"] == {"type": "APF1", "f": 80.0}, "kept within the set"
-    assert bank["m-L_01 (sw)"] == [0.4, {"ms": 0.5, "at": 4.78, "set": "cap_002"}], \
-        "cap_002's own, the one with no series kept for the others (#197)"
-    assert bank["w-R_01 (sw)"] == [{"ms": 0.1, "at": 4.7, "set": "cap_001"},
-                                   {"ms": 0.0, "at": None, "set": "cap_002"}], \
-        "cap_002's own beside cap_001's, not moved (#197)"
+    assert bank["m-L_01 (sw)"] == {"ms": 0.5, "at": 4.78, "set": "cap_002"}, "v1.1.3's: latest"
+    assert bank["w-R_01 (sw)"] == {"ms": 0.0, "at": None, "set": "cap_002"}
     assert bank["sw_01 (sw)"] == {"ms": 1.1, "at": 9.6, "set": "cap_000"}, "another series untouched"
+    by = stored[delay_bank.BY_SERIES]
+    assert by[""] == {"m-L_01 (sw)": 0.4}, "the one with no series kept for the others (#197)"
+    assert by["cap_001"] == {"w-R_01 (sw)": {"ms": 0.1, "at": 4.7, "set": "cap_001"}}, \
+        "cap_001's own, not moved (#197)"
+    assert by["cap_002"] == {title: bank[title] for title in (
+        "w-L_01 (sw)", "m-L_01 (sw)", "w-R_01 (sw)", "tw-L_01 (sw)")}
+    assert set(by) == {"", "cap_001", "cap_002"}
 
 
 def test_put_many_reads_the_store_once_and_writes_it_once(tmp_path, monkeypatch):
     """Counted where the store is read and written, not by the helper's name: since G10 C2 the one
-    read is `update_value`'s own, strict, and `load` is not on the write path at all."""
+    read is `update_values`'s own, strict, and `load` is not on the write path at all."""
     calls = {"read": 0, "write": 0}
     real_read, real_write = own_store.read_json, own_store.write_json
 
@@ -154,8 +158,8 @@ def test_a_store_that_cannot_be_read_refuses_put_many_as_it_refuses_put_and_says
     attempt at the write, not seven, and the sentence said once."""
     intact = unreadable(tmp_path)
     writes = []
-    real_update = project_settings.update_value
-    monkeypatch.setattr(project_settings, "update_value",
+    real_update = project_settings.update_values
+    monkeypatch.setattr(project_settings, "update_values",
                         lambda *args, **kwargs: writes.append(args) or real_update(*args, **kwargs))
 
     with pytest.raises(OSError) as by_put:
@@ -321,8 +325,12 @@ _UNREAD = {
 }
 
 
+def _fields(folder) -> dict:
+    return json.loads(project_settings.path_for(folder).read_text(encoding="utf-8"))
+
+
 def _stored(folder) -> dict:
-    return json.loads(project_settings.path_for(folder).read_text(encoding="utf-8"))[delay_bank.KEY]
+    return _fields(folder)[delay_bank.KEY]
 
 
 def test_a_step_carries_what_the_bank_cannot_read_through_unchanged(tmp_path):
@@ -446,11 +454,13 @@ def test_a_v113_bank_loses_no_reading_to_a_step_under_the_next_series(tmp_path):
     assert delay_bank.references(tmp_path, "cap_003") == ["w-L_01 (sw)"]
     stored = json.loads(path.read_text(encoding="utf-8"))
     assert stored["generator"] == "sdk:claude-opus-5", "the rest of the file is kept"
-    bank = stored[delay_bank.KEY]
-    assert bank["w-L_01 (sw)"][0] == before[delay_bank.KEY]["w-L_01 (sw)"], "as it was read"
-    assert bank["w-L_01 (sw)"][1] == {"ms": 0.0, "at": None, "set": "cap_003"}
-    assert bank["m-L_01 (sw)"] == before[delay_bank.KEY]["m-L_01 (sw)"], "untouched: one entry"
-    assert bank["c_01 (sw)"][0] == before[delay_bank.KEY]["c_01 (sw)"], "no series: kept"
+    was, bank, by = before[delay_bank.KEY], stored[delay_bank.KEY], stored[delay_bank.BY_SERIES]
+    assert bank["w-L_01 (sw)"] == {"ms": 0.0, "at": None, "set": "cap_003"}, "v1.1.3's: latest"
+    assert bank["m-L_01 (sw)"] == was["m-L_01 (sw)"], "untouched"
+    assert by["cap_001"] == {title: was[title] for title in ("w-L_01 (sw)", "w-R_01 (sw)")}, \
+        "what the step took KEY's place from, as it was read"
+    assert by["cap_002"] == {"sub_01 (sw)": was["sub_01 (sw)"]}
+    assert by[""] == {"c_01 (sw)": was["c_01 (sw)"]}, "no series: kept aside"
 
 
 def test_an_entry_with_no_series_stays_for_the_others_when_one_series_touches_it(tmp_path):
@@ -488,7 +498,10 @@ def test_clear_takes_the_shown_series_and_the_entries_with_no_series_and_nothing
 
     assert delay_bank.load(tmp_path, "A") == {"w-L_01 (sw)": 0.5}
     assert delay_bank.load(tmp_path, "B") == {}
-    assert _stored(tmp_path) == {"w-L_01 (sw)": {"ms": 0.5, "at": None, "set": "A"}}
+    assert delay_bank.load(tmp_path, "C") == {}, "c_01, shown under B, went with it"
+    a = {"w-L_01 (sw)": {"ms": 0.5, "at": None, "set": "A"}}
+    assert _stored(tmp_path) == a, "A's back in v1.1.3's field: a roll back reads it under A"
+    assert _fields(tmp_path)[delay_bank.BY_SERIES] == {"A": a}
 
     delay_bank.clear(tmp_path)
 
@@ -500,15 +513,19 @@ def test_what_one_series_cannot_read_is_named_for_it_alone_and_carried_through_t
     """#208 per series: a title two series hold, A's entry a hand edit. Named for A, not for B; a
     step under B writes B's entry and carries A's exactly as it was read."""
     odd = {"ms": "0,5", "at": None, "set": "A", "note": "kept"}
-    project_settings.set_value(tmp_path, delay_bank.KEY, {
-        "w-L_01 (sw)": [odd, {"ms": 0.7, "at": None, "set": "B"}]})
+    b = {"ms": 0.7, "at": None, "set": "B"}
+    project_settings.set_value(tmp_path, delay_bank.KEY, {"w-L_01 (sw)": b})
+    project_settings.set_value(tmp_path, delay_bank.BY_SERIES, {
+        "A": {"w-L_01 (sw)": odd}, "B": {"w-L_01 (sw)": b}})
 
     assert set(delay_bank.unread_entries(tmp_path, "A")) == {"w-L_01 (sw)"}
     assert delay_bank.unread_entries(tmp_path, "B") == {}
 
     delay_bank.put("w-L_01 (sw)", 0.8, tmp_path, session="B")
 
-    assert _stored(tmp_path)["w-L_01 (sw)"] == [odd, {"ms": 0.8, "at": None, "set": "B"}]
+    by = _fields(tmp_path)[delay_bank.BY_SERIES]
+    assert by["A"] == {"w-L_01 (sw)": odd}, "A's as it was read"
+    assert by["B"] == {"w-L_01 (sw)": {"ms": 0.8, "at": None, "set": "B"}}
 
 
 @pytest.mark.parametrize("field", [["w-L_01 (sw)", 0.198], "w-L_01 (sw)=0.198", 3],
@@ -535,3 +552,124 @@ def test_a_bank_of_a_shape_this_tcc_does_not_know_is_refused_never_written_over(
     assert path.read_bytes() == before, "never written over"
     told = [line for line in app_log_told if "delay bank" in line]
     assert len(told) == 1 and "not a shape this TCC reads" in told[0], app_log_told
+
+
+# ---- #197's review: what a Clear, a step with no series and a roll back to v1.1.3 must not lose --
+
+
+def test_clear_under_a_series_keeps_a_reading_with_no_series_that_series_no_longer_shows(tmp_path):
+    """#197's review, I1 (probe P1): touched under A, the entry with no series stays for B; a
+    Clear under A took it from B as well, though A showed its own. Only what A shows goes."""
+    project_settings.set_value(tmp_path, delay_bank.KEY, {
+        "w-L_01 (sw)": {"ms": 0.198, "at": None, "set": None}})
+    delay_bank.put("w-L_01 (sw)", 0.3, tmp_path, session="A")
+
+    delay_bank.clear(tmp_path, session="A")
+
+    assert delay_bank.load(tmp_path, "A") == {"w-L_01 (sw)": 0.198}, "A's own gone: shown again"
+    assert delay_bank.load(tmp_path, "B") == {"w-L_01 (sw)": 0.198}, "B keeps it"
+
+
+def test_a_step_with_no_series_writes_the_entry_with_no_series_never_a_series_own(tmp_path):
+    """#197's review, M2 (probe P5): with no series named — a series provider missing or raising —
+    a step wrote into the last series' own entry. Which series was meant is not known: it writes
+    the entry with no series, and every series' own stays."""
+    delay_bank.put("w-L_01 (sw)", 0.5, tmp_path, session="A")
+    delay_bank.put("w-L_01 (sw)", 0.7, tmp_path, session="B")
+
+    delay_bank.put("w-L_01 (sw)", 0.9, tmp_path)
+
+    assert delay_bank.load(tmp_path, "A") == {"w-L_01 (sw)": 0.5}
+    assert delay_bank.load(tmp_path, "B") == {"w-L_01 (sw)": 0.7}
+    assert delay_bank.load(tmp_path, "C") == {"w-L_01 (sw)": 0.9}, "no series: under every other"
+    assert delay_bank.load(tmp_path) == {"w-L_01 (sw)": 0.9}
+    assert _stored(tmp_path) == {"w-L_01 (sw)": {"ms": 0.9, "at": None, "set": None}}
+
+
+def _v113_step(folder, readings, series):
+    """A step of TCC v1.1.3 (`git show v1.1.3:src/autosound_tcc/core/delay_bank.py`, `put_many`):
+    `KEY` alone — each title's one entry replaced, its arrival and filter kept, the series set —
+    and every other field of the file left as it was."""
+    def change(raw):
+        bank = dict(raw or {})
+        for title, ms in readings:
+            was = bank.get(title) if isinstance(bank.get(title), dict) else {}
+            bank[title] = {"ms": ms, "at": was.get("at"), "set": series,
+                           **({"apf": was["apf"]} if was.get("apf") else {})}
+        return bank
+    project_settings.update_value(folder, delay_bank.KEY, change)
+
+
+def _v113_clear(folder, series):
+    """v1.1.3's Clear of one series: `KEY` keeps the entries of another series, and nothing else."""
+    project_settings.update_value(folder, delay_bank.KEY, lambda raw: {
+        title: value for title, value in (raw or {}).items()
+        if isinstance(value, dict) and value.get("set") is not None
+        and str(value["set"]) != series} or None)
+
+
+def _three_series(folder):
+    delay_bank.put_many([delay_bank.Reading("w-L_01 (sw)", 0.5),
+                         delay_bank.Reading("w-R_01 (sw)", 0.2)], folder, session="A")
+    delay_bank.put("w-L_01 (sw)", 0.7, folder, session="B")
+
+
+def test_v113_reads_the_latest_reading_of_each_title_as_it_always_did(tmp_path):
+    """#197's review, I3: `KEY` stays v1.1.3's own field, kept current on every step — a TCC
+    rolled back reads each title's latest reading under the series it was banked in."""
+    _three_series(tmp_path)
+
+    assert _stored(tmp_path) == {"w-L_01 (sw)": {"ms": 0.7, "at": None, "set": "B"},
+                                 "w-R_01 (sw)": {"ms": 0.2, "at": None, "set": "A"}}
+
+
+def test_a_v113_step_after_a_roll_back_loses_no_series_reading_on_the_way_back(tmp_path):
+    """#197's review, I3 (probe P2): v1.1.3 writes `KEY` alone. Its step under another series
+    replaces each title's entry there; back on this TCC every series still reads its own, and the
+    series v1.1.3 banked under reads what it banked."""
+    _three_series(tmp_path)
+
+    _v113_step(tmp_path, [("w-L_01 (sw)", 0.0), ("w-R_01 (sw)", 0.3)], "C")
+
+    assert delay_bank.load(tmp_path, "A") == {"w-L_01 (sw)": 0.5, "w-R_01 (sw)": 0.2}
+    assert delay_bank.load(tmp_path, "B") == {"w-L_01 (sw)": 0.7}
+    assert delay_bank.load(tmp_path, "C") == {"w-R_01 (sw)": 0.3}
+    assert delay_bank.references(tmp_path, "C") == ["w-L_01 (sw)"]
+
+    delay_bank.put("w-L_01 (sw)", 0.6, tmp_path, session="A")  # this TCC, the next step
+
+    assert delay_bank.load(tmp_path, "C") == {"w-R_01 (sw)": 0.3}, "v1.1.3's kept in C's own"
+    assert delay_bank.references(tmp_path, "C") == ["w-L_01 (sw)"]
+    assert delay_bank.load(tmp_path, "A") == {"w-L_01 (sw)": 0.6, "w-R_01 (sw)": 0.2}
+    assert delay_bank.load(tmp_path, "B") == {"w-L_01 (sw)": 0.7}
+
+
+def test_a_v113_step_under_a_series_is_that_series_latest(tmp_path):
+    """The rule for a series whose own entry is older than `KEY`'s: `KEY`'s, banked under that
+    series, wins — this TCC writes both on every step, so a `KEY` entry of that series that
+    differs from its own was written since, by v1.1.3. The own one is not dropped: it is the
+    older reading of the same series, and the next step of this TCC writes over both."""
+    _three_series(tmp_path)
+
+    _v113_step(tmp_path, [("w-R_01 (sw)", 0.25)], "A")
+
+    assert delay_bank.load(tmp_path, "A") == {"w-L_01 (sw)": 0.5, "w-R_01 (sw)": 0.25}
+    assert delay_bank.load(tmp_path, "B") == {"w-L_01 (sw)": 0.7}
+
+
+def test_a_v113_clear_after_a_roll_back_touches_v113_s_field_alone(tmp_path):
+    """v1.1.3's Clear keeps `KEY`'s entries of other series and drops the rest; the per-series
+    field is not its own. So a Clear made there does not reach a series' own readings: on the
+    way back they are there again — kept rather than lost, and a Clear here takes them."""
+    _three_series(tmp_path)
+
+    _v113_clear(tmp_path, "A")
+
+    assert _stored(tmp_path) == {"w-L_01 (sw)": {"ms": 0.7, "at": None, "set": "B"}}
+    assert delay_bank.load(tmp_path, "B") == {"w-L_01 (sw)": 0.7}
+    assert delay_bank.load(tmp_path, "A") == {"w-L_01 (sw)": 0.5, "w-R_01 (sw)": 0.2}
+
+    delay_bank.clear(tmp_path, session="A")
+
+    assert delay_bank.seen(tmp_path, "A") == set()
+    assert delay_bank.load(tmp_path, "B") == {"w-L_01 (sw)": 0.7}

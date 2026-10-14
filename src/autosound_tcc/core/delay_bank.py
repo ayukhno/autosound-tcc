@@ -25,23 +25,32 @@ that series' own curves; it has to bring that series' own corrections with them 
 series as a field of it: a step after a series switch banks every driver on screen, so it MOVED
 each one's entry into the new series, and back on the old one those drivers read nothing — the
 button at «(0)» the moment the session opened the next round, and the next step banking what was
-drawn over the reading. In the store a title holds one entry, exactly as every earlier file holds
-it, or a list of entries, one per series, from the moment a second series banks it. So a file of
-the earlier shape IS this shape: nothing is migrated, nothing can be lost on the way, and the
-first write that needs a list writes one.
+drawn over the reading.
 
-An entry with no series (written before the scope existed, or by a window that had no series to
-give) is shown under every series that holds no entry of its own for that title, rather than
-disappearing from all of them. Touched under a series it is NOT moved: that series gets its own
-entry, starting from it, and the one with no series stays for every other. Moving it — what this
-said until #197, «it picks up a series the first time it is touched» — took the reading off every
-series it was shown under, and nothing in the entry says which series it was read in. Clear of a
-series takes it with that series' own, as it always has: it is shown under the series cleared.
+Two fields now, so that a TCC rolled back to v1.1.3 loses nothing. `KEY` stays exactly v1.1.3's
+field — one entry per title, the series it was last banked under in it — and every step keeps it
+current, so v1.1.3 reads the latest reading of each title as it always did. Each series' own
+entries live beside it in `BY_SERIES`, a field v1.1.3 has never heard of and carries through its
+writes untouched. Under a series the entry shown is `KEY`'s when it was banked under that series
+— the series' latest: the same as its own, or written since by v1.1.3, which writes `KEY` alone —
+else the series' own, else an entry with no series. A step that takes `KEY`'s place from another
+series' entry first puts that entry in the other series' own, so a reading v1.1.3 banked is kept
+on the way back. A file of v1.1.3's shape is `KEY` alone: it reads as it is, and the first step
+writes `BY_SERIES`. (The list-per-title shape of the first #197 commit was never released and is
+not read: a list there is an entry this TCC cannot read, carried as such.)
 
-A field that is not a map of titles is not a shape this TCC knows — a newer TCC's, or a hand edit.
-It is refused, never written over: a strict read raises `BankShapeUnknown`, and so do a step and a
-Clear, before they write anything. Inside the map, an entry this TCC cannot read is carried
-through every write that does not touch it (G10 M2, #208).
+An entry with no series (written before the scope existed, or with no series to give) is shown
+under every series that holds no entry of its own for that title, rather than disappearing from
+all of them. Touched under a series it is NOT moved: that series gets its own entry, starting from
+it, and the one with no series is kept aside (`BY_SERIES[""]`) for every other — moving it, «it
+picks up a series the first time it is touched» until #197, took the reading off every series it
+was shown under, and nothing in the entry says which series it was read in. Clear of a series
+takes it only where it is what that series shows.
+
+A field that is not the shape this TCC writes — a newer TCC's, or a hand edit — is refused, never
+written over: a strict read raises `BankShapeUnknown`, and so do a step and a Clear, before they
+write anything. Inside the fields, an entry this TCC cannot read is carried through every write
+that does not touch it (G10 M2, #208).
 
 **Zero is a reading too, and it is ambiguous.** A driver plotted here and left at zero may be the
 reference everything else was measured from — or a driver nobody has got to yet, since the sub,
@@ -71,7 +80,16 @@ from typing import Any, Iterable, NamedTuple, Optional
 from autosound_tcc.core import config, own_store, project_settings
 from autosound_tcc.core.allpass import Allpass
 
+#: The per-title field, exactly as v1.1.3 keeps it: one entry per title, the series it was last
+#: banked under a field of it. Kept up to date on every step, so a TCC rolled back reads the latest
+#: reading of each title as it always did, and its writes, which touch this field alone, lose
+#: nothing of what is below (#197).
 KEY = "curve_delays"
+#: The per-series field (#197): `{series: {title: entry}}`, and under `""` — never a series, the
+#: window's series is `None` or a non-empty id — an entry with no series a series' step took
+#: `KEY`'s place from. A field v1.1.3 has never heard of: it carries it through every write.
+BY_SERIES = "curve_delays_by_series"
+_NONE = object()
 
 #: `put(allpass=_KEEP)`: leave whatever all-pass the entry already carries. The delay is banked on
 #: every change of every trace, and a call that only meant to move a delay must not wipe a filter.
@@ -121,28 +139,47 @@ class Reading(NamedTuple):
 
 
 class BankShapeUnknown(own_store.StoreUnreadable):
-    """The bank's field is there and is not a map of titles: a shape this TCC does not know — a
-    newer TCC's, or a hand edit. Refused as a store that cannot be read is (it is one, to the
-    bank): read strictly, written over never. Its text is the sentence said, once for this state
-    of the file."""
+    """A bank field is there and is not the shape this TCC writes: `KEY` not a map of titles,
+    `BY_SERIES` not a map of maps — a newer TCC's, or a hand edit. Refused as a store that cannot
+    be read is (it is one, to the bank): read strictly, written over never. Its text is the
+    sentence said, once for this state of the file."""
 
 
-def _known(raw: Any, tcc_dir: Path) -> Any:
-    """The bank's field as read, or `BankShapeUnknown` for one that is there and is not a map —
+class _Bank(NamedTuple):
+    """The two fields as stored: `latest` is `KEY` (`{title: entry}`, v1.1.3's own), `by` is
+    `BY_SERIES` (`{series: {title: entry}}`, `""` for the entries with no series)."""
+
+    latest: dict
+    by: dict
+
+
+def _known(fields: dict, tcc_dir: Path) -> _Bank:
+    """The bank as read, or `BankShapeUnknown` for a field of a shape this TCC does not write —
     for a reader that would put "nothing banked" on screen, and for every write."""
-    if raw is None or isinstance(raw, dict):
-        return raw
-    path = project_settings.path_for(tcc_dir)
-    message = (f"{path}: the delay bank there is a {type(raw).__name__}, not a shape this TCC "
-               "reads (a newer TCC's?); TCC will not write over it")
-    own_store.say_once(path, message, "bank")
-    raise BankShapeUnknown(message)
+    latest, by = fields.get(KEY), fields.get(BY_SERIES)
+    wrong = ""
+    if latest is not None and not isinstance(latest, dict):
+        wrong = f"{KEY} is a {type(latest).__name__}"
+    elif by is not None and not (isinstance(by, dict)
+                                 and all(isinstance(v, dict) for v in by.values())):
+        wrong = f"{BY_SERIES} is not a map of series"
+    if wrong:
+        path = project_settings.path_for(tcc_dir)
+        message = (f"{path}: the delay bank there is not a shape this TCC reads ({wrong}; a newer "
+                   "TCC's?); TCC will not write over it")
+        own_store.say_once(path, message, "bank")
+        raise BankShapeUnknown(message)
+    return _Bank(dict(latest or {}), {str(s): dict(rows) for s, rows in (by or {}).items()})
 
 
-def _rows(value: Any) -> list:
-    """A title's entries as stored: a list of them, one per series, or the one entry every file
-    before #197 held."""
-    return list(value) if isinstance(value, list) else [value]
+def _forgiving(fields: dict) -> _Bank:
+    """`_known` for a plain read: a field of a shape this TCC does not write is "nothing"."""
+    latest, by = fields.get(KEY), fields.get(BY_SERIES)
+    if not isinstance(latest, dict):
+        latest = {}
+    if not isinstance(by, dict) or not all(isinstance(v, dict) for v in by.values()):
+        by = {}
+    return _Bank(dict(latest), {str(s): dict(rows) for s, rows in by.items()})
 
 
 def _series_of(row: Any) -> Optional[str]:
@@ -153,20 +190,41 @@ def _series_of(row: Any) -> Optional[str]:
     return None
 
 
-def _shown(rows: list, session: Optional[str]) -> Optional[int]:
-    """Which of a title's entries is the one under `session`, or None when none is.
+def _shown(bank: _Bank, title: str, session: Optional[str]) -> Optional[tuple]:
+    """Where the entry shown for `title` under `session` is — `(KEY,)` or `(BY_SERIES, series)` —
+    or None when none is.
 
-    The series' own, else the one with no series. With no series named — a window with no series
-    provider, a caller outside one — the one with no series, else the last banked; the same one
-    for a read and a write, so a step with no series moves what it shows."""
+    Under a series: `KEY`'s entry when it was banked under that series (it is that series' latest:
+    equal to its own, or written since by a TCC that keeps `KEY` alone — v1.1.3 after a roll
+    back); else the series' own; else `KEY`'s entry with no series; else the one with no series
+    a series' step took `KEY`'s place from. With no series named — a window with no series
+    provider, a caller outside one — `KEY`'s entry, as v1.1.3 reads it, else the one with no
+    series kept aside.
+    """
+    key = bank.latest.get(title, _NONE)
     if session is not None:
-        for index, row in enumerate(rows):
-            if _series_of(row) == session:
-                return index
-    for index, row in enumerate(rows):
-        if _series_of(row) is None:
-            return index
-    return len(rows) - 1 if session is None and rows else None
+        if key is not _NONE and _series_of(key) == session:
+            return (KEY,)
+        if title in bank.by.get(session, {}):
+            return (BY_SERIES, session)
+    if key is not _NONE and (session is None or _series_of(key) is None):
+        return (KEY,)
+    if title in bank.by.get("", {}):
+        return (BY_SERIES, "")
+    return None
+
+
+def _row(bank: _Bank, where: tuple, title: str) -> Any:
+    return bank.latest[title] if where == (KEY,) else bank.by[where[1]][title]
+
+
+def _titles(bank: _Bank, session: Optional[str]) -> list:
+    """Every title that may have an entry under `session`, in the store's order."""
+    out = dict.fromkeys(bank.latest)
+    for series in ("", session):
+        if series is not None:
+            out.update(dict.fromkeys(bank.by.get(series, {})))
+    return list(out)
 
 
 def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None,
@@ -175,24 +233,20 @@ def _entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None,
     — the entry shown under `session` for each title (`_shown`).
 
     Read forgivingly unless `strict`: a store that cannot be read, or a field of a shape this TCC
-    does not know, is "nothing banked", or, strict, `StoreUnreadable` (`BankShapeUnknown`). A
+    does not write, is "nothing banked", or, strict, `StoreUnreadable` (`BankShapeUnknown`). A
     write never starts from this — see `put_many`.
     """
     tcc_dir = tcc_dir or config.tcc_dir()
     data = project_settings.load(tcc_dir, strict=strict)
-    return _parsed(_known(data.get(KEY), tcc_dir) if strict else data.get(KEY), session)
+    return _parsed(_known(data, tcc_dir) if strict else _forgiving(data), session)
 
 
-def _parsed(raw: Any, session: Optional[str] = None) -> dict[str, dict]:
-    """The bank's field as `_entries` gives it: per title, the entry shown under `session`, when
-    it can be read."""
-    if not isinstance(raw, dict):
-        return {}
+def _parsed(bank: _Bank, session: Optional[str] = None) -> dict[str, dict]:
+    """Per title, the entry shown under `session`, when it can be read."""
     out: dict[str, dict] = {}
-    for title, value in raw.items():
-        rows = _rows(value)
-        index = _shown(rows, session)
-        entry = _read(rows[index]) if index is not None else None
+    for title in _titles(bank, session):
+        where = _shown(bank, title, session)
+        entry = _read(_row(bank, where, title)) if where else None
         if entry is not None:
             out[str(title)] = entry
     return out
@@ -230,20 +284,19 @@ def unread_entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None
     """`{title: (what, why)}` for this series' entries the bank holds and cannot read — `what` is
     `"ms"` for a delay that is not a number (the entry is skipped by every read), `"apf"` for a
     filter of a kind this TCC does not know (read as none). Read strictly: `StoreUnreadable` for
-    a store that is there and cannot be read, or a field of a shape this TCC does not know.
+    a store that is there and cannot be read, or a field of a shape this TCC does not write.
 
     For the curve window (G10 M2 on screen, #208): such a driver on screen is drawn without what
     is banked for it, and a step banked what was drawn over the entry — so it keeps the entry as
     it is until the person moves that driver, and says why."""
     tcc_dir = tcc_dir or config.tcc_dir()
-    raw = _known(project_settings.load(tcc_dir, strict=True).get(KEY), tcc_dir)
+    bank = _known(project_settings.load(tcc_dir, strict=True), tcc_dir)
     out: dict[str, tuple[str, str]] = {}
-    for title, value in (raw or {}).items():
-        rows = _rows(value)
-        index = _shown(rows, session)
-        if index is None:
+    for title in _titles(bank, session):
+        where = _shown(bank, title, session)
+        if where is None:
             continue
-        row = rows[index]
+        row = _row(bank, where, title)
         if not isinstance(row, dict):
             # The first version's bare form, which carries no series: one that is a number is
             # read; one that is not (`"1,25"`) is named as the object's is, and kept until moved —
@@ -364,17 +417,20 @@ def put_many(
     write before it starts, where the `put`s ahead of it would already have written. No reading
     is no write.
 
-    The write is ONE strict read plus these readings (`project_settings.update_value`). The bank
-    was read forgivingly first and written through `set_value`, which read again: a first read
-    that failed and a second that did not wrote the readings alone over every other driver,
-    series and all-pass (G10 C2).
+    The write is ONE strict read plus these readings (`project_settings.update_values`, both
+    fields at once). The bank was read forgivingly first and written through `set_value`, which
+    read again: a first read that failed and a second that did not wrote the readings alone over
+    every other driver, series and all-pass (G10 C2).
 
-    A reading changes ONE entry: its title's under `session` (#197). Every other entry — another
-    title's, another series' of the same title, the one with no series — is written back exactly
-    as it was read, so what this TCC cannot read is never lost to a step on something else: a
-    delay that is not a number, a filter of a kind it does not know, a field it has never heard
-    of (G10 M2). A series with no entry of its own for the title gets one, starting from the
-    entry it was shown (the one with no series): an arrival and a filter it does not name carry.
+    A reading under a series is that series' entry for its title (#197), and `KEY`'s entry too, as
+    v1.1.3 would have written it. What `KEY` held there is not lost to it: another series' latest
+    goes to that series' own (it is never older than what is there), an entry with no series aside
+    under `""`, for the series that still show it. With no series named, `KEY`'s entry alone, with
+    no series — never a series' own: which one was meant is not known. Every other entry is
+    written back exactly as it was read, so what this TCC cannot read is never lost to a step on
+    something else: a delay that is not a number, a filter of a kind it does not know, a field it
+    has never heard of (G10 M2). A series with no entry of its own starts from the one it was
+    shown: an arrival and a filter the reading does not name carry.
     """
     tcc_dir = tcc_dir or config.tcc_dir()
     readings = list(readings)
@@ -382,26 +438,37 @@ def put_many(
         return load(tcc_dir, session)
     banked: dict[str, float] = {}
 
-    def change(raw: Any) -> dict[str, Any]:
-        bank = dict(_known(raw, tcc_dir) or {})
+    def change(fields: dict) -> dict[str, Any]:
+        bank = _known(fields, tcc_dir)
         for reading in readings:
             title = str(reading.title)
-            rows = _rows(bank[title]) if title in bank else []
-            index = _shown(rows, session)
-            was = (_read(rows[index]) if index is not None else None) or {}
+            where = _shown(bank, title, session)
+            was = (_read(_row(bank, where, title)) if where else None) or {}
             row = _serialised(_entry(was, reading, session))
-            if index is not None and (session is None or _series_of(rows[index]) == session):
-                rows[index] = row
+            if title in bank.latest:
+                held = _series_of(bank.latest[title])
+                if held is None and session is not None:
+                    bank.by.setdefault("", {})[title] = bank.latest[title]
+                elif held is not None and held != session:
+                    bank.by.setdefault(held, {})[title] = bank.latest[title]
+            bank.latest[title] = row
+            if session is not None:
+                bank.by.setdefault(session, {})[title] = dict(row)
             else:
-                rows.append(row)  # this series' own, beside what the others are shown
-            bank[title] = rows[0] if len(rows) == 1 else rows
+                bank.by.get("", {}).pop(title, None)  # `KEY`'s is the one with no series now
         banked.update(
             (name, entry["ms"]) for name, entry in _parsed(bank, session).items() if entry["ms"])
-        return bank
+        return _stored(bank)
 
-    project_settings.update_value(tcc_dir, KEY, change)
+    project_settings.update_values(tcc_dir, (KEY, BY_SERIES), change)
     forget_aside(tcc_dir)  # the fresh bank the set-aside line said the next step would start
     return banked
+
+
+def _stored(bank: _Bank) -> dict[str, Any]:
+    """The two fields to write: an empty one removed."""
+    by = {series: rows for series, rows in bank.by.items() if rows}
+    return {KEY: bank.latest or None, BY_SERIES: by or None}
 
 
 def put_many_or_say(readings: Iterable[Reading], tcc_dir: Optional[Path] = None,
@@ -422,7 +489,7 @@ def _entry(was: dict, reading: Reading, session: Optional[str]) -> dict:
     return {
         "ms": round(float(reading.ms), 4),
         "at": None if at is None else round(float(at), 4),
-        "set": session if session is not None else was.get("set"),
+        "set": session,
         "apf": apf,
         # Kept means kept: a filter of a kind this TCC cannot read goes on as it was read (#208).
         "apf_raw": was.get("apf_raw") if reading.allpass is _KEEP else None,
@@ -444,29 +511,38 @@ def clear(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> None
     """Forget one capture series' readings, or all of them when no series is named.
 
     Scoped, because the button sits under a window showing one series and a button that also wiped
-    last week's would be doing something nobody asked for. What goes is what that series shows:
-    its own entries, and the ones with no series, which are shown under every series — as it has
-    since the scope came in (2026-08-12), and kept so by #197. Another series' entry of the same
-    title stays. Through one strict read, as `put_many` is (G10 C2): a read that failed clears
-    nothing, and a field of a shape this TCC does not know is not cleared either.
+    last week's would be doing something nobody asked for. What goes is what that series shows,
+    and only that: its own entries, and an entry with no series where it is the one the series
+    shows — for a title the series holds none of its own (as since the scope came in,
+    2026-08-12). An entry with no series the series no longer shows stays for the others (#197's
+    review, I1), and so does another series' entry of the same title. Through one strict read, as
+    `put_many` is (G10 C2): a read that failed clears nothing, and a field of a shape this TCC
+    does not write is not cleared either.
     """
     tcc_dir = tcc_dir or config.tcc_dir()
 
-    def change(raw: Any) -> Optional[dict[str, Any]]:
+    def change(fields: dict) -> dict[str, Any]:
         # Another series' entries as they were read, not as `_parsed` reads them: one it cannot
         # read is still that series' (G10 M2).
-        bank = _known(raw, tcc_dir) or {}
+        bank = _known(fields, tcc_dir)
         if session is None:
-            return None
-        keep: dict[str, Any] = {}
-        for title, value in bank.items():
-            rows = [row for row in _rows(value)
-                    if _series_of(row) is not None and _series_of(row) != session]
-            if rows:
-                keep[title] = rows[0] if len(rows) == 1 else rows
-        return keep or None
+            return {KEY: None, BY_SERIES: None}
+        for title in _titles(bank, session):
+            where = _shown(bank, title, session)
+            if where == (KEY,):
+                del bank.latest[title]
+            elif where is not None:
+                del bank.by[where[1]][title]
+        bank.by.pop(session, None)  # its own, shown or under `KEY`'s newer one
+        for series, rows in bank.by.items():
+            # A title `KEY` no longer holds gets another series' own back in it, as v1.1.3 kept
+            # it: a TCC rolled back reads it under that series, and no series reads it here.
+            for title, row in rows.items():
+                if series and title not in bank.latest:
+                    bank.latest[title] = row
+        return _stored(bank)
 
-    project_settings.update_value(tcc_dir, KEY, change)
+    project_settings.update_values(tcc_dir, (KEY, BY_SERIES), change)
     forget_aside(tcc_dir)
 
 
