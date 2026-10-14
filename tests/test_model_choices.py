@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import child, codex_rpc, model_choices
+from autosound_tcc.core import child, codex_cli, codex_rpc, model_choices
 from autosound_tcc.core import model_choices as mc
 from autosound_tcc.core.model_choices import Choice, OmpCatalogueError
 from tests import _hung_child
@@ -68,9 +68,11 @@ def test_the_picker_shows_only_the_omp_models_the_user_marked(catalogue):
     assert omp[0].label == "Gemini 3.1 Pro"
 
 
-def test_with_nothing_marked_the_picker_is_the_sdk_alone(catalogue):
+def test_with_nothing_marked_the_picker_is_the_sdk_and_codex(catalogue):
+    """Codex's rows are the Generator's too since W-10 task 4 (its shipped pair, greyed, when the
+    CLI is missing — a pick is refused at launch until its session exists)."""
     assert [choice.harness for choice in model_choices.choices([])] == \
-        ["sdk"] * len(model_choices.SDK_MODELS)
+        ["sdk"] * len(model_choices.SDK_MODELS) + ["codex"] * len(model_choices.CODEX_MODELS)
 
 
 def test_a_free_model_is_visibly_free_at_the_moment_of_choosing(catalogue):
@@ -140,9 +142,11 @@ def test_the_reviewer_list_is_the_generator_list_plus_the_local_clis(catalogue, 
 
     assert reviewer[: len(generator)] == generator
     routes = {c.harness for c in reviewer[len(generator):]}
-    # And the key's own route (tcc#74): a one-shot call too, and the reviewer's alone.
-    assert routes == {"api", "agy", "codex"}
-    assert all(c.harness in ("sdk", "omp") for c in generator)
+    # And the key's own route (tcc#74): a one-shot call too, and the reviewer's alone. Codex is in
+    # the Generator's list since W-10 task 4, and the reviewer's carries each of its rows once.
+    assert routes == {"api", "agy"}
+    assert {c.harness for c in generator} == {"sdk", "omp", "codex"}
+    assert len({c.key for c in reviewer}) == len(reviewer)
 
 
 def test_every_route_is_labelled_and_says_whose_bill_it_is(catalogue):
@@ -1257,21 +1261,39 @@ _CODEX_FRAMES = [json.loads(line) for line in (
 _REAL_ASK_CODEX = mc._ask_codex_models
 
 
-def _as_ask(exchange):
-    """The model list asks through `codex_rpc.ask_blocking` (W-10 task 3); these tests still speak
-    in frames — `exchange(binary, requests, want, timeout)` returns the reply frame or None."""
+def _as_server(exchange):
+    """The model list asks through `codex_cli.probe`, one `codex_rpc.AppServer` (W-10 task 4);
+    these tests still speak in frames — `exchange(binary, requests, want, timeout)` returns the
+    reply frame to the last request, or None."""
 
-    def ask_blocking(binary, calls, *, timeout, **_kw):
-        requests = [{"method": "initialize", "id": 0}, {"method": "initialized"}] + [
-            {"method": method, "id": 1, "params": params} for method, params in calls]
-        frame = exchange(binary, requests, 1, timeout)
-        if frame is None:
-            raise TimeoutError("model/list: no answer")
-        if "error" in frame:
-            return [codex_rpc.RpcError(frame["error"].get("code"), frame["error"]["message"])]
-        return [frame["result"]]
+    class Server:
+        def __init__(self, argv, **_kw):
+            self.binary = argv[0]
+            self.sent = [{"method": "initialize", "id": 0}, {"method": "initialized"}]
 
-    return ask_blocking
+        async def open(self, timeout=30.0):
+            return {}
+
+        async def request(self, method, params=None, timeout=60.0):
+            self.sent.append({"method": method, "id": 1, "params": params or {}})
+            frame = exchange(self.binary, list(self.sent), 1, timeout)
+            if frame is None:
+                raise TimeoutError(f"{method}: no answer")
+            if "error" in frame:
+                raise codex_rpc.RpcError(frame["error"].get("code"), frame["error"]["message"])
+            return frame["result"]
+
+        async def close(self, grace=5.0):
+            return None
+
+    return Server
+
+
+def _codex_found(monkeypatch):
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
+    monkeypatch.setattr(codex_cli, "find",
+                        lambda **_kw: codex_cli.Found("/usr/local/bin/codex", "path"))
+    monkeypatch.setattr(codex_cli, "version", lambda found: (0, 162, 1))
 
 
 def test_the_codex_list_is_what_codex_offers_this_login(monkeypatch):
@@ -1283,9 +1305,8 @@ def test_the_codex_list_is_what_codex_offers_this_login(monkeypatch):
         asked["methods"] = [r.get("method") for r in requests]
         return next(f for f in _CODEX_FRAMES if f.get("id") == want)
 
-    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
-    monkeypatch.setattr(mc.shutil, "which", lambda name: "/usr/local/bin/codex")
-    monkeypatch.setattr(mc.codex_rpc, "ask_blocking", _as_ask(exchange))
+    _codex_found(monkeypatch)
+    monkeypatch.setattr(codex_rpc, "AppServer", _as_server(exchange))
 
     rows = _REAL_ASK_CODEX()
 
@@ -1391,9 +1412,8 @@ def test_a_claude_that_did_not_answer_is_said_on_the_rows_and_as_a_quiet_route(t
 
 
 def _codex_on_path(monkeypatch, exchange):
-    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
-    monkeypatch.setattr(mc.shutil, "which", lambda name: "/usr/local/bin/codex")
-    monkeypatch.setattr(mc.codex_rpc, "ask_blocking", _as_ask(exchange))
+    _codex_found(monkeypatch)
+    monkeypatch.setattr(codex_rpc, "AppServer", _as_server(exchange))
 
 
 @pytest.mark.parametrize("frame, said", [

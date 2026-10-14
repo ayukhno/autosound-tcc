@@ -16,6 +16,8 @@ import threading
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
 
+from autosound_tcc.core import codex_cli
+
 NOT_INSTALLED = "not_installed"
 SIGN_IN = "sign_in"
 LOCATION = "location"
@@ -26,7 +28,7 @@ PRIORITY = (NOT_INSTALLED, SIGN_IN, LOCATION, REFUSED, NOT_CHECKED)
 #: For the agent, in `get_tcc_state` — English, like the rest of that payload.
 PHRASES = {
     NOT_INSTALLED: "its CLI is not installed on this machine",
-    SIGN_IN: "not signed in to Claude on this machine",
+    SIGN_IN: "not signed in to its own account on this machine (Claude or Codex)",
     LOCATION: "not available in your region",
     REFUSED: "the last call to it was refused",
     NOT_CHECKED: "not checked yet since TCC started",
@@ -131,11 +133,17 @@ def reset() -> None:
 
 def status(choice, *, signed_in: Optional[Callable[[], Optional[bool]]] = None,
            unconfirmed: Optional[Callable[[object], bool]] = None,
-           reviewer: bool = False) -> Status:
+           reviewer: bool = False,
+           codex_signed_in: Optional[Callable[[], Optional[bool]]] = None) -> Status:
     """Ready, or the most serious reason it is not (see `PRIORITY`).
 
     `reviewer`: the choice is judged as a reviewer's, whose Claude child runs without
-    `ANTHROPIC_API_KEY` (tcc#127) — only the login signs it in (`claude_sdk.signed_in`)."""
+    `ANTHROPIC_API_KEY` (tcc#127) — only the login signs it in (`claude_sdk.signed_in`).
+
+    Codex's login is `codex_cli.signed_in()`, which the start's read fills with the model list
+    (one app-server, after agy and the SDK) and ↻ again; only a False is «sign in»."""
+    if codex_signed_in is None:
+        codex_signed_in = codex_cli.signed_in
     if signed_in is None:
         from autosound_tcc.core import claude_sdk
 
@@ -148,6 +156,8 @@ def status(choice, *, signed_in: Optional[Callable[[], Optional[bool]]] = None,
     if not getattr(choice, "available", True):
         found.append((NOT_INSTALLED, ""))
     if choice.harness == "sdk" and signed_in() is False:
+        found.append((SIGN_IN, ""))
+    if choice.harness == "codex" and codex_signed_in() is False:
         found.append((SIGN_IN, ""))
     with _lock:
         refusal = _refusals.get(choice.key)

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import codex_rpc
+from autosound_tcc.core import codex_cli, codex_rpc
 from autosound_tcc.core import model_choices as mc
 from autosound_tcc.core.codex_rpc import AppServer, ConnectionLost, Notify, RpcError
 
@@ -408,33 +408,42 @@ def _model_page(tmp_path: Path, name: str, data: list, cursor=None) -> Path:
     ])
 
 
-@posix_only
-def test_the_model_list_follows_next_cursor_through_ask(tmp_path, monkeypatch):
-    log = tmp_path / "fake.jsonl"
-    codex = _codex_wrapper(tmp_path, [
-        _model_page(tmp_path, "p1", [{"id": "gpt-a", "model": "gpt-a", "displayName": "GPT-A"},
-                                     {"id": "old", "model": "old", "hidden": True}], cursor="p2"),
-        _model_page(tmp_path, "p2", [{"id": "gpt-b", "model": "gpt-b"}]),
-    ], log)
+def _codex_is(monkeypatch, codex: Path) -> None:
+    """The model list asks the Codex `codex_cli.find()` found (W-10 task 4)."""
     monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
-    monkeypatch.setattr(mc.shutil, "which", lambda name: str(codex))
+    monkeypatch.setattr(codex_cli, "find", lambda **_kw: codex_cli.Found(str(codex), "path"))
+
+
+@posix_only
+def test_the_model_list_follows_next_cursor_in_one_app_server(tmp_path, monkeypatch):
+    """Since task 4 the list is part of `codex_cli.probe`: `account/read`, then every page of
+    `model/list` from the same app-server (one start, not one per page)."""
+    log = tmp_path / "fake.jsonl"
+    page = {"dir": "out", "t": 1, "msg": {"jsonrpc": "2.0", "id": 3, "method": "model/list"}}
+    scenario = write_scenario(tmp_path / "paged.jsonl", opening() + [
+        page, {"dir": "in", "t": 1, "msg": {"id": 3, "result": {"data": [
+            {"id": "gpt-a", "model": "gpt-a", "displayName": "GPT-A"},
+            {"id": "old", "model": "old", "hidden": True}], "nextCursor": "p2"}}},
+        {**page, "msg": {**page["msg"], "id": 4}},
+        {"dir": "in", "t": 1, "msg": {"id": 4, "result": {"data": [{"id": "gpt-b", "model": "gpt-b"}]}}},
+    ])
+    _codex_is(monkeypatch, _codex_wrapper(tmp_path, [scenario], log))
 
     rows = _REAL_ASK_CODEX()
 
     assert [(c.model, c.label) for c in rows] == [("gpt-a", "GPT-A"), ("gpt-b", "gpt-b")]
     asked = [row["msg"]["params"] for row in fake_log(log)
              if row.get("dir") == "out" and row["msg"].get("method") == "model/list"]
-    assert asked == [{}, {"cursor": "p2"}]
+    assert asked == [{"limit": codex_cli.PAGE_LIMIT}, {"limit": codex_cli.PAGE_LIMIT, "cursor": "p2"}]
     argvs = [row["argv"] for row in fake_log(log) if "argv" in row]
-    assert len(argvs) == 2 and all(a[-1] == "app-server" for a in argvs)
+    assert len(argvs) == 1 and argvs[0][-1] == "app-server"
     assert mc._LIST_WHY["codex"] == ""
 
 
 @posix_only
 def test_a_model_list_from_a_codex_that_dies_at_start_keeps_the_reason(tmp_path, monkeypatch):
-    codex = _codex_wrapper(tmp_path, [FIX / "startup-bad-mcp.jsonl"], tmp_path / "fake.jsonl")
-    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
-    monkeypatch.setattr(mc.shutil, "which", lambda name: str(codex))
+    _codex_is(monkeypatch, _codex_wrapper(tmp_path, [FIX / "startup-bad-mcp.jsonl"],
+                                          tmp_path / "fake.jsonl"))
 
     assert _REAL_ASK_CODEX() == []
     assert "invalid transport" in mc._LIST_WHY["codex"]

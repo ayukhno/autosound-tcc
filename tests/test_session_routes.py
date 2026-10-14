@@ -229,16 +229,19 @@ def test_an_sdk_launch_never_resumes_a_codex_thread_and_omp_still_reads_any(tmp_
         assert _launch(host) is resumed, harness
 
 
-def test_a_codex_pick_reads_the_sdk_route_while_the_sdk_carries_it(tmp_path, monkeypatch):
-    """Until Codex has its own session (#181 task 6), a Codex pick is built as a TuningSession, which
-    resumes the SDK's id; the window must read the same route, or it says «fresh» over a session
-    that resumes (task 2's review, m1)."""
+def test_a_codex_pick_is_refused_until_codex_has_its_session(tmp_path, monkeypatch):
+    """The picker offers Codex rows since #181 task 4, before Codex has a session of its own: built,
+    the pick would run Claude under a Codex name. Refused with its sentence, and nothing is built;
+    task 6 lifts the refusal together with `factory`'s Codex branch and `CODEX_ROUTE` (until then
+    `resume_route` keeps reading the SDK's route — task 2's review, m1)."""
     server = _server(tmp_path)
     server.registry.sync_phase("2")
     server.registry.bind_session("2", "sdk-id", route="sdk")
 
-    host, _ = _launch_host(tmp_path, SimpleNamespace(harness="codex", model="m"), server)
-    assert _launch(host) is True
+    host, said = _launch_host(tmp_path, SimpleNamespace(harness="codex", model="m"), server)
+    assert _launch(host) is None
+    assert said == [i18n.t("codexNotYet")]
+    assert session_routes.resume_route("codex") == session_routes.SDK_ROUTE
 
 
 # ---- session_routes as plain functions ------------------------------------------------------

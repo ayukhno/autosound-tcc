@@ -86,12 +86,19 @@ def blocker(choice, server) -> Optional[Refusal]:
 
     The SDK route takes TCC's url and token directly, so an unwritten `.mcp.json` refuses nothing
     there; omp reaches TCC only through that file, unwritten, it would run without TCC's tools.
+    A Codex pick is refused until its session exists (task 6).
     """
     if choice.harness == "omp":
         if not omp_session.is_available():
             return Refusal("ompMissing")
         if getattr(server, "config_error", ""):
             return omp_without_config(server)
+    if choice.harness == "codex":
+        # The picker offers Codex rows (W-10 task 4) before Codex has a session of its own: built,
+        # a Codex pick would fall to `factory`'s Claude branch and run Claude under a Codex name.
+        # Task 6 removes this refusal, together with `factory`'s Codex branch and `CODEX_ROUTE` in
+        # `resume_route`; tasks 8/9 put Codex's own blockers here (not found, too old, signed out).
+        return Refusal("codexNotYet")
     return None
 
 

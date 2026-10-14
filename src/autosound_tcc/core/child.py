@@ -411,7 +411,7 @@ def wants_a_console() -> dict:
 #: because Windows spells it `claude.cmd` / `claude.exe` and POSIX spells it `claude`. Short and
 #: closed on purpose: it decides which child is given a console to hand DOWN, and a loose match
 #: would hand one to something that then shows it.
-AGENT_COMMANDS = frozenset({"claude", "omp", "agy", "node"})
+AGENT_COMMANDS = frozenset({"claude", "omp", "agy", "node", "codex"})
 
 
 def is_agent_command(args) -> bool:

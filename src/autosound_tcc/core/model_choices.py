@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
-from autosound_tcc.core import child, codex_rpc
+from autosound_tcc.core import child, codex_cli
 from autosound_tcc.core import claude_sdk, model_overrides
 
 from autosound_tcc.core import reviewer_key
@@ -420,8 +420,13 @@ def omp_available() -> bool:
 
 
 def cli_available(harness: str) -> bool:
-    """Is this route's binary on PATH. Cheap: no subprocess, so the picker can ask per entry."""
-    return shutil.which({"agy": "agy", "codex": "codex"}.get(harness, "")) is not None
+    """Is this route's binary here. Cheap: no subprocess, so the picker can ask per entry.
+
+    Codex through `codex_cli.usable()` (W-10 task 4): PATH, then the folders a Dock-started app
+    misses, then TCC's own copy — stat calls, cached — and not one already read as too old."""
+    if harness == "codex":
+        return codex_cli.usable() is not None
+    return shutil.which({"agy": "agy"}.get(harness, "")) is not None
 
 
 #: Last good answer from each CLI that has to be asked over the network. Populated by
@@ -668,6 +673,8 @@ def ask_cli_lists(*, recheck: bool = False) -> None:
     """
     global _CODEX_ASKED
     _load_cached_catalogue()
+    if recheck:
+        codex_cli.forget()  # ↻: a Codex installed or moved since is found again
     if recheck or not _CODEX_ASKED:
         _CODEX_ASKED = True
         _store("codex", _ask_codex_models())
@@ -796,41 +803,35 @@ def _ask_codex_models() -> list[Choice]:
     (tcc#182) — the supported way to ask (`codex models` wants a terminal). No turn runs; [] when
     there is no Codex or it did not answer — why is in `_LIST_WHY`, and the shipped pair stands in.
 
-    Through `codex_rpc.ask_blocking`, which holds stdin open until the reply: `codex app-server`
-    exits at the end of stdin before it answers (measured on 0.162.1).
+    Through `codex_cli.probe` (W-10 task 4): the same app-server reads the login (`account/read`)
+    for `availability`, so Codex is asked once, not twice. The probe holds stdin open until the
+    last reply: `codex app-server` exits at the end of stdin before it answers (measured on 0.162.1).
     """
-    binary = shutil.which("codex") if cli_available("codex") else None
-    if binary is None:
+    if not cli_available("codex"):
         return []
-    out: list[Choice] = []
-    cursor = None
-    for _page in range(10):
-        params = {"cursor": cursor} if cursor else {}
-        try:
-            (reply,) = codex_rpc.ask_blocking(binary, [("model/list", params)],
-                                              timeout=CLI_TIMEOUT_S)
-        except TimeoutError:
-            _LIST_WHY["codex"] = f"codex app-server gave no answer in {int(CLI_TIMEOUT_S)} s"
-            return []
-        except (codex_rpc.ConnectionLost, OSError) as exc:
-            _LIST_WHY["codex"] = f"codex app-server: {exc}"
-            return []
-        if isinstance(reply, codex_rpc.RpcError):
-            _LIST_WHY["codex"] = f"codex app-server: {reply.message}"
-            return []
-        result = reply if isinstance(reply, dict) else {}
-        for entry in result.get("data") or []:
-            if not isinstance(entry, dict) or entry.get("hidden"):
-                continue
-            model = str(entry.get("model") or entry.get("id") or "")
-            if model:
-                out.append(Choice(harness="codex", model=model,
-                                  label=str(entry.get("displayName") or model), provider="openai"))
-        cursor = result.get("nextCursor")
-        if not cursor:
-            break
-    _LIST_WHY["codex"] = "" if out else "codex app-server listed no models"
+    said = codex_cli.probe(force=True)
+    out = [Choice(harness="codex", model=str(entry.get("model") or entry.get("id")),
+                  label=str(entry.get("displayName") or entry.get("model") or entry.get("id")),
+                  provider="openai")
+           for entry in said.models]
+    # A Codex the probe read as too old: no list, and `cli_available` greys the rows from now on.
+    _LIST_WHY["codex"] = "" if out else (said.why or "codex app-server listed no models")
     return out
+
+
+def codex_effort(level: str, supported) -> str:
+    """TCC's effort level as Codex takes it for a model whose `model/list` entry offers `supported`.
+
+    high → high; xhigh → xhigh where the model offers it, else high; max → the highest of max,
+    xhigh, high it offers. Nothing known about the model reads as offering none of the upper two:
+    high, which every Codex model of 2026-10 takes (`codex_cli.supported_efforts`)."""
+    have = {str(item).lower() for item in (supported or ())}
+    level = (level or "").strip().lower()
+    if level == "max":
+        return next((wanted for wanted in ("max", "xhigh") if wanted in have), "high")
+    if level == "xhigh" and "xhigh" in have:
+        return "xhigh"
+    return "high"
 
 
 #: The catalogue as last read in this process, so `choices()` can put a label on a model the user
@@ -909,6 +910,9 @@ def choices(active_omp: list[str]) -> list[Choice]:
     errors when used) is louder and easier to act on.
     """
     entries = sdk_choices()
+    # Codex's rows (W-10): what its own `model/list` named, or the shipped pair greyed/«not
+    # checked». A pick is refused at launch until its session exists (`session_routes.blocker`).
+    entries = entries + codex_choices()
     if active_omp:
         # Cached, NOT `omp_catalogue()`: this runs on the GUI thread on every window activation.
         catalogue = {choice.model: choice for choice in omp_catalogue_cached()}
@@ -1176,7 +1180,10 @@ def critic_choices(active_omp: list[str]) -> list[Choice]:
     Generator has to hold a session and talk to TCC's MCP server — which `agy` and `codex` may
     well be able to do, but not by anything TCC has wired yet.
     """
-    return _apply_overrides(choices(active_omp) + api_choices() + agy_choices() + codex_choices())
+    rows = _apply_overrides(choices(active_omp) + api_choices() + agy_choices() + codex_choices())
+    # Codex is in the Generator's list too now (W-10): one row per key, the first kept.
+    seen: set[str] = set()
+    return [c for c in rows if not (c.key in seen or seen.add(c.key))]
 
 
 def recommended(choice: Choice, critic: bool = False) -> bool:

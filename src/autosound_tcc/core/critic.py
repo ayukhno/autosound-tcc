@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import Mapping, Optional
 
-from autosound_tcc.core import app_log, child
+from autosound_tcc.core import app_log, child, codex_cli
 from autosound_tcc.core import config, vendor_loader
 
 DEFAULT_TIMEOUT_S = 600.0
@@ -304,6 +304,11 @@ def critic_bin_override(*, harness: str = "", environ=None, which=None) -> dict:
     # `which`, because a pick naming a CLI this machine does not have is worse than no override:
     # it would replace one dead name with another.
     route = (harness or "").strip().lower()
+    if route == "codex":
+        # Codex as TCC finds it (W-10, tcc#181): PATH, the folders a Dock-started app misses, TCC's
+        # own copy. Its folder goes first on the reviewer's PATH, so the method's own search for
+        # `codex` finds that binary — TCC's copy included, which is on no PATH at all.
+        return codex_reviewer_env(environ)
     wanted = _HARNESS_CLIS.get(route)
     if wanted and which(wanted):
         return {"AUTOSOUND_CRITIC_BIN": wanted}
@@ -324,6 +329,19 @@ def critic_bin_override(*, harness: str = "", environ=None, which=None) -> dict:
         if which(candidate):
             return {"AUTOSOUND_CRITIC_BIN": candidate}
     return {}
+
+
+def codex_reviewer_env(environ=None) -> dict:
+    """`AUTOSOUND_CRITIC_BIN=codex` and a PATH that starts with the folder of the Codex
+    `codex_cli.find()` found — `{}` when there is none. The name, not the path: the method reads
+    the vendor from the binary's name, and the PATH makes the name resolve to that binary."""
+    found = codex_cli.find()
+    if found is None:
+        return {}
+    environ = os.environ if environ is None else environ
+    rest = [part for part in (environ.get("PATH") or "").split(os.pathsep)
+            if part and os.path.normcase(part) != os.path.normcase(found.folder)]
+    return {"AUTOSOUND_CRITIC_BIN": "codex", "PATH": os.pathsep.join([found.folder, *rest])}
 
 
 def package_dir(project_dir: Optional[Path] = None) -> Path:

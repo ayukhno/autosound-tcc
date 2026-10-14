@@ -1176,6 +1176,13 @@ def _no_claude_asked_for_its_models(monkeypatch):
     monkeypatch.setattr(model_choices, "_ask_claude_models", lambda: [])
     # And `codex app-server` for Codex's (tcc#182).
     monkeypatch.setattr(model_choices, "_ask_codex_models", lambda: [])
+    # And where this machine's Codex is (W-10 task 4): PATH and `/opt/homebrew/bin` are the
+    # developer's, so `find` answers «none» unless a test stands one in; its login and list start
+    # unread. Tests of the finding bind the real `find` at import and pass their own tree.
+    from autosound_tcc.core import codex_cli
+
+    codex_cli.reset()
+    monkeypatch.setattr(codex_cli, "find", lambda **_kw: None)
     # What was asked, and why it failed, is per test: one test's ask must not stop the next's.
     monkeypatch.setattr(model_choices, "_CODEX_ASKED", False)
     monkeypatch.setattr(model_choices, "_ASKED_STAMP", {})

@@ -34,7 +34,7 @@ from importlib.metadata import PackageNotFoundError, distribution, version as pa
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import app_log, child, config, model_overrides, vendor_loader
+from autosound_tcc.core import app_log, child, codex_cli, config, model_overrides, vendor_loader
 
 
 #: How long a `--version` may take before it is written off. These are local binaries printing a
@@ -59,7 +59,7 @@ _TOOLS: tuple[tuple[str, str], ...] = (
     ("claude", "the Claude session (SDK route) and the terminal front-end"),
     ("agy", "the Gemini reviewer"),
     ("gemini", "the Gemini reviewer, Google's own CLI"),
-    ("codex", "a Codex reviewer"),
+    ("codex", "Codex session and reviewer"),
     ("omp", "every non-Claude model in the picker"),
     ("uv", "how TCC itself is installed and updated"),
     ("gh", "the project backup to GitHub"),
@@ -344,6 +344,10 @@ def _tools() -> Section:
     each other, so they run at once and the section costs about as long as its slowest member.
     """
     where = _which_all([exe for exe, _what in _TOOLS])
+    if not where.get("codex"):
+        # Where TCC itself finds Codex: the folders a Dock-started app misses, and TCC's own copy.
+        own = codex_cli.find()
+        where["codex"] = own.path if own is not None else None
     found = [(exe, what, where[exe]) for exe, what in _TOOLS]
     versions = _versions([exe for exe, _what, where in found if where])
     items: list[Item] = []
