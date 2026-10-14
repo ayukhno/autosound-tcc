@@ -123,10 +123,12 @@ def test_the_command_line_prints_one_shard_and_nothing_else():
     not a file becomes an argument to pytest."""
     done = subprocess.run([sys.executable, str(ROOT / "scripts" / "ci_shard.py"),
                            "--splits", "4", "--group", "2"],
-                          capture_output=True, text=True, encoding="utf-8")
+                          capture_output=True)
 
+    # Bytes, decoded here and strictly: decoded in subprocess's reader thread, a bad byte only
+    # warned and the test passed (tcc#202).
     assert done.returncode == 0, done.stderr
-    printed = done.stdout.split()
+    printed = done.stdout.decode("utf-8").split()
     assert printed, "an empty shard would silently run the whole suite"
     assert all(name.startswith("tests/") and name.endswith(".py") for name in printed), done.stdout
     assert printed == ci_shard.split(ci_shard.test_files(ROOT), ci_shard.load_weights(), 4)[1]
@@ -144,7 +146,24 @@ def test_the_shard_note_is_utf8_whatever_the_console_encoding():
                           capture_output=True, env=env)
 
     assert done.returncode == 0, done.stderr
-    assert "—" in done.stderr.decode("utf-8"), done.stderr
+    assert any(byte >= 0x80 for byte in done.stderr), (
+        "the note is plain ASCII now, so cp1252 and UTF-8 agree and this proves nothing — "
+        f"point the test at output that is not: {done.stderr!r}")
+    done.stderr.decode("utf-8")      # strict: a cp1252 byte raises here
+    done.stdout.decode("utf-8")
+
+
+def test_a_file_name_that_is_not_utf8_is_listed_not_a_crash():
+    """A name the file system hands back undecodable arrives as surrogate escapes; stdout passes
+    its bytes through instead of raising in the middle of the listing."""
+    import io
+
+    out, err = (io.TextIOWrapper(io.BytesIO(), encoding="cp1252") for _ in range(2))
+    ci_shard.utf8_output(out, err)
+    out.write("tests/test_\udce9.py")
+    out.flush()
+
+    assert out.buffer.getvalue() == b"tests/test_\xe9.py"
 
 
 def test_a_group_outside_the_split_is_refused_rather_than_silently_empty():

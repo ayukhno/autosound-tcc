@@ -6881,7 +6881,11 @@ def test_picking_a_reviewer_puts_it_in_the_project_params_at_once(monkeypatch):
                         lambda view, reuse_git=False: refreshed.append(reuse_git))
 
     window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData(flash.key))
-    QApplication.processEvents()
+    # Long enough for the folder watcher's reload to land had it been heard (tcc#202): a single
+    # `processEvents()` caught it only on a slow Windows runner, so the mute in `_reviewer_window`
+    # was pinned on no OS. Pumped past the coalesce window, a reload that slips in reads False.
+    from PySide6.QtTest import QTest
+    QTest.qWait(main_window._RELOAD_COALESCE_MS + 200)
 
     assert refreshed, "the panel names the reviewer, so it must not lag the picker"
     assert all(refreshed), "git's last answer, not a new read"

@@ -115,9 +115,15 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def utf8_output(stdout, stderr) -> None:
+    """UTF-8 whatever the console: on Windows a pipe gets the code page, and the note's «—» went
+    out as cp1252's 0x97 to a reader expecting UTF-8 (tcc#202). stdout passes an undecodable file
+    name's bytes through (`surrogateescape`) rather than crashing the listing; stderr, a note for
+    people, escapes what it cannot write."""
+    stdout.reconfigure(encoding="utf-8", errors="surrogateescape")
+    stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 if __name__ == "__main__":
-    # UTF-8 whatever the console: on Windows a pipe gets the code page, and the note's «—» went out
-    # as cp1252's 0x97 to a reader expecting UTF-8 (tcc#202).
-    for stream in (sys.stdout, sys.stderr):
-        stream.reconfigure(encoding="utf-8")
+    utf8_output(sys.stdout, sys.stderr)
     raise SystemExit(main())
