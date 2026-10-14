@@ -11,7 +11,7 @@ session builds or briefs an Agent; the seats from «Process weight»; `Engine: n
 
 | step | group | issues | note |
 |---|---|---|---|
-| 0 | the Arbiter's retest on the VM, v1.1.3 | #184, #192, #183, #165 | what no longer reproduces is closed |
+| 0 | the Arbiter's retest on the VM, v1.1.3 | #184, #192, #183, #165 | done 2026-10-14: #192 and #183 do not reproduce → closed; #165 reproduced on this Mac and fixed (40185b3); #184 works on the Mac, Windows checked in real work — nothing built unless it reproduces |
 | 1 | Release tooling | #201, #202 | cheap; makes the release itself cheaper |
 | 1‖ | a study, beside everything | #181 | a document, no code |
 | 2 | Install and update | #194, #195 | #195 may need a skill ticket for the method's half |
