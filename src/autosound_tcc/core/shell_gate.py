@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import fnmatch
 import itertools
+import os
 import posixpath
 import re
 import shlex
@@ -2201,24 +2202,49 @@ _EFFECTS: tuple[tuple[str, str], ...] = (
 _SKILL_OWNED = ("process/", "state/", "dsp_profile.json", "dsp_profile.draft.json",
                 "project.json", "autosound_context.md", "tuning-changelog", "audit-trail.md")
 
-#: The method's ledger writer, by the path its documents run it from (`rew_tool/state/process.py`,
-#: `skills/autosound-tuning/rew_tool/state/process.py`): a relative path that ENDS with it is the
-#: skill doing its job, as `foreign` always let it — the one owned name that is not a prefix.
-_SKILL_WRITER = "state/process.py"
+#: The shells `judge_action` reads a command line as.
+SHELL_BASH = "bash"
+SHELL_POWERSHELL = "powershell"
+
+#: The method's ledger writer, inside the skill's own folder. Run by an interpreter it is the skill
+#: doing its job, and its ARGUMENTS are data — `capture-knobs SubRC=4/4`, `done -1.1 project.json`
+#: — not paths: the writer writes only the project's skill files, that is its contract.
+_SKILL_WRITER = ("rew_tool", "state", "process.py")
+#: What runs it: the interpreter, and the options that change nothing about what it runs.
+_WRITER_RUNNERS = re.compile(r"python(?:3(?:\.\d+)?)?|py")
+_WRITER_RUNNER_OPTIONS = frozenset({"-u", "-B", "-3"})
+#: The variable a session's shell holds the method's copy in (`method_binding.SKILL_ROOT_ENV`).
+_SKILL_ROOT_REFS = ("$AUTOSOUND_SKILL_ROOT/", "${AUTOSOUND_SKILL_ROOT}/")
 
 #: The owned folders by their own name, without the slash: `./process` is `process/`.
 _SKILL_FOLDERS = frozenset(owned.rstrip("/") for owned in _SKILL_OWNED if owned.endswith("/"))
 
-#: What parts a line into the words `touches_only_skill_files` reads: blanks, the shells'
-#: separators and redirects, and quotes (a quoted path is still a path).
-_PATH_SPLIT = re.compile(r"[\s;|&<>()`'\"]+")
-#: A word that names a file or folder: it has a separator, starts as the home, a variable or a
-#: drive does, or ends as the files the skill writes do.
-_PATH_LIKE = re.compile(r"[/\\]|^[~$%]|^[A-Za-z]:|\.(?:json|md|jsonl|txt)$")
+#: What may run in a line `foreign` lets through as the skill's own: an allow-list, not a list of
+#: what looks like a path (the second fix round of tcc#181 — `rm -rf measurements process/a.json`
+#: hid a bare word behind one owned path). Commands whose every operand is a path the skill owns:
+_FOREIGN_PATH_HEADS = {
+    SHELL_BASH: frozenset({"cat", "tee", "mkdir", "touch", "cp", "mv", "rm"}),
+    SHELL_POWERSHELL: frozenset({"set-content", "add-content", "new-item", "copy-item",
+                                      "move-item", "remove-item", "out-file",
+                                      "cat", "tee", "mkdir", "cp", "mv", "rm"}),
+}
+#: …and commands whose operands are text, not files (only their redirections are judged):
+_FOREIGN_DATA_HEADS = {
+    SHELL_BASH: frozenset({"echo", "printf"}),
+    SHELL_POWERSHELL: frozenset({"echo", "write-output"}),
+}
+#: PowerShell parameters whose value is text, not a path: `Set-Content process/a.json -Value x`.
+#: Exact names only — a guess at an abbreviation would skip a path unread.
+_PS_DATA_PARAMS = frozenset({"-value", "-encoding", "-itemtype", "-type"})
+#: What PowerShell's line may not hold for `foreign` to read it at all: a value the line does not
+#: spell (`$`, `@`, `(…)`, `{…}`), an escape, a call (`&`), input (`<`), a comment.
+_PS_UNREAD = frozenset("`$@(){}&<#")
+#: What runs rather than reads: never a skill file, even in `state/` (`cat > state/evil.py`).
+_SCRIPT_SUFFIXES = (".py", ".sh", ".bash", ".zsh", ".ps1", ".psm1", ".bat", ".cmd", ".exe",
+                    ".command")
+#: The ways a shell changes folder: only into the project itself, and only first (`cd <project> &&`).
+_CD_HEADS = frozenset({"cd", "set-location", "sl", "chdir"})
 
-#: The shells `judge_action` reads a command line as.
-SHELL_BASH = "bash"
-SHELL_POWERSHELL = "powershell"
 
 
 @dataclass(frozen=True)
@@ -2249,36 +2275,260 @@ def effect_of(command: str) -> Optional[str]:
     return None
 
 
-def touches_only_skill_files(command: str) -> bool:
-    """Whether every path the command names is one the skill owns (the `foreign` gate's pass).
+def touches_only_skill_files(command: str, *, shell: str = "bash", project: Optional[Path] = None,
+                             skill: Optional[Path] = None) -> bool:
+    """Whether the line does nothing but the skill's own work in its own namespace (`foreign`'s
+    pass). Says nothing about danger — `judge_action` asks that first.
 
-    Anchored, not a substring (the fix round of tcc#181): `rm -rf /Users/x/state/` named `state/`
-    and passed. A path is the skill's only when it is relative, STARTS with an owned prefix
-    (`./` aside), and has no `..`, no variable and no backslash; any other path-like word — absolute,
-    `~`, `$HOME`, `%USERPROFILE%`, `C:\\…`, a climb — makes the line not «only skill files». The
-    one name matched at the END is the method's writer, `…/state/process.py` (`_SKILL_WRITER`). An
-    option's value is read as its path (`--target-directory=process/`). A line that names no path at
-    all is not «only skill files» either: nothing to judge is not the same as nothing to worry
-    about. Says nothing about danger — `judge_action` asks that first."""
-    paths = []
-    for word in _PATH_SPLIT.split(command):
-        if word.startswith("-") and "=" in word:
-            word = word.split("=", 1)[1]
-        if word in _STREAM_DEVICES or word.lower() == "$null":
-            continue  # a stream, not a file: `2>/dev/null`, PowerShell's `> $null`
-        if word and _PATH_LIKE.search(word):
-            paths.append(word)
-    return bool(paths) and all(_is_skill_path(path) for path in paths)
+    An allow-list (the second fix round of tcc#181). Every simple command — split on `;`, `&&`,
+    `||`, `|` and new lines — must be one of three things: a command on `_FOREIGN_PATH_HEADS` whose
+    every operand is a skill path; one on `_FOREIGN_DATA_HEADS` (its operands are text); or the
+    method's writer run by an interpreter (`_runs_the_writer`; its arguments are data). Every
+    redirection target of each must be a skill path, or a stream. A first `cd` into the project
+    itself is the folder the line runs in anyway; any other `cd`, `ln`, `git`, `chmod`, `python3 -c`,
+    `bash`, an assignment, a substitution, a `( … )` or `if` — anything not on the list — asks. And
+    a line with no skill path and no writer is not «only skill files»: nothing to judge is not the
+    same as nothing to worry about.
 
-
-def _is_skill_path(path: str) -> bool:
-    if (_is_absolute(path) or any(mark in path for mark in ("\\", "$", "%", "~"))
-            or ".." in path.split("/")):
+    A skill path (`_skill_path`) is relative to the project, starts with an owned prefix, has no
+    `..`, no variable, no `~`; an absolute one inside the project is read relative to it first, and
+    one a symlink takes out of the namespace is not the skill's. `project`, `skill`: the project's
+    folder and the method's copy (`_read_roots_for`'s two roots); without them only relative paths
+    are read and no writer is known."""
+    statements = (_powershell_simple_statements(command) if shell == SHELL_POWERSHELL
+                  else _bash_simple_statements(command))
+    if not statements:
         return False
+    if _is_cd_into(statements[0][0], project, shell):
+        statements = statements[1:]
+    named = False
+    for words, targets in statements:
+        if not words:
+            return False
+        for target in targets:
+            if target in _STREAM_DEVICES or re.fullmatch(r"\d+|-", target):
+                continue  # a stream, not a file: `2>/dev/null`, `2>&1`
+            if _skill_path(target, project, shell) is None:
+                return False
+            named = True
+        head, operands = _command_name(words[0]), words[1:]
+        if _runs_the_writer(head, operands, project, skill, shell):
+            named = True
+            continue
+        if head in _FOREIGN_DATA_HEADS[shell]:
+            continue
+        if head not in _FOREIGN_PATH_HEADS[shell]:
+            return False
+        paths = _powershell_operands(operands) if shell == SHELL_POWERSHELL else _bash_operands(
+            operands)
+        if paths is None or any(_skill_path(path, project, shell) is None for path in paths):
+            return False
+        named |= bool(paths)
+    return named
+
+
+def _bash_simple_statements(line: str) -> Optional[list[tuple[list[str], list[str]]]]:
+    """The line as `_Reader` takes it apart: (words, redirection targets) per simple command, or
+    None when anything in it is more than a simple command with words written on the line."""
+    try:
+        commands: list[_Command] = []
+        _Reader(line.strip(), commands, 0).read()
+    except (_Unreadable, RecursionError):
+        return None
+    statements = []
+    for command in commands:
+        if command.compound or not command.words:
+            return None
+        if _ASSIGNMENT.match(command.words[0].text) or _is_reserved(command.words[0]):
+            return None  # `X=1 rm …`, `if`, `for`: not a simple command
+        if any(word.output for word in command.words) or any(
+                target.output or target.dynamic for _, target in command.redirects):
+            return None  # another command's output, or a target the line does not spell
+        if any(word.dynamic for word in command.words[:1]):
+            return None
+        # A word whose value the line does not spell (`{a,b}`, `$'…'`) keeps a `$`, so no
+        # reading below can take it for a skill path.
+        statements.append(([("$" if word.dynamic and "$" not in word.text else "") + word.text
+                            for word in command.words],
+                           [target.text for _, target in command.redirects]))
+    return statements
+
+
+def _powershell_simple_statements(line: str) -> Optional[list[tuple[list[str], list[str]]]]:
+    """A PowerShell line, read only as far as `foreign` needs and no further: statements split on
+    `;`, `|` and new lines, words on blanks and commas, `'…'` and `"…"` quoted, `>`/`>>` (with a
+    stream number before it) a redirection. None for a line holding anything in `_PS_UNREAD` or a
+    quote that never closes — what is not read here is asked about."""
+    if any(ch in _PS_UNREAD for ch in line):
+        return None
+    statements: list[tuple[list[str], list[str]]] = [([], [])]
+    word: Optional[str] = None
+    quote = ""
+    redirect = False
+
+    def finish() -> None:
+        nonlocal word, redirect
+        if word is not None:
+            words, targets = statements[-1]
+            (targets if redirect else words).append(word)
+            word, redirect = None, False
+
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == quote:
+                quote = ""
+            else:
+                word += ch
+        elif ch in "'\"":
+            word = word or ""
+            quote = ch
+        elif ch in " \t\r,":
+            finish()
+        elif ch in ";|\n":
+            finish()
+            statements.append(([], []))
+        elif ch == ">":
+            if word is not None and re.fullmatch(r"\d|\*", word):
+                word = None  # `2>`, `*>`: which stream, not a word
+            finish()
+            if line[i + 1:i + 2] == ">":
+                i += 1
+            redirect = True
+        else:
+            word = (word or "") + ch
+        i += 1
+    if quote or redirect and word is None:
+        return None
+    finish()
+    return [statement for statement in statements if statement[0] or statement[1]]
+
+
+def _bash_operands(operands: list[str]) -> Optional[list[str]]:
+    """What a path command names: every word but its options, and an option's `=value`."""
+    paths = []
+    for word in operands:
+        if word.startswith("-") and len(word) > 1:
+            if "=" in word:
+                paths.append(word.split("=", 1)[1])
+            continue
+        paths.append(word)
+    return paths
+
+
+def _powershell_operands(operands: list[str]) -> Optional[list[str]]:
+    """What a cmdlet names: every word but its switches and the values of `_PS_DATA_PARAMS`; a
+    `-Path:x` value is a path. A word after any other parameter is read as a path too — a switch's
+    neighbour or a parameter's value, either way it may only add a question."""
+    paths = []
+    skip = False
+    for word in operands:
+        if skip:
+            skip = False
+            continue
+        if word.startswith("-") and len(word) > 1:
+            name, colon, value = word.partition(":")
+            if name.lower() in _PS_DATA_PARAMS:
+                skip = not colon
+            elif colon and value:
+                paths.append(value)
+            continue
+        paths.append(word)
+    return paths
+
+
+def _is_cd_into(words: list[str], project: Optional[Path], shell: str) -> bool:
+    """`cd <project>` exactly: the folder the line runs in anyway, so it may lead a line."""
+    if project is None or len(words) != 2 or _command_name(words[0]) not in _CD_HEADS:
+        return False
+    target = _slashed(words[1], shell)
+    return _is_absolute(target) and _inside(target, project) == ""
+
+
+def _runs_the_writer(head: str, operands: list[str], project: Optional[Path],
+                     skill: Optional[Path], shell: str) -> bool:
+    """An interpreter running the method's writer in the skill's own folder: by an absolute path,
+    by `$AUTOSOUND_SKILL_ROOT/…`, through the project's link (`.claude/skills/autosound-tuning/…`),
+    or as the method's documents write it (`rew_tool/state/process.py`) when the project holds
+    nothing at that path (then the line fails rather than runs something else). Whatever it resolves
+    to must be the writer in `skill`: a `process.py` in the project's `state/` is not it."""
+    if skill is None or not _WRITER_RUNNERS.fullmatch(head):
+        return False
+    at = 0
+    while at < len(operands) and operands[at] in _WRITER_RUNNER_OPTIONS:
+        at += 1
+    if at >= len(operands):
+        return False
+    script = _slashed(operands[at], shell)
+    writer = os.path.realpath(skill.joinpath(*_SKILL_WRITER))
+    for ref in _SKILL_ROOT_REFS:
+        if script.startswith(ref):
+            return os.path.realpath(skill / script[len(ref):]) == writer
+    if "$" in script or "%" in script or script.startswith("~"):
+        return False
+    if _is_absolute(script):
+        return os.path.realpath(script) == writer
+    if ".." in script.split("/") or project is None:
+        return False
+    there = project / script
+    if os.path.lexists(there):
+        return os.path.realpath(there) == writer
+    return posixpath.normpath(script) == "/".join(_SKILL_WRITER)
+
+
+def _slashed(word: str, shell: str) -> str:
+    """A PowerShell path with `/` for `\\`: `.\\process\\a.json` is `./process/a.json`, and
+    `C:\\x`, `\\\\server\\share` stay absolute (`C:/x`, `//server/share`)."""
+    return word.replace("\\", "/") if shell == SHELL_POWERSHELL else word
+
+
+def _inside(path: str, project: Path) -> Optional[str]:
+    """An absolute path relative to the project ("" for the project itself), or None outside it.
+    The project as given and as resolved both count: macOS's `/var` is `/private/var`."""
+    norm = posixpath.normpath(path)
+    fold = bool(re.match(r"[A-Za-z]:", norm))  # a Windows drive ignores case
+    for root in {project.as_posix(), Path(os.path.realpath(project)).as_posix()}:
+        here, there = (norm.lower(), root.lower()) if fold else (norm, root)
+        if here == there:
+            return ""
+        if here.startswith(there.rstrip("/") + "/"):
+            return norm[len(root.rstrip("/")) + 1:]
+    return None
+
+
+def _skill_path(word: str, project: Optional[Path], shell: str) -> Optional[str]:
+    """The word as a path the skill owns, relative to the project — or None.
+
+    Relative, an owned prefix (or an owned folder by its name), no `..`, no variable, no `~`, no
+    backslash left; an absolute path inside the project is read relative to it first. On disk, the
+    folder it lands in must still be the skill's: `ln -s .. state/up` makes `state/up/` the
+    project, and a check of the text alone would let `rm -rf state/up/` delete it."""
+    path = _slashed(word, shell)
+    if any(mark in path for mark in ("\\", "$", "%")) or path.startswith("~"):
+        return None
+    if _is_absolute(path):
+        path = _inside(path, project) if project is not None else None
+        if not path:
+            return None
+    if ".." in path.split("/"):
+        return None
     while path.startswith("./"):
         path = path[2:]
-    return (path.startswith(_SKILL_OWNED) or path in _SKILL_FOLDERS or path == _SKILL_WRITER
-            or path.endswith("/" + _SKILL_WRITER))
+    if not _is_owned(path) or path.lower().endswith(_SCRIPT_SUFFIXES):
+        return None  # the namespace holds data; a script there is one the next line could run
+    if project is not None:
+        fixed = re.split(r"[*?\[]", path, maxsplit=1)[0]  # a glob's folder, not its pattern
+        fixed = fixed if fixed == path else posixpath.dirname(fixed)
+        real = os.path.realpath(project / fixed) if fixed else ""
+        landed = os.path.relpath(real, os.path.realpath(project)) if real else ""
+        if not landed or landed.startswith("..") or not _is_owned(landed.replace(os.sep, "/")):
+            return None
+    return path
+
+
+def _is_owned(path: str) -> bool:
+    return path.startswith(_SKILL_OWNED) or path.rstrip("/") in _SKILL_FOLDERS
 
 
 def _is_dangerous(command: str, roots: Sequence[Path], shell: str) -> bool:
@@ -2300,7 +2550,9 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
     caller — this does not parse it, so a line that SAYS «Command:» cannot hide its head), or
     `detail` itself when None. `shell`: `powershell` for a line the caller knows is PowerShell —
     never read-only, and judged dangerous by either reader; any other value raises ValueError.
-    `gate` and `always_allowed` are read per call, so a gate narrowed mid-session takes effect on
+    `read_roots` is `_read_roots_for`'s: the project first, the method's copy after it — the
+    `foreign` pass reads both (`touches_only_skill_files`). `gate` and `always_allowed` are read
+    per call, so a gate narrowed mid-session takes effect on
     the next request. A name outside `OMP_TOOLS` and `mcp__tcc…` asks even under `auto`.
 
     Three things pass, and the reasoning for each is different. TCC's own tools raise their
@@ -2343,7 +2595,9 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
         # about it teaches the Arbiter to click through the ones that matter. Danger first: a
         # line that also deletes the home is not the skill doing its job (`rm -rf process/ ~`).
         allowed = (shell != SHELL_POWERSHELL and bash_is_read_only(line, read_roots)
-                   or gate == GATE_FOREIGN and not dangerous and touches_only_skill_files(line))
+                   or gate == GATE_FOREIGN and not dangerous and touches_only_skill_files(
+                       line, shell=shell, project=read_roots[0] if read_roots else None,
+                       skill=read_roots[1] if len(read_roots) > 1 else None))
     else:
         allowed = False
     if allowed:
@@ -2360,6 +2614,8 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
         # effect: an edit of `apply.py` changes the script, it does not write a ledger.
         tool=(effect_of(line) if name == "bash" else None) or tool,
         title=f"Дозволити {tool}?",
-        detail=line if dangerous else detail,
+        # Under `auto` the command alone, as it always was; elsewhere what omp sent with it
+        # (its `Description:`) stays.
+        detail=line if dangerous and gate == GATE_AUTO else detail,
         reason="gateIrreversible" if dangerous else "",
     )

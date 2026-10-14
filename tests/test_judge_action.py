@@ -11,7 +11,9 @@ Each cell: `pass` — runs unasked; `pass!` — runs unasked under `never` and i
 **Rows that changed for omp in the fix round (the Arbiter, 2026-10-14: «виправити повністю», even
 though omp asks more often).** Before it, `foreign` let a line through as «only skill files» when
 it was destructive or named other paths (a substring test: `rm -rf process/ ~` passed), and an
-unknown tool name passed `auto` without a look. See `CHANGED_FOR_OMP`.
+unknown tool name passed `auto` without a look. The second round made `foreign` an allow-list:
+every simple command on a short list, every operand and redirection a skill path, the method's
+writer only from the skill's own folder (its arguments are data). See `CHANGED_FOR_OMP`.
 """
 
 from __future__ import annotations
@@ -62,6 +64,10 @@ OMP_TABLE = [
      {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
     ("a writer with an effect", "bash", "Command: python3 rew_tool/apply.py --preset FULL", (),
      {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("dangerous bash with a description", "bash", "Description: clear it\nCommand: rm -rf ~/", (),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+    ("an edit of a writer", "edit", '{"path": "rew_tool/apply.py"}', (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("unknown tool", "browser_open", '{"url": "x"}', (),
      {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "ask", GATE_NEVER: "pass!"}),
     # The `foreign` hole, closed: danger first, and owned paths anchored.
@@ -85,8 +91,8 @@ OMP_TABLE = [
      {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("a skill file written", "bash", "Command: echo x > process/a.json", (),
      {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
-    ("a skill writer by its path", "bash", "Command: python3 state/process.py add-step", (),
-     {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("a script in the project's state/", "bash", "Command: python3 state/process.py add-step", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("a skill file written, errors dropped", "bash",
      "Command: echo x > process/a.json 2>/dev/null", (),
      {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
@@ -119,12 +125,127 @@ CHANGED_FOR_OMP = {
     "a writer's name by an absolute path": "foreign pass -> ask: the writer counts only by a "
                                            "relative path",
     "a writer's name by a climb": "foreign pass -> ask: `..` takes a path out of the namespace",
-    # The right reason: a command the danger check flags says «cannot be undone» in every gate.
+    "a script in the project's state/": "foreign pass -> ask: only the writer in the skill's own "
+                                        "folder is trusted; a script the project holds is not",
+    # The question's words.
     "dangerous bash": "writes/foreign ask -> ask!",
+    "dangerous bash with a description": "writes/foreign ask -> ask! (omp's Description: kept in "
+                                         "the detail there; `auto` shows the command alone)",
+    "an edit of a writer": "the question names the tool (`edit`), not `effectLedger`: an edit of "
+                           "apply.py changes the script, it does not write a ledger",
+    # The right reason: a command the danger check flags says «cannot be undone» in every gate.
     "PowerShell delete": "writes/foreign ask -> ask!",
     # Unknown names: `auto` passed them without a look, and `never` said nothing.
     "unknown tool": "auto pass -> ask; never pass -> pass!",
 }
+
+
+#: `foreign`, line by line (the second fix round of tcc#181: an allow-list, not a deny-list of
+#: path-looking words). (name, line, shell, an omp row — run through omp's `_gate` too —, passes).
+#: `{project}` and `{skill}` are the project folder and the method's copy (`_read_roots_for`).
+P = SHELL_POWERSHELL
+B = "bash"
+WRITER = "rew_tool/state/process.py"
+FOREIGN_ROWS = [
+    # C1 — a bare word behind one owned path, and commands that are not on the list.
+    ("a bare folder beside a skill file", "rm -rf measurements process/a.json", B, True, False),
+    ("everything beside a skill file", "rm -rf * process/a.json", B, True, False),
+    ("the repository beside a skill file", "rm -rf .git process/a.json", B, True, False),
+    ("git, then a skill write", "git reset --hard; echo > process/a.json", B, True, False),
+    ("chmod beside a skill file", "chmod -R 000 . process/a.json", B, True, False),
+    ("python -c beside a skill file",
+     "python3 -c 'import os; os.system(\"rm -rf ~\")' process/a.json", B, True, False),
+    ("a PowerShell list beside a skill file",
+     "Remove-Item -Recurse -Force measurements, process/a.json", P, True, False),
+    ("a skill write, then a format",
+     "Set-Content process/a.json -Value x; Format-Volume -DriveLetter C", P, True, False),
+    # C2 — `cd` and `ln` never take the pass; `.` and `..` are paths.
+    ("a link out of the namespace", "ln -s .. state/up", B, True, False),
+    ("cd up, then a skill folder", "cd .. && rm -rf process/", B, True, False),
+    ("cd to another car", "cd ..; cd other-car; rm -rf state/", B, True, False),
+    ("cd into the project, then the home", "cd {project} && rm -rf process/ ~", B, False, False),
+    ("cd elsewhere, then the writer", "cd /tmp && python3 {skill}/" + WRITER + " ./process show",
+     B, False, False),
+    # I3 — the writer is the one in the skill's own folder, run by an interpreter.
+    ("a writer written into the project", "cat > evil/state/process.py", B, True, False),
+    ("a writer the project holds", "python3 evil/state/process.py done", B, True, False),
+    ("a script written into state/", "cat > state/evil.py", B, True, False),
+    ("a script run from state/", "python3 state/evil.py", B, True, False),
+    ("a shell script from process/", "bash process/run.sh", B, True, False),
+    ("a copy into the skill's folder", "cp process/a.json {skill}/rew_tool/x.py", B, False, False),
+    ("a write into the skill's folder", "echo x > {skill}/SKILL.md", B, False, False),
+    ("the writer under python -c", "python3 -c 1 {skill}/" + WRITER, B, False, False),
+    # What the skill does in its own namespace still passes.
+    ("a skill folder emptied", "rm -rf process/old", B, False, True),
+    ("a skill folder made", "mkdir -p process/runs", B, False, True),
+    ("a skill file piped on", "cat state/a.json | tee process/b.json", B, False, True),
+    ("a skill file by a heredoc", "cat <<'EOF' > process/a.json\n{{}}\nEOF", B, False, True),
+    ("a skill glob", "rm process/*.tmp", B, False, True),
+    ("a skill file by its absolute path", "rm {project}/process/x.tmp", B, False, True),
+    ("a skill file set", "Set-Content process/a.json -Value x", P, False, True),
+    ("a skill file made", "New-Item -ItemType File process/a.json", P, False, True),
+    # I5 — PowerShell's own separator.
+    ("a skill file by backslashes", r"Remove-Item .\process\a.json", P, False, True),
+    ("the writer by backslashes", r"python rew_tool\state\process.py .\process done -1.1 project.json",
+     P, False, True),
+    # I4 — the method's own steps, as its documents write them (`vendor/autosound-tuning-skill/…`).
+    ("method: show", "python3 " + WRITER + " {project}/process show", B, False, True),
+    ("method: target", "python3 " + WRITER + " {project}/process target FLAT harman", B, False,
+     True),
+    ("method: handoff", "python3 " + WRITER + " {project}/process handoff", B, False, True),
+    ("method: capture-protective",
+     "python3 " + WRITER + " {project}/process capture-protective FL --hp 1000 LR 24", B, False,
+     True),
+    ("method: session-close", "python3 " + WRITER + " {project}/process session-close --check", B,
+     False, True),
+    ("method: enter-phase", "python3 " + WRITER + " {project}/process enter-phase -1", B, False,
+     True),
+    ("method: done with a file", "python3 " + WRITER +
+     ' {project}/process done -1.2 "rew_analitic/reviewer-check.md"', B, False, True),
+    ("method: done project.json", "python3 " + WRITER + ' {project}/process done -1.1 "project.json"',
+     B, False, True),
+    ("method: decision", "python3 " + WRITER +
+     ' {project}/process decision "dialogue language" "uk" -1.1', B, False, True),
+    ("method: capture-start", "python3 " + WRITER +
+     " {project}/process capture-start final 'v7 L/R 1/48'", B, False, True),
+    ("method: capture-knobs", "python3 " + WRITER + " {project}/process capture-knobs SubRC=4/4", B,
+     False, True),
+    ("method: capture-check", "python3 " + WRITER + " {project}/process capture-check --session", B,
+     False, True),
+    ("method: block", "python3 " + WRITER +
+     ' {project}/process block -1.2 "the first ✗ line of reviewer-check.md"', B, False, True),
+    ("method: --root", "python3 " + WRITER + " --root ./state registry render", B, False, True),
+    # …and by the paths a session's shell has: the skill's own, its variable, the project's link.
+    ("method by the skill's absolute path",
+     "python3 {skill}/" + WRITER + " {project}/process done lang ok", B, False, True),
+    ("method after cd into the project",
+     "cd {project} && python3 {skill}/" + WRITER + " ./process show", B, False, True),
+    ("method by the skill's variable",
+     'python3 "$AUTOSOUND_SKILL_ROOT/' + WRITER + '" ./process show', B, False, True),
+    ("method through the project's link",
+     "python3 .claude/skills/autosound-tuning/" + WRITER + " ./process show", B, False, True),
+]
+
+CHANGED_FOR_OMP.update({
+    name: "foreign pass -> ask: " + why for name, why in [
+        ("a bare folder beside a skill file", "a word that is not a skill path is not passed over"),
+        ("everything beside a skill file", "`*` is not a skill path"),
+        ("the repository beside a skill file", "`.git` is not a skill path"),
+        ("git, then a skill write", "`git` is not on the allow-list"),
+        ("chmod beside a skill file", "`chmod` is not on the allow-list"),
+        ("python -c beside a skill file", "`python3 -c` is not the writer"),
+        ("a PowerShell list beside a skill file", "`measurements` is not a skill path"),
+        ("a skill write, then a format", "`Format-Volume` is not on the allow-list"),
+        ("a link out of the namespace", "`ln` is not on the allow-list"),
+        ("cd up, then a skill folder", "only a `cd` into the project itself leads a line"),
+        ("cd to another car", "only a `cd` into the project itself leads a line"),
+        ("a writer written into the project", "a `.py` path is not a skill file"),
+        ("a writer the project holds", "only the writer in the skill's own folder is trusted"),
+        ("a script written into state/", "a `.py` in state/ is not a skill file"),
+        ("a script run from state/", "only the writer in the skill's own folder is trusted"),
+        ("a shell script from process/", "`bash` is not on the allow-list"),
+    ]
+})
 
 
 def _command(detail: str) -> str:
@@ -145,7 +266,8 @@ def _rows(table=OMP_TABLE):
 
 
 def test_every_changed_row_is_in_the_table():
-    assert set(CHANGED_FOR_OMP) <= {row[0] for row in OMP_TABLE}
+    assert set(CHANGED_FOR_OMP) <= {row[0] for row in OMP_TABLE} | {
+        row[0] for row in FOREIGN_ROWS if row[3]}
 
 
 @pytest.mark.parametrize("tool, detail, ticked, gate, cell", list(_rows()))
@@ -158,8 +280,71 @@ def test_the_table(tool, detail, ticked, gate, cell, tmp_path):
         assert verdict.unasked == _command(detail)
     if not verdict.allowed:
         assert verdict.title == f"Дозволити {tool}?"
-        # «Cannot be undone» shows the command itself; otherwise what the tool wants.
-        assert verdict.detail == (_command(detail) if cell == "ask!" else detail)
+        # Under `auto` «cannot be undone» shows the command alone; otherwise what omp sent.
+        assert verdict.detail == (_command(detail) if gate == GATE_AUTO and cell == "ask!"
+                                  else detail)
+
+
+def _project(tmp_path):
+    """A project with the method linked in, as TCC links it, and its two roots."""
+    project = tmp_path / "car"
+    project.mkdir()
+    roots = _read_roots_for(project)
+    link = project / ".claude" / "skills"
+    link.mkdir(parents=True)
+    (link / "autosound-tuning").symlink_to(roots[1], target_is_directory=True)
+    return project, roots
+
+
+@pytest.mark.parametrize("name, line, shell, omp, passes", FOREIGN_ROWS,
+                         ids=[row[0] for row in FOREIGN_ROWS])
+def test_foreign_line_by_line(name, line, shell, omp, passes, tmp_path, monkeypatch):
+    project, roots = _project(tmp_path)
+    line = line.format(project=project, skill=roots[1])
+    monkeypatch.setenv("AUTOSOUND_SKILL_ROOT", str(roots[1]))
+
+    verdict = judge_action("Bash", line, gate=GATE_FOREIGN, read_roots=roots, shell=shell)
+
+    assert verdict.allowed is passes, verdict
+
+
+@pytest.mark.parametrize("name, line", [(row[0], row[1]) for row in FOREIGN_ROWS if row[3]],
+                         ids=[row[0] for row in FOREIGN_ROWS if row[3]])
+def test_omp_asks_about_the_foreign_holes(name, line, tmp_path):
+    """The omp rows above through omp's own gate: each asks now (`CHANGED_FOR_OMP` says why)."""
+    session, sent, _ = _omp_gate(tmp_path, "bash", f"Command: {line}", (), GATE_FOREIGN)
+
+    assert len(session.bridge.requests) == 1 and sent[0]["value"] == "Deny"
+
+
+def test_a_link_out_of_the_namespace_is_not_the_skills(tmp_path):
+    """C2: `ln -s .. state/up` made earlier (it asked then) makes `state/up/` the project itself;
+    the text alone reads as a skill folder, the disk does not."""
+    project, roots = _project(tmp_path)
+    (project / "state").mkdir()
+    (project / "state" / "up").symlink_to("..", target_is_directory=True)
+    (project / "state" / "runs").mkdir()
+
+    for line in ("rm -rf state/up/", "rm -rf state/up/measurements", "rm state/up/*.json"):
+        assert not judge_action("Bash", line, gate=GATE_FOREIGN, read_roots=roots).allowed, line
+    # Where it lands decides: through the link to the project's own `process/` is the skill's.
+    for line in ("rm -rf state/runs/", "rm -rf state/up/process/old"):
+        assert judge_action("Bash", line, gate=GATE_FOREIGN, read_roots=roots).allowed, line
+
+
+def test_a_writer_the_project_holds_at_the_documents_path_is_not_the_skills(tmp_path):
+    """`rew_tool/state/process.py` is the documents' path in the SKILL's folder; from the project
+    it runs whatever the project holds there — so when it holds something, that must be the
+    writer itself."""
+    project, roots = _project(tmp_path)
+    planted = project / "rew_tool" / "state"
+    planted.mkdir(parents=True)
+    (planted / "process.py").write_text("import os\n")
+
+    verdict = judge_action("Bash", "python3 rew_tool/state/process.py ./process show",
+                           gate=GATE_FOREIGN, read_roots=roots)
+
+    assert not verdict.allowed
 
 
 def test_a_writer_is_asked_about_by_its_effect(tmp_path):
