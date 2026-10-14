@@ -21,7 +21,7 @@ session builds or briefs an Agent; the seats from «Process weight»; `Engine: n
 | 5 | Window polish, Leftovers | #203, #166, #167, #204, #180; #205–#209 | the Haiku trial |
 
 Code implementers run **one at a time** in the tree (no parallel edits, no tests over a changing file); the study
-runs beside them.
+runs beside them. Bought 2026-10-14: #194's re-review ran while the AI picks group had `tests/conftest.py` half-edited — 445 setup errors; it re-ran on a `git archive`.
 
 ## Weight and models (`hub:seam`, with the Arbiter's word of 2026-10-14 on Haiku)
 
@@ -58,7 +58,7 @@ result goes to the ledger below and one line to the hub's H-019.
 | #201 | done — re-review clean (ship as is); hub #246 told the command |  opus · high | 0a01d66, 5e24c74, 228fe1a | opus · high | ship skips the local suite on `ci-green` ok; `make ship VERSION= AT=` dry check; CHANGELOG v1.1.3 corrected; fallback cannot run today (the hub fails ci-green and windows-ran on unreadable CI) |
 | #202 | built | opus · medium | 05230bb, b3f722e | — (ordinary; the group seats) | a test race with the folder watcher's reload (400 ms); `ci_shard.py` prints UTF-8 on a cp1252 pipe. Found: TCC reloads ~0.4 s and ~0.94 s after its own pick lands in `.tcc/` — a pool line (F-102) |
 | Release tooling group | seats done: Important 2 (AT reads TCC's tags when the submodule is not initialised; AT's published-tag seam untested), Minor/gaps 11 — done — fixed in 6c02aed, 07522b4 (all 10); re-review: one Minor (a `-` URL reached ls-remote as an option) fixed by the session in this round's last commit | — | — | opus · high | not now: the self-triggered reload (pool), suite-wide `filterwarnings`, the «READY» wording |
-| #194 | task review: Important 2 (`%`/`^` in a Windows temp path breaks the update; fresh installs unconstrained → hub #280 TCC-058 to the skill), Minor 3 — fixed in f008582; re-review: no regression, Important — the plain retry fired on any failure → narrowed to an old uv (< 0.5.6) decided before the install; the line in four languages (pl/de by the Advisor); the README line with `--constraints` — built in 7de4aab, cc7000b (the script asks uv for `--constraints` before the install; pl/de by the Advisor, agy gemini-3.8-flash-high); last re-review running | opus · high | 14b02a3, fc6cfe1, f008582, 7de4aab, cc7000b | opus · high | `uv tool install --constraints` from the verified tag's `constraints.txt`; no effect until a TCC with this code updates to a tag that carries the file; fresh installs (README line) still unconstrained |
+| #194 | done — last re-review: no regression; uv ≥ 0.5.6 (uv #9547) confirmed; the README URL is v1.1.3's until the release bump (404 till then) | opus · high | 14b02a3, fc6cfe1, f008582, 7de4aab, cc7000b | opus · high | Windows cmd cases first run on the PR's CI; the downgrade 6.12 → 6.11.2 needs one real update on the VM after v1.1.4 |
 | AI picks group (#165, #196, #182) | building | opus · medium | | — (ordinary; the group seats) | omp 18.10.3 on this Mac: #165 reproduced here, not on the VM |
 | #181 spike | done — all six PASS (`spike/codex-app-server/RESULT.md`) | opus · high | 464159d | — | build L: 3–4 days macOS + ~1 day Windows; risks: app-server experimental (pin the version), the user's `~/.codex` servers/plugins/hooks switched off per process; the build: in W-10 (the Arbiter, 2026-10-14) — code map running |
 | #181 | done — the study, `docs/STUDY-W-10-codex-primary.md` | opus · high | (this commit) | — | feasible, L (2–4 days); next: a ≤1-day spike on six points; five questions for the Arbiter (§5) |
