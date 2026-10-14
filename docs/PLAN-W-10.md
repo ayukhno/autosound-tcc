@@ -58,5 +58,5 @@ result goes to the ledger below and one line to the hub's H-019.
 | #202 | built | opus · medium | 05230bb, b3f722e | — (ordinary; the group seats) | a test race with the folder watcher's reload (400 ms); `ci_shard.py` prints UTF-8 on a cp1252 pipe. Found: TCC reloads ~0.4 s and ~0.94 s after its own pick lands in `.tcc/` — a pool line (F-102) |
 | Release tooling group | seats running (silent-failure, tests) | — | — | opus · high | |
 | #194 | building | opus · high | | | |
-| #181 spike | building | opus · high | | — | the Arbiter's answers in the study §5 |
+| #181 spike | done — all six PASS (`spike/codex-app-server/RESULT.md`) | opus · high | 464159d | — | build L: 3–4 days macOS + ~1 day Windows; risks: app-server experimental (pin the version), the user's `~/.codex` servers/plugins/hooks switched off per process; the build waits for the Arbiter's word |
 | #181 | done — the study, `docs/STUDY-W-10-codex-primary.md` | opus · high | (this commit) | — | feasible, L (2–4 days); next: a ≤1-day spike on six points; five questions for the Arbiter (§5) |
