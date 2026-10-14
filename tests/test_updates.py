@@ -2855,7 +2855,7 @@ def test_every_goto_in_the_windows_script_has_its_label(kw):
 
 def test_the_windows_script_s_pinned_path_runs_in_this_order():
     lines = _cmd_lines(constraints=True)
-    order = ["call uv --version", "if %errorlevel% neq 0 goto failed",
+    order = ["call uv --version >nul", "if %errorlevel% neq 0 goto failed",
              next(line for line in lines if "tool install --help" in line),
              "if errorlevel 1 goto unpinned", 'set "tcc_pins=%~dp0constraints.txt"',
              next(line for line in lines if line.startswith("call uv tool install")

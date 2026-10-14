@@ -342,7 +342,7 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             *([_cmd_echo(signed)] if signed else []),
             _cmd_echo(said["updating"]),
             # `goto` keeps the errorlevel, so `:ran` reads the install that ran, either one.
-            *(["call uv --version",
+            *(["call uv --version >nul",  # stdout only: its version is not news, its error is
                "if %errorlevel% neq 0 goto failed",
                'uv tool install --help 2>nul | findstr /l /c:" --constraints " >nul',
                "if errorlevel 1 goto unpinned",
@@ -427,7 +427,7 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                 f"    {command}",
                 "  fi",
                 "}",
-                "if ! uv --version; then",
+                "if ! uv --version >/dev/null; then",  # stdout only: the error still shows
                 "  echo; " + say(shlex.quote(said["failed"])),
                 "  exit 1",
                 "fi",
