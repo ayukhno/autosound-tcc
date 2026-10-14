@@ -2,6 +2,5 @@
 {"dir": "in", "t": 0.135, "msg": {"id": 1, "result": {"userAgent": "tcc-spike/0.162.1 (Mac OS 27.0.1; arm64) Apple_Terminal/488 (tcc-spike; 0.0.1)", "codexHome": "<CODEX_HOME>", "platformFamily": "unix", "platformOs": "macos"}}}
 {"dir": "in", "t": 0.135, "msg": {"method": "remoteControl/status/changed", "params": {"status": "disabled", "serverName": "arbiter-mac.local", "installationId": "00000000-0000-4000-8000-000000000001", "environmentId": null}, "emittedAtMs": 1791970361346}}
 {"dir": "out", "t": 0.135, "msg": {"jsonrpc": "2.0", "method": "initialized"}}
-{"dir": "out", "t": 0.135, "msg": {"jsonrpc": "2.0", "method": "initialized"}}
 {"dir": "out", "t": 0.135, "msg": {"jsonrpc": "2.0", "id": 2, "method": "thread/resume", "params": {"cwd": "<WORK>", "approvalPolicy": "untrusted", "approvalsReviewer": "user", "sandbox": "read-only", "developerInstructions": "You are in a test harness. Keep every answer under 20 words.", "threadId": "00000000-0000-7000-8000-000000000000", "excludeTurns": true, "model": "gpt-5.6-luna"}}}
 {"dir": "in", "t": 0.187, "msg": {"error": {"code": -32600, "message": "no rollout found for thread id 00000000-0000-7000-8000-000000000000"}, "id": 2}}

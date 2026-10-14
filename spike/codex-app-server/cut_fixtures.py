@@ -180,8 +180,9 @@ def main() -> None:
     config = frames(W10_LOGS / "config-wire.jsonl")
     skillsoff = frames(W10_LOGS / "skillsoff-wire.jsonl")
     badmcp = frames(W10_LOGS / "badmcp-wire.jsonl")
-    init10 = request_pair(res10, "initialize") + [f for f in res10 if f["dir"] == "out"
-                                                   and f["msg"].get("method") == "initialized"]
+    # `request_pair(..., trailing=True)` already carries the `initialized` that follows the reply;
+    # appending it again recorded it twice in resume-ok / resume-error (task 6's review, Minor 7).
+    init10 = request_pair(res10, "initialize")
 
     write("turn-mcp", header(tool) + turn(tool, 0))
     write("mcp-elicitation", header(run) + turn(run, 0))
