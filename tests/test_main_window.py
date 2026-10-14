@@ -8540,6 +8540,31 @@ def test_a_restart_with_no_model_picked_says_so(monkeypatch):
     assert half.said and half.said[0][0] == i18n.t("startNoModel")
 
 
+def test_a_restart_onto_omp_with_no_mcp_json_is_refused_before_the_handoff(monkeypatch, tmp_path):
+    """branch-silent M3 (#206): the omp refusal for an unwritten `.mcp.json` came only after the
+    running Claude session had spent its save turn and been ended — no session was left. The new
+    choice is checked first: refused, the running session is not touched."""
+    class _Layout:
+        active = False
+
+    from autosound_tcc.core import model_choices
+
+    said, handed = [], []
+    gemini = model_choices.Choice(harness="omp", model="google/gemini", label="Gemini")
+    server = SimpleNamespace(stopped_reason=None, serving=True, project_dir=tmp_path,
+                             config_error="PermissionError: read-only")
+    half = _window_half(_control_layout=_Layout(), _agent_worker=object(), _running_model="x",
+                        _mcp_server=server, _generator_choice=lambda: gemini,
+                        _dialog=SimpleNamespace(_add_system_message=said.append),
+                        _hand_off=lambda worker, mode: handed.append(mode))
+    monkeypatch.setattr(main_window.omp_session, "is_available", lambda: True)
+
+    half._start_tuning_session()
+
+    assert handed == [], "the running session is not saved and ended for a start that cannot be"
+    assert said == [i18n.t("mcpNoConfigOmp").format(error="PermissionError: read-only")]
+
+
 def test_accepting_a_reviewers_replacement_names_it_in_the_project(monkeypatch):
     """The Critic side of an accept (157): the alias, and the project's reviewer setting takes
     the accepted key, so the picker filled from it holds the new one."""

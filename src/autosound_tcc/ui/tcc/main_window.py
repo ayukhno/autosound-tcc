@@ -4758,14 +4758,14 @@ class MainWindow(QMainWindow):
                 return
             if self._running_model == chosen.key:
                 return
-            self._hand_off_then_restart(worker)
-            return
+            # Checked BEFORE the handoff: refused at launch, the running session was already
+            # saved and ended for nothing (branch-silent M3, #206).
+            if refusal := session_routes.blocker(chosen, getattr(self, "_mcp_server", None)):
+                return self._dialog._add_system_message(mcp_view.say(refusal))
+            return self._hand_off(worker, "restart")
         self._launch_session(opening)
 
     # ---- handing the project over between sessions -------------------------
-
-    def _hand_off_then_restart(self, worker) -> None:
-        self._hand_off(worker, "restart")
 
     def _hand_off(self, worker, mode: str, wrote: bool = True) -> None:
         """Ask the running agent to write down where the project stands, then swap models.
