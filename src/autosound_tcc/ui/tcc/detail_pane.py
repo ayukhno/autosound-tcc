@@ -1536,15 +1536,19 @@ class DetailPane(QFrame):
         re-review of fix round 5), each stage with what its items come down to: the title first,
         to its floor -- what it says, the table below says too; then «порівняти з», the «інша
         конфігурація» tag and the EQ's «?», whole or hidden -- the list beside them names the
-        version, and «п…» said nothing for 64 px (the review of the follow-up); then the tabs
-        and the list, to their floors -- a tab to a glyph and «…», an EQ action to its glyph,
-        the list to «v_NNN», never to nothing. «закрити ✕» keeps its floor throughout. What is
-        left when all three have given is the head's own minimum, and it has to sit inside the
+        version, and «п…» said nothing for 64 px (the review of the follow-up); then the list,
+        to its floor «v_NNN», which still names the version; then the tabs, to their floors -- a
+        tab to a glyph and «…», an EQ action to its glyph, never to nothing. The list gives
+        before the tabs (the PR's Ubuntu run): given together, Qt took a few pixels off every
+        tab, and at two thirds of a 1512 screen «Таблиця», «Рівень», «Фази» elided under Linux's
+        fonts while the list still had room to give. «закрити ✕» keeps its floor throughout.
+        What is left when all have given is the head's own minimum, and it has to sit inside the
         centre's floor (tcc#106's two thirds of the screen, less the sides), or Qt trims the
         widest items below their floors: the list showed «v_», then nothing."""
         return [([self._title], "floor"),
                 ([self._compare_label, self._compare_other, self._eq_help], "hidden"),
-                ([*self._head.findChildren(_DTab), self._compare_combo], "floor")]
+                ([self._compare_combo], "floor"),
+                (self._head.findChildren(_DTab), "floor")]
 
     def _head_shows(self, widget: QWidget) -> bool:
         """Whether the owner shows this item -- the fit's own hiding does not count."""
@@ -1562,8 +1566,8 @@ class DetailPane(QFrame):
     def head_asks(self) -> list:
         """The widths the head asks for: `[0]` with everything whole, then with each stage of
         `_head_stages` given in turn -- `[1]` the title at its floor and the rest whole, `[2]`
-        the labels and the «?» hidden too, `[3]` the tabs and the list at their floors too, which
-        is the head's own minimum. Counted from the items' whole and floor widths (a hidden one
+        the labels and the «?» hidden too, `[3]` the list at its floor too, `[4]` the tabs at
+        their floors too, which is the head's own minimum. Counted from the items' whole and floor widths (a hidden one
         takes its spacing with it), not from what they ask for right now, so the numbers do not
         move with the way `_fit_head` last set them."""
         layout = self._head.layout()

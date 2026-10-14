@@ -1066,7 +1066,8 @@ def test_the_full_window_s_head_gives_way_in_stages(tmp_path, monkeypatch, view)
     tag and the EQ's «?», whole or hidden (the review of the follow-up: «п…» said nothing and
     cost 64 px); then the tabs and the list, each to its floor -- a tab to a glyph and «…», an
     EQ action to its glyph, the list to «v_NNN» -- with the row's gaps tightened, never to
-    nothing; «закрити ✕» keeps its floor throughout. The pane is put at each width by the
+    nothing; «закрити ✕» keeps its floor throughout. The list gives before the tabs (the PR's
+    Ubuntu run). The pane is put at each width by the
     splitter's handle, as the Arbiter would; the widths are the head's own asks, so no number
     here is a Mac pixel. Over the table and over one channel's EQ."""
     from PySide6.QtWidgets import QApplication
@@ -1108,7 +1109,7 @@ def test_the_full_window_s_head_gives_way_in_stages(tmp_path, monkeypatch, view)
         def shown(widgets):
             return [w.isVisibleTo(head) for w in widgets]
 
-        whole, title_gone, labels_gone, least = pane.head_asks()
+        whole, title_gone, labels_gone, list_gone, least = pane.head_asks()
         frame = pane.width() - head.width()
         roomy = 2000
         settle(roomy)
@@ -1133,9 +1134,16 @@ def test_the_full_window_s_head_gives_way_in_stages(tmp_path, monkeypatch, view)
             assert _at_its_floor(pane._title), (pane._title.fit_text(), pane._title.width())
         assert all(w.fit_text() == w.text() for w in (*tabs, *actions)), cut()
         _floors_hold(pane)
-        # Shorter still: the tabs, the actions and the list give, the gaps tighten -- never to
-        # nothing, and the list and «закрити ✕» whole.
-        centre((labels_gone + least) // 2 + frame)
+        # Shorter: the list gives before the tabs (the PR's Ubuntu run: given together, Qt took a
+        # few pixels off every tab at two thirds of a 1512 screen) -- the tabs still whole.
+        assert list_gone < labels_gone, "the list has room to give"
+        centre((labels_gone + list_gone) // 2 + frame)
+        assert all(w.fit_text() == w.text() for w in (*tabs, *actions)), cut()
+        assert box.width() >= box.floor_width() and _combo_shows_whole(box), box.width()
+        assert head.layout().spacing() == _HEAD_SPACING
+        # Shorter still: the tabs and the actions give, the gaps tighten -- never to nothing, and
+        # the list and «закрити ✕» whole.
+        centre((list_gone + least) // 2 + frame)
         assert any(t.fit_text() != t.text() for t in tabs), cut()
         assert all(_reads(w) for w in (*tabs, *actions)), cut()
         assert head.layout().spacing() == _HEAD_SPACING_TIGHT
