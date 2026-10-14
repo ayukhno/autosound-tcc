@@ -575,10 +575,16 @@ class CurveDialog(QDialog):
         #: the time one reads (N1, R1). One list serves every driver in `_unread`: a new
         #: selection empties both, so each came back under each of these.
         self._unread_series: list[Optional[str]] = []
-        #: The last step's write did not land (a read-only `.tcc/`, a full disk): what is drawn is
-        #: the person's and nowhere else, and a series switch does not put the bank over it
-        #: (#197's review, M1). Said on the window's line already (`curveBankNotKept`).
-        self._unsaved = False
+        #: Changes whose write did not land (a read-only `.tcc/`, a full disk, a store that cannot
+        #: be read): `{(title, series it was made under): (Reading, (delay, all-pass) drawn)}`. On
+        #: screen and nowhere else, so a series switch does not put the bank over such a driver
+        #: (#197's review, M1); and it is banked under the series it was made under, never the one
+        #: switched to, when a write next lands (#197's re-review, P7) — on screen or not. Said on
+        #: the window's line while the store refuses (`curveBankNotKept`).
+        self._pending: dict[tuple[str, Optional[str]], tuple] = {}
+        #: `{title: (delay, all-pass)}` as last banked or put back: what a step that does not land
+        #: compares with, so that only the drivers it changed are kept as unsaved.
+        self._baseline: dict[str, tuple] = {}
         #: The drivers in `_unread` the person has set since — touched, whatever the value is now:
         #: one moved and put back at the value drawn is still theirs (Fable m3, #209).
         self._touched_unread: set[str] = set()
@@ -1404,11 +1410,11 @@ class CurveDialog(QDialog):
 
         Not while drivers wait for a read of the bank (`_unread`): the step's retry puts them back,
         this series last (the re-review of G10 fix A, N1 and R1; #197's review, I2). Not over a
-        value whose write did not land either (`_unsaved`): it is on screen and nowhere else, and
-        putting the bank over it lost it (#197's review, M1) — the next step that lands banks it
-        under the series shown then.
+        driver whose change did not land either (`_pending`): it keeps its value, and the next
+        write that lands banks it under the series it was made under (#197's review, M1, and
+        re-review, P7). Every other driver gets this series' own.
         """
-        if self._view._traces and not self._unread and not self._unsaved:
+        if self._view._traces and not self._unread:
             self._restore_bank()
             self._sync_channel_delay()
         self._render_bank()
@@ -1484,8 +1490,12 @@ class CurveDialog(QDialog):
         # checking the set is the only reason it is ever sent anywhere. And the driver's all-pass,
         # which is the same kind of proposal and lives in the same entry. One write for the set:
         # this runs on every step of the box (#177).
+        series = self._session()
+        held = self._held_for_other_series(series)
         readings = []
         for index, trace in enumerate(self._view._traces):
+            if trace.name in held:
+                continue  # another series' change, not kept yet: banked there, never here (P7)
             kept = self._kept_raw.get(trace.name)
             if kept is not None:
                 if (self._view.delay_ms(index), self._view.allpass(index)) == kept[:2]:
@@ -1507,10 +1517,53 @@ class CurveDialog(QDialog):
             # so a new sentence per step, and a report stands until its ✕.
             # A write that lands ends the set-aside line (`delay_bank.aside_said`): the fresh bank
             # it said the next step would start — readings at zero too, which `load` does not count.
-            self._unsaved = not delay_bank.put_many_or_say(
-                readings, window_folder.tcc_dir(self), session=self._session())
+            flushed = self._bank_pending(series, {reading.title for reading in readings})
+            if delay_bank.put_many_or_say(readings, window_folder.tcc_dir(self), session=series):
+                for reading in readings:
+                    self._pending.pop((reading.title, series), None)
+                    self._baseline[reading.title] = self._drawn(reading.title)
+            else:
+                for reading in readings:
+                    if self._drawn(reading.title) != self._baseline.get(reading.title):
+                        self._pending[(reading.title, series)] = (
+                            reading, self._drawn(reading.title))
+            if flushed:
+                # Banked under their own series now: the drivers that held another series' value
+                # get this one's, as the switch would have given them (P7).
+                self._restore_bank()
         self._sync_channel_delay()
         self._render_bank()
+
+    def _drawn(self, title: str) -> Optional[tuple]:
+        """`(delay, all-pass)` drawn for `title`, or None when it is not on screen."""
+        for index, trace in enumerate(self._view._traces):
+            if trace.name == title:
+                return (self._view.delay_ms(index), self._view.allpass(index))
+        return None
+
+    def _held_for_other_series(self, series: Optional[str]) -> set:
+        """Drivers on screen still drawn at a change made under another series that did not land:
+        not this series' to bank (#197's re-review, P7). Moved since, they are this series'."""
+        return {
+            title for (title, made_under), (_reading, drawn) in self._pending.items()
+            if made_under != series and self._drawn(title) == drawn
+        }
+
+    def _bank_pending(self, series: Optional[str], covered: set) -> bool:
+        """Bank each change that did not land under the series it was made under — except the
+        shown series' own for a driver the step banks anyway (`covered`). True when one landed.
+        A record goes only when its write lands: a driver taken off the screen keeps it."""
+        own, landed = window_folder.tcc_dir(self), False
+        by_series: dict = {}
+        for (title, made_under), (reading, _drawn) in self._pending.items():
+            if made_under != series or title not in covered:
+                by_series.setdefault(made_under, []).append((title, made_under, reading))
+        for made_under, items in by_series.items():
+            if delay_bank.put_many_or_say([item[2] for item in items], own, session=made_under):
+                for title, _series, _reading in items:
+                    del self._pending[(title, made_under)]
+                landed = True
+        return landed
 
     def _render_bank(self) -> None:
         """The banked set behind its own button, and the same numbers beside the titles in the
@@ -1693,7 +1746,11 @@ class CurveDialog(QDialog):
             self._restoring = False
         # Nothing banked for this series now: what is drawn is the bank.
         self._unread, self._apf_unshown, self._kept_raw = {}, {}, {}
-        self._touched_unread, self._unsaved = set(), False
+        self._touched_unread = set()
+        # This series' changes not kept went with its Clear; another series' stay to be banked
+        # there (#197's re-review, P7).
+        self._pending = {key: record for key, record in self._pending.items() if key[1] != series}
+        self._baseline = {trace.name: (0.0, None) for trace in self._view._traces}
         self._render_bank()
 
     def _processing_rate_hz(self):
@@ -1998,6 +2055,16 @@ class CurveDialog(QDialog):
                 # the other series', and a reference left at its value was banked over this one's
                 # zero by the next step (#197). After `set_traces` they are what is drawn already.
                 back = put_back.get(trace.name)
+                now = (self._view.delay_ms(index), self._view.allpass(index))
+                records = [(made_under, record) for (title, made_under), record
+                           in self._pending.items() if title == trace.name]
+                unsaved = any(record[1] == now for _series, record in records)
+                if unsaved:
+                    back = None  # a change not kept yet, drawn: it stays (#197's review, M1, P7)
+                else:
+                    mine = self._pending.get((trace.name, series))
+                    if mine is not None:
+                        back = mine[1]  # drawn again from scratch: this series' latest is that
                 if back is not None and (drawn is None or self._view.delay_ms(index) == drawn[0]):
                     self._view.set_delay_target(index)
                     self._view.set_delay(back[0])
@@ -2022,6 +2089,8 @@ class CurveDialog(QDialog):
                     self._kept_raw[trace.name] = (*now, why)
                 elif what == "apf":
                     self._apf_unshown[trace.name] = why  # banked with its filter kept (C3's way)
+                if not unsaved:
+                    self._baseline[trace.name] = now
             self._view.set_delay_target(target)
         finally:
             self._restoring = False

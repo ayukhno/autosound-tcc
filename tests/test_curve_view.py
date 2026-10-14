@@ -1778,6 +1778,62 @@ def test_a_switch_does_not_put_the_bank_over_a_value_whose_write_did_not_land(
     assert delay_bank.load(session="A") == {wl: 0.61, wr: 0.2}, "and the step that lands banks it"
 
 
+def _store_out(how, monkeypatch):
+    """The store refusing the bank's writes until the returned call: a full disk (it reads, and
+    no write lands), or a folder in its place (it can be neither read nor written)."""
+    from autosound_tcc.core import config, own_store, project_settings
+
+    if how == "unreadable":
+        return _a_folder_in_the_store_s_place(project_settings.path_for(config.tcc_dir()))
+    real_write, full = own_store.write_json, [True]
+
+    def write_json(path, data):
+        if full:
+            raise OSError(28, "No space left on device")
+        real_write(path, data)
+
+    monkeypatch.setattr(own_store, "write_json", write_json)
+    return full.clear
+
+
+@pytest.mark.parametrize("how", ["unwritable", "unreadable"])
+def test_an_unsaved_change_is_banked_under_its_own_series_never_the_one_switched_to(
+        monkeypatch, app_log_told, how):
+    """#197's re-review (probe P7): A and B each hold both drivers; a step on w-L under A does not
+    land; the panel moves to B. The window kept every driver as drawn — A's — and once the store
+    was back, the next step banked A's w-R over B's own 0.9. Only the driver changed and not kept
+    stays as it is: the rest get B's own. The change is banked under A, where it was made, when
+    a write next lands — never under B."""
+    from autosound_tcc.core import delay_bank
+
+    wl, wr = "w-L_01 (sw)", "w-R_01 (sw)"
+    delay_bank.put_many([delay_bank.Reading(wl, 0.5), delay_bank.Reading(wr, 0.2)], session="A")
+    delay_bank.put_many([delay_bank.Reading(wl, 0.7), delay_bank.Reading(wr, 0.9)], session="B")
+    series = ["A"]
+    dialog = _dialog([wl, wr], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog.set_session_provider(lambda: series[0])
+    dialog._on_curves([Trace(wl, *_impulse(4.52)), Trace(wr, *_impulse(4.78))])
+    back = _store_out(how, monkeypatch)
+    try:
+        dialog._view.set_delay_target(0)
+        dialog._view.set_delay(0.55)  # not kept
+        series[0] = "B"
+        dialog.session_switched()
+    finally:
+        back()
+    if how == "unwritable":
+        assert dialog._view.delays()[:2] == pytest.approx([0.55, 0.9]), "w-R is B's own now"
+
+    dialog._view.set_delay_target(1)
+    dialog._view.set_delay(0.95)  # a step under B, and it lands
+
+    assert delay_bank.load(session="B") == {wl: 0.7, wr: 0.95}, "B's own w-L, not A's 0.55"
+    assert delay_bank.load(session="A") == {wl: 0.55, wr: 0.2}, "A's change banked under A"
+    assert dialog._view.delays()[:2] == pytest.approx([0.7, 0.95]), "and B's own on screen"
+    assert not dialog._pending, "nothing left unsaved"
+
+
 def test_a_driver_with_no_reading_is_named_not_assumed_to_be_at_zero():
     """The user's first real set left w-R, both rears, the centre and the sub off it entirely,
     with nothing saying so — a fragment that reads as a plan (2026-08-12)."""
