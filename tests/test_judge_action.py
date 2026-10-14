@@ -392,6 +392,15 @@ AUTO_LINK_ROWS = [
     ("a PowerShell delete over a nested link", "Remove-Item -Recurse -Force process", P),
     ("a PowerShell delete of a glob over a link", "Remove-Item -Recurse -Force process/*", P),
     ("a PowerShell move through a link", "Move-Item h/sub process/", P),
+    # A link made by something else earlier in the same line: the disk is read before the line
+    # runs, so a delete or a move of what is not there yet, after another statement, asks.
+    ("a link by python, then rm",
+     "python3 -c 'import os; os.symlink(os.path.expanduser(\"~\"), \"h3\")' && rm -rf h3/", B),
+    ("a link by perl, then rm", "perl -e 'symlink($ENV{{HOME}},\"h4\")'; rm -rf h4/", B),
+    ("an archive, then rm", "tar -xf evil.tar && rm -rf h5/", B),
+    ("an archive, then mv", "tar -xf evil.tar; mv h5/ elsewhere", B),
+    ("an archive, then a PowerShell delete",
+     "Expand-Archive evil.zip .; Remove-Item -Recurse -Force h6", P),
 ]
 
 #: …and what still passes `auto` there: links and deletes that stay inside the project.
@@ -402,6 +411,8 @@ AUTO_LINK_PASS = [
     ("a folder by New-Item", "New-Item -ItemType Directory -Path process/runs", P),
     ("a PowerShell link inside", "New-Item -ItemType SymbolicLink -Path state/l -Value "
                                  "process/a.json", P),
+    ("a missing folder removed, alone", "rm -rf h7/", B),
+    ("a statement, then an existing file removed", "echo hi && rm process/a.json", B),
 ]
 
 #: What changed for omp AND the SDK route (`TuningSession._can_use_tool` asks `bash_is_dangerous`
@@ -409,6 +420,9 @@ AUTO_LINK_PASS = [
 CHANGED_FOR_SDK = {
     name: "auto pass -> ask!: " + ("what it reaches lies outside the project through a link"
                                    if line.startswith(("rm", "mv")) else
+                                   "a delete or move of what is not there yet, after another "
+                                   "statement that could have made it a link"
+                                   if " rm " in line or " mv " in line else
                                    "a link made to outside the project")
     for name, line, shell in AUTO_LINK_ROWS if shell == B
 }

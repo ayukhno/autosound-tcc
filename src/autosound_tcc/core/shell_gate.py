@@ -524,9 +524,11 @@ _PROJECT: ContextVar[Optional[Path]] = ContextVar("shell_gate_project", default=
 @contextmanager
 def _in_project(roots: Sequence[Path]) -> Iterator[None]:
     token = _PROJECT.set(Path(roots[0]) if roots else None)
+    after = _AFTER_ANOTHER.set(False)  # each line starts with nothing run before it
     try:
         yield
     finally:
+        _AFTER_ANOTHER.reset(after)
         _PROJECT.reset(token)
 
 
@@ -681,7 +683,11 @@ def _script_is_dangerous(text: str, depth: int, inherited: Iterable[str] = (),
         _Reader(text, commands, depth).read()
         _follow_cd(commands, cwd)
         tainted = _tainted(commands, inherited)
-        return any(_command_is_dangerous(command, tainted, depth) for command in commands)
+        for command in commands:
+            if _command_is_dangerous(command, tainted, depth):
+                return True
+            _ran(command.words)
+        return False
     except (_Unreadable, RecursionError):
         return True  # unknown is not safe
 
@@ -1555,6 +1561,35 @@ def _xargs_command(arguments: list[_Word]) -> Optional[list[_Word]]:
 #: PowerShell's `Remove-Item -Recurse` follows a junction). The third fix round of tcc#181.
 _LINK_FOLLOWERS = frozenset({"rm", "unlink", "mv", "remove-item", "ri", "del", "erase", "rd",
                              "rmdir", "move-item", "mi", "move"})
+#: Whether a statement ran before this one in the same line (`_after`): what it made — a link by
+#: `python3 -c`, `perl`, an archive — is not on the disk the check reads.
+_AFTER_ANOTHER: ContextVar[bool] = ContextVar("shell_gate_after_another", default=False)
+
+
+#: Statements that only change the folder: they make nothing a later one could trip over.
+_FOLDER_CHANGES = frozenset({"cd", "pushd", "popd", "chdir", "set-location", "sl", "push-location",
+                             "pop-location"})
+#: …and the others that cannot make a link: they set, look up or say, and run nothing.
+_MAKES_NOTHING = _FOLDER_CHANGES | {"export", "local", "declare", "typeset", "readonly", "unset",
+                                    "set", "true", "false", ":", "echo", "printf", "type", "which",
+                                    "test", "["}
+
+
+def _ran(words: list[_Word]) -> None:
+    """A statement of the line was read: every one after it is «after another» (`_AFTER_ANOTHER`),
+    unless it makes nothing (`_MAKES_NOTHING`, behind its assignments and a `builtin`/`command`;
+    `command -v` only looks). A nested script inherits its line's mark."""
+    at = 0
+    while at < len(words) and _ASSIGNMENT.match(words[at].text):
+        at += 1
+    while at < len(words) and _command_name(words[at].text) in ("builtin", "command"):
+        if at + 1 < len(words) and words[at + 1].text in ("-v", "-V"):
+            return
+        at += 1
+    if at < len(words) and _command_name(words[at].text) not in _MAKES_NOTHING:
+        _AFTER_ANOTHER.set(True)
+
+
 #: What `New-Item -ItemType` makes that is a link.
 _LINK_KINDS = frozenset({"symboliclink", "junction", "hardlink"})
 #: How far a recursive PowerShell delete is looked into for a junction; past it, it asks.
@@ -1642,8 +1677,14 @@ def _reaches_out_through_a_link(arguments: list[_Word], cwd: Optional[str]) -> b
         if word.dynamic:
             continue  # what the line does not spell: the narrow rules have their own answer
         path = _resolve(word.text, base)
-        if path is not None and _in_the_project(path) and any(
-                _lands_outside(match) for match in _matches(path)):
+        if path is None or not _in_the_project(path):
+            continue
+        matches = _matches(path)
+        if any(_lands_outside(match) for match in matches):
+            return True
+        if _AFTER_ANOTHER.get() and not any(os.path.lexists(match) for match in matches):
+            # Not there when the line is read, and something ran before it in the same line:
+            # `python3 -c '…os.symlink(home, "h")' && rm -rf h/`. The disk cannot answer for it.
             return True
     return False
 
@@ -1657,7 +1698,6 @@ def _holds_a_link_out(target: _Word, cwd: Optional[str]) -> bool:
     path = _resolve(target.text, base)
     if path is None or not _in_the_project(path):
         return False
-    isjunction = getattr(os.path, "isjunction", lambda _: False)
     seen = 0
     for match in _matches(path):
         if not os.path.isdir(match) or os.path.islink(match):
@@ -1668,7 +1708,7 @@ def _holds_a_link_out(target: _Word, cwd: Optional[str]) -> bool:
                 if seen > _WALK_LIMIT:
                     return True
                 entry = os.path.join(folder, name)
-                if (os.path.islink(entry) or isjunction(entry)) and _lands_outside(entry):
+                if _lands_outside(entry):  # a link or a junction, whichever this Python can tell
                     return True
     return False
 
@@ -2021,6 +2061,9 @@ def _cmd_line_is_dangerous(line: str, tainted: set[str], depth: int,
         if any(_words_are_dangerous(reading, _Command(piped=in_pipe, cwd=cwd), tainted, depth)
                for reading in readings):
             return True
+        if not any(reading and _command_name(reading[0].text) in _FOLDER_CHANGES
+                   for reading in readings):
+            _ran(words)  # `if exist x cd build` only changes the folder, read either way
         if not in_pipe:
             cwd = _cmd_cd(readings, sure, cwd)  # `cd /d C:\ && rd /s /q .`
     return False
@@ -2149,6 +2192,7 @@ def _powershell_line_is_dangerous(line: str, depth: int, cwd: Optional[str] = ""
             continue
         if _powershell_statement_is_dangerous(words, in_pipe, call, depth, cwd):
             return True
+        _ran(words)
         moved, target = _cd_target(words, cwd, shell="powershell")  # `Set-Location ~; ri -r .`
         if moved and not in_pipe:
             cwd = target
