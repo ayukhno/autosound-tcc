@@ -2956,7 +2956,7 @@ class MainWindow(QMainWindow):
             return
         offer = state.get("offer")
         if not offer:
-            key = "gitNoGh" if state.get("gh") == "absent" else "gitGhSignedOut"
+            key = {"absent": "gitNoGh", "no-answer": "gitGhNoAnswer"}.get(state.get("gh"), "gitGhSignedOut")
             self._status_strip.notify(i18n.t(key), level="warn")
             return
         box = QMessageBox(self)
@@ -4050,7 +4050,7 @@ class MainWindow(QMainWindow):
             self._capture_check_not_run = measurement_view.NotRun(i18n.t("captureCheckUnread"),
                                                                   None, tuple(titles))
             self._status_strip.notify(self._capture_check_not_run.line, level="warn")
-        bad = measurement_view.unusable_lines(round_ or {}, titles)
+        bad = measurement_view.unusable_lines(round_ or {}, titles, ambiguous=i18n.t("measAmbiguous"))
         if bad and frozenset(bad) != getattr(self, "_unusable_dismissed", None):
             self._status_strip.notify(
                 i18n.t("unusableSummary").format(n=len(bad), first=bad[0]), level="warn",

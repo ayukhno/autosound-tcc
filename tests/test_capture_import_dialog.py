@@ -1089,7 +1089,7 @@ def test_a_sweep_the_check_could_not_judge_says_so_and_is_neither_fine_nor_unusa
     assert dialog._table.item(_row_of(dialog, "u2"), _COL_CHECK).text() == "✓"
     assert i18n.t("capCheckNotJudgedList").format(names="m_3 (sw)") in dialog._note.text()
     assert [(row.uuid, row.as_is, row.checked) for row in dialog.taken()] == [
-        ("u2", False, "usable"), ("u3", False, "")]
+        ("u2", False, ""), ("u3", False, "")]
 
 
 def test_an_apply_that_waited_stays_open_once_for_a_sweep_the_check_could_not_judge(tmp_path):
@@ -1331,9 +1331,9 @@ def test_a_row_red_only_for_its_title_does_not_lay_it_on_the_method(tmp_path, la
 
 
 def test_what_the_window_judged_goes_with_what_it_takes(tmp_path):
-    """tcc#149: each capture taken carries the window's verdict on it, for the card — `usable`
-    for a sweep it found usable over its own range, the clash's own name for a title of the wrong
-    kind taken as it is, and nothing where the window had nothing to say."""
+    """tcc#149: each capture taken carries the clash the window found in its title, for the card —
+    the clash's own name for a title of the wrong kind taken as it is, and nothing for a usable
+    sweep or where the window had nothing to say: the method judges a sweep's range itself."""
     _needs_the_method()
     check, _asked = _checker({"u2": dict(_USABLE, kind="sweep"),
                               "u3": dict(_USABLE, kind="sweep")})
@@ -1346,7 +1346,7 @@ def test_what_the_window_judged_goes_with_what_it_takes(tmp_path):
     _app().processEvents()
 
     assert [(row.uuid, row.as_is, row.checked) for row in dialog.taken()] == [
-        ("u1", False, ""), ("u2", False, "usable"), ("u3", True, "sweep_named_rta")]
+        ("u1", False, ""), ("u2", False, ""), ("u3", True, "sweep_named_rta")]
 
 
 @pytest.mark.parametrize("mode", ["dark", "light"])

@@ -161,21 +161,46 @@ def standing(round_: Optional[dict]) -> dict[str, dict]:
             if isinstance(row, dict) and not row.get("superseded_by")}
 
 
+def title_key():
+    """`title -> its identity within a round`: the method's own `process.title_key` (#153, from
+    v3.1.4), so `w-R_01 (sw)` taken is the `w-R_1 (sw)` the round asked for, as every reader of the
+    method's now counts it. A copy before v3.1.4 has none and matched raw titles; so does this then,
+    each copy read by its own rule. Never raises."""
+    try:
+        key = getattr(vendor_loader.load_process(), "title_key", None)
+    except Exception:  # noqa: BLE001 — no method on this machine: the raw title, as before #153
+        key = None
+    return key if callable(key) else (lambda title: ("raw", str(title)))
+
+
+def taken_as(round_: Optional[dict], title: str, key=None) -> Optional[str]:
+    """The row of the round's standing takes (`standing`) that answers for `title`, or None: the
+    exact title first, else a row of its key (`title_key`) — the method's `_row_for` over the rows
+    it stands by. A round written since v3.1.4 holds a take under the list's own title (the typed
+    spelling as its `as_in_rew`); one written before holds it as typed, and this finds it there."""
+    held = standing(round_)
+    if title in held:
+        return title
+    key = key or title_key()
+    wanted = key(title)
+    return next((row for row in held if key(row) == wanted), None)
+
+
 def outstanding(round_: Optional[dict]) -> list[str]:
     """What a round asked for and neither took nor skipped, in its own order: the method's
     `_outstanding` (`process.py`), its required and its optional titles alike — an optional one
     left untaken is no gap to the method, and no capture either (skill #80).
 
-    By the raw title, as the method compares: a capture taken under another spelling of the same
-    `name_key` answers for none of these, in the method's record, the agent's words or the close,
-    until the read against REW (`reconcile_captures`) takes it under the list's own. The live card
-    read its rows by key and said «done» where all three said «outstanding», and history said
-    «waiting» after the close (the re-review of G6+G7 fix B). Both cards ask this, so «done» has
-    one source."""
+    By the series key, as the method matches from v3.1.4 (#153, `title_key`): a capture taken or
+    skipped under another spelling of a title (`w-R_01 (sw)` for `w-R_1 (sw)`) answers for it, in
+    the method's record, the agent's words and the close alike. Both cards ask this, so «done» has
+    one source (the re-review of G6+G7 fix B)."""
     round_ = round_ or {}
-    held, skipped = standing(round_), round_.get("skipped") or {}
+    key = title_key()
+    held = {key(str(title)) for title in standing(round_)}
+    skipped = {key(str(title)) for title in round_.get("skipped") or {}}
     return [str(title) for title in round_.get("expected") or []
-            if str(title) not in held and str(title) not in skipped]
+            if key(str(title)) not in held and key(str(title)) not in skipped]
 
 
 def journal_file(project_dir: Optional[Path] = None) -> Path:

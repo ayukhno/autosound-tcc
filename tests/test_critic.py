@@ -82,6 +82,24 @@ def test_clipboard_fallback_is_not_reported_as_an_answer(stubbed, tmp_path):
     assert result.text == ""
 
 
+def test_a_clipboard_package_is_the_review_the_record_names(stubbed, tmp_path):
+    """SKL-073 item 6 (v3.1.4): one review round, one record — a package is completed by at most
+    one answer. The clipboard route files no review of its own, only the package it compiled
+    (`>> PACKAGE_FILE:`): the record names that package, as a POSIX path, so the answer the
+    Arbiter brings back completes the right round."""
+    stubbed(
+        "print('▶ РУЧНИЙ РЕЖИМ: БУФЕР ОБМІНУ (CLIPBOARD MODE)', file=sys.stderr)\n"
+        "print('>> PACKAGE_FILE: process\\\\reviews\\\\2026-10-14-x-package.md', file=sys.stderr)\n"
+        "sys.exit(0)\n"
+    )
+    project = _project(tmp_path)
+
+    result = critic.run("package body", project_dir=project, python_executable=sys.executable)
+
+    assert result.mode == critic.MODE_CLIPBOARD
+    assert result.review == "process/reviews/2026-10-14-x-package.md"
+
+
 def test_silence_is_an_error_not_a_critique(stubbed, tmp_path):
     stubbed("sys.exit(0)\n")
     project = _project(tmp_path)

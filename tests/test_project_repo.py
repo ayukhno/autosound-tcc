@@ -252,7 +252,10 @@ def test_the_backup_runs_only_after_yes(tmp_path, monkeypatch):
     asked = []
     monkeypatch.setattr(QMessageBox, "exec", lambda self: asked.append(self.text()) or
                         QMessageBox.StandardButton.No)
-    for gh, sentence in (("absent", "gitNoGh"), ("signed-out", "gitGhSignedOut")):
+    # v3.1.4's `no-answer` (`gh auth status` said nothing in 30 s) is its own line, not «signed out»:
+    # signing in again would not help a gh that does not answer.
+    for gh, sentence in (("absent", "gitNoGh"), ("signed-out", "gitGhSignedOut"),
+                         ("no-answer", "gitGhNoAnswer")):
         monkeypatch.setattr(project_repo, "backup_status", lambda project, gh=gh: {
             "repo": True, "remote": None, "gh": gh, "init": None, "offer": None})
         _button(window, "Back up to GitHub (1/2)").click()

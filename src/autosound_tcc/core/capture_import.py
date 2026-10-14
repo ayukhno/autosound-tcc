@@ -93,9 +93,9 @@ class Candidate:
     #: (tcc#21). Read back from the store, so that capture is not asked about again; a re-take
     #: under the same title is another uuid and is checked afresh (SCR-040).
     as_is: bool = False
-    #: What the import window's check said about this capture, kept for the card until the method
-    #: reads a sweep's own range (tcc#149, hub #247 — drop with the patch): `usable` (over its own
-    #: range, `check_sweeps`), or a clash's own name (`verdict_reader`). "" said nothing.
+    #: The clash the import window's check found between this capture's title and its data, by its
+    #: own name (`verdict_reader`, `CLASHES`), kept for the card: the method reads no titles. ""
+    #: found none. A store written before v3.1.4 may hold `usable` here; nothing reads it now.
     checked: str = ""
 
     @property
@@ -232,11 +232,11 @@ def retake_titles(measurements: dict, project_dir: Optional[Path] = None) -> lis
 
 
 def window_verdicts(project_dir: Optional[Path] = None) -> dict[str, str]:
-    """`uuid -> what the import window's check said` for the captures taken through it (tcc#149):
-    `usable`, or a clash's name. Keyed by REW's uuid as the method keys its own verdict, so a
-    re-take — a new uuid — never inherits it. Read by the card until hub #247 (drop with it)."""
+    """`uuid -> the clash the import window's check found` for the captures taken through it
+    (tcc#149): a clash's name (`CLASHES`). Keyed by REW's uuid as the method keys its own verdict,
+    so a re-take — a new uuid — never inherits it. Read by the card: the method reads no titles."""
     return {uuid: str(entry["checked"]) for uuid, entry in load_imported(project_dir).items()
-            if entry.get("checked")}
+            if entry.get("checked") in CLASHES}
 
 
 def imported_titles(project_dir: Optional[Path] = None) -> list[str]:
@@ -284,7 +284,7 @@ def record_imported(rows: Iterable["Candidate"], round_id: str = "",
         # the same capture must not quietly forget that the tuner already answered for it.
         if row.as_is or (measurements.get(row.uuid) or {}).get("as_is"):
             entry["as_is"] = True
-        # The window's verdict, by the same uuid and kept the same way (tcc#149, hub #247 patch).
+        # The window's clash, by the same uuid and kept the same way (tcc#149).
         checked = row.checked or str((measurements.get(row.uuid) or {}).get("checked") or "")
         if checked:
             entry["checked"] = checked
@@ -411,13 +411,11 @@ def _verdict_by_the_method() -> Optional[Callable[..., dict]]:
 
     Only the method's verdict, nothing of ours (the Arbiter, 2026-10-02): a sweep that never
     completed, a flat loopback, a silent capture. Noise and distortion are REW's to report. It is
-    also the function the method's own `capture-check` runs after the import, which the card reads
-    — but not asked the same question since tcc#148: the window asks it over each sweep's own range
-    (`check_sweeps`) and adds what a title contradicts (`verdict_reader`), while the method's check
-    still asks over 20-20000 Hz and reads no titles. The card agrees with the window through TCC's
-    own patch (tcc#149: `window_verdicts`, `measurement_view.held_by_the_window`); what still
-    disagrees is the method's step gate, which counts such a sweep unusable until the method asks
-    over the same range (hub #247).
+    also the function the method's own `capture-check` runs after the import, which the card reads,
+    asked the same question: from v3.1.4 the method judges each sweep over the range REW holds for
+    it (hub #247), so the window, the card and the method's step gate read one verdict. What the
+    window adds is what a title contradicts (`verdict_reader`): the method reads no titles, and the
+    card reads that clash from the import store (`window_verdicts`).
     """
     try:
         answer = getattr(vendor_loader.load_verify(), "verdict", None)
@@ -467,69 +465,23 @@ def _method_tag(title: str) -> str:
     return str((parsed or {}).get("method") or "")
 
 
-def sweep_band(record: Optional[dict]) -> Optional[tuple[float, float]]:
-    """The range the sweep itself was set to, as REW holds it for that measurement — the listing's
-    `startFreq` / `endFreq` (among its fields in `rew_api.py`, measured on a live REW V5.40) — or
-    None where REW gives no range a sweep can have (tcc#148)."""
-    try:
-        low, high = float((record or {})["startFreq"]), float((record or {})["endFreq"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    return (low, high) if 0 < low < high < float("inf") else None
-
-
-def _truncated(issue: Any) -> bool:
-    """The method's own «covers A-B Hz, asked for C-D — truncated» (`verify.verdict`)."""
-    text = str(issue)
-    return text.startswith("covers ") and text.rstrip().endswith("truncated")
-
-
-def only_truncated(issues: Any) -> bool:
-    """Whether a verdict's issues are the method's «covers … — truncated» and nothing else — the one
-    match for it, the window's drop (`_without_truncation`) and the card's (tcc#149) alike. A line
-    the method rewords is not matched, and the verdict stays the method's red."""
-    issues = list(issues or [])
-    return bool(issues) and all(_truncated(issue) for issue in issues)
-
-
 #: Every clash `verdict_reader` names — the kind's and the driver's — which the card reads as the
-#: window did (tcc#149, the review's m4). Until hub #247; drop with the patch.
+#: window did (tcc#149, the review's m4). Kept while the method reads no titles: its verdict judges
+#: the data alone, so a sweep titled `(rta)` passes there.
 CLASHES = ("sweep_named_rta", "rta_named_sweep", "tweeter_plays_low", "sub_plays_high")
-#: The window's verdict on a capture it found usable over its own range (tcc#149). Until hub
-#: #247; drop with the patch.
-CHECKED_USABLE = "usable"
 
 
 def window_said(verdict: Optional[dict]) -> str:
-    """What the window's check said about one capture, as `Candidate.checked` keeps it: `usable`
-    for a usable verdict, a clash's own name for a title its data contradicts, else "" (tcc#149).
-    Until hub #247; drop with the patch."""
-    verdict = verdict or {}
-    found = [clash.get("why") for clash in verdict.get("clashes") or []
+    """What the window's check found about one capture, as `Candidate.checked` keeps it: a clash's
+    own name for a title its data contradicts, else "" (tcc#149)."""
+    found = [clash.get("why") for clash in (verdict or {}).get("clashes") or []
              if clash.get("why") in CLASHES]
-    if found:
-        return str(found[0])
-    if verdict.get("exists") and verdict.get("applicable", True) is not False \
-            and verdict.get("valid"):
-        return CHECKED_USABLE
-    return ""
-
-
-def _without_truncation(verdict: dict) -> dict:
-    """The verdict with its «truncated» left out: asked over no range of the sweep's own, the
-    method's default band is not one it stopped short of (the Arbiter, 2026-10-03: «Якщо немає
-    діапазону, то і не перевіряємо»). The rest stands — flat, silent, unreadable — and `valid` is
-    the method's own rule over what is left."""
-    issues = list(verdict.get("issues") or [])
-    kept = [issue for issue in issues if not _truncated(issue)]
-    if len(kept) == len(issues):
-        return verdict
-    return dict(verdict, issues=kept, valid=not kept)
+    return str(found[0]) if found else ""
 
 
 #: Where `check_sweeps` puts a sweep's «could not judge: <error>» (#170 F16-3) — a key the method's
-#: verdict never has. With no `exists` beside it, `unusable` never reads it red, `window_said` never
-#: `usable` and `verdict_reader` adds no clash: it is its own answer, said as such on the row.
+#: verdict never has. With no `exists` beside it, `unusable` never reads it red and
+#: `verdict_reader` adds no clash: it is its own answer, said as such on the row.
 _NOT_JUDGED = "not_judged"
 
 
@@ -555,9 +507,9 @@ def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]
     `stop` is asked between two sweeps: a window that closed wants no more of them, and each is up
     to five seconds against a REW that hangs (review M4).
 
-    Each is asked over the range REW holds for it (`sweep_band`, tcc#148): over 20-20000 Hz every
-    sub, mid-bass and woofer sweep read «truncated» (finding 146). Where REW gives no range the
-    method reads its own default band, and its «truncated» is left out (`_without_truncation`).
+    Each is judged over the range REW holds for it by the method itself (v3.1.4, hub #247): the
+    record handed over carries REW's `startFreq`/`endFreq`, and where REW lists none the method
+    checks no truncation. Nothing of TCC's narrows or edits that verdict (finding 146, tcc#148).
 
     A sweep the verdict raised on gets «could not judge: <error>» (`could_not_judge`), its
     traceback in the log (#170 F16-3): it used to drop out of the answer, and its row read as one
@@ -579,17 +531,14 @@ def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]
         if row.uuid not in by_uuid:
             continue
         ordinal, raw = by_uuid[row.uuid]
-        band = sweep_band(raw)
-        asked = {"f_low": band[0], "f_high": band[1]} if band else {}
         try:
-            judged = dict(judge(str(raw.get("title") or ""), measurements={ordinal: raw},
-                                **asked) or {})
+            judged = dict(judge(str(raw.get("title") or ""), measurements={ordinal: raw}) or {})
         except Exception as exc:  # noqa: BLE001 — the verdict «never raises»; one that does is said
             app_log.logger().exception("capture check: the method's verdict raised on %r",
                                        raw.get("title"))
             found[row.uuid] = {_NOT_JUDGED: f"could not judge: {type(exc).__name__}: {exc}"}
             continue
-        found[row.uuid] = judged if band else _without_truncation(judged)
+        found[row.uuid] = judged
     return found
 
 

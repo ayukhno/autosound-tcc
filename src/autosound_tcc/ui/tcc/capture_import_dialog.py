@@ -1100,7 +1100,7 @@ class CaptureImportDialog(QDialog):
         taken = []
         for row in self.ticked_rows():
             verdict = self._verdict(row.uuid)
-            # And what the window said about it, for the card until hub #247 (tcc#149).
+            # And the clash the window found in its title, for the card (tcc#149).
             row = replace(row, checked=capture_import.window_said(verdict))
             taken.append(replace(row, as_is=True) if capture_import.unusable(verdict) else row)
         return taken

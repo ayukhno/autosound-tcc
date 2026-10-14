@@ -75,6 +75,25 @@ def test_the_token_rides_in_the_environment_never_in_argv(tmp_path, started):
     assert any(p.startswith("mcp_servers.tcc.tool_timeout_sec=") for p in pairs)
 
 
+def test_a_project_without_agents_md_gets_it_and_a_refusal_never_stops_codex(
+        tmp_path, started, monkeypatch, capsys):
+    """Skill #149 (v3.1.4): a terminal Codex loads the method through the project's `AGENTS.md`,
+    so the method's `agents-setup` is asked first (`agents_md.ensure`). A refusal is said on
+    stderr, and Codex starts all the same."""
+    from autosound_tcc.core import agents_md
+
+    _write_config(tmp_path)
+    asked = []
+    monkeypatch.setattr(agents_md, "ensure", lambda project: asked.append(project) or "")
+    assert codex_terminal.main([str(tmp_path)]) == 0
+    assert asked == [tmp_path.resolve()] and len(started) == 1
+
+    monkeypatch.setattr(agents_md, "ensure", lambda project: "AGENTS.md was not written: why")
+    assert codex_terminal.main([str(tmp_path)]) == 0
+    assert len(started) == 2
+    assert "AGENTS.md was not written: why" in capsys.readouterr().err
+
+
 def test_tcc_s_tools_are_approved_and_nothing_else_of_the_session_reaches_the_terminal(
         tmp_path, started):
     """F3 (the Arbiter, 2026-10-14): TCC's server is added per process, so the user's own Codex

@@ -877,10 +877,11 @@ def test_standing_of_no_round_or_no_taken_is_nothing(round_):
 
 def test_outstanding_is_the_methods_own_list_required_and_optional(project, process):
     """The re-review of G6+G7 fix B, the parity gap: what a round still waits for is the method's
-    own list, `_outstanding` — by the raw title, its required and its optional titles alike — and
-    both cards read it from here. A capture taken under another spelling of the same `name_key`
-    answers for none of it, nor does a supersede's trace; a skip does. Asked of the same round side
-    by side, so a rule that drifts from the method's fails here first."""
+    own list, `_outstanding` — its required and its optional titles alike — and both cards read it
+    from here. From v3.1.4 by the series key (#153): a capture taken under another spelling of the
+    same `name_key` answers for it, as a skip does; a supersede's trace answers for nothing. Asked
+    of the same round side by side, so a rule that drifts from the method's fails here first — and
+    of a round written before v3.1.4, which holds a take as it was typed."""
     module = vendor_loader.load_process()
     process.start_capture("1", ["w-L_1 (sw)", "w-R_1 (sw)", "sw_1 (sw)"], optional=["w-L_1 (rta)"])
     process.record_capture("w-R_1 (sw)")
@@ -891,8 +892,12 @@ def test_outstanding_is_the_methods_own_list_required_and_optional(project, proc
 
     said = module._outstanding(round_) + module._outstanding_optional(round_)
     assert sorted(process_view.outstanding(round_)) == sorted(said)
-    assert sorted(said) == ["w-L_1 (rta)", "w-R_1 (sw)"]
+    assert sorted(said) == ["w-L_1 (rta)"]
     assert process_view.outstanding(None) == process_view.outstanding({}) == []
+
+    before = {"expected": ["w-L_1 (sw)", "w-R_1 (sw)"], "skipped": {"w-L_01 (sw)": {"reason": "x"}},
+              "taken": {"w-R_01 (sw)": {"planned": False}}}
+    assert process_view.outstanding(before) == module._outstanding(before) == []
 
 
 # ---- `standing()` is the only reader of `taken` (#175) -----------------------------------------

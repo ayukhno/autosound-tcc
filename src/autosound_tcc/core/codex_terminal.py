@@ -22,8 +22,9 @@ blanked for the shells Codex starts (`codex_cli.token_blank_for_shells_args`).
 The method: Codex takes an extra skills root only over app-server (`skills/extraRoots/set`), and
 its config has no key for one (0.162.1: `skills` holds `bundled`, `include_instructions`,
 `max_context_tokens` and per-skill `config` overrides). A terminal Codex therefore loads the
-method through the project's `AGENTS.md`, and its shell runs the bound copy through
-`AUTOSOUND_SKILL_ROOT`, which the launcher's line sets (`terminal_launcher.launch`, #169).
+method through the project's `AGENTS.md` — written by the method's `agents-setup` before Codex
+starts when a project made before v3.1.4 has none (`agents_md`) — and its shell runs the bound copy
+through `AUTOSOUND_SKILL_ROOT`, which the launcher's line sets (`terminal_launcher.launch`, #169).
 
 Nothing here imports Qt.
 """
@@ -38,7 +39,7 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from autosound_tcc.core import codex_cli, config
+from autosound_tcc.core import agents_md, codex_cli, config
 
 #: TCC's entry in `.mcp.json` and the header its token rides in (`mcp_server.write_mcp_config`).
 SERVER_NAME = "tcc"
@@ -159,6 +160,10 @@ def main(args: Optional[Sequence[str]] = None) -> int:
         found = _codex()
     except Refused as exc:
         return _refuse(str(exc))
+    # The `AGENTS.md` a terminal Codex loads the method by, written by the method into a project
+    # made before it seeded one (skill #149). A refusal is said, and Codex starts without it.
+    if said := agents_md.ensure(project):
+        print(said, file=sys.stderr)
     env = {**os.environ, codex_cli.TOKEN_ENV: token}
     return _start(command(found.path, url, parsed.model), env, project)
 

@@ -59,10 +59,10 @@ class MeasItem:
     # Taken although the method's check called it unusable — the tuner's «Take it as it is» in the
     # import window (tcc#21). Done on the card, and the row says why (finding 147).
     as_is: bool = False
-    # Failing the method's check for «truncated» alone, on a sweep the import window found usable
-    # over its own range: done on the card, and the row says so (tcc#149). Until hub #247 — the
-    # method reading a sweep's range — lands; drop with that patch.
-    own_range: bool = False
+    # REW holds this capture under more than one spelling (`w-R_1 (sw)` and `w-R_01 (sw)`): the
+    # method's check named them all and picked none (`ambiguous_titles`, #153, v3.1.4). A rename
+    # in REW, not a re-take: the row says which titles to keep one of.
+    ambiguous: tuple = ()
 
 
 @dataclass(frozen=True)

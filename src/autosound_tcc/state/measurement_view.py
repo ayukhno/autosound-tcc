@@ -298,35 +298,17 @@ def taken_as_is(project_dir: Optional[Path] = None) -> dict[str, str]:
             if entry.get("as_is")}
 
 
-# ---- tcc#149: the card agrees with the import window on a sweep's own range ------------------
-# A patch until the method's own check reads a sweep's range (hub #247, TCC-049). At the re-pin
-# that carries it, drop this block and its uses (`window_checked`, `held_by_the_window`,
-# `flagged_by_the_window` below, and the `own_range` state of `verdict_state` with its `window`),
-# `MeasItem.own_range`, `measOwnRange*`, and `Candidate.checked` with what writes it.
-# The clash half (`flagged_by_the_window`, `CLASHES`, the clash names in `checked`) is not about the
-# band: keep it at that re-pin unless the method's check also reads titles by then.
+# ---- tcc#149: the card says what the import window found in a title ---------------------------
+# The band half of this patch went with the re-pin to v3.1.4 (hub #247): the method judges each
+# sweep over its own range, so the window and the card read the method's verdict as it is. The clash
+# half stays while the method reads no titles.
 
 
 def window_checked(project_dir: Optional[Path] = None) -> dict[str, str]:
-    """`uuid -> what the import window's check said` (`capture_import.window_verdicts`)."""
+    """`uuid -> the clash the import window found` (`capture_import.window_verdicts`)."""
     from autosound_tcc.core import capture_import
 
     return capture_import.window_verdicts(project_dir)
-
-
-def held_by_the_window(verdict: dict, checked: dict) -> bool:
-    """Whether a failing verdict of the method's is its «covers … — truncated» alone, on a capture
-    the import window found usable over its own range — by the uuid the verdict pins, never by
-    title, so a re-take under the same name is judged on its own. The method asks over 20-20000 Hz
-    and every band-limited sweep reads truncated there (finding 146); the window asked over the
-    sweep's own range. The verdict itself stays the method's, and so does its step gate."""
-    from autosound_tcc.core import capture_import
-
-    if not verdict or verdict.get("ok") or not applicable(verdict) or absent(verdict):
-        return False
-    uuid = str(verdict.get("uuid") or "")
-    return (bool(uuid) and checked.get(uuid) == capture_import.CHECKED_USABLE
-            and capture_import.only_truncated(verdict.get("issues")))
 
 
 def flagged_by_the_window(verdict: dict, checked: dict, marked: dict) -> bool:
@@ -339,6 +321,16 @@ def flagged_by_the_window(verdict: dict, checked: dict, marked: dict) -> bool:
 
     uuid = str((verdict or {}).get("uuid") or "")
     return bool(uuid) and uuid in marked and checked.get(uuid) in capture_import.CLASHES
+
+
+def ambiguous_in_rew(verdict: Optional[dict]) -> tuple[str, ...]:
+    """The titles REW holds one capture under, when the method's check found more than one and
+    picked none (`ambiguous_titles`, #153, v3.1.4); () for any other verdict. Said as «keep one:
+    rename or delete the other in REW», never as a re-take: the captures may both be good."""
+    verdict = verdict or {}
+    if verdict.get("ok"):
+        return ()
+    return tuple(str(title) for title in verdict.get("ambiguous_titles") or ())
 
 
 def _answered_as_is(verdict: dict, title: str, marked: dict, keys: set, key) -> bool:
@@ -358,38 +350,35 @@ def _answered_as_is(verdict: dict, title: str, marked: dict, keys: set, key) -> 
     return title in marked.values() or (key is not None and key in keys)
 
 
-def _row(name: str, status: str, issues: Optional[str], as_is: bool, own_range: bool = False,
-         **fields) -> MeasItem:
+def _row(name: str, status: str, issues: Optional[str], as_is: bool, **fields) -> MeasItem:
     """One checklist row. «Taken as it is» explains a GREEN row — the tuner's answer, in place of
     the method's reasons; on a row a skip or a change turned another colour, that row's own
-    reason stands (review of finding 147, M3). So does «usable over its own range» (tcc#149)."""
+    reason stands (review of finding 147, M3). Two spellings of it in REW (`ambiguous`) are said
+    on a red row alone: one skipped or taken as it is has its own reason."""
     said = as_is and status == STATUS_DONE
-    own = own_range and status == STATUS_DONE and not said
-    return MeasItem(name=name, status=status, extra=None if said or own else issues, as_is=said,
-                    own_range=own, **fields)
+    if status != STATUS_STALE:
+        fields.pop("ambiguous", None)
+    return MeasItem(name=name, status=status, extra=None if said else issues, as_is=said, **fields)
 
 
-#: What a capture's recorded verdict means to the Arbiter — `verdict_state`'s five answers.
+#: What a capture's recorded verdict means to the Arbiter — `verdict_state`'s four answers.
 VERDICT_FINE = "fine"
 VERDICT_AS_IS = "as_is"
-VERDICT_OWN_RANGE = "own_range"
 VERDICT_ABSENT = "absent"
 VERDICT_BAD = "bad"
 
 
-def verdict_state(verdict: dict, title: str, as_is: dict, window: dict, *, key=None,
+def verdict_state(verdict: dict, title: str, as_is: dict, *, key=None,
                   keys=frozenset()) -> str:
     """Whether a capture's verdict needs the Arbiter, decided once (#175, TA-8). The card, the
     window's check loop (`to_check`) and the strip after a check (`unusable_lines`) all read it;
     three places decided it before, and a text parse of the check's output was one of them.
 
     `verdict` is the method's own, as it recorded it (`taken[title]["verified"]`), and `title` the
-    capture's; `as_is` is `taken_as_is()`, `window` `window_checked()`. The answer is one of:
+    capture's; `as_is` is `taken_as_is()`. The answer is one of:
 
     * `fine` — ok, or the check does not apply (an RTA: `applicable: false`, hub #154 §1);
     * `as_is` — failing, and the tuner took it as it is (finding 147);
-    * `own_range` — failing «truncated» alone, on a sweep the import window passed over its own
-      range (tcc#149): kept in this one place, so dropping it after hub #247 is one deletion;
     * `absent` — no curve under that title (the Arbiter, 2026-09-23: waiting, not bad);
     * `bad` — a curve that is there and fails: a retake to decide on. So is a capture never
       checked (`{}`), as the method's own gate counts it (`unusable_captures`).
@@ -405,8 +394,6 @@ def verdict_state(verdict: dict, title: str, as_is: dict, window: dict, *, key=N
         return VERDICT_ABSENT
     if _answered_as_is(verdict, title, as_is, keys, key):
         return VERDICT_AS_IS
-    if held_by_the_window(verdict, window):
-        return VERDICT_OWN_RANGE
     return VERDICT_BAD
 
 
@@ -417,17 +404,23 @@ def to_check(round_: dict, rew_titles, project_dir: Optional[Path] = None) -> li
     Only what the round took (tcc#21): checking whatever REW showed made a dud left for a re-take
     «брак — знятий» and a good sweep nobody ticked green, and a title in REW's list is not this
     project taking it in (the Arbiter, 2026-09-06). What still stands (#175): a superseded row is
-    a typo's trace. Settled is `fine`, `as_is` and `own_range`: none of those verdicts will change,
+    a typo's trace. Settled is `fine` and `as_is`: neither of those verdicts will change,
     and each check is a pull from REW and a journal event — an RTA's, read as unchecked, started
     one on every scan of REW (hub #154 §1). An absent one is asked again: the curve may be there
-    now."""
-    held = {str(title) for title in rew_titles}
+    now. By the series key (#153, v3.1.4): the round holds `w-R_01 (sw)` taken under the list's
+    `w-R_1 (sw)`, REW still under `w-R_01`, and the method's check finds it there by key."""
+    key = process_view.title_key()
+    held = {key(str(title)) for title in rew_titles}
     taken = process_view.standing(round_)
-    as_is, window = taken_as_is(project_dir), window_checked(project_dir)
+    as_is = taken_as_is(project_dir)
+
+    def unsettled(title: str) -> bool:
+        row = process_view.taken_as(round_, title, key)
+        return row is not None and verdict_state(taken[row].get("verified"), title, as_is) \
+            in (VERDICT_ABSENT, VERDICT_BAD)
+
     return [str(title) for title in round_.get("expected") or []
-            if str(title) in held and str(title) in taken
-            and verdict_state(taken[str(title)].get("verified"), str(title), as_is, window)
-            in (VERDICT_ABSENT, VERDICT_BAD)]
+            if key(str(title)) in held and unsettled(str(title))]
 
 
 @dataclass(frozen=True)
@@ -480,29 +473,39 @@ class NotRun:
         taken = process_view.standing(round_)
 
         def recorded_since(title: str) -> bool:
-            verdict = (taken.get(title) or {}).get("verified") or {}
+            row = process_view.taken_as(round_, title)
+            verdict = (taken.get(row) or {}).get("verified") or {} if row is not None else {}
             return bool(verdict) and str(verdict.get("at") or "")[:19] >= self.since[:19]
 
         return all(title not in pending or recorded_since(title) for title in self.asked)
 
 
-def unusable_lines(round_: dict, asked, project_dir: Optional[Path] = None) -> list[str]:
+def unusable_lines(round_: dict, asked, project_dir: Optional[Path] = None,
+                   ambiguous: str = "") -> list[str]:
     """What the strip says after a check that ran: `<title> — <issues joined by "; ">`, in the
     checker's own words, for each title of `asked` — what the check was handed — whose verdict the
     method RECORDED reads `bad`, in the order asked (#175, TA-8).
 
     Read from the record, not the check's text: that text has a line for every expected title, one
     not handed as `UNUSABLE … не перевірено` (tcc#21, review I5), and it was parsed in two places.
-    No line for `as_is` (its row is green «taken as it is», review of finding 147 I1), `own_range`
-    (tcc#149) or `absent` (waiting, not unusable). None for a title with no verdict recorded
-    either: never «everything is bad» — a check that did not run says so itself (R-ax)."""
+    No line for `as_is` (its row is green «taken as it is», review of finding 147 I1) or `absent`
+    (waiting, not unusable). None for a title with no verdict recorded
+    either: never «everything is bad» — a check that did not run says so itself (R-ax).
+
+    `ambiguous` is the window's sentence for a capture REW holds under two spellings
+    (`ambiguous_in_rew`), with `{titles}` in it: the line asks for a rename in REW, not a re-take."""
     taken = process_view.standing(round_)
-    as_is, window = taken_as_is(project_dir), window_checked(project_dir)
+    as_is = taken_as_is(project_dir)
+    key = process_view.title_key()
     lines = []
     for title in asked or ():
-        verdict = (taken.get(str(title)) or {}).get("verified")
-        if verdict and verdict_state(verdict, str(title), as_is, window) == VERDICT_BAD:
-            lines.append(f"{title} — {'; '.join(str(i) for i in verdict.get('issues') or [])}")
+        row = process_view.taken_as(round_, str(title), key)
+        verdict = (taken.get(row) or {}).get("verified") if row is not None else None
+        if verdict and verdict_state(verdict, str(title), as_is) == VERDICT_BAD:
+            held = ambiguous_in_rew(verdict)
+            said = (ambiguous.format(titles=", ".join(held)) if held and ambiguous
+                    else "; ".join(str(i) for i in verdict.get("issues") or []))
+            lines.append(f"{title} — {said}")
     return lines
 
 
@@ -635,12 +638,10 @@ def build_session(
     # under the wrong title and corrected — and every read below asks the method's rule of it.
     recorded_taken = {str(t) for t in process_view.standing(round_)}
     # What the open round still waits for, as the method says it (`process_view.outstanding`):
-    # by the raw title, so a capture taken under another spelling of a row's name answers for
-    # nothing. Read by key, the row said «done» where the method, the agent and the close said
-    # «outstanding», and history said «waiting» (the re-review of G6+G7 fix B). The past card asks
-    # the same, so «done» has one source; the other spelling is a row of its own (below).
-    # The raw title too: a listed row keeps its own spelling when the derived one is a take
-    # (`_round_groups`, #208).
+    # by the series key from v3.1.4 (#153), so a capture taken under another spelling of a row's
+    # name answers for it, as the method, the agent and the close count it. The past card asks the
+    # same, so «done» has one source (the re-review of G6+G7 fix B). The raw title too: a listed
+    # row keeps its own spelling when the derived one is a take (`_round_groups`, #208).
     waiting = ({spelling for t in process_view.outstanding(round_)
                 for spelling in (_canonical(naming, glossary, t), str(t))}
                if round_open else set())
@@ -679,7 +680,7 @@ def build_session(
     retake_keys = {_key(t) for t in retake or ()} - {None}
     as_is_marked = taken_as_is(project)
     as_is_keys = {_key(t) for t in as_is_marked.values()} - {None}
-    window = window_checked(project)  # tcc#149, until hub #247
+    window = window_checked(project)  # tcc#149: the clash the window found in a title
 
     def not_taken(key) -> str:
         """Blue while REW holds it under this name, yellow while it does not (F-056) — or while
@@ -696,19 +697,15 @@ def build_session(
         verdict = verdicts.get(name) or verdicts_by_key.get(key)
         if not verdict:
             return None, None
-        return verdict, verdict_state(verdict, name, as_is_marked, window, key=key,
-                                      keys=as_is_keys)
+        return verdict, verdict_state(verdict, name, as_is_marked, key=key, keys=as_is_keys)
 
     def as_is_for(name: str) -> bool:
         verdict, state = verdict_for(name)
         return state == VERDICT_AS_IS or flagged_by_the_window(verdict, window, as_is_marked)
 
-    def own_range_for(name: str) -> bool:
-        return verdict_for(name)[1] == VERDICT_OWN_RANGE
-
     def status_for(name: str, skip_by_key: bool = True) -> str:
-        """`skip_by_key=False` for a take under another spelling of a name the round asks for:
-        a skip of that name is not a skip of this title (the end-of-branch review, tests I1)."""
+        """`skip_by_key=False` for a take the round did not ask for: its skip is read by its own
+        title (the end-of-branch review, tests I1)."""
         entry = naming.parse_name(name, glossary)
         key = naming.name_key(entry) if entry else None
         if name in recorded_skipped or (skip_by_key and key is not None and key in skipped_keys):
@@ -746,11 +743,14 @@ def build_session(
         Nothing for a capture the check does not apply to (an RTA): "this check does not apply"
         trailed every RTA row, cut off, and said nothing anyone needed (finding 30). A green row
         taken as it is says that instead (`_row`, finding 147)."""
-        verdict = verdicts.get(name) or {}
+        verdict = verdict_for(name)[0] or {}
         if not applicable(verdict):
             return None
         issues = verdict.get("issues") or []
         return "; ".join(str(i) for i in issues) or None
+
+    def ambiguous_for(name: str) -> tuple[str, ...]:
+        return ambiguous_in_rew(verdict_for(name)[0])
 
     protective = {str(k): v for k, v in (round_.get("protective") or {}).items()}
 
@@ -771,7 +771,7 @@ def build_session(
     for spec in groups_spec:
         items = tuple(
             _row(name, listed_status(name), issues_for(name), as_is_for(name),
-                 own_range_for(name), protective=protective_for(name))
+                 protective=protective_for(name), ambiguous=ambiguous_for(name))
             for name in spec["names"]
         )
         groups.append(MeasGroup(type=spec["label"], items=items, method=spec.get("method")))
@@ -786,25 +786,14 @@ def build_session(
         listed |= {str(t) for t in round_.get("expected") or []}
         extras += tuple(
             _row(title, status_for(title), issues_for(title), as_is_for(title),
-                 own_range_for(title), additional=True, unread=True)
+                 additional=True, unread=True)
             for title in sorted(recorded_taken - listed) if _key(title) is None
         )
-        # Taken under another spelling of a name the round asks for (`w-R_01` for `w-R_1`): the
-        # method holds it beside that name, unplanned — whether the name still waits, was taken
-        # under its own spelling too, or skipped. A row of its own, as history shows it: read by
-        # key, it was neither row. Keyed by the round's own list, never the phase's plan a round
-        # opened with no list draws, and never for a title already a row: a take that answered
-        # its row is that row, not an extra beside it (the re-review of G6+G7 fix C, N1). Built
-        # only for names that still waited, it left the card once the list's spelling was taken
-        # or skipped, a red `w-R_01` among them, while history kept it (the end-of-branch review,
-        # tests I1). Its skip is read by its own title, as the method and history read it.
-        expected_raw = {str(t) for t in round_.get("expected") or []}
-        asked_keys = {_key(n) for n in expected_raw} - {None}
-        extras += tuple(
-            _row(title, status_for(title, skip_by_key=False), issues_for(title),
-                 as_is_for(title), own_range_for(title), additional=True)
-            for title in sorted(recorded_taken - listed) if _key(title) in asked_keys
-        )
+        # A take under another spelling of a name the round asks for (`w-R_01` for `w-R_1`) is no
+        # row of its own (#153, v3.1.4): the method stores it under the list's title, the typed
+        # spelling beside it as `as_in_rew`, and a round written before is read by key the same
+        # way — that name's row answers for it (`process_view.outstanding`, `verdicts_by_key`).
+        asked_keys = {_key(str(t)) for t in round_.get("expected") or []} - {None}
         # Taken in this round though nobody asked for it under any spelling (#208): history shows
         # it as «captured though nobody asked», and the live card had a row for it only while REW
         # still held the curve (`_extras`). Not a key a row or an extra above already answers.
@@ -812,7 +801,7 @@ def build_session(
                  | {_key(item.name) for item in extras} | asked_keys)
         extras += tuple(
             _row(title, status_for(title, skip_by_key=False), issues_for(title),
-                 as_is_for(title), own_range_for(title), additional=True)
+                 as_is_for(title), additional=True)
             for title in sorted(recorded_taken - listed)
             if _key(title) is not None and _key(title) not in drawn
         )
@@ -861,7 +850,7 @@ def build_sessions(
         return None
     state = process_view.load_state(project)
     marked = taken_as_is(project)
-    window = window_checked(project)  # tcc#149, until hub #247
+    window = window_checked(project)  # tcc#149: the clash the window found in a title
     past = [
         session
         for round_ in process_view.capture_rounds(project)
@@ -879,35 +868,50 @@ def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict
     Statuses come from the round's own record and nothing else — REW is not consulted. A series
     captured three weeks ago is history whether or not that project is still open in REW, which is
     the whole reason SCR-034 wrote the round down in the first place.
+
+    One row per series key (#153, v3.1.4), as the method reads a round: a take or a skip under
+    another spelling of a listed title (`w-R_01 (sw)` for `w-R_1 (sw)`) is that title's row — the
+    method stores it there, and a round written before is found by key (`process_view.taken_as`).
     """
     expected = [str(t) for t in (round_.get("expected") or [])]
     taken = {str(k): v for k, v in process_view.standing(round_).items()}
-    skipped = {str(k) for k in (round_.get("skipped") or {})}
+    skips = round_.get("skipped") or {}
     waiting = set(process_view.outstanding(round_))  # the live card's source too
     if not expected and not taken:
         return None
+    key = process_view.title_key()
+    listed = {key(title) for title in expected}
     for title in taken:
-        if title not in expected:
+        if title not in expected and key(title) not in listed:
             expected.append(title)  # captured though nobody asked: still part of what happened
 
     marked = dict(as_is or {})
-    window = dict(checked or {})  # tcc#149, until hub #247
+    window = dict(checked or {})  # tcc#149: the clash the window found in a title
+
+    def row_of(name: str) -> dict:
+        """The standing take that answers for `name`, by its key."""
+        found = process_view.taken_as(round_, name, key)
+        return taken.get(found) or {} if found is not None else {}
+
+    def skip_of(name: str) -> Optional[dict]:
+        """The skip that answers for `name`, by its key; None when it was not skipped."""
+        if name in skips:
+            return skips[name] or {}
+        return next((row or {} for title, row in skips.items() if key(str(title)) == key(name)),
+                    None)
 
     def state_for(name: str) -> Optional[str]:
         """What the row's verdict means (`verdict_state`); None for one never checked."""
-        verdict = (taken.get(name) or {}).get("verified")
-        return verdict_state(verdict, name, marked, window) if verdict else None
+        verdict = row_of(name).get("verified")
+        return verdict_state(verdict, name, marked) if verdict else None
 
     def as_is_for(name: str) -> bool:
         """Taken as it is, as on the live card (finding 147): history does not turn it red."""
         return (state_for(name) == VERDICT_AS_IS or flagged_by_the_window(
-            (taken.get(name) or {}).get("verified") or {}, window, marked))
-
-    def own_range_for(name: str) -> bool:
-        return state_for(name) == VERDICT_OWN_RANGE
+            row_of(name).get("verified") or {}, window, marked))
 
     def status_for(name: str) -> str:
-        if name in skipped:
+        if skip_of(name) is not None:
             return STATUS_SKIPPED
         if name in waiting:
             return STATUS_WAIT  # asked for, never taken, and the round closed anyway
@@ -920,13 +924,17 @@ def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict
         # The skip reason comes first, and the order is the point: a skipped capture is ALSO
         # reported by the checker as "no measurement titled ...", which is true and useless. Why a
         # human decided not to take it outranks the arithmetic noticing it is not there.
-        if name in skipped:
-            return (round_.get("skipped") or {}).get(name, {}).get("reason")
-        verdict = (taken.get(name) or {}).get("verified") or {}
+        skip = skip_of(name)
+        if skip is not None:
+            return skip.get("reason")
+        verdict = row_of(name).get("verified") or {}
         if not applicable(verdict):
             return None  # an RTA: the check has nothing to say about it (finding 30)
         issues = verdict.get("issues") or []
         return "; ".join(str(i) for i in issues) or None
+
+    def ambiguous_for(name: str) -> tuple[str, ...]:
+        return ambiguous_in_rew(row_of(name).get("verified"))
 
     protective = {str(k): v for k, v in (round_.get("protective") or {}).items()}
 
@@ -944,7 +952,7 @@ def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict
             method=spec.get("method"),
             items=tuple(
                 _row(name, status_for(name), issues_for(name), as_is_for(name),
-                     own_range_for(name), protective=protective_for(name))
+                     protective=protective_for(name), ambiguous=ambiguous_for(name))
                 for name in spec["names"]
             ),
         )

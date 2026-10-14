@@ -718,6 +718,38 @@ def test_a_typo_the_open_round_already_corrected_is_not_asked_to_supersede_again
     assert (asked, answer) == ([], ([], [], [])), "a trace is asked nothing, and nothing is done"
 
 
+def test_a_rename_is_matched_to_the_round_s_take_by_its_series_key(tmp_path, monkeypatch):
+    """#153 (v3.1.4, hub #269): the round stores a take typed `w-R_01 (sw)` under the list's
+    `w-R_1 (sw)`, the typed spelling as `as_in_rew`. A rename in REW is found there by its key, raw
+    titles no longer meet: renamed to another capture (`w-L_02`), the round is asked to supersede
+    it. Renamed within its key (`w-R_1`), it is the capture the round already holds there — asked
+    nothing, as the method itself refuses it: «corrected to itself — nothing to supersede»."""
+    from autosound_tcc.core import config, process_writer, vendor_loader
+
+    from tests import _rounds
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    process = _rounds.write_round(tmp_path, version=1, expected=["w-R_1 (sw)", "w-L_2 (sw)"],
+                                  taken=["w-R_01 (sw)"], pad=False)
+    assert process.load()["capture"]["taken"]["w-R_1 (sw)"]["as_in_rew"] == "w-R_01 (sw)"
+    with pytest.raises(vendor_loader.load_process().ProcessError, match="corrected to itself"):
+        process.supersede_capture("w-R_01 (sw)", "w-R_1 (sw)", "the tidy spelling")
+    asked = []
+    monkeypatch.setattr(process_writer, "supersede_capture",
+                        lambda project_dir, wrong, right: asked.append((wrong, right)) or (0, "", ""))
+    panel = MeasurementPanel()
+    panel._taking = capture_import.candidates(
+        {"1": {"title": "w-R_01 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:10:00"}}, tmp_path)
+
+    assert panel._supersede_renamed(panel._taking, {"u1": "w-R_1 (sw)"}) == ([], [], [])
+    assert asked == [], "a rename within one key is asked nothing"
+    done, _refused, _not_asked = panel._supersede_renamed(panel._taking, {"u1": "w-L_02 (sw)"})
+    assert asked == done == [("w-R_01 (sw)", "w-L_02 (sw)")], "found by its key"
+
+
 def test_method_channel_pairs_uses_meas_order_by_default():
     _app()
     panel = MeasurementPanel()
@@ -2367,46 +2399,22 @@ def test_a_row_taken_as_it_is_says_so_on_the_card():
     assert row._name_label.full_text() == f"sw_7 (sw) {i18n.t('capCheckAsIsDone')}"
 
 
-@pytest.mark.parametrize("lang", ["en", "uk"])
-def test_a_row_held_by_the_window_says_its_verdict_and_keeps_its_width(lang):
-    """tcc#149, the review's I3: green for a sweep the import window found usable over its own
-    range, with the window's verdict beside it — and only that. The row asks for its whole text
-    (the columns scroll sideways since 2026-09-23), and with the line about the method's own check
-    on it the row asked for ~930 px and a 380-px card scrolled ~870 px sideways. That line is the
-    row's hover. The width is held to the short text's ink (`theme.drawn_width`), so it cannot
-    grow back."""
-    import math
-
-    from PySide6.QtGui import QFontMetricsF
-
+def test_a_row_rew_holds_under_two_spellings_says_keep_one_not_the_check_s_words():
+    """#153 (v3.1.4): a capture REW holds as `w-R_01 (sw)` and `w-R_1 (sw)` is red with «keep one:
+    rename or delete the other in REW», both titles named — not the check's raw words, and never
+    a re-take."""
     from autosound_tcc.state.models import MeasItem
-    from autosound_tcc.ui.tcc import theme
-    from autosound_tcc.ui.tcc.measurement_panel import _MeasName, _MeasRow
+    from autosound_tcc.ui.tcc.measurement_panel import _MeasRow
 
     _app()
-    before = i18n.current_language()
-    try:
-        i18n.set_language(lang)
-        row = _MeasRow(MeasItem(name="sw_7", status="done", own_range=True), "sw")
+    held = ("w-R_01 (sw)", "w-R_1 (sw)")
+    row = _MeasRow(MeasItem(name="w-R_1", status="stale", ambiguous=held,
+                            extra="ambiguous: REW holds w-R_01 (sw) and w-R_1 (sw) for w-R_1 (sw)"),
+                   "sw")
 
-        short = f"sw_7 (sw) {i18n.t('measOwnRange')}"
-        assert row.status == "done"
-        assert row._name_label.full_text() == short
-        assert row.hover_tip.text() == i18n.t("measOwnRangeUntil")
-        ink = theme.drawn_width(QFontMetricsF(row._name_label.font()), short)
-        assert row._name_label.minimumWidth() <= max(_MeasName._MIN_WIDTH, math.ceil(ink) + 12)
-    finally:
-        i18n.set_language(before)
-
-
-def test_the_held_row_s_words_name_no_ticket_and_no_skill():
-    """The review's m5: «(hub #247)» and «the skill» are the bus's names, not the tuner's. The
-    hover says it in plain words: the method's own step check, the sweep's range."""
-    for lang in ("en", "uk"):
-        for key in ("measOwnRange", "measOwnRangeUntil"):
-            text = i18n.T[lang][key]
-            assert "#" not in text and "hub" not in text.lower(), (lang, key, text)
-            assert "skill" not in text.lower() and "скіл" not in text.lower(), (lang, key, text)
+    said = row._name_label.full_text()
+    assert i18n.t("measAmbiguous").format(titles=", ".join(held)) in said, said
+    assert "ambiguous:" not in said
 
 
 def _found_session():

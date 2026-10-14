@@ -816,8 +816,8 @@ def test_a_verdict_that_raises_is_logged_and_its_sweep_says_it_could_not_be_judg
     """#170 F16-3: the method's verdict «never raises»; one that did dropped its sweep from the
     answer with nothing logged, and the window showed the row as one nobody had asked about. Now
     the traceback goes to the log and the sweep's answer is «could not judge: <error>» — its own
-    answer: not a pass (`window_said` is not `usable`), not red (`unusable`), and no title clash
-    is read into it (`verdict_reader`)."""
+    answer: not red (`unusable`), and no title clash is read into it (`window_said`,
+    `verdict_reader`)."""
     rows = ci.candidates(_rew(("m-L_1 (sw)", "a", "2026-Aug-25 20:10:00"),
                               ("m-R_1 (sw)", "b", "2026-Aug-25 20:10:10")), imported={})
     listing = {str(i): {"title": r.title, "uuid": r.uuid} for i, r in enumerate(rows, start=1)}
@@ -960,20 +960,21 @@ def _listed(title, uuid, notes=_SWEEP_NOTES, **range_) -> dict:
     return {"title": title, "uuid": uuid, "date": "2026-Oct-03 12:00:00", "notes": notes, **range_}
 
 
-def test_a_sweep_is_asked_about_over_the_range_rew_holds_for_it():
-    """Finding 146 (tcc#148): the verdict was asked over 20-20000 Hz, so a sub swept over 20-1001
-    read «covers 20-1001 Hz, asked for 20-20000 — truncated». It is asked over the range REW holds
-    for that measurement — its own `startFreq`-`endFreq`."""
+def test_a_sweep_is_handed_to_the_method_with_the_range_rew_holds_for_it():
+    """Finding 146 (tcc#148): over 20-20000 Hz a sub swept over 20-1001 read «covers 20-1001 Hz,
+    asked for 20-20000 — truncated». From v3.1.4 the method judges a sweep over the range REW holds
+    for it (hub #247): the record it is handed carries REW's `startFreq`-`endFreq`, and TCC asks
+    for no band of its own — the method's verdict is the one the card and the step gate read."""
     listing = {"1": _listed("sw_7 (sw)", "u1", startFreq=20.0, endFreq=1001.0)}
     asked = []
 
     def verdict(name, measurements=None, **band):
-        asked.append((name, band))
+        asked.append((name, measurements, band))
         return _verdict()
 
     ci.check_sweeps(ci.candidates(listing, imported={}), listing=lambda: listing, verdict=verdict)
 
-    assert asked == [("sw_7 (sw)", {"f_low": 20.0, "f_high": 1001.0})]
+    assert asked == [("sw_7 (sw)", listing, {})]
 
 
 @pytest.mark.parametrize("range_", [{}, {"startFreq": 0, "endFreq": 1001.0},
@@ -982,7 +983,7 @@ def test_a_sweep_is_asked_about_over_the_range_rew_holds_for_it():
 def test_where_rew_holds_no_range_none_is_made_up(range_):
     """No range, no truncation check (the Arbiter, 2026-10-03: «Якщо немає діапазону, то і не
     перевіряємо»): nothing is passed for a band REW did not give — or gave as nothing a sweep can
-    be set to — so the method's own defaults read the rest."""
+    be set to — and the method, reading none, checks no truncation (v3.1.4's `band_source`)."""
     listing = {"1": _listed("sw_7 (sw)", "u1", **range_)}
     asked = []
 
@@ -1151,13 +1152,14 @@ def test_finding_146_as_the_arbiter_met_it(monkeypatch, tmp_path):
     assert not any("truncated" in issue for issue in shown["u-rta"]["issues"])
 
 
-# ---- the card agrees with the window until hub #247 (tcc#149) ------------------------------------
+# ---- the card says what the window found in a title (tcc#149) -----------------------------------
 
 
 def test_what_the_window_judged_is_kept_by_the_capture_s_uuid(tmp_path):
-    """tcc#149: the window's verdict on a capture it took — usable over its own range, or a title
-    of the wrong kind — is kept beside «as it is», by REW's uuid as the method keys its own verdict.
-    A later import of the same capture with nothing to say keeps it; another capture has none."""
+    """tcc#149: the clash the window found in a capture it took — a title of the wrong kind — is
+    kept beside «as it is», by REW's uuid as the method keys its own verdict. A later import of the
+    same capture with nothing to say keeps it; another capture has none. A `usable` an older store
+    holds (the band half, gone with v3.1.4) is no clash and is not read."""
     from dataclasses import replace
 
     rows = ci.candidates(_rew(("sw_7 (sw)", "u-sw", "2026-Oct-03 12:00:00"),
@@ -1167,32 +1169,18 @@ def test_what_the_window_judged_is_kept_by_the_capture_s_uuid(tmp_path):
                         replace(rows[1], as_is=True, checked="sweep_named_rta"), rows[2]],
                        project_dir=tmp_path)
 
-    assert ci.window_verdicts(tmp_path) == {"u-sw": "usable", "u-rta": "sweep_named_rta"}
+    assert ci.window_verdicts(tmp_path) == {"u-rta": "sweep_named_rta"}
 
-    ci.record_imported([rows[0]], project_dir=tmp_path)
-    assert ci.window_verdicts(tmp_path)["u-sw"] == "usable", "not forgotten by a later import"
-
-
-@needs_the_method
-def test_only_truncated_reads_the_method_s_own_line(monkeypatch):
-    """The card's drop (tcc#149) and the window's (tcc#148) are one match, made against the
-    method's real wording: a verdict failing for «covers … — truncated» alone, and nothing else."""
-    listing = {"1": _listed("sw_7 (sw)", "u1")}
-    _rew_fr(monkeypatch, listing, 20.0, 1001.0)
-    line = vendor_loader.load_verify().verdict("sw_7 (sw)", measurements=listing)["issues"]
-
-    assert ci.only_truncated(line), line
-    assert not ci.only_truncated(line + ["in-band mean -96.1 dB — silence, not a sweep"])
-    assert not ci.only_truncated(["in-band mean -96.1 dB — silence, not a sweep"])
-    assert not ci.only_truncated([])
+    ci.record_imported([rows[1]], project_dir=tmp_path)
+    assert ci.window_verdicts(tmp_path)["u-rta"] == "sweep_named_rta", "not forgotten by a later import"
 
 
 def test_the_window_s_verdict_names_any_clash_it_found():
     """tcc#149, the review's m4: every clash the window found goes to the card under its own name — the
-    driver's as well as the kind's — and a usable verdict as `usable`."""
+    driver's as well as the kind's — and a verdict with none as nothing."""
     usable = dict(_verdict(), kind="sweep")
 
-    assert ci.window_said(usable) == "usable"
+    assert ci.window_said(usable) == ""
     for why in ("sweep_named_rta", "rta_named_sweep", "tweeter_plays_low", "sub_plays_high"):
         assert ci.window_said(dict(usable, valid=False, clashes=[{"why": why}])) == why
     assert ci.window_said(_verdict(valid=False, issues=["in-band mean -96.1 dB — silence"])) == ""

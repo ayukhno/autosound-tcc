@@ -37,7 +37,7 @@ from pathlib import Path
 from dataclasses import replace
 from typing import Any, AsyncIterator, Optional
 
-from autosound_tcc.core import (app_log, child, codex_cli, codex_rpc, config, critic,
+from autosound_tcc.core import (agents_md, app_log, child, codex_cli, codex_rpc, config, critic,
                                 method_binding, model_choices, openers, process_writer,
                                 signal_bus, vendor_loader)
 from autosound_tcc.core.agent_events import (AgentEvent, Notice, TextDelta, ToolCall, ToolEnd,
@@ -286,6 +286,10 @@ class CodexSession:
         binary = await self._binary()
         env = self._env(binding)
         notices: list[AgentEvent] = []
+        # The `AGENTS.md` Codex reads, written by the method into a project made before it seeded
+        # one (skill #149); a refusal is said, and the session starts without it.
+        if said := await asyncio.to_thread(agents_md.ensure, self.project_dir):
+            notices.append(Notice(said))
         config_read = await self._probe(binary, env)
         if config_read is None:
             config_read = {}

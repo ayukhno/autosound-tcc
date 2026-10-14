@@ -4,7 +4,7 @@ What changed in Autosound TCC, the desktop app for the
 [autosound-tuning](https://github.com/ayukhno/autosound-tuning-skill) method. The app's update
 button follows the tags below, so a version here is what somebody actually receives when they press
 it. A fresh install takes the same tags: the paired method's installer (`install.sh` and
-`install.ps1` at v3.1.3) asks for TCC's newest release by its tag and checks the tag's signature
+`install.ps1` at v3.1.4) asks for TCC's newest release by its tag and checks the tag's signature
 first; a tag that does not check is not installed, and the method is installed without the app. Only
 when the installer cannot read TCC's releases at all — no network, or no tags yet — does it fall
 back to `main`, and it says so: that copy has no signature to check.
@@ -14,6 +14,37 @@ is cut from, that heading is renamed to `## [vX.Y.Z] — date · title`, with it
 line. The heading is written by hand; `make ship` only checks it. A `### Breaking` section marks a
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
+
+## [Unreleased]
+
+Paired with method `71a56cf331f6ee9cf5fb869a93b6381a78067b22` — the tag on that commit is **`v3.1.4`**.
+
+The method moves to v3.1.4 (tcc#200), its W-10: a capture round matches its titles by the series key, each
+sweep is judged over its own range, and Codex finds the method through the project's `AGENTS.md`. TCC's
+suite ran against the method's candidate before its release (hub #283). The guide's method links follow it.
+
+### Changed
+
+- **A sweep is judged over its own range by the method itself** (tcc#200, hub #247): from v3.1.4 the method
+  reads the range REW holds for a sweep, so the import window, the capture card and the method's step check
+  read one verdict. TCC's own patch for it (tcc#149) is gone, and with it the card's «usable over its own
+  range» note: a band-limited sweep the method passes is plainly done.
+- **A capture typed under another spelling of a listed name is that capture** (tcc#200, hub #269): `w-R_01
+  (sw)` taken is the `w-R_1 (sw)` the round asked for — one row on both cards, under the list's name, as
+  the method, the agent and the close count it. A rename within one name in the import window asks the
+  round nothing; the method would refuse it as «corrected to itself».
+
+### Fixed
+
+- **A capture REW holds under two spellings asks for a rename, not a re-take** (tcc#200): the card's row and
+  the strip name both titles and say to keep one — rename or delete the other in REW.
+- **A gh that does not answer is said as that** (tcc#200): «Back up to GitHub» said «gh is not signed in»
+  when `gh auth status` gave no answer in 30 s; it now says gh did not answer, and to try again.
+- **Codex reads the method's `AGENTS.md` in a project made before it was seeded** (tcc#200, skill #149):
+  before Codex starts — in TCC or in a terminal — TCC asks the method's `agents-setup` to write it when the
+  project has none. A refusal is said, and Codex starts all the same.
+- **A review worked by hand on the clipboard is recorded against its package** (tcc#200): the journal's
+  reviewer record names the package the method compiled, so the answer brought back completes that round.
 
 ## [v1.1.3] — 2026-10-13 · one method per project, waits with a deadline, stores that never read broken as empty, the method's answers on screen, a delay bank that never writes over what it could not read, the method at v3.1.3
 

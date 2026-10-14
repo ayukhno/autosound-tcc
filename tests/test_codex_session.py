@@ -628,6 +628,33 @@ def test_the_projects_own_skill_listed_is_quiet_and_none_listed_is_said(project,
     assert isinstance(events[0], Notice) and "did not load the tuning method" in events[0].text
 
 
+def test_agents_md_is_asked_of_the_method_before_the_start_and_a_refusal_is_said(
+        project, tmp_path, stand_in, monkeypatch):
+    """Skill #149 (v3.1.4): the method's `agents-setup` runs before Codex starts, off the loop
+    (`agents_md.ensure`); a refusal is a Notice and the session starts all the same."""
+    from autosound_tcc.core import agents_md
+
+    ours = str(project / ".claude" / "skills" / "autosound-tuning" / "SKILL.md")
+    skills = [{"name": "autosound-tuning", "path": ours, "scope": "user"}]
+    rows = [*opening(), out({"id": 2, "method": "skills/extraRoots/set"}),
+            inn({"id": 2, "result": {}}), out({"id": 3, "method": "skills/list"}),
+            inn({"id": 3, "result": {"data": [{"cwd": str(project), "skills": skills}]}}),
+            *thread_start("th"), *turn("th")]
+    asked = []
+    monkeypatch.setattr(agents_md, "ensure", lambda folder: asked.append(folder)
+                        or "AGENTS.md was not written: why")
+    session = make(project, stand_in.use(write(tmp_path, rows, "agents.jsonl")))
+
+    async def go():
+        try:
+            return await drain(session.start())
+        finally:
+            await session.close()
+
+    assert run(go()) == [Notice("AGENTS.md was not written: why"), TurnEnd("th")]
+    assert asked == [project]
+
+
 # ---- the token and the process --------------------------------------------------------------------
 
 

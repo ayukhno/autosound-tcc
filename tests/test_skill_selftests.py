@@ -67,22 +67,11 @@ def _discover() -> list[tuple[str, tuple[str, ...]]]:
 
 _SELFTESTS = _discover() if vendor_loader.is_available() else []
 
-#: v3.1.3's selftests that fail on Windows over a path said the way Windows writes it — a link's
-#: target with `\\?\` in front, a missing file's path as a repr, backslashes doubled — where the
-#: check builds the plain path (hub #274, TCC-055). The method's to mend; `strict`, so the re-pin
-#: to the tag that mends them turns these red and takes them off.
-_FAIL_ON_WINDOWS = {"contract.py", "dsp_profile.py", "naming.py"}
-
-
 def _params():
-    windows = sys.platform == "win32"
-    return [
-        pytest.param(module, argv, id=module, marks=pytest.mark.xfail(
-            strict=True, raises=AssertionError,
-            reason="a path said as Windows writes it (hub #274, TCC-055)"))
-        if windows and module in _FAIL_ON_WINDOWS else pytest.param(module, argv, id=module)
-        for module, argv in _SELFTESTS
-    ]
+    """Every selftest, on every platform: v3.1.4 mended the three that failed on Windows over a
+    path said the way Windows writes it (hub #274, TCC-055), and their strict xfail came off with
+    the re-pin."""
+    return [pytest.param(module, argv, id=module) for module, argv in _SELFTESTS]
 
 
 @pytest.mark.parametrize("module,argv", _params())

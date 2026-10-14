@@ -641,7 +641,10 @@ def run(
                             pins_set_aside=pins, api_vendor=api_vendor)
     if _CLIPBOARD_MARKER in stderr:
         # The clipboard path writes the compiled PACKAGE to the same place, so a review the Arbiter
-        # works by hand is on the record rather than looking like no review at all.
+        # works by hand is on the record rather than looking like no review at all — the record
+        # names that package (SKL-073 item 6, v3.1.4), and the answer brought back completes it.
+        package = _PACKAGE_MARKER.search(stderr)
+        review = review or (PureWindowsPath(package.group("path")).as_posix() if package else None)
         return CriticResult(MODE_CLIPBOARD, "", None, role, _why_clipboard(stderr) or tail,
                             duration, called_at, review, pins_set_aside=pins,
                             api_vendor=api_vendor)

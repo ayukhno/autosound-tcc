@@ -525,15 +525,8 @@ class _MeasRow(QWidget):
         self._unread = bool(getattr(item, "unread", False))
         #: Taken as it is in the import window (finding 147): green, and «taken as it is» beside it.
         self._as_is = bool(getattr(item, "as_is", False))
-        #: Usable over its own range by the import window's check, «truncated» by the method's
-        #: (tcc#149): green, «usable over its own range» beside it, the method's view on hover.
-        #: Until hub #247; drop with that patch.
-        self._own_range = bool(getattr(item, "own_range", False))
-        if self._own_range:
-            # The line that the method's own step check still counts it is the ROW's hover, not
-            # its text: a row asks for its whole text, and with that line on it a held row asked
-            # for ~930 px (the review's I3).
-            attach_tip(self, i18n.t("measOwnRangeUntil"))
+        #: REW holds it under two spellings (#153): «keep one», in place of the check's words.
+        self._ambiguous = tuple(getattr(item, "ambiguous", ()) or ())
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 1, 0, 1)
         layout.setSpacing(6)
@@ -559,10 +552,10 @@ class _MeasRow(QWidget):
         extra = self._extra
         if self._unread:  # the check's own words, if it has any, after the mark
             extra = " · ".join(part for part in (i18n.t("measUnread"), self._extra) if part)
+        if self._ambiguous:  # a rename in REW, not a re-take: the method picked neither
+            extra = i18n.t("measAmbiguous").format(titles=", ".join(self._ambiguous))
         if self._as_is:  # the import window's own words for the answer
             extra = " · ".join(part for part in (extra, i18n.t("capCheckAsIsDone")) if part)
-        if self._own_range:  # the window's verdict on the row (tcc#149, until hub #247)
-            extra = " · ".join(part for part in (extra, i18n.t("measOwnRange")) if part)
         # Class first, text second: the class carries the font (`.mn` is the monospace face), and
         # eliding against the font the label had a moment ago cuts at the wrong character.
         self._name_label.setProperty("class", f"mn mn-{self._status}")
@@ -1486,12 +1479,20 @@ class MeasurementPanel(QWidget):
         A CLOSED round is none, as in `_on_import_offer` (finding 147): `capture_round` hands back
         the last round as it stands, the method refuses any write into a closed one, and
         `title_fixes` reads that refusal as «never took it» — done — so the status said «The round
-        now has the new title» about a round nothing changed (MA1). It is asked nothing."""
+        now has the new title» about a round nothing changed (MA1). It is asked nothing.
+
+        Taken is by the method's series key (#153, v3.1.4): the round holds `w-R_01 (sw)` under the
+        list's `w-R_1 (sw)`, so the take is found by its key. A rename within one key is a spelling
+        of the capture the round already holds there, and is asked nothing: the method refuses it
+        as «corrected to itself — nothing to supersede»."""
         round_ = process_view.capture_round() or {}
-        taken = set() if round_.get("closed") else set(process_view.standing(round_))
+        if round_.get("closed"):
+            round_ = {}
+        key = process_view.title_key()
         fixes = [(row.title, (titles or {}).get(row.uuid)) for row in rows]
         fixes = [(wrong, right) for wrong, right in fixes
-                 if right and wrong != right and wrong in taken]
+                 if right and key(wrong) != key(right)
+                 and process_view.taken_as(round_, wrong, key) is not None]
         return title_fixes.supersede_each(config.project_dir(), fixes)
 
     def _write_ledger(self, rows: list, titles: dict) -> None:

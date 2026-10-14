@@ -15,7 +15,7 @@ import pytest
 from autosound_tcc.core import vendor_loader
 from autosound_tcc.state import measurement_view, process_view
 
-from tests import _intake, _rew_fakes, _rounds
+from tests import _intake, _rounds
 from tests._fresh import qt_loaded
 from autosound_tcc.state import measurement_view as mv
 
@@ -963,88 +963,13 @@ def test_taken_as_it_is_is_said_only_on_a_row_that_reads_done(project):
     assert (item.status, item.as_is, item.extra) == (mv.STATUS_SKIPPED, False, "sub disconnected")
 
 
-# ---- the card agrees with the import window until hub #247 (tcc#149) ---------------------------
-
-
-def _methods_truncated_line(monkeypatch) -> str:
-    """The method's own «covers … — truncated», as its real `verify.verdict` words it for a sub
-    swept over 20-1001 Hz and judged over its default 20-20000 — REW faked at the method's edge.
-    REW keeps no impulse for it, and says so as REW does (`_rew_fakes.no_impulse`)."""
-    import math
-
-    verify = vendor_loader.load_verify()
-    freqs = [20.0 * 2 ** (i / 12) for i in range(int(math.log2(1001 / 20) * 12) + 1)]
-    listing = {"1": {"title": "sw_7 (sw)", "uuid": "u-sw", "notes": "DELAY 6.1 ms"}}
-    monkeypatch.setattr(verify._api, "get_fr",
-                        lambda mid, smoothing=None: (freqs, [85.0 - i * 0.2 for i in range(len(freqs))],
-                                                     None))
-    monkeypatch.setattr(verify._api, "get_impulse_response",
-                        _rew_fakes.no_impulse(verify._api, listing))
-    issues = verify.verdict("sw_7 (sw)", measurements=listing)["issues"]
-    assert len(issues) == 1 and "truncated" in issues[0], issues
-    return issues[0]
-
-
-def _own_range_round(project, monkeypatch, *, uuid="u-sw", also=None, checked="usable"):
-    """A sub sweep the import window judged usable over its own range (tcc#148), taken in
-    normally, and the method's own check judging it over 20-20000 Hz after the import: its verdict,
-    pinned to the capture's uuid, as the method writes it."""
-    from autosound_tcc.core import capture_import
-
-    line = _methods_truncated_line(monkeypatch)
-    process = _round(project, version=7, expected=["sw_7 (sw)"], taken=["sw_7 (sw)"])
-    sw = _as_typed("sw_7 (sw)")
-    state = process.load()
-    state["capture"]["taken"][sw]["verified"] = {
-        "ok": False, "exists": True, "applicable": True, "uuid": uuid,
-        "issues": [line] + ([also] if also else [])}
-    process._write(state)
-    capture_import.record_imported([capture_import.Candidate(
-        ordinal="1", title=sw, uuid="u-sw", date="", when=None, imported=False, checked=checked)],
-        project_dir=project)
-    return process, sw, line
+# ---- the card says what the import window found in a title (tcc#149) ----------------------------
+# Its band half went with the re-pin to v3.1.4: the method judges a sweep over its own range itself
+# (hub #247), and the card reads its verdict as it is.
 
 
 def _item(session, name):
     return {i.name: i for g in session.groups for i in g.items}[name]
-
-
-def test_a_sweep_the_window_judged_over_its_own_range_is_not_red_on_the_card(project, monkeypatch):
-    """tcc#149 (the W-7 review of #148, I2): the window passed a sub swept over 20-1001 Hz; the
-    method's own check, over 20-20000 Hz, called it «truncated» and the card painted it red. Until
-    the method reads the sweep's range (hub #247), a verdict failing for that line alone, on a
-    capture the window judged usable over its own range, is done on the card — said so, with the
-    method's verdict left as the method wrote it."""
-    process, sw, _line = _own_range_round(project, monkeypatch)
-
-    item = _item(mv.build_session("0", 7, [sw], project, taken=[sw]), "sw_7 (sw)")
-
-    assert item.status == mv.STATUS_DONE
-    assert item.own_range, "the row says why: usable over its own range, until hub #247"
-    assert item.extra is None and not item.as_is
-    assert process.load()["capture"]["taken"][sw]["verified"]["ok"] is False
-
-
-@pytest.mark.parametrize("case", [{"uuid": "u-retaken"}, {"checked": ""},
-                                  {"also": "in-band mean -96.1 dB — silence, not a sweep"}])
-def test_a_capture_the_window_did_not_pass_stays_red_on_the_card(project, monkeypatch, case):
-    """Only what the window passed, by the uuid the method's verdict pins: a re-take under the
-    same title is another capture; a capture the window had nothing to say about is the method's;
-    a verdict with anything beside «truncated» is the method's too."""
-    _process, sw, _line = _own_range_round(project, monkeypatch, **case)
-
-    item = _item(mv.build_session("0", 7, [sw], project, taken=[sw]), "sw_7 (sw)")
-
-    assert (item.status, item.own_range) == (mv.STATUS_STALE, False), case
-
-
-def test_a_past_round_reads_the_window_s_verdict_the_same_way(project, monkeypatch):
-    process, _sw, _line = _own_range_round(project, monkeypatch)
-    process.close_capture("done")
-
-    item = _item(mv.build_sessions("0", 7, [], project, taken=[])[1], _as_typed("sw_7 (sw)"))
-
-    assert (item.status, item.own_range) == (mv.STATUS_DONE, True)
 
 
 def test_a_capture_the_window_flagged_for_its_kind_reads_as_in_the_window(project):
@@ -1167,70 +1092,25 @@ def test_the_open_round_waits_for_what_the_method_waits_for_after_a_supersede(pr
     assert _item(session, "w-L_1 (sw)").status == mv.STATUS_DONE, "the corrected title is taken"
 
 
-@pytest.mark.parametrize("pad", [False, True], ids=["by-raw-title", "by-key"])
-def test_a_same_key_supersede_never_colours_the_corrected_row(project, pad):
-    """#175 (`measurement_view.py:465-471`): `w-R_1 (sw)` taken, then a second sweep typed
-    `w_R_1 (sw)` — the older notation, the same `name_key` — judged silent by the check, then
-    superseded by `w-R_1 (sw)`. The verdicts were built over every row, and the one by key is the
-    last row of that key: the superseded one, so the corrected row came up red with a typo's
-    verdict. Looked up by the raw title (the tidy spelling) and by key (as typed), live and once
-    the round is history, where the superseded row was a red row of its own."""
-    typed = _as_typed if pad else str
-    process = _round(project, version=1, expected=["w-R_1 (sw)"],
-                     taken=["w-R_1 (sw)", "w_R_1 (sw)"], pad=pad)
-    process.check_captures([typed("w_R_1 (sw)")], verifier=_Silent())
-    process.supersede_capture(typed("w_R_1 (sw)"), typed("w-R_1 (sw)"), "typed with an underscore")
-    assert process.capture_outstanding() == []
-
-    live = _item(mv.build_session("0", 1, [], project, taken=[]), "w-R_1 (sw)")
-    assert (live.status, live.extra) == (mv.STATUS_DONE, None)
-
-    process.start_capture(1, expected=[typed("sw_1 (sw)")])  # closes cap_001: history now
-    past = _past(project, "cap_001")
-    assert {i.name: i.status for g in past.groups for i in g.items} == {
-        typed("w-R_1 (sw)"): mv.STATUS_DONE}, "the typo's trace is no row, and nothing is red"
-
-
-def test_a_typo_spelled_as_the_cards_name_lends_the_corrected_row_no_verdict(project):
-    """Task 27's review, Minor 2: above, the corrected row's own verdict is empty, so the card's
-    lookup by its name falls through to the one by key, and only that one is ever tried with a
-    typo's verdict. Here the typo IS the card's name — `w-R_1 (sw)`, judged silent, corrected to
-    `w-R_01 (sw)` — so the lookup by name itself would hand the row the typo's red verdict, had it
-    read a superseded row. Not red, live or once the round is history; that the row waits on both,
-    as the method waits for the raw title, is the parity test's (`…_under_another_spelling`)."""
-    process = _round(project, version=1, expected=["w-R_1 (sw)"], taken=["w-R_1 (sw)"], pad=False)
-    process.check_captures(["w-R_1 (sw)"], verifier=_Silent())
-    process.supersede_capture("w-R_1 (sw)", "w-R_01 (sw)", "typed without its zero")
-
-    live = _item(mv.build_session("0", 1, [], project, taken=[]), "w-R_1 (sw)")
-    process.start_capture(1, expected=["sw_1 (sw)"])  # closes cap_001: history now
-    past = _past(project, "cap_001")
-
-    assert live.status != mv.STATUS_STALE and live.extra is None, (live.status, live.extra)
-    assert mv.STATUS_STALE not in {i.status for g in past.groups for i in g.items}
-
-
 _L, _R, _R0 = "w-L_1 (sw)", "w-R_1 (sw)", "w-R_01 (sw)"
 _DONE, _WAIT, _BAD, _SKIP = mv.STATUS_DONE, mv.STATUS_WAIT, mv.STATUS_STALE, mv.STATUS_SKIPPED
 
 #: A round asking for `w-R_1 (sw)` and `w-L_1 (sw)`, and what became of `w-R_1` under another
 #: spelling (`w-R_01`): `(the round, then, the rows both cards show)`. `then` is what follows the
 #: takes: «silent» — the check judges `w-R_01` silent — and «silent, then its own», which takes
-#: `w-R_1` after that verdict. The first three are the re-review of G6+G7 fix B's; the rest are the
-#: end-of-branch review's (tests I1), where a6a27ea dropped the other spelling off the live card.
+#: `w-R_1` after that verdict. From v3.1.4 the method matches a round's titles by the series key
+#: (#153, hub #269): a take under another spelling is stored under the list's title, the typed one
+#: kept as `as_in_rew`, so each case is one row per key under the list's title. A supersede between
+#: two spellings of one key is refused («corrected to itself»): that case is gone from the table.
 _SPELLINGS = {
-    "taken so": (dict(taken=[_L, _R0]), "", {_R: _WAIT, _L: _DONE, _R0: _DONE}),
-    "corrected to it": (dict(taken=[_L, _R], superseded={_R: _R0}), "",
-                        {_R: _WAIT, _L: _DONE, _R0: _DONE}),
-    "taken so, judged silent": (dict(taken=[_L, _R0]), "silent",
-                                {_R: _WAIT, _L: _DONE, _R0: _BAD}),
-    "both spellings": (dict(taken=[_L, _R0, _R]), "", {_R: _DONE, _L: _DONE, _R0: _DONE}),
+    "taken so": (dict(taken=[_L, _R0]), "", {_R: _DONE, _L: _DONE}),
+    "taken so, judged silent": (dict(taken=[_L, _R0]), "silent", {_R: _BAD, _L: _DONE}),
+    "both spellings": (dict(taken=[_L, _R0, _R]), "", {_R: _DONE, _L: _DONE}),
     "the other judged silent, then its own": (dict(taken=[_L, _R0]), "silent, then its own",
-                                              {_R: _DONE, _L: _DONE, _R0: _BAD}),
-    "its own, then the other": (dict(taken=[_L, _R, _R0]), "",
-                                {_R: _DONE, _L: _DONE, _R0: _DONE}),
+                                              {_R: _DONE, _L: _DONE}),
+    "its own, then the other": (dict(taken=[_L, _R, _R0]), "", {_R: _DONE, _L: _DONE}),
     "skipped, then the other": (dict(taken=[_L, _R0], skipped={_R: "no driver"}), "",
-                                {_R: _SKIP, _L: _DONE, _R0: _DONE}),
+                                {_R: _SKIP, _L: _DONE}),
     "a typo superseded by its own": (dict(taken=[_L, "w-R_9 (sw)"],
                                           superseded={"w-R_9 (sw)": _R}), "",
                                      {_R: _DONE, _L: _DONE}),
@@ -1244,17 +1124,11 @@ _SPELLINGS = {
 @pytest.mark.parametrize("how", list(_SPELLINGS))
 def test_the_live_card_waits_for_what_the_method_waits_for_under_another_spelling(project, how):
     """The re-review of G6+G7 fix B, the parity gap: the round asks for `w-R_1 (sw)` and holds
-    `w-R_01 (sw)` — taken so, or as the target of a supersede of `w-R_1 (sw)`. The method compares
-    raw titles: `capture_outstanding()` still lists `w-R_1 (sw)`, and so do the agent and the
-    close. The live card read its rows by `name_key` and said «done»; history, after the close,
-    said «waiting», with an extra «done» row. One source for «done» now
-    (`process_view.outstanding`): both cards wait as the method does, the other spelling a row of
-    its own — and its verdict is its own row's, never lent to the row that waits.
-
-    The end-of-branch review, tests I1: a6a27ea built that row only while the list's own spelling
-    still waited, so once it was taken too, or skipped, the other spelling left the live card —
-    a red `w-R_01` among them — while history kept it. The row is there whatever became of the
-    list's spelling, and reads its skip by its own title, as the method does."""
+    `w-R_01 (sw)`. Both cards wait as the method does (`process_view.outstanding`), so «done» has
+    one source — and from v3.1.4 the method matches by the series key (#153): `w-R_01` taken is the
+    `w-R_1` asked for, one row under the list's title, the typed spelling kept as `as_in_rew`, its
+    verdict that row's. A skip of the list's title outranks a take under any spelling of it, live
+    and in history alike."""
     fields, then, rows = _SPELLINGS[how]
     process = _round(project, version=1, expected=[_R, _L], pad=False, **fields)
     if then.startswith("silent"):
@@ -1262,6 +1136,10 @@ def test_the_live_card_waits_for_what_the_method_waits_for_under_another_spellin
     if then == "silent, then its own":
         process.record_capture(_R)
     assert process.capture_outstanding() == ([_R] if rows[_R] == _WAIT else [])
+    assert sorted(process_view.standing(process.load()["capture"])) == sorted(rows), \
+        "one row per key, under the list's title"
+    if how in ("taken so", "its own, then the other"):
+        assert process.load()["capture"]["taken"][_R]["as_in_rew"] == _R0
 
     live = mv.build_session("0", 1, [], project, taken=[])
     process.start_capture(1, expected=["sw_1 (sw)"])  # closes cap_001: history now
@@ -1286,24 +1164,24 @@ def test_an_unasked_take_rew_still_holds_is_one_row_done(project):
     assert sorted(rows) == sorted([(_R, _DONE), (_L, _DONE), ("sw_1 (sw)", _DONE)]), rows
 
 
-def test_a_padded_list_holding_the_unpadded_take_shows_one_row_of_each_name(project):
+def test_a_padded_list_holding_the_unpadded_take_shows_one_row_done(project):
     """#208 (W-9's fix C, concern 2): a round that lists `w-R_01 (sw)` — typed padded into
-    `capture-start` — and took `w-R_1 (sw)` drew two rows reading `w-R_1 (sw)` on the live card:
-    the listed one in the derived spelling, waiting, and the take beside it, done. The method
-    compares raw titles: `w-R_01` still waits and `w-R_1` is an unasked take, as history shows
-    them. The listed row keeps its own spelling when the derived one is a take of its own."""
+    `capture-start` — and took `w-R_1 (sw)` drew two rows reading `w-R_1 (sw)` on the live card.
+    From v3.1.4 the method matches by the series key (#153): the take is stored under the list's
+    `w-R_01 (sw)`, `w-R_1 (sw)` kept as its `as_in_rew`, and nothing waits. One row of that key,
+    done, live and in history."""
     process = _round(project, version=1, expected=[_R0, _L], taken=[_L, _R], pad=False)
-    assert process.capture_outstanding() == [_R0]
+    assert process.capture_outstanding() == []
+    assert process.load()["capture"]["taken"][_R0]["as_in_rew"] == _R
 
     live = mv.build_session("0", 1, [], project, taken=[])
     process.start_capture(1, expected=["sw_1 (sw)"])  # closes cap_001: history now
     past = _past(project, "cap_001")
 
-    rows = {_R0: _WAIT, _L: _DONE, _R: _DONE}
     for which, card in (("live", live), ("past", past)):
-        names = [i.name for g in card.groups for i in g.items]
-        assert sorted(names) == sorted(rows), (which, names)
-        assert {i.name: i.status for g in card.groups for i in g.items} == rows, which
+        rows = [(i.name, i.status) for g in card.groups for i in g.items]
+        assert len(rows) == 2 and {status for _name, status in rows} == {_DONE}, (which, rows)
+        assert _L in dict(rows), (which, rows)
 
 
 def test_a_round_opened_with_no_list_shows_each_take_once(project):
@@ -1530,7 +1408,7 @@ def _check(process, answers: dict) -> dict:
 def _state(project, round_: dict, title: str) -> str:
     typed = _as_typed(title)
     verdict = process_view.standing(round_)[typed].get("verified") or {}
-    return mv.verdict_state(verdict, typed, mv.taken_as_is(project), mv.window_checked(project))
+    return mv.verdict_state(verdict, typed, mv.taken_as_is(project))
 
 
 def _imported(project, title: str, uuid: str, **said) -> None:
@@ -1561,20 +1439,6 @@ def test_a_capture_taken_as_it_is_is_as_is_and_a_retake_under_its_title_is_bad(p
 
     assert _state(project, _check(process, {"sw_7 (sw)": _held("u-sw", _TRUNCATED)}),
                   "sw_7 (sw)") == mv.VERDICT_AS_IS
-    assert _state(project, _check(process, {"sw_7 (sw)": _held("u-retaken", _TRUNCATED)}),
-                  "sw_7 (sw)") == mv.VERDICT_BAD
-
-
-def test_a_sweep_the_window_passed_over_its_own_range_is_own_range_and_nothing_more(project):
-    """tcc#149, until hub #247: «truncated» alone, on the uuid the window passed. Anything beside
-    it is the method's verdict, and so is a re-take."""
-    process = _round(project, version=7, expected=["sw_7 (sw)"], taken=["sw_7 (sw)"])
-    _imported(project, "sw_7 (sw)", "u-sw", checked="usable")
-
-    assert _state(project, _check(process, {"sw_7 (sw)": _held("u-sw", _TRUNCATED)}),
-                  "sw_7 (sw)") == mv.VERDICT_OWN_RANGE
-    assert _state(project, _check(process, {"sw_7 (sw)": _held("u-sw", _TRUNCATED, _SILENCE)}),
-                  "sw_7 (sw)") == mv.VERDICT_BAD
     assert _state(project, _check(process, {"sw_7 (sw)": _held("u-retaken", _TRUNCATED)}),
                   "sw_7 (sw)") == mv.VERDICT_BAD
 
@@ -1615,6 +1479,51 @@ def test_the_window_checks_only_what_the_round_took_and_rew_holds(project):
     assert mv.to_check(round_, three[1:], project) == []
 
 
+def test_the_window_checks_a_take_rew_holds_under_another_spelling(project):
+    """#153 (v3.1.4): the round stores `w-R_01 (sw)` taken under the list's `w-R_1 (sw)`, and REW
+    still holds `w-R_01`. Matched by raw title, the window never asked about it; by the series key
+    it asks, and the strip says the verdict the method recorded under the list's title."""
+    process = _round(project, version=1, expected=[_R], taken=[_R0], pad=False)
+    process.check_captures([_R], verifier=_Silent())
+    round_ = process_view.capture_round(project)
+
+    assert mv.to_check(round_, [_R0], project) == [_R]
+    assert mv.unusable_lines(round_, [_R], project) == [
+        f"{_R} — in-band mean -94.0 dB — silence, not a sweep"]
+
+
+class _TwoSpellings:
+    """The method's verifier with REW holding one capture under both spellings: its check finds
+    them by the series key and records AMBIGUOUS, both named, neither asked (#153, v3.1.4)."""
+
+    _api = SimpleNamespace(get_measurements=lambda: {"1": {"title": "w-R_01 (sw)"},
+                                                     "2": {"title": "w-R_1 (sw)"}})
+
+    def verify(self, wanted):
+        assert not wanted, wanted
+        return []
+
+
+def test_a_capture_rew_holds_under_two_spellings_asks_for_a_rename_not_a_retake(project):
+    """#153 (v3.1.4): the method's check records `ambiguous_titles` when REW holds one capture
+    under two spellings, and picks neither. The row and the strip say «keep one: rename or delete
+    the other in REW» with both titles — never a re-take: both curves may be good."""
+    process = _round(project, version=1, expected=[_R], taken=[_R0], pad=False)
+    process.check_captures([_R], verifier=_TwoSpellings())
+    round_ = process_view.capture_round(project)
+    held = (_R0, _R)
+    assert tuple(round_["taken"][_R]["verified"]["ambiguous_titles"]) == held
+
+    live = _item(mv.build_session("0", 1, [], project, taken=[]), _R)
+    assert (live.status, live.ambiguous) == (mv.STATUS_STALE, held)
+    assert mv.unusable_lines(round_, [_R], project, ambiguous="keep one of {titles}") == [
+        f"{_R} — keep one of {_R0}, {_R}"]
+    # History folds the journal, whose `capture_verified` names the bad titles and no more: red
+    # there, as any capture that did not pass (`process_view.capture_rounds`).
+    process.start_capture(1, expected=["sw_1 (sw)"])  # closes cap_001: history now
+    assert _item(_past(project, "cap_001"), _R).status == mv.STATUS_STALE
+
+
 def test_an_expected_title_in_rew_that_nobody_took_is_not_checked(project):
     _round(project, version=1, expected=["m-L_1 (sw)"])
 
@@ -1624,14 +1533,12 @@ def test_an_expected_title_in_rew_that_nobody_took_is_not_checked(project):
 
 def test_a_settled_capture_is_not_checked_again_and_one_that_is_not_is(project):
     """hub #154 §1: an RTA's verdict will not change, and treating it as unchecked started a check
-    on every scan of REW. Nor will one taken as it is (finding 147), or one the window passed over
-    its own range until hub #247 (tcc#149) — each a pull from REW and a journal event for nothing.
-    A re-take under the same title is another uuid and is checked; so are a bad one and an absent
-    one, whose curve may be there now."""
+    on every scan of REW. Nor will one taken as it is (finding 147) — each a pull from REW and a
+    journal event for nothing. A re-take under the same title is another uuid and is checked; so are
+    a bad one and an absent one, whose curve may be there now."""
     titles = ["sw_7 (rta)", "sw_7 (sw)", "w-L_7 (sw)", "w-R_7 (sw)", "m-L_7 (sw)"]
     process = _round(project, version=7, expected=titles, taken=titles)
     _imported(project, "sw_7 (sw)", "u-sw", as_is=True)
-    _imported(project, "w-L_7 (sw)", "u-wl", checked="usable")
     held = [_as_typed(t) for t in titles]
     answers = {"sw_7 (rta)": _held("u-rta", _NOT_SWEPT, applicable=False),
                "sw_7 (sw)": _held("u-sw", _TRUNCATED), "w-L_7 (sw)": _held("u-wl", _TRUNCATED),
@@ -1639,7 +1546,7 @@ def test_a_settled_capture_is_not_checked_again_and_one_that_is_not_is(project):
                "m-L_7 (sw)": _not_held(_as_typed("m-L_7 (sw)"))}
 
     assert mv.to_check(_check(process, answers), held, project) == [
-        _as_typed("w-R_7 (sw)"), _as_typed("m-L_7 (sw)")]
+        _as_typed("w-L_7 (sw)"), _as_typed("w-R_7 (sw)"), _as_typed("m-L_7 (sw)")]
     retaken = _check(process, {"sw_7 (sw)": _held("u-sw2", _TRUNCATED),
                                "w-L_7 (sw)": _held("u-wl2", _TRUNCATED)})
     assert mv.to_check(retaken, held, project) == [
@@ -1650,17 +1557,15 @@ def test_a_settled_capture_is_not_checked_again_and_one_that_is_not_is(project):
 # The strip after a check that ran: a line for each recorded `bad` verdict (`unusable_lines`).
 
 
-def test_the_strip_says_each_bad_capture_and_none_taken_as_it_is_held_or_absent(project):
+def test_the_strip_says_each_bad_capture_and_none_taken_as_it_is_or_absent(project):
     """Review of finding 147, I1: «1 unusable: sw_7 (sw) — … truncated» beside a row the card read
-    green «taken as it is». tcc#149: the same for a sub the window had just passed over its own
-    range. The Arbiter, 2026-09-23: a curve that is not there is waiting, not unusable. Another
-    capture's failure still is a line — the method's issues, joined."""
-    titles = ["sw_7 (sw)", "w-L_7 (sw)", "w-R_7 (sw)", "m-L_7 (sw)"]
+    green «taken as it is». The Arbiter, 2026-09-23: a curve that is not there is waiting, not
+    unusable. Another capture's failure still is a line — the method's issues, joined."""
+    titles = ["sw_7 (sw)", "w-R_7 (sw)", "m-L_7 (sw)"]
     process = _round(project, version=7, expected=titles, taken=titles)
     _imported(project, "sw_7 (sw)", "u-sw", as_is=True)
-    _imported(project, "w-L_7 (sw)", "u-wl", checked="usable")
     round_ = _check(process, {
-        "sw_7 (sw)": _held("u-sw", _TRUNCATED), "w-L_7 (sw)": _held("u-wl", _TRUNCATED),
+        "sw_7 (sw)": _held("u-sw", _TRUNCATED),
         "w-R_7 (sw)": _not_held(_as_typed("w-R_7 (sw)")),
         "m-L_7 (sw)": _held("u-ml", _TRUNCATED, _SILENCE)})
 
@@ -1706,11 +1611,11 @@ def test_a_verdict_with_no_uuid_is_matched_as_is_by_its_title_or_the_cards_name_
     verdict = _check(process, {"sw_7 (sw)": {**_held("u-sw", _SILENCE), "stats": {}}})[
         "taken"][sw]["verified"]
     assert verdict["uuid"] is None
-    as_is, window, key = mv.taken_as_is(project), mv.window_checked(project), _key(project)
+    as_is, key = mv.taken_as_is(project), _key(project)
 
-    assert mv.verdict_state(verdict, sw, as_is, window) == mv.VERDICT_AS_IS, "by its title"
-    assert mv.verdict_state(verdict, "sw_7 (sw)", as_is, window) == mv.VERDICT_BAD
-    assert mv.verdict_state(verdict, "sw_7 (sw)", as_is, window, key=key("sw_7 (sw)"),
+    assert mv.verdict_state(verdict, sw, as_is) == mv.VERDICT_AS_IS, "by its title"
+    assert mv.verdict_state(verdict, "sw_7 (sw)", as_is) == mv.VERDICT_BAD
+    assert mv.verdict_state(verdict, "sw_7 (sw)", as_is, key=key("sw_7 (sw)"),
                             keys={key(sw)}) == mv.VERDICT_AS_IS, "by the name key"
     item = _item(mv.build_session("0", 7, [sw], project, taken=[sw]), "sw_7 (sw)")
     assert (item.status, item.as_is) == (mv.STATUS_DONE, True), "the card matches by key"
