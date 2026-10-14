@@ -3755,3 +3755,23 @@ at once.
 **Weight.** Low: reading speed in the menu.
 
 **Task.** The next wave's collection (the Arbiter: «запиши ще», with finding 160).
+
+### 162. While the model thinks without a tool, nothing on screen moves
+
+**What.** The W-10 Windows pass, 2026-10-14 (Codex route): after a Stop the Arbiter sent a new message and read the
+next turn as having no «AI is thinking» indicator, though the answer came. Checked against the code and the VM's
+frame log: the window's busy state was on for the whole turn (no stale turn end; pinned by the tests of 711f4bae).
+What he saw is that nothing moved: the two turns after a Stop were almost all reasoning with no tool (29 s, then
+18 s before the first tool and ~25 s after it). The «Working… · m:ss» header is static text whose clock ticks once
+a second; the only animated element, the ⟳ activity line with its dots, runs only while a tool call is open and
+stops at that tool's end. No route maps the model's thinking to any panel event: Codex's `reasoning` items return
+nothing (`codex_session._item_started`), the SDK route drops `thinking_delta` (`tuning_session._translate` reads
+only `text_delta`), omp's `message_update` likewise keeps only `text_delta`.
+
+**Where.** The dialog panel: the header's «Working… · m:ss» (`dialog_panel._set_busy` / `_tick_turn`) and the ⟳
+activity line (`_add_chip` / `_tick_activity` / `_end_chip`); all three routes.
+
+**Weight.** Medium: a long tool-less think looks like a stalled or idle window, and after a Stop it reads as the
+indicator missing.
+
+**Task.** The next wave's collection.
