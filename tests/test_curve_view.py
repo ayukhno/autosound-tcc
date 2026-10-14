@@ -6064,6 +6064,68 @@ def test_a_redraw_of_the_crossing_dots_in_hx_leaves_one_set_on_the_plot(redraw):
     assert len(dots) == 1 and dots[0] is view._crossing_dots, dots
 
 
+def test_clear_with_a_series_provider_that_raises_clears_nothing_and_says_so(app_log_warnings):
+    """Fable m2 (`fable-g6g7-g10.md`, #209): with no series Clear cleared the whole bank — every
+    series' delays and all-passes, last week's included — because a provider that raised read as
+    «no series». Unreachable today (the panel outlives the window), one refactor away. Refused
+    while the series cannot be read, and said on the window's line; cleared once it reads."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+    from autosound_tcc.core.allpass import Allpass
+
+    delay_bank.put("sub_01 (sw)", 1.5, session="S1", allpass=Allpass(1, 80.0))
+    delay_bank.put(_SIDE[0], 0.2, session="S2")
+    before = project_settings.load(config.tcc_dir()).get(delay_bank.KEY)
+    dialog = _plotted(_SIDE[:2])
+    broken = [True]
+
+    def series():
+        if broken:
+            raise RuntimeError("Internal C++ object (MeasurementPanel) already deleted.")
+        return "S2"
+
+    dialog.set_session_provider(series)
+    dialog._on_clear_bank()
+
+    assert project_settings.load(config.tcc_dir()).get(delay_bank.KEY) == before, "nothing cleared"
+    assert i18n.t("curveBankClearNoSeries").rstrip(".") in dialog._status.text()
+    broken.clear()
+    dialog._on_clear_bank()
+    assert delay_bank.seen(session="S1") == {"sub_01 (sw)"}, "S1 kept: the clear is S2's"
+    assert _SIDE[0] not in delay_bank.seen(session="S2")
+    assert i18n.t("curveBankClearNoSeries").rstrip(".") not in dialog._status.text()
+
+
+def test_a_driver_zeroed_while_the_store_was_out_keeps_the_zero(app_log_told):
+    """Fable m3 (#209): the store could not be read, w-L and w-R were drawn at 0; the person moved
+    w-L to 0.1 and deliberately back to 0.0 — nothing written, as it should be. Once the store read
+    again, the next step on w-R put w-L back at the bank's 0.25 and banked it: «moved since» was
+    read as «drawn value differs», not as a touch. A touch is a touch."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    names = _SIDE[:2]
+    delay_bank.put(names[0], 0.25)
+    delay_bank.put(names[1], 0.30)
+    dialog = _dialog(list(names), bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    store = project_settings.path_for(config.tcc_dir())
+    restore = _a_folder_in_the_store_s_place(store)
+    try:
+        dialog._on_curves([Trace(n, *_impulse(4.5 + 0.05 * i)) for i, n in enumerate(names)])
+        assert dialog._view.delays()[:2] == [0.0, 0.0], "drawn without the bank"
+        dialog._view.set_delay_target(0)
+        dialog._view.set_delay(0.1)  # the person moves w-L ...
+        dialog._view.set_delay(0.0)  # ... and deliberately back to zero
+        assert store.is_dir(), "still unreadable: nothing written"
+    finally:
+        restore()
+
+    dialog._view.set_delay_target(1)
+    dialog._view.set_delay(0.31)  # a step on w-R once the store reads
+
+    assert dialog._view.delays()[:2] == pytest.approx([0.0, 0.31]), "the person's zero stands"
+    assert delay_bank.load() == {names[1]: 0.31} and names[0] in delay_bank.seen()
+
+
 # ---- a provider that raises is logged, once while it goes on raising (G10 M1, #177) --------------
 
 

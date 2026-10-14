@@ -575,6 +575,11 @@ class CurveDialog(QDialog):
         #: the time one reads (N1, R1). One list serves every driver in `_unread`: a new
         #: selection empties both, so each came back under each of these.
         self._unread_series: list[Optional[str]] = []
+        #: The drivers in `_unread` the person has set since — touched, whatever the value is now:
+        #: one moved and put back at the value drawn is still theirs (Fable m3, #209).
+        self._touched_unread: set[str] = set()
+        #: Whether the last Clear was refused for a series that could not be read (Fable m2, #209).
+        self._clear_refused = False
         #: The drivers whose banked all-pass the restore could not draw — no skill maths on this
         #: machine — `{title: why}` (G10 C3). The view holds no filter for them, so they are banked
         #: with their filter kept, never taken off.
@@ -1450,6 +1455,10 @@ class CurveDialog(QDialog):
         if self._restoring:
             return
         if self._unread:
+            # The person's touch on a driver drawn without its bank: theirs from now, even back at
+            # the value drawn — a deliberate zero is a zero (Fable m3, #209).
+            if self._view.delay_target_name() in self._unread:
+                self._touched_unread.add(self._view.delay_target_name())
             # The restore could not read the bank, so what is drawn is not what is banked: a read
             # now puts the bank back first. Still not read, nothing is banked (G10 C1).
             self._restore_bank(came_back=False)
@@ -1561,6 +1570,9 @@ class CurveDialog(QDialog):
             notes.append(i18n.t("curveApfUnshown").format(
                 names=", ".join(title.split(" ")[0] for title in self._apf_unshown),
                 why=next(iter(self._apf_unshown.values()))))
+        self._clear_refused = self._clear_refused and "series" in self._providers_raising
+        if self._clear_refused:
+            notes.append(i18n.t("curveBankClearNoSeries"))
         if self._kept_raw and not self._unread:
             notes.append(i18n.t("curveBankKeptUnread").format(
                 names=", ".join(title.split(" ")[0] for title in self._kept_raw),
@@ -1569,7 +1581,7 @@ class CurveDialog(QDialog):
         # Red only while what is set here is not being kept, or what was banked is out of reach
         # (set aside). A filter kept in the bank that this machine cannot draw is information,
         # and keeps the quiet colour (N4).
-        bad = bool(said or aside or self._unread)
+        bad = bool(said or aside or self._unread or self._clear_refused)
         if (note, bad) != (self._bank_note, self._bank_bad):
             self._bank_note, self._bank_bad = note, bad
             self._render_note()
@@ -1644,7 +1656,11 @@ class CurveDialog(QDialog):
         stay as banked. Zeroed first, they stood at zero over a bank that still held the set, and
         the refusal left the slot before the bank was drawn again (Task 30's review, Minor 1).
         """
-        if not delay_bank.clear_or_say(session=self._session()):
+        series = self._session()
+        # A series that could not be read is not «no series»: with none, the clear takes every
+        # series' readings, last week's included (Fable m2, #209). Refused and said instead.
+        self._clear_refused = "series" in self._providers_raising
+        if self._clear_refused or not delay_bank.clear_or_say(session=series):
             self._render_bank()
             return
         self._restoring = True
@@ -1660,6 +1676,7 @@ class CurveDialog(QDialog):
             self._restoring = False
         # Nothing banked for this series now: what is drawn is the bank.
         self._unread, self._apf_unshown, self._kept_raw = {}, {}, {}
+        self._touched_unread = set()
         self._render_bank()
 
     def _processing_rate_hz(self):
@@ -1882,6 +1899,7 @@ class CurveDialog(QDialog):
             # gone with it — and what was said about the last selection's drivers: a restore that
             # fails keeps it, and an emptied plot uncovered it (N-B1, #209).
             self._unread, self._apf_unshown, self._kept_raw = {}, {}, {}
+            self._touched_unread = set()
         self._view.set_traces(traces)
         # What came back, in the order it is drawn: the group's aside is about these (#209).
         self._plotted = [str(trace.name) for trace in traces]
@@ -1943,12 +1961,15 @@ class CurveDialog(QDialog):
                     trace.name, (self._view.delay_ms(index), self._view.allpass(index)))
             return  # said by `own_store` when it was read, once for this state of the file
         unread, self._unread = self._unread, {}
+        touched, self._touched_unread = self._touched_unread, set()
         self._apf_unshown, self._kept_raw = {}, {}
         self._restoring = True
         try:
             target = self._view.delay_target()
             for index, trace in enumerate(self._view._traces):
                 drawn = unread.get(trace.name)
+                if trace.name in touched:
+                    drawn = (None, object())  # set by the person since: neither is put back
                 if trace.name in bank and (drawn is None or self._view.delay_ms(index) == drawn[0]):
                     self._view.set_delay_target(index)
                     self._view.set_delay(bank[trace.name])
@@ -2158,7 +2179,7 @@ class CurveDialog(QDialog):
         `_render_note` while nothing is drawn. What the store says stands — it is about the store.
         """
         self._view.set_traces([])
-        self._unread, self._kept_raw = {}, {}
+        self._unread, self._kept_raw, self._touched_unread = {}, {}, set()
         self._render_bank()
         self._render_note()
 
