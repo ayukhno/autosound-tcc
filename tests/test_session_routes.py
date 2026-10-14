@@ -1,0 +1,215 @@
+"""Routing out of the window (`core/session_routes.py`, tcc #181 task 2): which session a pick gets,
+what refuses a launch, which CLI the terminal opens, and which registry id a launch resumes.
+
+The first half pins the WINDOW's behaviour through its own methods on a stand-in `self` — no full
+window is built — and was green before the routing moved, so the move is shown to change nothing.
+The second half tests `session_routes` as plain functions.
+"""
+
+from __future__ import annotations
+
+import os
+from types import SimpleNamespace
+
+import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from autosound_tcc.core import critic, omp_session, terminal_launcher  # noqa: E402
+from autosound_tcc.core.omp_session import OmpSession  # noqa: E402
+from autosound_tcc.core.session_registry import SessionRegistry  # noqa: E402
+from autosound_tcc.core.tuning_session import TuningSession  # noqa: E402
+from autosound_tcc.ui.tcc import i18n, mcp_view  # noqa: E402
+from autosound_tcc.ui.tcc.main_window import MainWindow  # noqa: E402
+
+
+@pytest.fixture
+def built(monkeypatch):
+    """Every session constructed, as (class, kwargs) — the constructors themselves do not run."""
+    seen: list[tuple[type, dict]] = []
+
+    def recorder(cls):
+        def init(self, **kwargs):
+            seen.append((cls, kwargs))
+        return init
+
+    monkeypatch.setattr(TuningSession, "__init__", recorder(TuningSession))
+    monkeypatch.setattr(OmpSession, "__init__", recorder(OmpSession))
+    return seen
+
+
+@pytest.fixture
+def language():
+    was = i18n.current_language()
+    yield i18n.set_language
+    i18n.set_language(was)
+
+
+def _server(tmp_path, **extra):
+    fields = dict(stopped_reason=None, config_error="", project_dir=tmp_path,
+                  registry=SessionRegistry(tmp_path / ".tcc"), url="http://127.0.0.1:1/mcp",
+                  token="tok")
+    fields.update(extra)
+    return SimpleNamespace(**fields)
+
+
+# ---- the window, pinned ---------------------------------------------------------------------
+
+
+def _factory_host(gate="writes", allowed=frozenset({"Bash"})):
+    state = {"gate": gate, "allowed": allowed}
+    host = SimpleNamespace(_bridge=object(), _effective_gate=lambda: state["gate"],
+                           _always_allowed=lambda: state["allowed"])
+    return host, state
+
+
+def test_an_sdk_pick_gets_the_sdk_session_with_the_servers_url_and_token(tmp_path, built, language):
+    host, _ = _factory_host()
+    server = _server(tmp_path)
+    language("uk")
+    choice = SimpleNamespace(harness="sdk", model="claude-opus-5")
+
+    MainWindow._session_factory(host, choice, server, True, "high")()
+
+    assert built == [(TuningSession, dict(
+        project_dir=tmp_path, mcp_url="http://127.0.0.1:1/mcp", mcp_token="tok",
+        bridge=host._bridge, model="claude-opus-5", gate="writes",
+        always_allowed=frozenset({"Bash"}), effort="high", language="uk"))]
+
+
+def test_an_omp_pick_gets_omp_with_resume_and_no_url_or_token(tmp_path, built, language):
+    host, _ = _factory_host()
+    language("uk")
+    choice = SimpleNamespace(harness="omp", model="google/gemini")
+
+    MainWindow._session_factory(host, choice, _server(tmp_path), True, None)()
+
+    assert built == [(OmpSession, dict(
+        project_dir=tmp_path, bridge=host._bridge, model="google/gemini", resume=True,
+        gate="writes", always_allowed=frozenset({"Bash"}), effort=None, language="uk"))]
+
+
+@pytest.mark.parametrize("harness", ["sdk", "omp"])
+def test_the_gate_is_read_when_the_session_is_built_and_the_language_when_the_factory_is(
+        tmp_path, built, language, harness):
+    """The factory is made before `_ensure_machine_gate_answered` asks its question, and the
+    session is built later on the worker's thread: the gate picked in between is the one it gets."""
+    host, state = _factory_host()
+    language("uk")
+    factory = MainWindow._session_factory(
+        host, SimpleNamespace(harness=harness, model="m"), _server(tmp_path), False, None)
+    state["gate"], state["allowed"] = "never", frozenset({"Edit"})
+    language("en")
+
+    factory()
+
+    kwargs = built[0][1]
+    assert (kwargs["gate"], kwargs["always_allowed"], kwargs["language"]) == (
+        "never", frozenset({"Edit"}), "uk")
+
+
+class _Built(Exception):
+    """The launch got past its refusals and asked for a factory."""
+
+
+def _launch_host(tmp_path, choice, server):
+    said: list[str] = []
+
+    def factory(_choice, _server, resumed, effort):
+        raise _Built(resumed)
+
+    host = SimpleNamespace(
+        _mcp_server=server, _mcp_error="", _generator_choice=lambda: choice,
+        _dialog=SimpleNamespace(_add_system_message=lambda text, *a, **k: said.append(text)),
+        _project_setting=lambda key: None, _session_factory=factory)
+    return host, said
+
+
+def _launch(host, fresh=False):
+    """`resumed` when the launch reached the factory, or None when it was refused."""
+    try:
+        MainWindow._launch_session(host, fresh=fresh)
+    except _Built as built:
+        return built.args[0]
+    return None
+
+
+def test_a_missing_omp_refuses_the_launch_with_its_sentence(tmp_path, monkeypatch):
+    monkeypatch.setattr(omp_session, "is_available", lambda: False)
+    host, said = _launch_host(tmp_path, SimpleNamespace(harness="omp", model="g"),
+                              _server(tmp_path))
+
+    assert _launch(host) is None
+    assert said == [i18n.t("ompMissing")]
+
+
+def test_omp_without_its_mcp_json_refuses_the_launch_with_the_views_sentence(tmp_path, monkeypatch):
+    monkeypatch.setattr(omp_session, "is_available", lambda: True)
+    server = _server(tmp_path, config_error="PermissionError: read-only")
+    host, said = _launch_host(tmp_path, SimpleNamespace(harness="omp", model="g"), server)
+
+    assert _launch(host) is None
+    assert said == [mcp_view.omp_without_config(server)]
+    assert said == [i18n.t("mcpNoConfigOmp").format(error="PermissionError: read-only")]
+
+
+def test_an_sdk_launch_is_not_refused_by_an_unwritten_mcp_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(omp_session, "is_available", lambda: False)
+    server = _server(tmp_path, config_error="PermissionError: read-only")
+    host, said = _launch_host(tmp_path, SimpleNamespace(harness="sdk", model="m"), server)
+
+    assert _launch(host) is False
+    assert said == []
+
+
+@pytest.mark.parametrize("harness", ["sdk", "omp"])
+def test_a_launch_resumes_when_the_registry_holds_an_open_id(tmp_path, monkeypatch, harness):
+    """Today both routes read the one registry: the SDK id resumes the SDK route, and omp's
+    `--continue` follows the same answer. «Fresh» says not resumed."""
+    monkeypatch.setattr(omp_session, "is_available", lambda: True)
+    server = _server(tmp_path)
+    host, _ = _launch_host(tmp_path, SimpleNamespace(harness=harness, model="m"), server)
+
+    assert _launch(host) is False, "no id yet"
+    server.registry.sync_phase("2")
+    server.registry.bind_session("2", "sess-1")
+    assert _launch(host) is True
+    assert _launch(host, fresh=True) is False
+    server.registry.close_phase("2")
+    assert _launch(host) is False, "a closed phase starts fresh"
+
+
+def _terminal_host(tmp_path, choice, notes):
+    return SimpleNamespace(
+        _mcp_server=SimpleNamespace(project_dir=tmp_path), _generator_choice=lambda: choice,
+        _status_strip=SimpleNamespace(notify=lambda text, **k: notes.append(text)),
+        _control_layout=SimpleNamespace(active=False))
+
+
+@pytest.mark.parametrize("harness, cli", [("sdk", "claude"), ("omp", "omp")])
+def test_the_terminal_opens_the_cli_that_carries_the_pick(tmp_path, monkeypatch, harness, cli):
+    seen, notes = {}, []
+    monkeypatch.setattr(terminal_launcher, "launch",
+                        lambda project_dir, **kw: seen.update(kw, project_dir=project_dir) or kw["cli"])
+    monkeypatch.setattr(critic, "session_env", lambda project_dir: {"ENV": str(project_dir)})
+    host = _terminal_host(tmp_path, SimpleNamespace(harness=harness, model="the-model"), notes)
+
+    MainWindow._open_terminal(host)
+
+    extra = ("--config", str(omp_session.overlay_path(tmp_path))) if harness == "omp" else ()
+    assert seen == dict(project_dir=tmp_path, cli=cli, model="the-model", extra=extra,
+                        env={"ENV": str(tmp_path)})
+    assert notes == [i18n.t("terminalOpened").format(cli=cli)]
+
+
+def test_a_terminal_that_cannot_open_says_why_on_the_strip(tmp_path, monkeypatch):
+    def refuse(project_dir, **kw):
+        raise terminal_launcher.TerminalLaunchError("'claude' is not on PATH")
+
+    notes: list[str] = []
+    monkeypatch.setattr(terminal_launcher, "launch", refuse)
+    host = _terminal_host(tmp_path, SimpleNamespace(harness="sdk", model="m"), notes)
+
+    MainWindow._open_terminal(host)
+
+    assert notes == ["'claude' is not on PATH"]
