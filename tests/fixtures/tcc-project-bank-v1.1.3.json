@@ -1,0 +1,45 @@
+{
+  "generator": "sdk:claude-opus-5",
+  "schema_version": 1,
+  "curve_delays": {
+    "w-L_01 (sw)": {
+      "ms": 0.198,
+      "at": 4.52,
+      "set": "cap_001",
+      "apf": {
+        "type": "APF2",
+        "f": 250.0,
+        "q": 0.71
+      }
+    },
+    "w-R_01 (sw)": {
+      "ms": 0.0,
+      "at": 4.78,
+      "set": "cap_001"
+    },
+    "m-L_01 (sw)": {
+      "ms": 1.25,
+      "at": 3.9,
+      "set": "cap_001"
+    },
+    "sub_01 (sw)": {
+      "ms": 1.5,
+      "at": 9.6,
+      "set": "cap_002"
+    },
+    "m-R_01 (sw)": {
+      "ms": 0.0,
+      "at": null,
+      "set": "cap_002",
+      "apf": {
+        "type": "APF1",
+        "f": 80.0
+      }
+    },
+    "c_01 (sw)": {
+      "ms": 0.4,
+      "at": null,
+      "set": null
+    }
+  }
+}

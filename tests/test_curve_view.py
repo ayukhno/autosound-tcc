@@ -1611,6 +1611,46 @@ def test_switching_series_in_the_panel_re_reads_the_bank_but_keeps_the_plot():
     assert [t.name for t in dialog._view._traces] == plotted
 
 
+@pytest.mark.xfail(strict=True, reason="#197: the bank keeps one entry per title, so a step under "
+                   "series B moves series A's entries to B and A reads 0 on the way back")
+def test_a_series_switched_to_and_back_keeps_its_own_reading():
+    """#197 (F-100 O4): the bank held one entry per title. A step after a series switch banks every
+    driver on screen into the new series, which MOVED each one's entry there; back on the old
+    series those drivers read nothing, the button dropped to «(0)», and the next step banked what
+    was drawn over the reading. Each series keeps its own (user, 2026-08-12: "там все своє і
+    криві і корекції")."""
+    from autosound_tcc.core import delay_bank
+
+    wl, wr = "w-L_01 (sw)", "w-R_01 (sw)"
+    series = ["A"]
+    dialog = _dialog([wl, wr], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog.set_session_provider(lambda: series[0])
+    dialog._on_curves([Trace(wl, *_impulse(4.52)), Trace(wr, *_impulse(4.78))])
+    dialog._view.set_delay_target(0)
+    dialog._view.set_delay(0.5)
+    assert delay_bank.load(session="A") == {wl: 0.5}
+
+    series[0] = "B"  # the next round: the same titles, another series
+    dialog.session_switched()
+    dialog._view.set_delay_target(0)
+    dialog._view.set_delay(0.7)
+
+    series[0] = "A"
+    dialog.session_switched()
+
+    assert delay_bank.load(session="A") == {wl: 0.5}, "A's reading is still A's"
+    assert delay_bank.load(session="B") == {wl: 0.7}, "and B's is B's"
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=1), "not «(0)»"
+    assert dialog._view.delays()[:2] == pytest.approx([0.5, 0.0]), "A's own on screen"
+
+    dialog._view.set_delay_target(1)
+    dialog._view.set_delay(0.1)  # the next step under A
+
+    assert delay_bank.load(session="A") == {wl: 0.5, wr: 0.1}, "the step lost nothing"
+    assert delay_bank.load(session="B") == {wl: 0.7}
+
+
 def test_a_driver_with_no_reading_is_named_not_assumed_to_be_at_zero():
     """The user's first real set left w-R, both rears, the centre and the sub off it entirely,
     with nothing saying so — a fragment that reads as a plan (2026-08-12)."""
