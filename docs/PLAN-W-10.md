@@ -39,6 +39,24 @@ Haiku 5.5 did not make a small mod edit (it stopped at a hub guard and left a pl
 then. Measure per task: done or not, defects the Opus seats find, rework rounds, time; high against xhigh. The
 result goes to the ledger below and one line to the hub's H-019.
 
+## Cost (estimate, 2026-10-14; hub #282)
+
+Machine time ~16–22 h — the subagents' run time over the whole wave, of which ~6 h spent by the evening of
+2026-10-14 (Release tooling, Install and update, AI picks, the Codex study, spike and tasks 1–7).
+
+| part | machine time | agent runs |
+|---|---|---|
+| done: three groups + #181's study and spike + Codex tasks 1–7 | ~6 h | ~60 |
+| Codex tasks 8–10 + its group seats | ~3–4 h | ~10 |
+| Rounds and the bank (#197–#200, Risk: high) | ~3–4 h | ~12 |
+| Window polish + Leftovers (10 issues; the Haiku trial on four) | ~3–5 h | ~15 |
+| the final branch review (Fable) + the PR's fix round | ~1–3 h | ~3 |
+| **total** | **~16–22 h** | **~100** |
+
+Wall clock: two to three more days at the session's pace, plus the PR's CI (~35 min per run) and the Arbiter's
+live Codex run and Windows VM pass (task 10). Codex usage: the spike and task 1 spent ~356k tokens on the cheapest
+model; task 10's live run is the next spend.
+
 ## The implementer's brief (every spawn)
 
 - Tree `~/dev/autosound/tcc`, branch `wave-10`. Read the issue (`gh issue view N -R ayukhno/autosound-tcc`) — it is
@@ -68,6 +86,7 @@ result goes to the ledger below and one line to the hub's H-019.
 | Codex task 4 (`codex_cli`) | done — `find`/`version`/`probe` (one app-server, paging), the picker and availability wired, the reviewer env, `codexNotYet` until task 6; checked on this Mac: the npm shim → the native binary, 0.162.1, signed in, 7 models | opus · medium | 1475e33 | — (the Codex group seats) | pl/de by the Advisor (agy gemini-3.8-flash-high) |
 | Codex task 5 (`shell_gate.judge_action`) | done — the last round ba3264e: a delete/move of a path missing at check time after an earlier statement in the same line asks (a link made by python/perl/tar); `cd`/`export`/`echo` exempt (Ruling 49 kept); the junction walk without `isjunction` | opus · high | 54e6b96, 2b56a6c, 6e07979, 9bf24f8, ba3264e | opus · high | the `foreign` hole closed fully (the Arbiter); omp and the SDK route ask more — every changed row in `CHANGED_FOR_OMP` / `CHANGED_FOR_SDK` |
 | Codex task 6 (`CodexSession` turns) | done — re-review: I1–I4 and the Minors closed, «task 7 can build on this file»; M1–M3 folded into task 7; the `ask` cancel hang not reproduced in ~230 tries (M4 → task 7 checks the repro) | opus · high | 1464e49, a70218e, beeac31 | opus · high | |
-| Codex task 7 (approvals through the gate) | building | opus · high | | opus · high | |
+| Codex task 7 (approvals through the gate) | built — task review running | opus · high | 032c28c | opus · high | `shell_of()` PowerShell detection; a delete asks under `auto`; M1–M3 folded; M4 is asyncio's own cleanup hang (the worker's path is safe) |
+| N2 for the skill's beta-v3.1.4-rc1 (hub #283) | CI running on PR #214 (main + the pointer only, not for merge) | — | d84a0cb | — | items 1 and 5 of SKL-073 ride #200 |
 | #181 spike | done — all six PASS (`spike/codex-app-server/RESULT.md`) | opus · high | 464159d | — | build L: 3–4 days macOS + ~1 day Windows; risks: app-server experimental (pin the version), the user's `~/.codex` servers/plugins/hooks switched off per process; the build: in W-10 (the Arbiter, 2026-10-14) — the Arbiter chose the blended design (`docs/PLAN-W-10-codex.md`, 10 tasks, ~5.5–6 days) |
 | #181 | done — the study, `docs/STUDY-W-10-codex-primary.md` | opus · high | (this commit) | — | feasible, L (2–4 days); next: a ≤1-day spike on six points; five questions for the Arbiter (§5) |
