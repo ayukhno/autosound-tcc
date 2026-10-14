@@ -4900,7 +4900,7 @@ class MainWindow(QMainWindow):
         while a capture round or a step is still open, and says what is open. That belongs on the
         strip, where a restart can still act on it.
         """
-        if not getattr(self, "_session_open", False):
+        if not session_routes.take_open_journal(self):  # the window's start, or the session's
             return
         self._session_open = False
         try:
@@ -5006,10 +5006,9 @@ class MainWindow(QMainWindow):
         # looks exactly like one that never happened -- which is the case план-факт is for. Best
         # effort: a project whose skill is not vendored still gets to run a session.
         try:
-            session_routes.record_start(server.project_dir, choice, resumed)
             # Paired with `_record_session_stop`: what is opened here is what gets closed there,
             # and a session that never made it onto the record has no stop to write.
-            self._session_open = True
+            self._session_open = session_routes.record_start(server.project_dir, choice, resumed)
             # A project with no process state at all starts in intake, and TCC opening it means
             # event one does not depend on which model the user brought (SCR-031: the re-run
             # watched a model read `enter-phase -1` verbatim and ask its questions instead). Only

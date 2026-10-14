@@ -83,14 +83,31 @@ def factory(choice, *, project_dir: Path, bridge, mcp_url: Optional[str],
     )
 
 
-def record_start(project_dir: Path, choice, resumed: bool) -> None:
+def record_start(project_dir: Path, choice, resumed: bool) -> bool:
     """The journal's `session-start` for a launch, before its first token — unless the session
     says it itself. A Codex launch that means to resume learns only from `thread/resume` whether
     it did (a refused one starts afresh), so `CodexSession` journals that one once it knows
-    (`factory` passes `journal=resumed`; the group review, M7). Raises `ProcessWriterError`."""
+    (`factory` passes `journal=resumed`; the group review, M7). Whether the window wrote it — the
+    window's `_session_open`, which a stop pairs with a close. Raises `ProcessWriterError`."""
     if choice.harness == "codex" and resumed:
-        return
+        return False
     process_writer.record_session(project_dir, choice.harness, choice.model, resumed=resumed)
+    return True
+
+
+def take_open_journal(window) -> bool:
+    """Whether a stop owes the journal a `session-close`: the window wrote the start
+    (`_session_open`), or the session did (`CodexSession.journaled`, read off the worker — and
+    cleared here, so one stop closes it once). A Codex resume whose start failed, or whose
+    `session-start` was refused, wrote none and gets no close (the re-review of the group fix, I).
+    The window clears its own flag."""
+    if getattr(window, "_session_open", False):
+        return True
+    session = getattr(getattr(window, "_agent_worker", None), "session", None)
+    if getattr(session, "journaled", False):
+        session.journaled = False
+        return True
+    return False
 
 
 def resume_route(harness: str) -> Optional[str]:

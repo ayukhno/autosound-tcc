@@ -1793,3 +1793,50 @@ def test_a_powershell_line_run_in_a_subfolder_is_judged_from_there(tmp_path):
                             shell=SHELL_POWERSHELL).allowed
     assert judge_action("Bash", narrow, gate=GATE_AUTO, read_roots=roots,
                         shell=SHELL_POWERSHELL).allowed
+
+
+def test_the_session_says_it_journalled_only_when_it_did(project, tmp_path, stand_in, monkeypatch):
+    """The re-review's I (B): the window closes a Codex resume's journal line only when the
+    session says it wrote the start; a refused `session-start` is a Notice and no claim."""
+    from autosound_tcc.core import process_writer
+
+    def refused(*a, **k):
+        raise process_writer.ProcessWriterError("holds no project.json")
+
+    thread = "01a139c1-783b-75c0-afc6-38328bee7086"
+    resumable(project, thread)
+    rows = [*frames("resume-ok"), *turn(thread)]
+    results = {}
+    for name, record in (("ok", lambda *a, **k: "ok"), ("refused", refused)):
+        monkeypatch.setattr(codex_session.process_writer, "record_session", record)
+        session = make(project, stand_in.use(write(tmp_path, rows, f"{name}.jsonl")), resume=True,
+                       journal=True)
+
+        async def go(s=session):
+            try:
+                return await drain(s.start())
+            finally:
+                await s.close()
+
+        events = run(go())
+        results[name] = (session.journaled, events)
+    assert results["ok"][0] is True
+    journaled, events = results["refused"]
+    assert journaled is False
+    assert any(isinstance(e, Notice) and "holds no project.json" in e.text for e in events)
+
+
+def test_a_start_that_fails_before_the_journal_claims_nothing(project, stand_in):
+    """(A): signed out — the session never reached its journal line."""
+    session = make(project, stand_in.use("signed-out", probe="signed-out"), resume=True,
+                   journal=True)
+
+    async def go():
+        try:
+            await drain(session.start())
+        finally:
+            await session.close()
+
+    with pytest.raises(CodexSignedOut):
+        run(go())
+    assert session.journaled is False

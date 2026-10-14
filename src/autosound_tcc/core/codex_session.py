@@ -212,6 +212,9 @@ class CodexSession:
         #: only from `thread/resume` whether it did (the window journals every other launch,
         #: `session_routes.record_start`; the group review, M7).
         self.journal = journal
+        #: This session wrote its `session-start` (read by the window's stop through
+        #: `session_routes.take_open_journal`, which pairs it with one close).
+        self.journaled = False
         self.registry = SessionRegistry(config.tcc_dir(self.project_dir))
         #: Codex's thread id — what a later launch on the Codex route resumes.
         self.session_id: Optional[str] = None
@@ -317,6 +320,7 @@ class CodexSession:
         except process_writer.ProcessWriterError as exc:
             app_log.logger().warning("codex: session-start was not journalled: %s", exc)
             return [Notice(f"journal: {exc}")]
+        self.journaled = True
         return []
 
     def _redact(self, text: str) -> str:

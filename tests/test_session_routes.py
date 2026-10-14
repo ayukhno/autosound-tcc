@@ -431,3 +431,78 @@ def test_codex_gone_at_click_time_is_the_launcher_s_error_not_another_client(tmp
     with pytest.raises(terminal_launcher.TerminalLaunchError, match="Codex"):
         session_routes.client_invocation("codex", SimpleNamespace(harness="codex", model="m"),
                                          tmp_path)
+
+
+# ---- the stop's journal line pairs the start's (the re-review of the group fix, I) ---------------
+
+
+@pytest.mark.parametrize("harness, resumed, wrote", [
+    ("sdk", False, True), ("sdk", True, True), ("omp", True, True), ("codex", False, True),
+    ("codex", True, False)])
+def test_record_start_says_whether_the_window_journalled(tmp_path, monkeypatch, harness, resumed,
+                                                         wrote):
+    """The window keeps the answer as `_session_open`: every route but a Codex resume is on the
+    record before the first token, as before; a Codex resume is not the window's to pair."""
+    from autosound_tcc.core import process_writer
+    monkeypatch.setattr(process_writer, "record_session", lambda *a, **k: "ok")
+
+    assert session_routes.record_start(
+        tmp_path, SimpleNamespace(harness=harness, model="m"), resumed) is wrote
+
+
+def _stop_host(window_wrote: bool, session) -> SimpleNamespace:
+    said: list[str] = []
+    return SimpleNamespace(
+        _session_open=window_wrote, _agent_worker=SimpleNamespace(session=session),
+        _status_strip=SimpleNamespace(notify=lambda text, **k: said.append(text)),
+        _dialog=SimpleNamespace(_add_system_message=lambda *a, **k: None))
+
+
+@pytest.fixture
+def closes(monkeypatch, tmp_path):
+    from autosound_tcc.core import config, process_writer
+    calls: list = []
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(process_writer, "close_session",
+                        lambda project_dir: calls.append(project_dir) or (True, ""))
+    return calls
+
+
+@pytest.mark.parametrize("why", ["the start failed before the journal", "session-start refused"])
+def test_a_codex_resume_the_session_never_journalled_writes_no_close(closes, why):
+    """(A) signed out, MethodRefused, CodexStartFailed, a Stop while starting; (B) `session-start`
+    refused inside the session: either way no start is on the record, so no close is written."""
+    host = _stop_host(False, SimpleNamespace(journaled=False))
+
+    MainWindow._record_session_stop(host)
+
+    assert closes == []
+
+
+def test_a_codex_resume_the_session_journalled_is_closed_once(closes):
+    session = SimpleNamespace(journaled=True)
+    host = _stop_host(False, session)
+
+    MainWindow._record_session_stop(host)
+    MainWindow._record_session_stop(host)
+
+    assert len(closes) == 1 and session.journaled is False
+
+
+@pytest.mark.parametrize("session", [None, SimpleNamespace()])
+def test_a_launch_the_window_journalled_is_closed_once_as_before(closes, session):
+    host = _stop_host(True, session)
+
+    MainWindow._record_session_stop(host)
+    MainWindow._record_session_stop(host)
+
+    assert len(closes) == 1 and host._session_open is False
+
+
+def test_no_journalled_start_no_worker_no_close(closes):
+    host = _stop_host(False, None)
+    host._agent_worker = None
+
+    MainWindow._record_session_stop(host)
+
+    assert closes == []
