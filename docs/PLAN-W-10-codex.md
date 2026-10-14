@@ -174,6 +174,12 @@ resumes anyway.
 - **Command approvals** list `accept`, `acceptWithExecpolicyAmendment`, `cancel` as decisions; `decline` works too —
   TCC sends `accept` / `decline`.
 - **Sign-in** uses a fixed callback port, `127.0.0.1:1455` (Windows: Defender/firewall on the VM pass).
+- **`codex_rpc` as built (cb70b5c, task 3)** — for task 6: the reader handles `serverRequest/resolved` the moment it
+  arrives (a gate finishing later cannot answer a withdrawn request); the notification is still queued; read
+  `server.withdrawn(rid)` (True = it was still pending) to decide whether to drop the bar. `on_request(msg)` runs in
+  the reader: return an awaitable and it runs as its own task; a raise answers the request with an error; no handler
+  → -32601. On Windows `close()` goes to `child.kill_tree` after the grace (holds the loop up to 5 s). Pass
+  `secret_env=("TCC_MCP_TOKEN",)` with `env` to keep the token out of the frame log.
 - **Task 6 turns `CODEX_ROUTE` on** in `session_routes.resume_route` together with `factory`'s Codex branch (e89f0ca: until then a Codex pick reads the SDK's route — one without the other told the chat «fresh» over a resumed session).
 - The method's `session-start` takes any harness string (`rew_tool/state/process.py:9259-9261`): `codex` journals as
   `"harness": "codex"`.

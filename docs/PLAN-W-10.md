@@ -64,6 +64,8 @@ result goes to the ledger below and one line to the hub's H-019.
 | Install and update group (#194, #195) | seats running (silent-failure, tests by mutation) | — | — | opus · high | |
 | Codex task 1 (fixtures, stand-in) | done — 2 paid turns, 62.4k tokens (47.9k cached) on gpt-5.6-luna/low; 13 scenarios, a 41-method schema cut, the stand-in asserting exactly-once | opus · medium | acaf06d | — | what binds the later tasks: `docs/PLAN-W-10-codex.md` «Learned in task 1» |
 | Codex task 2 (registry routes, `session_routes`) | done — review: no Critical/Important; 4 Minors fixed by the session (e89f0ca: a Codex pick reads the SDK route until task 6; stale probe comments) | opus · high | 747128a, c9a78cd, e89f0ca | opus · high | main_window 6138 → 6095 |
-| Codex task 3 (`codex_rpc`) | building | opus · medium | | — | |
+| Codex task 3 (`codex_rpc`) | done — 20 tests against the stand-in; the model list moved onto `ask_blocking` (paging, reasons kept) | opus · medium | cb70b5c | — (the Codex group seats) | notes for task 6 in the Codex plan |
+| Codex task 4 (`codex_cli`) | building | opus · medium | | — | |
+| Codex task 5 (`shell_gate.judge_action`) | building | opus · high | | opus · high | |
 | #181 spike | done — all six PASS (`spike/codex-app-server/RESULT.md`) | opus · high | 464159d | — | build L: 3–4 days macOS + ~1 day Windows; risks: app-server experimental (pin the version), the user's `~/.codex` servers/plugins/hooks switched off per process; the build: in W-10 (the Arbiter, 2026-10-14) — the Arbiter chose the blended design (`docs/PLAN-W-10-codex.md`, 10 tasks, ~5.5–6 days) |
 | #181 | done — the study, `docs/STUDY-W-10-codex-primary.md` | opus · high | (this commit) | — | feasible, L (2–4 days); next: a ≤1-day spike on six points; five questions for the Arbiter (§5) |
