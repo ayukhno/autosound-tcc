@@ -3692,7 +3692,8 @@ def test_the_header_reload_asks_again_for_the_title(monkeypatch):
     _app()
     window = MainWindow()
     _KEEP_WINDOWS.append(window)
-    monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: None)
+    loads = []
+    monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: loads.append(1))
     monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: None)
     monkeypatch.setattr(MainWindow, "_ping_rew", lambda self: None)
     monkeypatch.setattr(MainWindow, "_refresh_cli_catalogue", lambda self, force=False: None)
@@ -3713,8 +3714,12 @@ def test_the_header_reload_asks_again_for_the_title(monkeypatch):
     assert asked == [], "the switch is off in tests: nothing was asked"
 
     monkeypatch.setenv("AUTOSOUND_TCC_MCP", "1")  # past the launch-time escape hatch (conftest)
+    loads.clear()
     window._bridge.refresh_from_disk()  # what the session's report_phase sends
-    QTest.qWait(main_window._AGENT_REFRESH_MS + 200)  # the agent's re-read has run
+    # The re-read is seen to run, not waited for on a fixed clock (G2-tests M4, branch-tests M5);
+    # then a little more, since the update question would run on a daemon thread.
+    assert _pump_until(lambda: bool(loads), seconds=5), "the agent's re-read ran"
+    _pump_until(lambda: False, seconds=0.2)
     assert asked == [], "a phase report asks GitHub nothing"
     window._header_refresh_btn.click()
     settle(True)
@@ -8086,6 +8091,25 @@ def test_the_agent_is_told_the_preset_on_screen_when_there_are_two(tmp_path, mon
     assert window._preset_combo.currentData() == "FULL"
     assert window._bridge.snapshot()["preset"] == window._preset_combo.currentData()
 
+    # An agent write, from the MCP server's own thread as in the app, reaches the snapshot through
+    # the re-read (G2-tests M2, #206): every test emitted on the GUI thread and stubbed the load, so
+    # a re-read that drew without publishing, or a connection whose timer cannot start off the GUI
+    # thread, stayed green. The watchers are silent: only the agent's path may bring it.
+    import threading
+
+    watchers = [w for w in (window._project_watcher, getattr(window, "_process_watcher", None)) if w]
+    for watcher in watchers:
+        watcher.blockSignals(True)
+    try:
+        window._preset_override = "SECOND"
+        writer = threading.Thread(target=window._bridge.refresh_from_disk)
+        writer.start()
+        writer.join(5)
+        assert _pump_until(lambda: window._bridge.snapshot()["preset"] == "SECOND", seconds=5)
+    finally:
+        for watcher in watchers:
+            watcher.blockSignals(False)
+
 
 def test_a_preset_switch_reaches_the_agent(tmp_path, monkeypatch):
     _two_presets(tmp_path, monkeypatch)
@@ -8197,10 +8221,21 @@ def test_a_window_closing_before_the_agents_reread_reloads_nothing(monkeypatch):
     assert loads == [] and checks == []
 
 
-def test_a_cancelled_close_still_rereads_after_an_agent_write(monkeypatch, tmp_path):
+@pytest.mark.parametrize("switched", [False, True])
+def test_a_cancelled_close_still_rereads_after_an_agent_write(monkeypatch, tmp_path, switched):
     """Review of #152: `closeEvent` sets `_closing` before it asks whether to save, and Cancel kept
     it set — so after Close → Cancel the agent's writes no longer reached the screen, and nothing
-    said so. Cancel means the window stays: it is not closing."""
+    said so. Cancel means the window stays: it is not closing.
+
+    Its two replays apart (branch-tests M1, #206): the agent's re-read runs the contract check,
+    the watcher's the intake gate; counting the loads alone passed with either one gone. And an
+    agent write after Cancel comes from the server's thread, as in the app (G2-tests M2).
+
+    `switched`: the close came from a project switch (branch-code M2, #206) — the process-wide
+    folder is already the new one, and the kept window read the NEW folder into itself at once.
+    It reads nothing and says to open TCC again."""
+    import threading
+
     from PySide6.QtGui import QCloseEvent
     from PySide6.QtWidgets import QMessageBox
 
@@ -8210,11 +8245,16 @@ def test_a_cancelled_close_still_rereads_after_an_agent_write(monkeypatch, tmp_p
     window = MainWindow()
     _KEEP_WINDOWS.append(window)
     window._agent_worker = SimpleNamespace(shutdown=lambda: None)
-    loads = []
+    loads, checks, gates, said = [], [], [], []
     monkeypatch.setattr(MainWindow, "_safe_load_project", lambda self: loads.append(1))
-    monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_start_contract_check", lambda self: checks.append(1))
+    monkeypatch.setattr(MainWindow, "_check_intake_gate", lambda self: gates.append(1))
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **_k: said.append(text))
 
     def asked():
+        if switched:  # what the new-project dialog does before it closes this window
+            (tmp_path / "new-car").mkdir()
+            monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path / "new-car"))
         # A write lands while the question is up, and the box's own loop runs past the timer:
         # the re-read was skipped then, and Cancel never replayed it (the G2 review).
         window._bridge.refresh_from_disk()
@@ -8227,11 +8267,19 @@ def test_a_cancelled_close_still_rereads_after_an_agent_write(monkeypatch, tmp_p
         window.closeEvent(event)
         assert not event.isAccepted(), "the situation this is about: the window stays"
         assert loads == [], "skipped while the question was up"
-        assert _pump_until(lambda: bool(loads), seconds=3), "Cancel re-reads what landed meanwhile"
+        if switched:
+            _pump_until(lambda: False, seconds=(main_window._AGENT_REFRESH_MS + 600) / 1000)
+            assert loads == checks == gates == [], "the new folder is not read into this window"
+            assert said.count(i18n.t("projectReopen")) == 1, said
+            return
+        assert _pump_until(lambda: len(loads) == 2, seconds=3), "Cancel re-reads what landed"
+        assert checks == [1] and gates == [1], "each replay ran: the agent's and the watcher's"
 
         _pump_until(lambda: False, seconds=0.6)
         loads.clear()
-        window._bridge.refresh_from_disk()
+        writer = threading.Thread(target=window._bridge.refresh_from_disk)  # the server's thread
+        writer.start()
+        writer.join(5)
         assert _pump_until(lambda: bool(loads), seconds=3), "an agent write after Cancel is re-read"
     finally:
         window._agent_worker = None

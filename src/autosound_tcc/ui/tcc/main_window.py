@@ -104,7 +104,7 @@ from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, mcp_view, s
 from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line, terminal_menu
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
-from autosound_tcc.ui.tcc import qt_shutdown
+from autosound_tcc.ui.tcc import qt_shutdown, window_folder
 from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order, is_other_preset
 from autosound_tcc.ui.tcc.row_rule import table_fields
 from autosound_tcc.ui.tcc.setting_status import group_status
@@ -720,6 +720,7 @@ class MainWindow(QMainWindow):
         self.loggedError.connect(self._show_logged_error)
         self.resize(1280, 820)
         _live_windows.add(self)
+        self._built_on = window_folder.pin()  # its folder: a cancelled switch reads no other (#206)
 
         self._settings = get_settings()
         self._mode = self._settings.value(_THEME_KEY, None) or _detect_system_mode()
@@ -1753,11 +1754,9 @@ class MainWindow(QMainWindow):
         self._agent_refresh_timer.start()
 
     def _reread_after_agent(self) -> None:
-        if getattr(self, "_closing", False):
-            app_log.logger().info("the agent's re-read is skipped: the window is closing")
-            return  # a window on its way out — or left behind by a test — reloads nothing (F-053)
-        self._safe_load_project()
-        self._start_contract_check()
+        if window_folder.may_reread(self, "the agent's re-read"):  # not closing, its folder (F-053)
+            self._safe_load_project()
+            self._start_contract_check()
 
     def _safe_load_project(self) -> None:
         """Re-read the project without letting a bad file take the window with it.
@@ -3613,8 +3612,8 @@ class MainWindow(QMainWindow):
 
     def _reload_project_files(self) -> None:
         """Re-read what the skill wrote and put it on screen."""
-        if getattr(self, "_closing", False):
-            return  # a window on its way out — or left behind by a test — reloads nothing (F-053)
+        if not window_folder.may_reread(self, "the watcher's reload"):  # F-053; #206's switch
+            return
         self._arm_project_watcher()
         self._safe_load_project()
         self._check_intake_gate()
