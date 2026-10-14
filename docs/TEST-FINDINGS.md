@@ -3711,3 +3711,18 @@ Arbiter's machine is one CI never ran; `pyproject.toml` allows `PySide6-Essentia
 **Weight.** High: a new Qt minor reaches users untested; the update itself finished clean.
 
 **Task.** W-10's pool (collection).
+
+### 159. Neither update says the tag's signature was checked
+
+**What.** The Arbiter, 2026-10-14, the installer walk on the VM: the method updated to v3.1.3, then TCC to v1.1.3,
+both through TCC, both ended well — and nowhere, in the method's update or in TCC's, did he see that the tag's
+signature was checked and good. TCC's update window starts with «TCC is closed — updating it now.» and carries no
+line about the signature. The check exists (`core/updates.py`: «a tag that does not verify gets no script at all»),
+but the person never sees its answer.
+
+**Where.** Windows VM: the method's update in TCC, TCC's update window.
+
+**Weight.** Medium: a security check the user cannot see is one he cannot trust or report on. The method's half
+runs the skill's own `upkeep.py`; whose line it is there — the review decides.
+
+**Task.** W-10's pool (collection).

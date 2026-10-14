@@ -2082,7 +2082,7 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 
 ### F-101 — After v1.1.3: the installer walk, then the queue
 
-**Статус**: open · written 2026-10-14 at «добраніч», after v1.1.3 was tagged and W-9's milestone closed · resume:
+**Статус**: open · **the installer walk done 2026-10-14** (the Arbiter, the VM: the method to v3.1.3, then TCC 1.1.2 → 1.1.3 through TCC's update; both on screen; findings 158, 159) — the queue remains · written 2026-10-14 at «добраніч», after v1.1.3 was tagged and W-9's milestone closed · resume:
 `hub/bin/role tcc --resume b9350366-d017-4e9a-be26-e092e6bfff29`
 
 - **The installer path walked by hand for v1.1.3** (`WAVES.md` §3.1, TCC only — the Arbiter's): an update to v1.1.3
