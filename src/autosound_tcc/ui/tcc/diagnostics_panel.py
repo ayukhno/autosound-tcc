@@ -1068,7 +1068,7 @@ class DiagnosticsDialog(QDialog):
                  "done": i18n.t("updTermDone"), "failed": i18n.t("updTermFailed"),
                  "moved": i18n.t("updTermMoved"), "unpinned": i18n.t("updTermUnpinned"),
                  "signed": i18n.t("updTermSigned"), "differs": i18n.t("updTermDiffers"),
-                 "nopins": i18n.t("updTermNoPins")}
+                 "nopins": i18n.t("updTermNoPins"), "busy": i18n.t("updTermBusy")}
         self._tcc_job = _UpdateStep(lambda: updates.prepare_tcc_update(channel, words=words))
         self._tcc_timer.start()
 

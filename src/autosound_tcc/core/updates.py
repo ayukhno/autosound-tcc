@@ -36,10 +36,12 @@ from __future__ import annotations
 
 import json
 import logging
+import ntpath
 import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -156,7 +158,72 @@ TCC_WINDOW_WORDS = {
     # After uv, when the version it installed is not the commit that was checked (#195).
     "differs": "The version installed is not the commit whose signature was checked, so the "
                "check above does not cover it — tell the author. Installed:",
+    # Windows, before uv: programs still running from TCC's own folder, named one per line after.
+    "busy": "The update did not start: these still run from TCC's own folder, and Windows will "
+            "not let uv replace it while they do. Close them — an «Open a terminal on this "
+            "project → Codex» window is one — then start TCC and press «Update TCC» again:",
 }
+
+#: uv's folder for TCC's own tool, under `uv tool dir`: what an update replaces — and, on Windows,
+#: cannot while a program runs from it (`tool_env_holders`).
+TCC_TOOL = "autosound-tcc"
+#: Beside the Windows script: the programs it found running from that folder, one per line.
+_BUSY_FILE = "tcc-busy.txt"
+#: The script's PowerShell for them (`$env:tcc_tools` is `uv tool dir`), asked twice three seconds
+#: apart: the launcher TCC was started by ends a moment after TCC itself.
+_BUSY_PS = ("$d = (Join-Path $env:tcc_tools '" + TCC_TOOL + "') + '\\'; "
+            "function held { @(Get-Process | Where-Object { $_.Path -and "
+            "$_.Path.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) }) }; "
+            "$h = held; if ($h.Count) { Start-Sleep 3; $h = held }; "
+            "$h | ForEach-Object { '{0}.exe, pid {1}' -f $_.ProcessName, $_.Id }")
+
+
+def tool_env_holders(processes: Optional[list] = None, *, prefix: Optional[str] = None,
+                     me: Optional[int] = None, platform: Optional[str] = None) -> list[str]:
+    """The programs running from TCC's own tool folder — «python.exe, pid 4242» — other than this
+    TCC and what started it. Windows only, and only for TCC installed as uv's tool (`prefix`, this
+    Python's `sys.prefix`, is `…\\autosound-tcc`): a source checkout or a test's venv is not
+    what an update replaces.
+
+    Why (W-10, the Arbiter's VM): «Open a terminal → Codex» runs Codex as a child of TCC's own
+    `python.exe`, which stays while that window is open; uv then fails «failed to remove directory
+    …\\Scripts: Access is denied (os error 5)» and leaves the tool broken («Invalid environment …
+    missing Python executable»). So the update says which and stops before uv: here, before TCC
+    closes (`prepare_tcc_update`), and again in the script, right before uv (`_BUSY_PS`).
+
+    `processes`: dicts as `Win32_Process` gives them (`ProcessId`, `ParentProcessId`, `Name`,
+    `ExecutablePath`); None asks Windows (`_windows_processes`). `me`: this process."""
+    if not _is_windows(platform):
+        return []
+    prefix = sys.prefix if prefix is None else prefix
+    if ntpath.basename(ntpath.normpath(prefix)).lower() != TCC_TOOL:
+        return []
+    if processes is None:
+        processes = _windows_processes()
+    me = os.getpid() if me is None else me
+    parent = {p.get("ProcessId"): p.get("ParentProcessId") for p in processes}
+    mine, at = set(), me
+    while at and at not in mine:  # this TCC, and the launcher that started it
+        mine.add(at)
+        at = parent.get(at)
+    root = ntpath.normcase(ntpath.normpath(prefix)) + "\\"
+    return [f"{p.get('Name')}, pid {p.get('ProcessId')}" for p in processes
+            if p.get("ProcessId") not in mine and isinstance(p.get("ExecutablePath"), str)
+            and ntpath.normcase(p["ExecutablePath"]).startswith(root)]
+
+
+def _windows_processes() -> list[dict]:
+    """Every process with its parent and its program, from `Win32_Process`; [] when PowerShell
+    does not answer — the script asks again before uv."""
+    query = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance Win32_Process | "
+             "Select-Object ProcessId,ParentProcessId,Name,ExecutablePath | ConvertTo-Json -Compress")
+    try:
+        done = child.run_bounded(["powershell", "-NoProfile", "-Command", query],
+                                 timeout=_ASK_TIMEOUT * 2, **child.quiet())
+        data = json.loads((done.stdout or b"").decode("utf-8", "replace") or "[]")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+    return [p for p in (data if isinstance(data, list) else [data]) if isinstance(p, dict)]
 
 #: Beside the script when the update was verified: run by the INSTALLED TCC's own Python, it prints
 #: the commit uv put there (`direct_url.json`, `install_report.install_source`'s source), or
@@ -334,12 +401,23 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
         # in, which Windows will not remove while it is somebody's current directory.
         end = ([":end", f'(goto) 2>nul & cd /d "%TEMP%" & rmdir /s /q '
                         f'"{str(folder).replace("%", "%%")}"'] if folder else [":end"])
+        # Before uv, whatever still runs from TCC's own folder (`tool_env_holders`): uv cannot
+        # replace it then, and fails half way. `%%~zs` is the list's size; none written, none run.
+        busy = [
+            'set "tcc_tools="',
+            "for /f \"delims=\" %%d in ('uv tool dir 2^>nul') do set \"tcc_tools=%%d\"",
+            f'if defined tcc_tools powershell -NoProfile -Command "{_BUSY_PS}" '
+            f'> "%~dp0{_BUSY_FILE}" 2>nul',
+            f'if exist "%~dp0{_BUSY_FILE}" for %%s in ("%~dp0{_BUSY_FILE}") do '
+            "if %%~zs gtr 0 goto busy",
+        ]
         lines = [
             "@echo off",
             "chcp 65001 >nul",
             "cls",
             _cmd_echo(said["wait"]),
             f'powershell -NoProfile -Command "Wait-Process -Id {pid} -ErrorAction SilentlyContinue"',
+            *busy,
             *guard,
             *([_cmd_echo(signed)] if signed else []),
             _cmd_echo(said["updating"]),
@@ -374,6 +452,11 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             *([":differs", "echo.", _cmd_echo(said["differs"]), "echo %tcc_got%", "goto end"]
               if readback else []),
             *([":moved", "echo.", _cmd_echo(said["moved"]), "goto end"] if sha else []),
+            ":busy",
+            "echo.",
+            _cmd_echo(said["busy"]),
+            f'type "%~dp0{_BUSY_FILE}"',
+            "goto end",
             ":failed",
             "echo.",
             _cmd_echo(said["failed"]),
@@ -1753,6 +1836,10 @@ def prepare_tcc_update(channel: str = STABLE, *, pid: Optional[int] = None,
         shown = _shown_tcc(version, revision)
         _log.warning("tcc: %s is ahead of %s — not moved back", shown, tag)
         return TccUpdate(None, "ahead", f"{shown} → {tag}", tag=tag)
+    held = tool_env_holders(platform=platform)
+    if held:  # Windows: uv could not replace TCC's folder now (W-10) — said before TCC closes
+        _log.warning("tcc: %s run from TCC's own folder — no update", "; ".join(held))
+        return TccUpdate(None, "busy", "; ".join(held), tag=tag)
     ok, line, why, sha, pins = check_tcc_tag(tag)
     # The update log's line with the check's result — the evidence HUB-032 closes on.
     (_log.info if ok else _log.warning)("tcc tag %s: %s", tag, line)

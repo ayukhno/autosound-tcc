@@ -1256,7 +1256,9 @@ def test_the_windows_update_window_shows_only_the_person_s_lines(tmp_path):
     lines = raw.decode("utf-8").split("\r\n")
     assert lines[:3] == ["@echo off", "chcp 65001 >nul", "cls"], lines[:3]
     shown = [line[len("echo "):] for line in lines if line.startswith("echo ")]
-    assert shown == [_WORDS["wait"], _WORDS["updating"], _WORDS["done"], _WORDS["failed"]]
+    # The busy line (W-10) is the English default here: `_WORDS` has none.
+    assert shown == [_WORDS["wait"], _WORDS["updating"], _WORDS["done"],
+                     updates.TCC_WINDOW_WORDS["busy"], _WORDS["failed"]]
     install = next(line for line in lines if "uv tool install" in line)
     assert install.startswith("call uv tool install ") and "@v0.1.45" in install
 
@@ -2171,8 +2173,9 @@ def test_the_windows_update_removes_its_folder_after_its_last_line(monkeypatch, 
     assert lines[-1] == "", "the file ends with its line break"
     assert lines[-3:-1] == [":end", f'(goto) 2>nul & cd /d "%TEMP%" & rmdir /s /q "{path.parent}"']
     assert "goto :eof" not in lines, "no exit around the last line"
-    # done, the tag moved, and the installed commit read back as another (#195): each to `:end`.
-    assert [line for line in lines if line.startswith("goto ")] == ["goto end"] * 3
+    # done, the tag moved, the installed commit read back as another (#195), and a program
+    # still running from TCC's folder (W-10): each to `:end`.
+    assert [line for line in lines if line.startswith("goto ")] == ["goto end"] * 4
 
     given = tmp_path / "given"
     given.mkdir()
@@ -2643,6 +2646,9 @@ def _recording_uv(bindir, seen, old=False, fails=False):
         (bindir / "uv.cmd").write_text(
             "@echo off\r\n"
             f'if "%~1"=="--version" (echo {_OLD_UV}& exit /b 0)\r\n'
+            # `uv tool dir`, asked before the install (whatever runs from TCC's folder): a folder
+            # nothing runs from, and not one of the installs this keeps.
+            f'if "%~1"=="tool" if "%~2"=="dir" (echo {bindir}\\tools& exit /b 0)\r\n'
             'if not "%~3"=="--help" goto install\r\n'
             # `^<`/`^>`: bare, cmd reads them as redirects and prints nothing.
             "echo   -b, --build-constraints ^<BUILD_CONSTRAINTS^>\r\n"
@@ -3056,3 +3062,116 @@ def test_a_release_before_the_file_says_nothing_about_it_in_the_window(monkeypat
     ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
 
     assert updates.TCC_WINDOW_WORDS["nopins"] not in ready.script.read_text(encoding="utf-8")
+
+
+# ---- W-10, the Arbiter's Windows pass, round 3: a program running from TCC's folder ------------
+
+_TOOLS = r"C:\Users\me\AppData\Roaming\uv\tools"
+_ENV = _TOOLS + r"\autosound-tcc"
+
+
+def _process(pid, parent, path):
+    return {"ProcessId": pid, "ParentProcessId": parent, "ExecutablePath": path,
+            "Name": None if path is None else path.rsplit("\\", 1)[-1]}
+
+
+#: Windows-shaped, as `Win32_Process` answers: this TCC (100) started by its launcher (90, in the
+#: tool's folder) from Explorer; the «Open a terminal → Codex» window's Python (4242) under a cmd
+#: whose parent is gone; Codex; another tool whose folder shares the prefix; one in another case;
+#: one whose path Windows would not say.
+_PROCESSES = [
+    _process(4, 0, None),
+    _process(80, 4, r"C:\Windows\explorer.exe"),
+    _process(90, 80, _ENV + r"\Scripts\autosound-tcc.exe"),
+    _process(100, 90, _ENV + r"\Scripts\pythonw.exe"),
+    _process(900, 777, r"C:\Windows\System32\cmd.exe"),
+    _process(4242, 900, _ENV + r"\Scripts\python.exe"),
+    _process(4300, 4242, r"C:\Users\me\AppData\Local\codex\codex.exe"),
+    _process(5000, 80, _TOOLS + r"\autosound-tcc-other\Scripts\python.exe"),
+    _process(5100, 80, _ENV.upper() + r"\SCRIPTS\PYTHON.EXE"),
+]
+
+
+def test_what_runs_from_tcc_s_folder_is_named_but_this_tcc_and_its_launcher(monkeypatch):
+    monkeypatch.setattr(updates, "_windows_processes", lambda: pytest.fail("not asked again"))
+
+    held = updates.tool_env_holders(_PROCESSES, prefix=_ENV, me=100, platform="win32")
+
+    assert held == ["python.exe, pid 4242", "PYTHON.EXE, pid 5100"]
+
+
+def test_nothing_is_asked_off_windows_or_off_uv_s_tool(monkeypatch):
+    monkeypatch.setattr(updates, "_windows_processes", lambda: pytest.fail("asked"))
+
+    assert updates.tool_env_holders(prefix=_ENV, me=100, platform="darwin") == []
+    assert updates.tool_env_holders(prefix=r"C:\src\tcc\.venv", me=100, platform="win32") == []
+
+
+def test_an_update_is_refused_before_its_check_while_tcc_s_folder_is_in_use(monkeypatch):
+    """Said in the row while TCC still runs — no window, no uv, nothing fetched."""
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v99.0.0")
+    monkeypatch.setattr(updates, "check_tcc_tag", lambda tag: pytest.fail("checked"))
+    monkeypatch.setattr(updates, "write_tcc_install_script",
+                        lambda *a, **k: pytest.fail("a script was written"))
+    monkeypatch.setattr(updates, "tool_env_holders",
+                        lambda platform=None: ["python.exe, pid 4242"])
+
+    ready = updates.prepare_tcc_update(pid=100, platform="win32")
+
+    assert (ready.script, ready.reason, ready.detail) == (None, "busy", "python.exe, pid 4242")
+
+
+def test_the_windows_script_stops_before_uv_while_tcc_s_folder_is_in_use():
+    """Asked again in the window, after TCC closed and before anything else: a terminal opened
+    since the press holds the folder too. Found, the list is said and uv never runs."""
+    lines = _cmd_lines(sha=_VERIFIED, constraints=True, check_installed=True)
+    wait = next(at for at, line in enumerate(lines) if "Wait-Process" in line)
+    asked = next(at for at, line in enumerate(lines) if updates._BUSY_PS in line)
+    goes = lines.index(f'if exist "%~dp0{updates._BUSY_FILE}" for %%s in '
+                       f'("%~dp0{updates._BUSY_FILE}") do if %%~zs gtr 0 goto busy')
+    first_uv = next(at for at, line in enumerate(lines) if line.startswith("call uv"))
+    ls_remote = next(at for at, line in enumerate(lines) if "ls-remote" in line)
+
+    assert wait < asked < goes < min(first_uv, ls_remote)
+    assert "if defined tcc_tools" in lines[asked], "no folder from uv: nothing to look in"
+    busy = lines[lines.index(":busy"):]
+    assert busy[:5] == [":busy", "echo.", "echo " + updates.TCC_WINDOW_WORDS["busy"],
+                        f'type "%~dp0{updates._BUSY_FILE}"', "goto end"]
+
+
+def test_the_script_s_question_names_tcc_s_folder_and_each_program_by_its_pid():
+    ps = updates._BUSY_PS
+    assert "Join-Path $env:tcc_tools 'autosound-tcc'" in ps and "+ '\\'" in ps
+    assert "$_.Path.StartsWith($d, [StringComparison]::OrdinalIgnoreCase)" in ps
+    assert "'{0}.exe, pid {1}' -f $_.ProcessName, $_.Id" in ps
+    assert "Start-Sleep 3" in ps, "TCC's launcher ends a moment after TCC"
+    assert not set('"%^&|<>') & set(ps.replace("|", "")), "nothing cmd reads inside the quotes"
+
+
+@pytest.mark.skipif(not sys.platform.startswith("win"), reason="runs the Windows script")
+def test_the_windows_script_says_who_holds_tcc_s_folder_and_installs_nothing(tmp_path):
+    """On Windows, for real: a Python running from `<uv tool dir>\\autosound-tcc` holds it."""
+    tools = tmp_path / "tools"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(tools / "autosound-tcc")],
+                   check=True, capture_output=True, timeout=120)
+    python = tools / "autosound-tcc" / "Scripts" / "python.exe"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "uv.cmd").write_text(
+        "@echo off\r\n"
+        f'if "%~1"=="tool" if "%~2"=="dir" (echo {tools}& exit /b 0)\r\n'
+        f'echo %*>> "{tmp_path / "uv.args"}"\r\n', encoding="utf-8")
+    holder = subprocess.Popen([str(python), "-c", "import time; time.sleep(90)"])
+    try:
+        gone = subprocess.Popen([sys.executable, "-c", ""])
+        gone.wait()
+        folder = tmp_path / "update"
+        folder.mkdir()
+        path = updates.write_tcc_install_script(pid=gone.pid, tag="v1.1.4", words=_WORDS,
+                                                folder=folder, platform="win32")
+        out, _err = _run_update(path, bindir)
+    finally:
+        holder.kill()
+    assert f"python.exe, pid {holder.pid}" in out, out
+    assert updates.TCC_WINDOW_WORDS["busy"] in out and _WORDS["done"] not in out, out
+    assert not (tmp_path / "uv.args").exists(), "uv ran"

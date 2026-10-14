@@ -115,7 +115,12 @@ def command(binary: str, url: str, model: Optional[str]) -> list[str]:
 def _start(argv: list[str], env: dict, cwd: Path) -> int:
     """Hand the terminal to Codex. POSIX: `execve` — this process becomes Codex. Windows has no
     such replacement (`os.execv` starts a new process and returns), so Codex runs here with this
-    console's own stdio — no new window: the terminal already is one — and its code is ours."""
+    console's own stdio — no new window: the terminal already is one — and its code is ours.
+
+    So on Windows TCC's own `python.exe` stays while the window is open, and uv cannot replace
+    TCC's folder: the update names it and stops before uv (`updates.tool_env_holders`, W-10).
+    Not handed off instead: this process ending while Codex runs would give the console back to
+    the shell that started it, and the two would read the keyboard at once."""
     if not sys.platform.startswith("win"):
         os.chdir(cwd)
         os.execve(argv[0], argv, env)

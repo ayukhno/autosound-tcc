@@ -161,6 +161,27 @@ def test_the_update_window_gets_the_signature_line_in_the_reader_s_language(monk
 
     assert seen["words"]["signed"] == i18n.t("updTermSigned")
     assert seen["words"]["differs"] == i18n.t("updTermDiffers")
+    assert seen["words"]["busy"] == i18n.t("updTermBusy")
+
+
+def test_a_folder_in_use_is_said_on_the_row_and_the_button_stays_on(monkeypatch):
+    """W-10 (Windows): an «Open a terminal → Codex» window runs from TCC's folder; the press
+    says which, in the reader's language, and works again once it is closed."""
+    _seals(monkeypatch, updates.Seal("unknown", reason="source_checkout"),
+           updates.Seal("unknown", reason="not_found"))
+    monkeypatch.setattr(updates, "prepare_tcc_update", lambda channel="stable", **kw: (
+        updates.TccUpdate(None, "busy", "python.exe, pid 4242")))
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._show_update(updates.Status("tcc", "1.1.3", "1.1.4", True))
+
+    dialog._update_tcc()
+    dialog._tcc_job.join(timeout=10)
+    dialog._poll_tcc_job()
+
+    label, button = dialog._update_rows["tcc"]
+    assert i18n.t("updWhy_busy") in label.text() and "python.exe, pid 4242" in label.text()
+    assert button.isEnabled()
 
 
 def test_a_method_update_that_lands_takes_the_old_release_s_mark_away(monkeypatch):
