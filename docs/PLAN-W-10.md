@@ -16,9 +16,10 @@ session builds or briefs an Agent; the seats from «Process weight»; `Engine: n
 | 1‖ | a study, beside everything | #181 | a document, no code |
 | 2 | Install and update | #194, #195 | #195 may need a skill ticket for the method's half |
 | 3 | AI picks + what step 0 leaves | #196, #182, #165; #184, #192, #183 | |
-| 4 | Rounds and the bank | #197, #198, #199, #200 | the skill's halves of #198/#199 ticketed first; #200 waits for the skill's W-10 tag |
+| 4 | Rounds and the bank | #197, #198, #199, #200 | the skill's halves of #198/#199 ticketed first; #200 waits for the skill's W-10 tag; #200 also runs the method's `project.py <dir> agents-setup` before a Codex start (in-app and terminal) so a project made before skill #149 gets the `AGENTS.md` Codex reads |
 | 6 | Codex (#181, the Arbiter: «в цій») | #181 | `feature-dev`: code map → questions → architects → his choice → build; after the AI picks group (shared files) |
 | 5 | Window polish, Leftovers | #203, #166, #167, #204, #180; #205–#209 | the Haiku trial |
+| 7 | the Windows pass, last | Codex task 10's Windows half, #184 | the Arbiter, 2026-10-14: «віндоус треба оновити щоб перевіряти. зробимо в кінці» — Windows on the VM is updated first; the VM pass runs after every group is built, before the final review. The macOS live run of task 10 stays in order |
 
 Code implementers run **one at a time** in the tree (no parallel edits, no tests over a changing file); the study
 runs beside them. Bought 2026-10-14: #194's re-review ran while the AI picks group had `tests/conftest.py` half-edited — 445 setup errors; it re-ran on a `git archive`.
