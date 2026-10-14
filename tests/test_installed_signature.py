@@ -304,7 +304,7 @@ def test_a_good_answer_for_one_build_is_never_the_answer_for_another(monkeypatch
 
     assert (other.state, other.reason) == ("bad", "commit_differs"), other
     assert again == other
-    assert len(asked) == 2
+    assert len(asked) == 3, "only «good» is kept: a «bad» is asked again"
 
 
 def test_a_verdict_is_kept_on_disk_so_the_next_start_fetches_nothing(monkeypatch):
@@ -522,3 +522,67 @@ def test_the_windows_window_reads_what_uv_installed_too():
     assert "uv tool dir" in script and "tcc-installed.py" in script
     assert script.index("if errorlevel 1 goto failed") < script.index("tcc-installed.py")
     assert updates.TCC_WINDOW_WORDS["differs"] in script
+
+
+# ---- the last round: the shared job always ends, only «good» is kept, a network failure is one -
+
+def test_a_store_that_raises_still_releases_the_shared_check(monkeypatch):
+    import threading
+
+    asked = []
+    monkeypatch.setattr(updates, "check_tcc_tag", _answers(asked, "a" * 40))
+    monkeypatch.setattr(updates, "_seal_store", lambda: (_ for _ in ()).throw(RuntimeError("no home")))
+    _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
+
+    first = updates.tcc_seal()
+    got = []
+    later = threading.Thread(target=lambda: got.append(updates.tcc_seal()))
+    later.start()
+    later.join(timeout=5)
+
+    assert first.state == "good" and not later.is_alive() and got, "nobody waits forever"
+    assert updates._SEAL_FLIGHTS == {}
+
+
+def test_a_bad_answer_is_not_kept_across_a_restart(monkeypatch):
+    asked = []
+    monkeypatch.setattr(updates, "check_tcc_tag", lambda tag, **kw: asked.append(tag) or (
+        False, f"{tag}: No principal matched.", "bad_signature", "", None))
+    _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
+
+    assert updates.tcc_seal().state == "bad"
+    updates._TCC_SEALS.clear()
+    assert updates.tcc_seal().state == "bad"
+
+    assert asked == ["v1.1.3", "v1.1.3"]
+    assert not updates._seal_store().exists()
+
+
+def test_a_store_that_cannot_be_replaced_leaves_no_temporary_file(monkeypatch):
+    asked = []
+    monkeypatch.setattr(updates, "check_tcc_tag", _answers(asked, "a" * 40))
+    monkeypatch.setattr(updates.os, "replace",
+                        lambda *a: (_ for _ in ()).throw(PermissionError("held by a reader")))
+    _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
+
+    assert updates.tcc_seal().state == "good"
+    folder = updates._seal_store().parent
+    assert [path.name for path in folder.iterdir()] == [], "no signatures.json.<pid>.tmp left"
+
+
+def test_a_light_fetch_the_network_failed_is_said_as_such_and_not_fetched_twice(monkeypatch):
+    fetches = []
+
+    def fake(*args, cwd=None, timeout=None, base_env=None):
+        if "fetch" in args:
+            fetches.append(args)
+            return False, "fatal: unable to access 'https://github.com/': Could not resolve host"
+        return True, ""
+
+    monkeypatch.setattr(updates, "_git", fake)
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+
+    ok, line, why, _sha, _pins = updates.check_tcc_tag("v1.1.3", light=True)
+
+    assert (ok, why) == (False, "fetch_failed") and "Could not resolve host" in line
+    assert len(fetches) == 1

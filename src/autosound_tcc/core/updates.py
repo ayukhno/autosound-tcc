@@ -1605,7 +1605,9 @@ def _fetch_tcc_tag(repo: Path, tag: str, light: bool) -> tuple[bool, str]:
     timeout = _SEAL_FETCH_TIMEOUT if light else _FETCH_TIMEOUT
     if light:
         ok, said = _git(*fetch, "--filter=tree:0", TCC_REPO, refspec, cwd=repo, timeout=timeout)
-        if ok or isinstance(said, _DidNotRun):
+        # Only a refusal OF THE OPTION earns the whole fetch; a network that failed is said as
+        # itself, once.
+        if ok or isinstance(said, _DidNotRun) or "filter" not in said.lower():
             return ok, said
         _log.info("tcc tag %s: a fetch without the files was refused (%s) — fetching it whole",
                   tag, said)
@@ -1751,9 +1753,9 @@ class Seal:
     changed: Optional[bool] = False
 
 
-#: TCC's answers that cannot change — the installed commit, a signed tag and the key are all
-#: fixed — by `_seal_key`, in this process; and on disk (`_seal_store`), so the next start fetches
-#: nothing (#195 review, 1). Only verdicts: «could not look» is asked again.
+#: TCC's «good» answers, which cannot change — the installed commit, a signed tag and the key are
+#: all fixed — by `_seal_key`, in this process; and on disk (`_seal_store`), so the next start
+#: fetches nothing (#195 review, 1). Anything else is asked again.
 _TCC_SEALS: dict[str, Seal] = {}
 #: One check per key at a time, process-wide: two diagnostics windows share it.
 _SEAL_LOCK = threading.Lock()
@@ -1790,8 +1792,11 @@ def _stored_seal(key: str) -> Optional[Seal]:
 
 
 def _store_seal(key: str, seal: Seal) -> None:
-    path = _seal_store()
+    """Keep a «good» verdict for the next start. Never raises: a verdict that is not kept is one
+    fetch more, and the shared check must end either way (`tcc_seal`)."""
+    path = fresh = None
     try:
+        path = _seal_store()
         try:
             kept = json.loads(path.read_text(encoding="utf-8"))
             kept = kept if isinstance(kept, dict) else {}
@@ -1803,8 +1808,13 @@ def _store_seal(key: str, seal: Seal) -> None:
         fresh = path.with_name(f"{path.name}.{os.getpid()}.tmp")
         fresh.write_text(json.dumps(kept, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(fresh, path)
-    except OSError as exc:
+    except Exception as exc:  # noqa: BLE001 — a reader holding the file on Windows, no home
         _log.warning("the signature verdict was not kept in %s: %s", path, exc)
+        if fresh is not None:
+            try:
+                fresh.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _seal_refused(tag: str, line: str, why: str) -> Seal:
@@ -1833,9 +1843,9 @@ def tcc_seal() -> Seal:
     installed (`install_report.install_source`). A fetch: off the GUI thread.
 
     A source checkout, or a build uv installed from no tag, has nothing signed to check, and says
-    so — not «checked». A verdict is kept for good (`_TCC_SEALS`, `_seal_store`): the pair and the
-    key cannot change, so it is fetched once per installed build. A fetch that failed is asked
-    again. Two callers at once share one check (`_SEAL_FLIGHTS`)."""
+    so — not «checked». A «good» is kept for good (`_TCC_SEALS`, `_seal_store`): the pair and the
+    key cannot change, so it is fetched once per installed build. Anything else — a failed fetch,
+    a «bad» — is asked again. Two callers at once share one check (`_SEAL_FLIGHTS`)."""
     _url, commit = install_report.install_source()
     if not commit:
         return Seal("unknown", reason="source_checkout")
@@ -1858,17 +1868,22 @@ def tcc_seal() -> Seal:
     if not mine:
         flight.done.wait()
         return flight.seal or Seal("unknown", tag, "seal_failed")
+    seal = Seal("unknown", tag, "seal_failed")
     try:
         seal = _check_installed_tcc(tag, commit)
+        # Only «good» is kept: a «bad» may be one bad answer, and Re-check asks again.
+        if seal.state == "good":
+            with _SEAL_LOCK:
+                _TCC_SEALS[key] = seal
+            _store_seal(key, seal)
     except Exception as exc:  # noqa: BLE001 — an answer for both callers, not a dead thread
         seal = Seal("unknown", tag, "seal_failed", f"{type(exc).__name__}: {exc}")
-    with _SEAL_LOCK:
-        if seal.state != "unknown":
-            _TCC_SEALS[key] = seal
-            _store_seal(key, seal)
-        _SEAL_FLIGHTS.pop(key, None)
-    flight.seal = seal
-    flight.done.set()
+    finally:
+        # Whatever happened above, the shared check ends: a waiter left behind waits forever.
+        with _SEAL_LOCK:
+            _SEAL_FLIGHTS.pop(key, None)
+        flight.seal = seal
+        flight.done.set()
     return seal
 
 
