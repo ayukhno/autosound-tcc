@@ -13,8 +13,10 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import stat
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -241,7 +243,26 @@ def test_after_an_install_the_next_find_and_probe_look_again(monkeypatch, target
 
     _install(_Opener(wheel), target)
 
-    assert "reset" in calls and "forget" in calls
+    assert calls == ["forget"], "found again — and the versions already read are kept"
+
+
+@POSIX_ONLY
+def test_an_install_keeps_a_too_old_reading_so_the_old_codex_stays_passed_over(
+        monkeypatch, tmp_path, target):
+    """The review's M1: a wipe of the versions read made `find()` answer the old Codex on PATH
+    again until the next probe ended — «Sign in» on it, the blocker silent."""
+    old = tmp_path / "old" / "codex"
+    old.parent.mkdir()
+    old.write_bytes(b"old")
+    found_old = codex_cli.Found(str(old), codex_cli.SOURCE_PATH)
+    monkeypatch.setitem(codex_cli._VERSIONS, codex_cli._stamp(found_old), (0, 150, 0))
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+
+    _install(_Opener(wheel), target)
+
+    assert codex_cli.known_version(found_old) == (0, 150, 0)
+    assert codex_cli.too_old(found_old)
 
 
 # ---- nothing half-done ---------------------------------------------------------------------
@@ -421,3 +442,186 @@ def test_the_install_never_touches_anything_outside_its_folder(monkeypatch, tmp_
     for path in set(tmp_path.rglob("*")) - before:
         assert path == codex_folder or codex_folder in path.parents \
             or path in codex_folder.parents, path
+
+
+# ---- the fix round of the task review (M2–M7) ----------------------------------------------
+
+
+def test_a_redirect_to_plain_http_is_refused(monkeypatch, target):
+    marker = _old_copy(target)
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+
+    class Redirected(_Opener):
+        def __call__(self, url, timeout=None):
+            response = super().__call__(url, timeout)
+            if url == FILE_URL:
+                response._url = "http://files.pythonhosted.org/" + ROW["filename"]
+            return response
+
+    with pytest.raises(InstallError) as caught:
+        _install(Redirected(wheel), target)
+
+    assert "http://" in str(caught.value)
+    _assert_nothing_left(target, marker)
+
+
+def test_a_content_length_that_is_not_a_number_is_not_an_error(monkeypatch, target):
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+
+    class Garbled(_Opener):
+        def __call__(self, url, timeout=None):
+            response = super().__call__(url, timeout)
+            response.headers = {"Content-Length": "lots"}
+            return response
+
+    seen: list[tuple[int, int]] = []
+    if os.name == "nt":
+        pytest.skip("the fake codex is a POSIX script")
+    codex_install.install(lambda d, t: seen.append((d, t)), lambda: False, opener=Garbled(wheel),
+                          target=target, platform=KEY)
+    assert seen[-1] == (len(wheel), len(wheel)), "the index's size stands in"
+
+
+@POSIX_ONLY
+def test_a_failed_rename_puts_the_old_copy_back(monkeypatch, target):
+    marker = _old_copy(target)
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+    monkeypatch.setattr(codex_install, "RETRY_DELAYS", (0, 0))
+    real = codex_install._replace
+
+    def refuse_the_new_one(src, dst):
+        if ".0.162.1-new-" in str(src) or "-new-" in Path(src).name:
+            raise PermissionError(13, "in use")
+        return real(src, dst)
+
+    monkeypatch.setattr(codex_install, "_replace", refuse_the_new_one)
+
+    with pytest.raises(InstallError) as caught:
+        _install(_Opener(wheel), target)
+
+    assert caught.value.key == "codexInstallDisk"
+    _assert_nothing_left(target, marker)
+
+
+@POSIX_ONLY
+def test_a_rename_refused_for_a_moment_is_tried_again(monkeypatch, target):
+    """Windows: a fresh .exe under a Defender scan refuses a rename for a moment."""
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+    monkeypatch.setattr(codex_install, "RETRY_DELAYS", (0, 0, 0))
+    real = codex_install._replace
+    refused = {"n": 0}
+
+    def flaky(src, dst):
+        if "-new-" in Path(src).name and refused["n"] < 2:
+            refused["n"] += 1
+            raise PermissionError(13, "being scanned")
+        return real(src, dst)
+
+    monkeypatch.setattr(codex_install, "_replace", flaky)
+
+    path, _seen = _install(_Opener(wheel), target)
+
+    assert path.is_file() and refused["n"] == 2
+
+
+def test_a_cancel_mid_unpack_leaves_nothing(monkeypatch, target):
+    marker = _old_copy(target)
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+    state = {"cancel": False}
+    real = codex_install._copy
+
+    def copy_then_cancel(src, dst):
+        real(src, dst)
+        state["cancel"] = True
+
+    monkeypatch.setattr(codex_install, "_copy", copy_then_cancel)
+
+    with pytest.raises(InstallError) as caught:
+        _install(_Opener(wheel), target, cancelled=lambda: state["cancel"])
+
+    assert caught.value.key == "codexInstallCancelled"
+    _assert_nothing_left(target, marker)
+
+
+def test_the_version_check_waits_long_enough_and_an_unread_version_is_said_so(monkeypatch, target):
+    marker = _old_copy(target)
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+    asked: list[float] = []
+
+    def unread(found, timeout=None):
+        asked.append(timeout)
+        return None
+
+    monkeypatch.setattr(codex_cli, "version", unread)
+
+    with pytest.raises(InstallError) as caught:
+        _install(_Opener(wheel), target)
+
+    assert asked and asked[0] >= 60, "a first run under a virus scan is slow"
+    assert caught.value.key == "codexInstallUnreadVersion"
+    assert "could not" in str(caught.value) and "unknown" not in str(caught.value)
+    _assert_nothing_left(target, marker)
+
+
+@POSIX_ONLY
+def test_a_staging_folder_that_will_not_go_is_named_in_the_log(monkeypatch, target, caplog):
+    wheel = _wheel(says="0.150.0")
+    _pin(monkeypatch, wheel)
+    monkeypatch.setattr(codex_install.shutil, "rmtree", lambda *a, **k: None)
+
+    with caplog.at_level("WARNING"), pytest.raises(InstallError):
+        _install(_Opener(wheel), target)
+
+    left = [p for p in target.parents[3].iterdir() if "-new-" in p.name]
+    assert left and str(left[0]) in caplog.text
+
+
+@POSIX_ONLY
+def test_leftovers_of_an_install_cut_short_are_swept_and_a_fresh_one_is_not(monkeypatch, target):
+    codex_dir = target.parents[3]
+    codex_dir.mkdir(parents=True)
+    stale_part = codex_dir / ".codex-abc.whl.part"
+    stale_part.write_bytes(b"half")
+    stale_new = codex_dir / f".{codex_cli.PIN}-new-xyz"
+    (stale_new / "codex_cli_bin").mkdir(parents=True)
+    stale_old = codex_dir / f".{codex_cli.PIN}-old-xyz"
+    stale_old.mkdir()
+    long_ago = time.time() - 3 * 3600
+    for path in (stale_part, stale_new, stale_new / "codex_cli_bin", stale_old):
+        os.utime(path, (long_ago, long_ago))
+    fresh = codex_dir / ".codex-another-process.whl.part"
+    fresh.write_bytes(b"still coming")
+    unrelated = codex_dir / "notes.txt"
+    unrelated.write_text("mine")
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+
+    _install(_Opener(wheel), target)
+
+    assert not stale_part.exists() and not stale_new.exists() and not stale_old.exists()
+    assert fresh.exists(), "another TCC may be downloading it right now"
+    assert unrelated.exists()
+
+
+@POSIX_ONLY
+def test_a_complete_copy_put_there_by_another_install_is_a_success(monkeypatch, target):
+    """Two TCCs installing at once: the second's rename fails, yet Codex is there and whole."""
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+
+    def the_other_won(staging, folder):
+        shutil.copytree(staging, folder)
+        raise InstallError("the rename lost the race", key="codexInstallDisk", error="ENOTEMPTY")
+
+    monkeypatch.setattr(codex_install, "_place", the_other_won)
+
+    path, _seen = _install(_Opener(wheel), target)
+
+    assert path == target and target.is_file()
+    assert [p.name for p in target.parents[3].iterdir()] == [codex_cli.PIN]

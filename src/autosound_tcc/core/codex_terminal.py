@@ -72,11 +72,12 @@ def connection(project_dir: Path) -> tuple[str, str]:
 
 def _codex() -> codex_cli.Found:
     """The native Codex binary (never a shim), not one known to be too old — or `Refused`."""
-    found = codex_cli.find()
+    # This is a terminal, not the GUI thread: the version may be read here. Read too old, the
+    # Codex found is passed over for TCC's own copy, as the probe does (task 9's review, I1).
+    found, read = codex_cli.settled()
     if found is None:
         raise Refused(f"Codex is not installed on this computer: in TCC, choose {_install_line()}, "
                       "then run this again.")
-    read = codex_cli.version(found)  # this is a terminal, not the GUI thread: it may run
     if codex_cli.too_old(found):
         raise Refused(f"Codex {codex_cli.version_text(read)} at {found.path} is too old: TCC needs "
                       f"{codex_cli.version_text(codex_cli.MIN_VERSION)} or newer — in TCC, "

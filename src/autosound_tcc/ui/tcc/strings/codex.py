@@ -119,6 +119,30 @@ STRINGS: dict[str, dict[str, str]] = {
         'de': 'Der entpackte Codex meldet {version} statt {pin} und wurde daher wieder '
               'entfernt.',
     },
+    'codexInstallUnreadVersion': {
+        'en': 'The unpacked Codex did not say its version, so it was removed again. Try once '
+              'more; if it happens again, the log says what it answered.',
+        'uk': 'Розпакований Codex не назвав своєї версії, тож його знову прибрано. Спробуйте ще '
+              'раз; якщо повториться, у журналі видно, що він відповів.',
+        'pl': 'Rozpakowany Codex nie zgłosił swojej wersji, więc został ponownie usunięty. Spróbuj jeszcze raz; jeśli to się powtórzy, w dzienniku widać, co odpowiedział.',
+        'de': 'Der entpackte Codex hat seine Version nicht gemeldet und wurde daher wieder entfernt. Versuche es noch einmal; falls es wieder vorkommt, steht im Log, was er geantwortet hat.',
+    },
+    'codexInstallUnexpected': {
+        'en': 'Codex was not installed: something TCC did not expect went wrong ({error}). '
+              'Nothing was left behind; the log has the details.',
+        'uk': 'Codex не встановлено: сталося те, чого TCC не очікував ({error}). Нічого не '
+              'залишено; подробиці — у журналі.',
+        'pl': 'Codex nie został zainstalowany: stało się coś, czego TCC się nie spodziewał ({error}). Nic nie pozostało; szczegóły są w dzienniku.',
+        'de': 'Codex wurde nicht installiert: Es ist etwas schiefgelaufen, was TCC nicht erwartet hat ({error}). Es wurde nichts hinterlassen; die Details stehen im Log.',
+    },
+    'codexBrowserDidNotOpen': {
+        'en': 'The browser did not open. To sign in to Codex, open this address yourself (it is '
+              'copied): {url}',
+        'uk': 'Браузер не відкрився. Щоб увійти в Codex, відкрийте цю адресу самі (її '
+              'скопійовано): {url}',
+        'pl': 'Przeglądarka nie otworzyła się. Aby zalogować się do Codex, otwórz ten adres samodzielnie (został skopiowany): {url}',
+        'de': 'Der Browser hat sich nicht geöffnet. Um dich bei Codex anzumelden, öffne diese Adresse selbst (sie wurde kopiert): {url}',
+    },
     'codexFinishInBrowser': {
         'en': 'Finish signing in to Codex in the browser.',
         'uk': 'Завершіть вхід у Codex у браузері.',

@@ -18,7 +18,8 @@ What it guarantees:
   beside the target in TCC's `codex/` folder; the new copy is renamed into exactly the folder
   `codex_cli.tcc_copy_path()` names only once it is whole and says the pinned version; an older
   complete copy is replaced only then. Any failure — a digest, a cancel, a full disk, a wrong
-  version — leaves no temp file and no partial folder, and the older copy as it was.
+  version — leaves no temp file and no partial folder, and the older copy as it was; what an
+  install cut short by a crash left is swept by the next one.
 
 Qt-free. **Worker thread only**: it downloads ~130 MB and runs `codex --version`.
 """
@@ -33,6 +34,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import time
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -54,6 +56,13 @@ DIST_INFO = f"openai_codex_cli_bin-{codex_cli.PIN}.dist-info"
 CHUNK = 1 << 20
 #: The index and the file: long enough for a slow line to start answering.
 TIMEOUT_S = 60.0
+#: The new binary's first `--version`: on Windows a fresh .exe may sit under a Defender scan.
+VERSION_TIMEOUT_S = 90.0
+#: A refused rename is tried again after each of these (a scan holds a fresh .exe a moment).
+RETRY_DELAYS: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0)
+#: A leftover of an install cut short (a crash, a kill) older than this is swept by the next one;
+#: a younger one may be another TCC's install under way.
+STALE_S = 30 * 60
 
 
 class Wheel(NamedTuple):
@@ -154,6 +163,14 @@ def _file_entry(opener: Callable, wheel: Wheel) -> dict:
     return entry
 
 
+def _number(value) -> int:
+    """A size from a header or the index; 0 when it is not one (progress then shows no total)."""
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _download(opener: Callable, entry: dict, into: Path, progress, cancelled) -> _Download:
     """Stream the file to a temp file in `into`, hashing as it goes. On any failure the temp file
     is removed here; on success it is the caller's."""
@@ -165,7 +182,7 @@ def _download(opener: Callable, entry: dict, into: Path, progress, cancelled) ->
     try:
         with handle, _open(opener, str(entry["url"])) as response:
             headers = getattr(response, "headers", {}) or {}
-            total = int(headers.get("Content-Length") or entry.get("size") or 0)
+            total = _number(headers.get("Content-Length")) or _number(entry.get("size"))
             progress(0, total)
             while True:
                 if cancelled():
@@ -276,7 +293,8 @@ def _unpack(wheel_path: Path, into: Path, cancelled) -> None:
 
 
 def _remove(path: Optional[Path]) -> None:
-    """Gone, file or folder, quietly: this is the cleanup of a failure already being said."""
+    """Gone, file or folder: this is the cleanup of a failure already being said. What will not
+    go is named in the log (a Windows .exe a scan still holds, for one)."""
     if path is None:
         return
     try:
@@ -285,7 +303,50 @@ def _remove(path: Optional[Path]) -> None:
         elif path.exists() or path.is_symlink():
             path.unlink()
     except OSError:
-        app_log.logger().warning("codex install: %s could not be removed", path, exc_info=True)
+        pass
+    if path.exists() or path.is_symlink():
+        app_log.logger().warning("codex install: %s could not be removed; the next install "
+                                 "sweeps it once it is older than %d min", path, STALE_S // 60)
+
+
+def _leftovers(parent: Path, pin: str) -> list[Path]:
+    """What an install cut short leaves in TCC's `codex/` folder: its own patterns only."""
+    patterns = (".codex-*.whl.part", f".{pin}-new-*", f".{pin}-old-*")
+    try:
+        return [path for pattern in patterns for path in parent.glob(pattern)]
+    except OSError:
+        return []
+
+
+def _sweep(parent: Path, pin: str) -> None:
+    """Remove the leftovers older than `STALE_S`; a younger one may be another TCC's install."""
+    now = time.time()
+    for path in _leftovers(parent, pin):
+        try:
+            age = now - path.lstat().st_mtime
+        except OSError:
+            continue
+        if age > STALE_S:
+            app_log.logger().info("codex install: sweeping %s, left by an install cut short", path)
+            _remove(path)
+
+
+def _replace(src, dst) -> None:
+    """One rename; the seam a test refuses."""
+    os.replace(src, dst)
+
+
+def _replace_retrying(src: Path, dst: Path) -> None:
+    """`_replace`, tried again after each of `RETRY_DELAYS` while it is refused — a fresh .exe
+    under a virus scan refuses a rename for a moment on Windows. The last refusal is raised."""
+    for delay in (*RETRY_DELAYS, None):
+        try:
+            _replace(src, dst)
+            return
+        except OSError:
+            if delay is None:
+                raise
+            time.sleep(delay)
 
 
 def _place(staging: Path, folder: Path) -> None:
@@ -296,21 +357,32 @@ def _place(staging: Path, folder: Path) -> None:
         aside = Path(tempfile.mkdtemp(dir=folder.parent, prefix=f".{folder.name}-old-"))
         aside.rmdir()
         try:
-            os.replace(folder, aside)
+            _replace_retrying(folder, aside)
         except OSError as exc:
             raise InstallError(f"the older Codex at {folder} could not be replaced (is a session "
                                f"using it?): {exc}", key="codexInstallDisk", error=str(exc)) from exc
     try:
-        os.replace(staging, folder)
+        _replace_retrying(staging, folder)
     except OSError as exc:
         if aside is not None:
             try:
-                os.replace(aside, folder)
+                _replace_retrying(aside, folder)
             except OSError:
                 app_log.logger().error("codex install: the older copy is left at %s", aside)
         raise InstallError(f"Codex could not be put in place at {folder}: {exc}",
                            key="codexInstallDisk", error=str(exc)) from exc
     _remove(aside)
+
+
+def _reads_pin(binary: Path) -> Optional[tuple]:
+    """`codex --version` of `binary` with the first run's bound; None when it says nothing."""
+    return codex_cli.version(codex_cli.Found(str(binary), codex_cli.SOURCE_TCC),
+                             timeout=VERSION_TIMEOUT_S)
+
+
+def _complete(binary: Path) -> bool:
+    """Is a whole copy of the pinned Codex at `binary` — another TCC's install that won a race."""
+    return binary.is_file() and codex_cli.version_text(_reads_pin(binary)) == codex_cli.PIN
 
 
 def install(progress: Callable[[int, int], None], cancelled: Callable[[], bool],
@@ -340,6 +412,7 @@ def install(progress: Callable[[int, int], None], cancelled: Callable[[], bool],
     except OSError as exc:
         raise InstallError(f"TCC's folder for Codex could not be made: {exc}",
                            key="codexInstallDisk", error=str(exc)) from exc
+    _sweep(folder.parent, folder.name)
     staging: Optional[Path] = None
     part: Optional[Path] = None
     try:
@@ -360,23 +433,36 @@ def install(progress: Callable[[int, int], None], cancelled: Callable[[], bool],
         if not new_binary.is_file():
             raise InstallError(f"the wheel has no {inside.as_posix()}", key="codexInstallBadWheel",
                                error=f"no {inside.as_posix()}")
-        read = codex_cli.version(codex_cli.Found(str(new_binary), codex_cli.SOURCE_TCC))
+        read = _reads_pin(new_binary)
+        if read is None:
+            raise InstallError(f"the unpacked Codex could not be asked its version in "
+                               f"{VERSION_TIMEOUT_S:g} s (the log has what it said)",
+                               key="codexInstallUnreadVersion")
         if codex_cli.version_text(read) != codex_cli.PIN:
             said = codex_cli.version_text(read)
             raise InstallError(f"the unpacked Codex says {said}, not {codex_cli.PIN}",
                                key="codexInstallWrongVersion", version=said, pin=codex_cli.PIN)
         if cancelled():
             raise InstallError("the installation was cancelled", key="codexInstallCancelled")
-        _place(staging, folder)
-        staging = None
+        try:
+            _place(staging, folder)
+        except InstallError:
+            # Two TCCs installing at once: the other one's whole copy is the same Codex.
+            if not _complete(binary):
+                raise
+            log.info("codex install: another install put Codex %s at %s first", codex_cli.PIN,
+                     folder)
+        else:
+            staging = None
     except InstallError as exc:
         log.warning("codex install: %s", exc)
         raise
     finally:
         _remove(part)
         _remove(staging)
+    # Found again from here on; the versions already read are kept — a wipe made `find()` answer
+    # an old Codex on PATH again until the next probe ended (task 9's review, M1).
     codex_cli.forget()
-    codex_cli.reset()
     log.info("codex install: Codex %s is at %s", codex_cli.PIN, binary)
     return binary
 

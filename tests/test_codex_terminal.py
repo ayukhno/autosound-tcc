@@ -10,6 +10,7 @@ No real Codex runs here: `find`, `version` and the exec are stood in.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,9 @@ import pytest
 from autosound_tcc.core import codex_cli, codex_terminal
 from autosound_tcc.core.codex_cli import Found
 from autosound_tcc.ui.tcc.strings import codex as codex_strings
+
+#: The real `find`: `conftest` stands a «none» in for the machine's.
+_REAL_FIND = codex_cli.find
 
 TOKEN = "s3cret-token-0123456789"
 URL = "http://127.0.0.1:8765/mcp"
@@ -202,3 +206,35 @@ def test_windows_runs_codex_in_this_console_and_returns_its_code(monkeypatch, tm
     assert seen["argv"] == [BINARY] and seen["env"] == {"A": "1"} and seen["cwd"] == str(tmp_path)
     assert "creationflags" not in seen, "no new console: the terminal is already one"
     assert "stdout" not in seen and "stdin" not in seen
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX scripts stand in for codex")
+def test_an_old_codex_on_path_gives_way_to_tccs_installed_copy(tmp_path, monkeypatch):
+    """The review's I1: the terminal is a process of its own with no versions read yet, so an old
+    `codex` on PATH came first, and the refusal sent the person to «Install Codex» — greyed in
+    TCC, since its copy is installed. Read too old, it is passed over as the probe passes it."""
+    import sys
+
+    def script(path: Path, says: str) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"#!{sys.executable}\nprint('codex-cli {says}')\n")
+        path.chmod(0o755)
+        return path
+
+    _write_config(tmp_path)
+    old = script(tmp_path / "old-bin" / "codex", "0.100.0")
+    home = tmp_path / "home"
+    own = script(codex_cli.tcc_copy_path(home=home, environ={}, windows=False), codex_cli.PIN)
+    monkeypatch.setattr(codex_cli, "find", _REAL_FIND)
+    monkeypatch.setattr(codex_cli, "SYSTEM_FOLDERS", ())
+    monkeypatch.setattr(codex_cli, "dock_folders", lambda **_kw: [])
+    monkeypatch.setattr(codex_cli.Path, "home", lambda: home)
+    monkeypatch.setenv("PATH", str(old.parent))
+    codex_cli.forget()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(codex_terminal, "_start", lambda argv, env, cwd: calls.append(argv) or 0)
+
+    assert codex_terminal.main([str(tmp_path)]) == 0
+
+    assert calls and calls[0][0] == str(own)
+    codex_cli.forget()

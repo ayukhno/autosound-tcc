@@ -10,7 +10,7 @@ opens the browser. One `codex app-server` (`codex_rpc.AppServer`, spawned on the
   Codex itself, and its own sentence is `SignInError`'s.
 * `wait(timeout)` — until `account/login/completed`: its `success`, its `error` kept as the
   sentence (`error`). After a success the login and the model list are read afresh
-  (`codex_cli.reset()` and a forced `probe()`), on the same worker.
+  (`codex_cli.forget()` and a forced `probe()`), on the same worker.
 * `cancel()` — `account/login/cancel` for the login started; any thread, never blocking.
 * `close()` — idempotent; a login still pending is cancelled first, then the child is closed and
   reaped (`AppServer.close`: stdin, grace, terminate, `child.kill_tree`).
@@ -163,7 +163,7 @@ class SignIn:
              cancelled: Callable[[], bool] = lambda: False) -> bool:
         """Block until Codex says how the sign-in ended: True on success. `cancelled()` is read
         every `POLL_S`; when it says so the sign-in is cancelled and this returns False. After a
-        success the login and the models are read again (`codex_cli.reset` + `probe(force=True)`).
+        success the login and the models are read again (`codex_cli.forget` + `probe(force=True)`).
         The app-server is closed before this returns."""
         if self._loop is None or self._completed is None:
             raise SignInError("the sign-in was not started")
@@ -194,7 +194,9 @@ class SignIn:
             self.error = str(params.get("error") or "Codex said the sign-in did not succeed")
         if success:
             self.error = ""
-            codex_cli.reset()
+            # Found again and asked again; the versions already read are kept — a wipe made
+            # `find()` answer an old Codex on PATH until the probe ended (task 9's review, M1).
+            codex_cli.forget()
             codex_cli.probe(force=True)
         app_log.logger().info("codex sign-in: %s", "done" if success else
                               "cancelled" if self.cancelled else f"failed ({self.error})")

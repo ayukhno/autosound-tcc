@@ -193,6 +193,21 @@ def test_the_strip_s_cancel_reaches_the_install_between_chunks(monkeypatch, no_s
     assert seen == [True]
 
 
+def test_an_unexpected_install_error_is_said_as_itself_not_as_a_disk(monkeypatch, no_subprocess):
+    """The review's M5: a ValueError read as «could not be written to the disk»."""
+    _app()
+
+    def install(progress, cancelled, **_kw):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(codex_install, "install", install)
+    host = _host()
+
+    _entry("codex_install").on(host)
+    said = i18n.t("codexInstallUnexpected").format(error="ValueError: boom")
+    _until(lambda: said in host._status_strip.texts())
+
+
 class _FakeSignIn:
     """`codex_login.SignIn` without Codex: records the thread, waits for a cancel when told."""
 
@@ -235,7 +250,7 @@ def fake_sign_in(monkeypatch, tmp_path):
     _FakeSignIn.block = False
     monkeypatch.setattr(codex_login, "SignIn", _FakeSignIn)
     opened: list[str] = []
-    monkeypatch.setattr(codex_menu, "open_browser", opened.append)
+    monkeypatch.setattr(codex_menu, "open_browser", lambda url: opened.append(url) or True)
     found = _found(tmp_path)
     monkeypatch.setattr(codex_cli, "find", lambda **_kw: found)
     monkeypatch.setattr(codex_menu, "after_sign_in", lambda: None)
@@ -257,6 +272,29 @@ def test_sign_in_runs_on_a_worker_opens_the_browser_and_says_the_result(fake_sig
     finish = [kw for text, kw in host._status_strip.lines if text == i18n.t("codexFinishInBrowser")]
     assert finish and finish[0]["action"][0] == i18n.t("codexCancel"), "a cancel line while waiting"
     assert host.reloaded == [True]
+
+
+def test_a_browser_that_does_not_open_leaves_the_address_with_the_person(
+        fake_sign_in, no_subprocess, monkeypatch):
+    """The review's M6: no browser, and the strip said «finish in the browser» with no address
+    anywhere for ten minutes. The address goes on the strip and onto the clipboard, the «Cancel»
+    still beside it."""
+    _app()
+    monkeypatch.setattr(codex_menu, "open_browser", lambda url: False)
+    _FakeSignIn.block = True
+    host = _host()
+    url = "https://auth.openai.com/oauth/authorize?x=1"
+
+    _entry("codex_sign_in").on(host)
+    said = i18n.t("codexBrowserDidNotOpen").format(url=url)
+    _until(lambda: said in host._status_strip.texts())
+
+    from PySide6.QtGui import QGuiApplication
+    assert QGuiApplication.clipboard().text() == url
+    offer = dict(host._status_strip.lines)[said]["action"]
+    assert offer[0] == i18n.t("codexCancel")
+    offer[1]()
+    _until(lambda: i18n.t("codexSignInCancelled") in host._status_strip.texts())
 
 
 def test_a_failed_sign_in_says_codex_s_sentence(fake_sign_in, no_subprocess):

@@ -311,6 +311,12 @@ def test_two_turns_with_approvals_each_answered_once_and_the_brief_rides_each(pr
         def restore_delivered(self):
             Bus.restored += 1
 
+        # The rest of `SignalBus`, which a Codex turn never asks (`test_doubles`): asked, it fails.
+        def _unasked(self, *_a, **_k):
+            raise AssertionError("a Codex turn asked the bus for more than its brief")
+
+        ack = deliver = is_open = open_ids = pending_count = push = wait = _unasked
+
     session = make(project, stand_in.use("file-approval"))
     session.bus = Bus()
 

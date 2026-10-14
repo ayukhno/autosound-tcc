@@ -215,3 +215,21 @@ def test_the_sign_in_spawns_the_native_binary_never_a_shim(monkeypatch):
     found = Found("/native/codex", codex_cli.SOURCE_FOLDER, shim="/usr/local/bin/codex")
     monkeypatch.setattr(codex_cli, "find", lambda **_kw: found)
     assert codex_login.binary() == "/native/codex"
+
+
+def test_a_success_keeps_the_versions_already_read(tmp_path, stand_in, monkeypatch):
+    """The review's M1: the sign-in forgets where Codex is and probes again; it does not wipe a
+    too-old reading, or `find()` would answer the old Codex until the probe ended."""
+    old = tmp_path / "old" / "codex"
+    old.parent.mkdir()
+    old.write_bytes(b"old")
+    found_old = Found(str(old), codex_cli.SOURCE_PATH)
+    monkeypatch.setitem(codex_cli._VERSIONS, codex_cli._stamp(found_old), (0, 150, 0))
+    _log, probes = stand_in(_scenario(tmp_path, "success"))
+    sign_in = SignIn()
+    sign_in.begin()
+
+    assert sign_in.wait(timeout=10) is True
+
+    assert probes == [True]
+    assert codex_cli.known_version(found_old) == (0, 150, 0)

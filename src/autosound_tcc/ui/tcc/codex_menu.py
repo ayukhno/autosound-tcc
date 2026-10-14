@@ -10,7 +10,8 @@ their own Codex account through a TCC button that opens the browser.
   result, done or the `InstallError`'s sentence, lands there too.
 * **Sign in** — offered while Codex is usable and not known to be signed in. The work runs on
   `workers.CodexSignInWorker`; the window opens the address Codex gives in the browser and says
-  «finish in the browser» with a «Cancel», then the result.
+  «finish in the browser» with a «Cancel», then the result. No browser: the address is on the
+  strip and on the clipboard.
 
 The lines' states are asked when Settings opens (`MainMenu`'s `aboutToShow`), by stat calls and
 cached readings only — `version()` and `probe()` run only on the workers. One job at a time per
@@ -127,11 +128,18 @@ def say_install_error(error: codex_install.InstallError) -> str:
     return str(error)
 
 
-def open_browser(url: str) -> None:
+def open_browser(url: str) -> bool:
+    """Open `url` in the person's browser; False when the system could not."""
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QDesktopServices
 
-    QDesktopServices.openUrl(QUrl(url))
+    return bool(QDesktopServices.openUrl(QUrl(url)))
+
+
+def _copy_to_clipboard(text: str) -> None:
+    from PySide6.QtGui import QGuiApplication
+
+    QGuiApplication.clipboard().setText(text)
 
 
 def sign_in(host) -> None:
@@ -145,8 +153,16 @@ def sign_in(host) -> None:
     strip = host._status_strip
 
     def got_url(url: str) -> None:
-        open_browser(url)
-        strip.notify(i18n.t("codexFinishInBrowser"), action=_cancel_offer(job))
+        if open_browser(url):
+            strip.notify(i18n.t("codexFinishInBrowser"), action=_cancel_offer(job))
+            return
+        # No browser opened (the review's M6): the address stays with the person — on the strip
+        # and on the clipboard, since the strip's text cannot be selected. Not `sticky`: a sticky
+        # line outlives the sign-in's result; a line with an offer is off the clock anyway, and
+        # the result replaces it.
+        _copy_to_clipboard(url)
+        strip.notify(i18n.t("codexBrowserDidNotOpen").format(url=url), level="warn",
+                     action=_cancel_offer(job))
 
     def finished(outcome) -> None:
         ok, error, cancelled = outcome

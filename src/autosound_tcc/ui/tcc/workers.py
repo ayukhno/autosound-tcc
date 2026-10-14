@@ -321,9 +321,11 @@ class CodexInstallWorker(QThread):
             self.done.emit(exc)
             return
         except Exception as exc:  # noqa: BLE001 — said on the strip, not lost in a thread
-            app_log.logger().exception("codex install failed")
-            self.done.emit(codex_install.InstallError(str(exc), key="codexInstallDisk",
-                                                      error=str(exc)))
+            # Its own sentence, with what it was: not every surprise is a disk (the review's M5).
+            app_log.logger().exception("codex install failed unexpectedly")
+            what = f"{type(exc).__name__}: {exc}"
+            self.done.emit(codex_install.InstallError(what, key="codexInstallUnexpected",
+                                                      error=what))
             return
         if self._then is not None:
             try:

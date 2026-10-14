@@ -280,15 +280,16 @@ def parse_version(text: str) -> Optional[tuple]:
     return tuple(int(part) for part in match.groups()) if match else None
 
 
-def version(found: Found) -> Optional[tuple]:
+def version(found: Found, timeout: float = VERSION_TIMEOUT_S) -> Optional[tuple]:
     """`codex --version` as `(X, Y, Z)`, once per (path, mtime); None when it cannot be read —
-    then Codex is used anyway and the log says so. **Worker thread only.**"""
+    then Codex is used anyway and the log says so. **Worker thread only.** `timeout`: longer for a
+    binary's first run, which a virus scan may hold (the install's check)."""
     stamp = _stamp(found)
     with _lock:
         if stamp is not None and stamp in _VERSIONS:
             return _VERSIONS[stamp]
     try:
-        proc = child.run_bounded([found.path, "--version"], timeout=VERSION_TIMEOUT_S, text=True,
+        proc = child.run_bounded([found.path, "--version"], timeout=timeout, text=True,
                                  encoding="utf-8", errors="replace", **child.quiet())
         said = f"{proc.stdout or ''}\n{proc.stderr or ''}"
     except (OSError, subprocess.SubprocessError) as exc:
@@ -427,6 +428,23 @@ async def _ask(binary: str, timeout: float) -> tuple[Any, list, str]:
         await server.close(grace=child.REAP_TIMEOUT_S)
 
 
+def settled() -> tuple[Optional[Found], Optional[tuple]]:
+    """`find()` with its version read — and, when that reading is too old, `find()` again, which
+    now passes it over for TCC's own copy. `(found, version)`; the found one is still the old Codex
+    when there is no other. **Worker thread only** (or a process of its own: the terminal, whose
+    cache starts empty, task 9's review I1)."""
+    found = find()
+    if found is None:
+        return None, None
+    read = version(found)
+    if read is not None and read < MIN_VERSION:
+        forget()
+        other = find()
+        if other is not None and other != found:
+            found, read = other, version(other)
+    return found, read
+
+
 def probe(*, force: bool = False) -> Probe:
     """Ask Codex once — its login and its models — and remember the answer (`signed_in()`,
     `models()`). **Worker thread only.** Again only with `force` (↻)."""
@@ -434,17 +452,10 @@ def probe(*, force: bool = False) -> Probe:
     with _lock:
         if _PROBE.asked and not force:
             return _PROBE
-    found = find()
+    found, read = settled()
     if found is None:
         result = Probe(asked=True)
     else:
-        read = version(found)
-        if read is not None and read < MIN_VERSION:
-            # Read too old just now: look again — `find` passes it over for TCC's own copy.
-            forget()
-            other = find()
-            if other is not None and other != found:
-                found, read = other, version(other)
         if read is not None and read < MIN_VERSION:
             result = Probe(asked=True, why=(f"Codex {version_text(read)} is older than "
                                             f"{version_text(MIN_VERSION)}, the oldest TCC speaks to"))
@@ -563,7 +574,7 @@ def unknown_enabled_features(config_read: Mapping) -> list[str]:
 
 __all__ = [
     "Found", "Probe", "MIN_VERSION", "PIN", "SOURCE_PATH", "SOURCE_FOLDER", "SOURCE_TCC",
-    "find", "forget", "version", "known_version", "too_old", "usable", "probe", "signed_in", "models",
+    "find", "forget", "settled", "version", "known_version", "too_old", "usable", "probe", "signed_in", "models",
     "supported_efforts", "efforts_in", "tcc_copy_path", "dock_folders", "tcc_tool_args",
     "tcc_connection_args",
     "isolation_args",

@@ -687,6 +687,81 @@ def test_no_subprocess_decodes_its_child_with_the_machines_locale():
     )
 
 
+def text_io_without_encoding(source: str, label: str) -> list[str]:
+    """`label:line call()` for each text open / read_text / write_text in `source` that names no
+    encoding. Two `.open()` shapes are not files and are passed over by their shape, never by the
+    file they sit in: an awaited `.open()` (`await server.open(...)` — `codex_rpc.AppServer`
+    starting a process; no file API in the tree is awaited), and `.open()` on a name bound to a
+    `zipfile.ZipFile(...)` in the same module (a member, always bytes)."""
+    import ast
+
+    tree = ast.parse(source, filename=label)
+    awaited = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Await)}
+    zips: set[str] = set()
+    for node in ast.walk(tree):
+        value, names = None, []
+        if isinstance(node, ast.Assign):
+            value, names = node.value, [t.id for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.withitem) and isinstance(node.optional_vars, ast.Name):
+            value, names = node.context_expr, [node.optional_vars.id]
+        func = value.func if isinstance(value, ast.Call) else None
+        if (isinstance(func, ast.Attribute) and func.attr == "ZipFile") or (
+                isinstance(func, ast.Name) and func.id == "ZipFile"):
+            zips.update(names)
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in ("read_text", "write_text", "open"):
+            continue
+        if any(kw.arg == "encoding" for kw in node.keywords):
+            continue
+        # `importlib.metadata`'s `Distribution.read_text(name)` is a different API — its
+        # argument is a FILENAME inside the distribution, and it decodes as UTF-8 itself.
+        inner = node.func.value
+        if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) \
+                and inner.func.id == "distribution":
+            continue
+        if node.func.attr == "open":
+            if id(node) in awaited:
+                continue  # `await x.open()`: a process starting, not a file (AppServer)
+            if isinstance(inner, ast.Name) and inner.id in zips:
+                continue  # a zip member: bytes, whatever its mode
+            mode = ""
+            if node.args and isinstance(node.args[0], ast.Constant):
+                mode = str(node.args[0].value)
+            for kw in node.keywords:
+                if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                    mode = str(kw.value.value)
+            if "b" in mode:
+                continue  # bytes carry no encoding to get wrong
+        offenders.append(f"{label}:{node.lineno} {node.func.attr}()")
+    return offenders
+
+
+def test_the_encoding_check_passes_only_the_shapes_that_are_not_text_files():
+    """The two shapes passed over above, beside text opens that still fail."""
+    sample = (
+        "import zipfile\n"                                       # 1
+        "async def start(server):\n"                             # 2
+        "    await server.open(timeout=5)\n"                     # 3
+        "def unpack(path, dest, info):\n"                        # 4
+        "    archive = zipfile.ZipFile(path)\n"                  # 5
+        "    with archive.open(info) as src, open(dest, 'wb'):\n"  # 6
+        "        pass\n"                                         # 7
+        "    with zipfile.ZipFile(path) as other:\n"             # 8
+        "        other.open(info)\n"                             # 9
+        "def texts(path, server, thing):\n"                      # 10
+        "    path.open()\n"                                      # 11
+        "    path.open('r')\n"                                   # 12
+        "    server.open()\n"                                    # 13
+        "    thing.open(info)\n"                                 # 14
+        "    path.read_text()\n"                                 # 15
+    )
+    assert text_io_without_encoding(sample, "s") == [
+        "s:11 open()", "s:12 open()", "s:13 open()", "s:14 open()", "s:15 read_text()"]
+
+
 def test_every_file_this_app_reads_or_writes_names_its_encoding():
     """A text handle with no `encoding` uses the MACHINE's locale encoding, and that is a bug that
     only exists on somebody else's computer.
@@ -702,34 +777,10 @@ def test_every_file_this_app_reads_or_writes_names_its_encoding():
     found three more (two writing the macOS bundle, one opening the process lock in text mode).
     None of them had bitten yet, which is the point of running it over everything.
     """
-    import ast
-
     offenders = []
     for file in sorted((ROOT / "src").rglob("*.py")):
-        tree = ast.parse(file.read_text(encoding="utf-8"), filename=str(file))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-                continue
-            if node.func.attr not in ("read_text", "write_text", "open"):
-                continue
-            if any(kw.arg == "encoding" for kw in node.keywords):
-                continue
-            # `importlib.metadata`'s `Distribution.read_text(name)` is a different API — its
-            # argument is a FILENAME inside the distribution, and it decodes as UTF-8 itself.
-            inner = node.func.value
-            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) \
-                    and inner.func.id == "distribution":
-                continue
-            if node.func.attr == "open":
-                mode = ""
-                if node.args and isinstance(node.args[0], ast.Constant):
-                    mode = str(node.args[0].value)
-                for kw in node.keywords:
-                    if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
-                        mode = str(kw.value.value)
-                if "b" in mode:
-                    continue  # bytes carry no encoding to get wrong
-            offenders.append(f"{file.relative_to(ROOT)}:{node.lineno} {node.func.attr}()")
+        offenders += text_io_without_encoding(file.read_text(encoding="utf-8"),
+                                              str(file.relative_to(ROOT)))
 
     assert not offenders, "text I/O without an explicit encoding:\n" + "\n".join(offenders)
 
