@@ -213,14 +213,25 @@ def _canonical(naming, glossary, title: str) -> str:
 
 
 def _round_groups(round_: dict, naming, glossary) -> list[dict]:
-    """An open round's columns: the ones it carries (skill #83), else its list by method."""
+    """An open round's columns: the ones it carries (skill #83), else its list by method.
+
+    Each listed title in the derived spelling — except one whose derived spelling the round took
+    as a title of its own (#208): a list holding `w-R_01 (sw)` that took `w-R_1 (sw)` drew the take
+    as the listed row, waiting, where the method — raw titles — waits for `w-R_01` and holds
+    `w-R_1` unasked, as history shows them. That row keeps the spelling it was listed under."""
+    listed = {str(t) for t in round_.get("expected") or []}
+    taken = {str(t) for t in process_view.standing(round_)} - listed
+
+    def spelled(title) -> str:
+        canonical = _canonical(naming, glossary, title)
+        return str(title) if canonical != str(title) and canonical in taken else canonical
+
     carried = [
         {"label": str(g.get("label") or g.get("method") or ""), "method": g.get("method"),
-         "names": [_canonical(naming, glossary, n) for n in g.get("names") or []]}
+         "names": [spelled(n) for n in g.get("names") or []]}
         for g in round_.get("groups") or [] if isinstance(g, dict) and g.get("names")
     ]
-    return carried or groups_from_titles(
-        [_canonical(naming, glossary, t) for t in round_.get("expected") or []])
+    return carried or groups_from_titles([spelled(t) for t in round_.get("expected") or []])
 
 
 def protective_phrase(legs) -> str:
@@ -628,7 +639,10 @@ def build_session(
     # nothing. Read by key, the row said «done» where the method, the agent and the close said
     # «outstanding», and history said «waiting» (the re-review of G6+G7 fix B). The past card asks
     # the same, so «done» has one source; the other spelling is a row of its own (below).
-    waiting = ({_canonical(naming, glossary, t) for t in process_view.outstanding(round_)}
+    # The raw title too: a listed row keeps its own spelling when the derived one is a take
+    # (`_round_groups`, #208).
+    waiting = ({spelling for t in process_view.outstanding(round_)
+                for spelling in (_canonical(naming, glossary, t), str(t))}
                if round_open else set())
     # A skip and a verdict are keyed the same way "taken" is — BY KEY, not by the string. The
     # round records the title as somebody typed it in REW (`sw_01 (sw)`); the checklist derives
@@ -790,6 +804,17 @@ def build_session(
             _row(title, status_for(title, skip_by_key=False), issues_for(title),
                  as_is_for(title), own_range_for(title), additional=True)
             for title in sorted(recorded_taken - listed) if _key(title) in asked_keys
+        )
+        # Taken in this round though nobody asked for it under any spelling (#208): history shows
+        # it as «captured though nobody asked», and the live card had a row for it only while REW
+        # still held the curve (`_extras`). Not a key a row or an extra above already answers.
+        drawn = ({_key(n) for spec in groups_spec for n in spec["names"]}
+                 | {_key(item.name) for item in extras} | asked_keys)
+        extras += tuple(
+            _row(title, status_for(title, skip_by_key=False), issues_for(title),
+                 as_is_for(title), own_range_for(title), additional=True)
+            for title in sorted(recorded_taken - listed)
+            if _key(title) is not None and _key(title) not in drawn
         )
     if extras:
         # Ours, at this version, but not on the checklist -- an experiment tag, a channel the

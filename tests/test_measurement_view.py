@@ -1234,6 +1234,10 @@ _SPELLINGS = {
     "a typo superseded by its own": (dict(taken=[_L, "w-R_9 (sw)"],
                                           superseded={"w-R_9 (sw)": _R}), "",
                                      {_R: _DONE, _L: _DONE}),
+    # A take the round did not ask for under any spelling (#208): history kept it as «captured
+    # though nobody asked», and the live card had no row for it unless REW still held the curve.
+    "an unasked extra": (dict(taken=[_L, _R, "sw_1 (sw)"]), "",
+                         {_R: _DONE, _L: _DONE, "sw_1 (sw)": _DONE}),
 }
 
 
@@ -1265,8 +1269,28 @@ def test_the_live_card_waits_for_what_the_method_waits_for_under_another_spellin
 
     for which, card in (("live", live), ("past", past)):
         assert {i.name: i.status for g in card.groups for i in g.items} == rows, which
-    if _R0 in rows:
-        assert _item(live, _R0).additional, "on the live card, a row the round did not ask"
+    for extra in set(rows) - {_R, _L}:
+        assert _item(live, extra).additional, "on the live card, a row the round did not ask"
+
+
+def test_a_padded_list_holding_the_unpadded_take_shows_one_row_of_each_name(project):
+    """#208 (W-9's fix C, concern 2): a round that lists `w-R_01 (sw)` — typed padded into
+    `capture-start` — and took `w-R_1 (sw)` drew two rows reading `w-R_1 (sw)` on the live card:
+    the listed one in the derived spelling, waiting, and the take beside it, done. The method
+    compares raw titles: `w-R_01` still waits and `w-R_1` is an unasked take, as history shows
+    them. The listed row keeps its own spelling when the derived one is a take of its own."""
+    process = _round(project, version=1, expected=[_R0, _L], taken=[_L, _R], pad=False)
+    assert process.capture_outstanding() == [_R0]
+
+    live = mv.build_session("0", 1, [], project, taken=[])
+    process.start_capture(1, expected=["sw_1 (sw)"])  # closes cap_001: history now
+    past = _past(project, "cap_001")
+
+    rows = {_R0: _WAIT, _L: _DONE, _R: _DONE}
+    for which, card in (("live", live), ("past", past)):
+        names = [i.name for g in card.groups for i in g.items]
+        assert sorted(names) == sorted(rows), (which, names)
+        assert {i.name: i.status for g in card.groups for i in g.items} == rows, which
 
 
 def test_a_round_opened_with_no_list_shows_each_take_once(project):
