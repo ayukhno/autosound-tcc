@@ -817,6 +817,30 @@ DANGER_TABLE = [
     ("recursive delete", P, r"Start-Process cmd -ArgumentList '/c rd /s /q C:\Users'"),
     ("recursive delete", P,
      r"Start-Process powershell -ArgumentList '-c Remove-Item -Recurse -Force C:\Users'"),
+    # A colon-bound quoted parameter is still a parameter (the narrow re-review, 1).
+    ("format/wipe disk", P, "Start-Process cmd -ArgumentList:'/c format D:'"),
+    ("format/wipe disk", P, "Start-Process -FilePath:cmd -ArgumentList:'/c format D:'"),
+    ("format/wipe disk", P, "Start-Process -FilePath:'cmd.exe' -ArgumentList:\"/c format D:\""),
+    ("recursive delete", P, r"Remove-Item -Path:'C:\Users' -Recurse:$true -Force"),
+    ("recursive delete", P, r"Remove-Item -Recurse -LiteralPath:'C:\Users'"),
+    ("recursive delete", P, r"Set-Location -Path:'C:\'; Remove-Item -Recurse *"),
+    # WSL runs a bash line (the narrow re-review, 2).
+    ("recursive delete", P, "wsl rm -rf ~"),
+    ("recursive delete", P, "wsl.exe rm -rf ~"),
+    ("recursive delete", P, "wsl -- rm -rf ~"),
+    ("recursive delete", P, "wsl -e rm -rf /mnt/c/Users"),
+    ("recursive delete", P, "wsl --exec rm -rf /mnt/c/Users"),
+    ("recursive delete", P, "wsl -d Ubuntu -u root --cd / rm -rf /mnt/c/Users"),
+    ("recursive delete", P, r"C:\Windows\System32\wsl.exe rm -rf ~"),
+    ("recursive delete", P, r'"C:\Windows\System32\bash.exe" -c "rm -rf ~"'),
+    ("recursive delete", P, "Start-Process wsl -ArgumentList '-e rm -rf /mnt/c/Users'"),
+    ("recursive delete", P, "Start-Process wsl.exe 'rm -rf ~'"),
+    ("recursive delete", P, "Start-Process bash -ArgumentList '-c \"rm -rf ~\"'"),
+    ("recursive delete", B, "wsl rm -rf ~"),
+    ("format/wipe disk", P, "wsl --unregister Ubuntu"),
+    ("format/wipe disk", P, "wsl --shutdown"),
+    ("format/wipe disk", P, "wsl -t Ubuntu"),
+    ("format/wipe disk", P, "wsl -e mkfs.ext4 /dev/sdb1"),
     ("raw device overwrite", B, "dd if=/dev/zero of=/dev/disk2"),
     ("raw device overwrite", B, "echo x > /dev/disk2"),
     ("raw device overwrite", P, r"Set-Content -Path \\.\PhysicalDrive1 -Value 0"),
@@ -855,7 +879,9 @@ def test_the_danger_table_covers_each_class_in_both_shells():
     "Format-Table -AutoSize", "Get-Content notes.txt | Format-List",
     r"Get-Content \\?\C:\Users\me\notes.txt", "Start-Process notepad", "start notepad",
     "Start-Process notepad -ArgumentList 'readme.txt'", "Start-Process cmd -ArgumentList '/c dir'",
-    "Start-Process powershell -ArgumentList '-c Get-ChildItem' -Wait", "Start-Process cmd"])
+    "Start-Process powershell -ArgumentList '-c Get-ChildItem' -Wait", "Start-Process cmd",
+    "wsl ls", "wsl -l", "wsl --list --verbose", "wsl --status", "wsl", "wsl -d Ubuntu",
+    "wsl -e ls -la", "wsl -- cat notes.txt", "Start-Process wsl", "Remove-Item -Path:'x.tmp'"])
 def test_the_disk_class_does_not_take_in_reads(line, tmp_path):
     """Looking at disks, and `Format-Table`, are not wiping one: they pass `auto` as before."""
     assert judge_action("Bash", line, gate=GATE_AUTO, read_roots=_read_roots_for(tmp_path),
@@ -870,7 +896,8 @@ TICK_ROWS = [row for row in OMP_TABLE if row[0] in (
     "a Codex tick, a home wipe", "always-allowed dangerous bash", "always-allowed ordinary bash")]
 #: A PowerShell spelling a bash shell cannot run as written (bash eats `\\`, and `ri` is no bash
 #: command): the SDK route's Bash tool never runs it, and its reader is bash's alone.
-BASH_CANNOT_RUN = {r"ri -r C:\Users", r"Storage\Clear-Disk -Number 1"}
+BASH_CANNOT_RUN = {r"ri -r C:\Users", r"Storage\Clear-Disk -Number 1",
+                   r"C:\Windows\System32\wsl.exe rm -rf ~"}
 
 
 def _sdk_cell(line: str, gate: str, ticked: tuple, tmp_path) -> str:

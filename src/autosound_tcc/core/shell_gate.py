@@ -393,6 +393,9 @@ _DISK_TOOLS = frozenset({"format-volume", "clear-disk", "remove-partition", "ini
                          "remove-virtualdisk", "remove-storagepool", "diskpart"})
 #: What runs the program named after it: PowerShell's `Start-Process`/`saps`/`start`, cmd's `start`.
 _STARTERS = frozenset({"start-process", "saps", "start"})
+#: A PowerShell parameter bound with a colon — `-Path:'C:\Users'`: a parameter whatever quotes its
+#: value carries (the quotes only made `quoted` true; the narrow re-review of the group fix, 1).
+_COLON_PARAM = re.compile(r"-[A-Za-z][\w-]*:")
 #: A raw device by its Win32 name — `\\.\PhysicalDrive1`, `\\.\Harddisk0Partition1`, a volume
 #: `\\.\D:` (not a path under it: `\\?\C:\Users\x` is a long path) — Windows' `/dev/disk2`.
 #: Named anywhere in a command it asks: writing it overwrites a disk, and nothing in a tune reads
@@ -760,8 +763,11 @@ def _cd_target(words: list[_Word], here: Optional[str], shell: str,
         return False, here
     arguments = words[1:]
     if shell == "powershell":
-        arguments = [word for word in arguments if not word.text.startswith("-")
-                     or word.quoted]  # `-Path`, `-LiteralPath`: the path is the word after
+        # `-Path`, `-LiteralPath`: the path is the word after; `-Path:'C:\'` carries it.
+        arguments = [_Word(text=word.text.partition(":")[2], started=True,
+                           dynamic=word.dynamic) if _is_parameter(word) and ":" in word.text
+                     else word for word in arguments
+                     if not _is_parameter(word) or word.text.partition(":")[2]]
     else:
         while arguments and (arguments[0].text in ("-L", "-P", "-e", "-@", "-n", "--")
                              or shell == "cmd" and _is_windows_switch(arguments[0].text)):
@@ -1362,6 +1368,8 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
                               for at in range(1, len(words)))
     if name in _SHELLS:
         return _shell_is_dangerous(arguments, command, tainted, depth)
+    if name == "wsl":
+        return _wsl_is_dangerous(arguments, command, tainted, depth)
     if name == "cmd":
         return _cmd_is_dangerous(arguments, command, tainted, depth)
     if name in ("powershell", "pwsh"):
@@ -1404,7 +1412,47 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
 _START_SWITCHES = ("wait", "passthru", "nonewwindow", "usenewenvironment", "loaduserprofile",
                    "whatif", "confirm", "verbose", "debug")
 #: The programs whose argument string is a shell line of their own.
-_SHELL_PROGRAMS = frozenset({"cmd", "powershell", "pwsh"})
+_SHELL_PROGRAMS = frozenset({"cmd", "powershell", "pwsh", "wsl", "bash"})
+#: wsl's options that take the word after them.
+_WSL_VALUED = frozenset({"-d", "--distribution", "-u", "--user", "--cd", "--shell-type"})
+#: wsl's own commands that cannot be taken back for a distro's state: `--unregister` deletes its
+#: disk with everything in it; `--shutdown`/`--terminate` kill what runs there unsaved; an import
+#: or a conversion rewrites one; `--manage` moves or resizes its disk.
+_WSL_RUINOUS = frozenset({"--unregister", "--shutdown", "--terminate", "-t", "--import",
+                          "--import-in-place", "--set-version", "--manage"})
+#: wsl's own commands that only look or set things up: no Linux command line follows them.
+_WSL_OWN = frozenset({"-l", "--list", "--status", "--version", "-v", "--help", "--install",
+                      "--update", "--export", "--set-default", "-s", "--set-default-version",
+                      "--mount", "--unmount", "--debug-shell"})
+
+
+def _wsl_is_dangerous(arguments: list[_Word], command: _Command, tainted: set[str],
+                      depth: int) -> bool:
+    """`wsl …` runs a Linux command line the gate reads as bash (the narrow re-review, 2): the
+    words after `-e`/`--exec` as one command, after `--` or after wsl's own options (`-d <distro>`,
+    `-u <user>`, `--cd <dir>`) as a line its shell runs. wsl alone is an interactive shell; its
+    listing and status commands pass; `--unregister`, `--shutdown` and the like ask."""
+    at = 0
+    while at < len(arguments):
+        word = arguments[at]
+        if word.dynamic or _runs(word, tainted):
+            return True  # an option or a command the line does not spell
+        text = word.text.lower()
+        if text in ("-e", "--exec"):
+            rest = arguments[at + 1:]
+            return bool(rest) and _words_are_dangerous(rest, command, tainted, depth)
+        if text == "--" or not text.startswith("-"):
+            rest = arguments[at + 1:] if text == "--" else arguments[at:]
+            if any(w.dynamic or _runs(w, tainted) for w in rest):
+                return True
+            return bool(rest) and _script_is_dangerous(" ".join(w.text for w in rest), depth + 1,
+                                                       tainted, command.cwd)
+        if text in _WSL_RUINOUS:
+            return True
+        if text in _WSL_OWN:
+            return False
+        at += 2 if text in _WSL_VALUED else 1
+    return False
 
 
 def _start_is_dangerous(arguments: list[_Word], command: _Command, depth: int) -> bool:
@@ -1421,7 +1469,7 @@ def _start_is_dangerous(arguments: list[_Word], command: _Command, depth: int) -
         word = arguments[at]
         at += 1
         text = word.text
-        if not (text.startswith("-") and len(text) > 1 and not word.quoted):
+        if not _is_parameter(word):
             positional.append(text)
             continue
         key, inline, value = text[1:].partition(":")
@@ -1459,6 +1507,14 @@ def _start_is_dangerous(arguments: list[_Word], command: _Command, depth: int) -
                                              command.cwd):
                 return True
     return False
+
+
+def _is_parameter(word: _Word) -> bool:
+    """A PowerShell parameter (or a bash option): `-x` unquoted, or `-name:value` with the value
+    quoted — `'-Recurse'` whole in quotes is a string, as PowerShell reads it."""
+    text = word.text
+    return text.startswith("-") and len(text) > 1 and (
+        not word.quoted or bool(_COLON_PARAM.match(text)))
 
 
 def _lists_names_below_a_narrow_folder(producer: Optional[_Command]) -> bool:
@@ -1688,7 +1744,7 @@ def _operand_words(arguments: list[_Word]) -> list[_Word]:
         text = word.text
         if not ended and text == "--":
             ended = True
-        elif not ended and text.startswith("-") and len(text) > 1 and not word.quoted:
+        elif not ended and _is_parameter(word):
             _, colon, value = text.partition(":")
             if colon and value:
                 operands.append(_Word(text=value, started=True, dynamic="$" in value))
@@ -1861,7 +1917,7 @@ def _new_item_is_dangerous(arguments: list[_Word], cwd: Optional[str]) -> bool:
     while at < len(arguments):
         word = arguments[at]
         text = word.text
-        if text.startswith("-") and len(text) > 1 and not word.quoted:
+        if _is_parameter(word):
             name, colon, value = text[1:].partition(":")
             name = name.lower()
             takes = any(_is_param(name, full, 2) for full in ("itemtype", "type", "value",
@@ -2318,7 +2374,7 @@ def _remove_item_is_dangerous(arguments: list[_Word], piped: bool, cwd: Optional
     targets: list[_Word] = []
     for word in arguments:
         text = word.text
-        if text.startswith("-") and len(text) > 1 and not word.quoted:
+        if _is_parameter(word):
             name, has_value, value = text[1:].partition(":")
             if name and "recurse".startswith(name.lower()):
                 recurse |= value.lower() != "$false"
