@@ -2651,6 +2651,41 @@ def test_the_refresh_button_is_off_on_a_past_series_and_stays_off_after_a_read()
     assert panel._refresh_btn.isEnabled() and panel._read_btn.isEnabled()
 
 
+def test_the_card_and_the_strip_name_a_change_of_rews_level_calibration(tmp_path, monkeypatch):
+    """tcc#198 (hub #268, PAS-015): REW reset its SPL calibration between two rounds — every
+    `splOffsetdB` 103.35 → 120.0 — and nothing said so. A read of REW's list now names it: on the
+    card's orange line while it holds, on the strip once. Gone when the offsets agree again."""
+    from autosound_tcc.core import app_log, config, vendor_loader
+
+    from tests import _rounds
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    told = []
+    monkeypatch.setattr(app_log, "warn", told.append)
+    _rounds.write_round(tmp_path, version=3, expected=["w-L_3 (sw)"], taken=["w-L_3 (sw)"],
+                        pad=False)
+    _rounds.write_round(tmp_path, version=4, expected=["w-L_4 (sw)"], taken=["w-L_4 (sw)"],
+                        pad=False)
+
+    def listing(after):
+        return {"1": {"title": "w-L_3 (sw)", "uuid": "u3", "splOffsetdB": 103.35},
+                "2": {"title": "w-L_4 (sw)", "uuid": "u4", "splOffsetdB": after}}
+
+    panel = MeasurementPanel()
+    said = i18n.t("levelCalJump").format(delta="+16.65", before="103.35", after="120.0")
+
+    panel._on_refreshed(listing(120.0))
+    panel._on_refreshed(listing(120.0))
+    assert panel._level_label.text() == said and not panel._level_label.isHidden()
+    assert told == [said], "the strip is told once"
+
+    panel._on_refreshed(listing(103.35))
+    assert panel._level_label.isHidden() and not panel._level_label.text()
+
+
 @pytest.mark.parametrize("mode", ["dark", "light"])
 def test_a_row_rew_holds_reads_blue(monkeypatch, mode):
     """Finding 155: «the task's rows that REW already holds turn blue (the card's «в REW» colour)».

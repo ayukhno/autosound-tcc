@@ -36,7 +36,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import capture_import, config, process_writer, protective, title_fixes
+from autosound_tcc.core import (capture_import, config, level_calibration, process_writer, protective,
+                                title_fixes)
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc import discard, i18n, qt_shutdown
@@ -694,6 +695,9 @@ class MeasurementPanel(QWidget):
         #: import window closes, and the curve window — opened from this card — reads by title.
         self._rew_answer: dict = {}
         self._dup_titles: list[str] = []
+        #: What REW's level calibration says about the round against the last one (tcc#198), as
+        #: `level_calibration.Note`s — keys, so a language switch redraws them.
+        self._level_notes: list = []
         self._rows: list[_MeasRow] = []
         self._preset_provider = preset_provider
         self._settings = get_settings()
@@ -734,6 +738,13 @@ class MeasurementPanel(QWidget):
         self._dup_label.setWordWrap(True)
         self._dup_label.setHidden(True)
         layout.addWidget(self._dup_label)
+        # REW's level calibration changed since the last round, or differs inside this one
+        # (tcc#198, hub #268): its own line in the same orange, said once on the strip too.
+        self._level_label = QLabel("")
+        self._level_label.setProperty("class", "caution-line")
+        self._level_label.setWordWrap(True)
+        self._level_label.setHidden(True)
+        layout.addWidget(self._level_label)
 
         head_row = QHBoxLayout()
         # 4, not 8: the right column's floor is this row's (VM-15, Ruling 30), and at two thirds of
@@ -918,6 +929,21 @@ class MeasurementPanel(QWidget):
         self._dup_label.setText(
             i18n.t("capImportDupWarn").format(names=named) if self._dup_titles else "")
         self._dup_label.setHidden(not self._dup_titles)
+        self._level_label.setText(" ".join(self._level_sentence(n) for n in self._level_notes))
+        self._level_label.setHidden(not self._level_notes)
+
+    @staticmethod
+    def _level_sentence(note) -> str:
+        return i18n.t(note.key).format(**note.values)
+
+    def _say_level_calibration(self) -> None:
+        """What REW's last answer and TCC's own record say about the round's level calibration
+        (tcc#198): on this card while it holds, and on the strip once. Nothing is corrected — the
+        common base is the method's (hub #285)."""
+        project = config.project_dir()
+        self._level_notes = level_calibration.notes(project, self._rew_answer)
+        level_calibration.tell(project, self._level_notes, self._level_sentence)
+        self._render_status()
 
     def set_no_project(self, message: str) -> None:
         """Hide the (mock) capture grid and show a plain message instead -- called by MainWindow
@@ -1388,6 +1414,7 @@ class MeasurementPanel(QWidget):
         self._set_status("measRefreshed", n=len(self._rew_answer))
         self._remember_titles([(m or {}).get("title", "") for m in self._rew_answer.values()],
                               replace=True)
+        self._say_level_calibration()
 
     def _on_import_offer(self, measurements: dict) -> None:
         """REW answered; put the answer in front of the tuner.
@@ -1407,6 +1434,7 @@ class MeasurementPanel(QWidget):
         self._remember_titles(
             (m or {}).get("title", "") for m in measurements.values()
         )
+        self._say_level_calibration()
         round_ = process_view.capture_round() or {}
         # A closed round is none (finding 147): the method keeps the last round in its state with
         # `closed` set, and handing the ledger its id made every capture of the pass refused —
@@ -1653,6 +1681,8 @@ class MeasurementPanel(QWidget):
             # Written, reported fine, and not in the round: TCC's defect, not a refusal and not the
             # tuner's (TODO F-049).
             self._add_status("protNotInRecord", channels=", ".join(result["prot_lost"]))
+        # The pass is in the round now: its captures' offsets are this round's (tcc#198).
+        self._say_level_calibration()
         # The round is a fact about the checklist too: what it recorded as taken is what the grid
         # colours, and the Protection dialog now has a pass to write into.
         self.titlesChanged.emit()
