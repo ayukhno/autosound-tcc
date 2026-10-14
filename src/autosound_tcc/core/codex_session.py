@@ -110,6 +110,13 @@ def inner_command(command: str) -> str:
     return parts[0] if len(parts) == 1 else command
 
 
+def _names_the_method(name: str) -> bool:
+    """Codex's name for the method: bare, or `<plugin>:autosound-tuning` — a real Codex 0.162.1
+    namespaces a skill that comes with a `.claude-plugin/`, as the vendored repo does (task 10's
+    live run, F1)."""
+    return name == SKILL_NAME or name.rsplit(":", 1)[-1] == SKILL_NAME
+
+
 def shell_of(command: str, *, windows: Optional[bool] = None) -> str:
     """Which shell's reader judges `command` (`judge_action`'s `shell`): PowerShell when its first
     word is `powershell`/`pwsh` (any folder, `.exe` or not, quoted or not); bash when it is Codex's
@@ -378,18 +385,16 @@ class CodexSession:
             return [Notice(
                 "Codex did not list its skills, so which copy of the tuning method it loads is "
                 "unchecked: a second copy in Codex's own skills would not be noticed.")]
-        ours = {os.path.normcase(os.path.realpath(skill_dir / "SKILL.md")),
-                os.path.normcase(os.path.realpath(root / SKILL_NAME / "SKILL.md")),
-                os.path.normcase(str(root / SKILL_NAME / "SKILL.md"))}
         found = False
         for group in listed.get("data") or []:
             for skill in (group or {}).get("skills") or []:
-                if not isinstance(skill, dict) or skill.get("name") != SKILL_NAME:
+                if not isinstance(skill, dict):
                     continue
                 path = str(skill.get("path") or "")
-                if os.path.normcase(os.path.realpath(path)) in ours \
-                        or os.path.normcase(path) in ours:
+                if self._is_bound_copy(path, skill_dir, root):
                     found = True
+                    continue
+                if not _names_the_method(str(skill.get("name") or "")):
                     continue
                 said = (f"Codex also offers a copy of the method at {path}, besides the one this "
                         f"project runs ({skill_dir}), and a session could load either; remove it "
@@ -398,6 +403,21 @@ class CodexSession:
                                          self.project_dir, said)
                 raise method_binding.MethodRefused(said)
         return [] if found else [self._no_skill_notice()]
+
+    @staticmethod
+    def _is_bound_copy(path: str, skill_dir: Path, root: Path) -> bool:
+        """Whether a skill Codex lists IS the method this project runs — by its path, never its
+        name: the bound copy's `SKILL.md` (Codex lists it resolved), or anything under the
+        project's own link in the extra root."""
+        if not path:
+            return False
+        link = root / SKILL_NAME
+        spelled = os.path.normcase(os.path.abspath(path))
+        if spelled.startswith(os.path.normcase(os.path.abspath(link)) + os.sep):
+            return True
+        real = os.path.normcase(os.path.realpath(path))
+        return real in {os.path.normcase(os.path.realpath(skill_dir / "SKILL.md")),
+                        os.path.normcase(os.path.realpath(link / "SKILL.md"))}
 
     def _no_skill_notice(self) -> Notice:
         return Notice(
@@ -880,7 +900,11 @@ class CodexSession:
         if method == "item/completed":
             return self._item_completed(params.get("item") or {}), False
         if method == "turn/completed":
-            events: list[AgentEvent] = []
+            # A tool Codex never completed — its approval was pending when Stop came — is closed
+            # here, or the panel's running row stays open (task 10's live run, F2).
+            events: list[AgentEvent] = [ToolEnd(name) for name in self._running.values()]
+            self._running.clear()
+            self._running_label = ""
             if turn.get("status") == "failed":
                 said = str((turn.get("error") or {}).get("message") or "the turn failed")
                 if said != self._last_error:

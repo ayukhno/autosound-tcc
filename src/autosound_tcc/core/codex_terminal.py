@@ -5,10 +5,15 @@
 The line «Open terminal → Codex» runs. Claude and omp find TCC through the project's `.mcp.json`
 on their own; Codex does not read that file, so this reads it for Codex: TCC's url and token from
 TCC's entry, the token handed over in the environment (`codex_cli.TOKEN_ENV`) and Codex started
-with TCC's connection pieces only (`codex_cli.tcc_connection_args`). Nothing of the in-app
-session's own switches — no approval mode, no isolation: in a terminal the user's own Codex config
-rules approvals and extras (the Arbiter, 2026-10-14: «коли в терміналі — налаштування самого
-кодекса»).
+with TCC's server exactly as the in-app session has it (`codex_cli.tcc_tool_args`): the connection
+AND `default_tools_approval_mode="approve"` (the Arbiter, 2026-10-14 — F3 of task 10's live run).
+Why: TCC adds its server per process, so the user's own Codex config has no entry to set an
+approval mode on; without it an interactive Codex asks on every TCC tool call, even a read, and
+`codex exec` refuses them. TCC's tools that change anything confirm themselves in TCC's window.
+
+Everything else stays the user's own Codex config (the Arbiter, 2026-10-14: «коли в терміналі —
+налаштування самого кодекса»): approvals for shell commands and file edits, the user's other MCP
+servers, the extras — no `isolation_args`.
 
 The token is never in argv, the terminal's line, the screen, a log line or a new file: it goes
 from the file TCC already wrote into this process's memory and into Codex's environment.
@@ -93,10 +98,11 @@ def _install_line() -> str:
 
 
 def command(binary: str, url: str, model: Optional[str]) -> list[str]:
-    """Codex's argv: TCC's connection pieces, then the model when one was chosen."""
+    """Codex's argv: TCC's server as the session has it (connection + approval), then the model
+    when one was chosen."""
     from autosound_tcc.core.codex_session import TOOL_TIMEOUT_S  # the session's own bound
 
-    argv = [binary, *codex_cli.tcc_connection_args(url, timeout_sec=TOOL_TIMEOUT_S)]
+    argv = [binary, *codex_cli.tcc_tool_args(url, timeout_sec=TOOL_TIMEOUT_S)]
     if model:
         argv += ["--model", model]
     return argv

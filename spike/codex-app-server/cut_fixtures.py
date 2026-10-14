@@ -27,6 +27,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 SPIKE_LOGS = HERE / "work" / "logs"
 W10_LOGS = HERE / "work" / "w10" / "logs"
+LIVE_LOGS = HERE / "work" / "logs" / "w10live"
 OUT = REPO / "tests" / "fixtures" / "codex"
 SCHEMA_OUT = REPO / "tests" / "fixtures" / "codex-schema-0.162.1"
 
@@ -67,6 +68,19 @@ def frames(path: Path) -> list[dict]:
         if e["dir"] == "meta":
             continue
         out.append({"dir": "out" if e["dir"] == "->" else "in", "t": e["t"], "msg": e["msg"]})
+    return out
+
+
+def tcc_frames(path: Path) -> list[dict]:
+    """A frame log written by TCC's own `codex_rpc` (`.tcc/codex-frames.jsonl`, task 10's live run):
+    `dir` already "out"/"in"; its "note" lines and the `jsonrpc` key are dropped."""
+    out = []
+    for line in path.read_text().splitlines():
+        e = json.loads(line)
+        if e.get("dir") not in ("out", "in") or not isinstance(e.get("msg"), dict):
+            continue
+        msg = {k: v for k, v in e["msg"].items() if k != "jsonrpc"}
+        out.append({"dir": e["dir"], "t": e["t"], "msg": msg})
     return out
 
 
@@ -205,7 +219,23 @@ def main() -> None:
     write("skills-bundled-off", skillsoff)
     stderr = (W10_LOGS / "badmcp-stderr.log").read_text().strip()
     write("startup-bad-mcp", badmcp + [{"dir": "eof", "t": badmcp[-1]["t"] + 0.2, "exit": 1, "stderr": stderr}])
+    live = LIVE_LOGS / "codex-frames-session.jsonl"
+    if live.exists():
+        skills_namespaced(tcc_frames(live))
     schema()
+
+
+def skills_namespaced(fs: list[dict]) -> None:
+    """Task 10's live run: how a real Codex lists the linked method — `autosound-tuning:autosound-
+    tuning`, because the vendored repo carries `.claude-plugin/` (F1). The start's exchange up to
+    `skills/list`; the project folder becomes <WORK>, the bound copy <METHOD>."""
+    roots = request_pair(fs, "skills/extraRoots/set", trailing=False)
+    project = roots[0]["msg"]["params"]["extraRoots"][0].rsplit("/.claude/skills", 1)[0]
+    method = str((REPO / "vendor" / "autosound-tuning-skill" / "skills" / "autosound-tuning").resolve())
+    rows = (request_pair(fs, "initialize")
+            + roots + request_pair(fs, "skills/list", trailing=False))
+    text = json.dumps(rows).replace(method, "<METHOD>").replace(project, "<WORK>")
+    write("skills-namespaced", json.loads(text))
 
 
 # --- the schema cut --------------------------------------------------------------------------

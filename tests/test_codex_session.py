@@ -482,7 +482,8 @@ def test_interrupt_sends_turn_interrupt_and_the_turn_ends_on_its_own_completion(
             await session.close()
 
     events, server = run(go())
-    assert order[-2:] == ["interrupt", "TurnEnd"] and order.count("TurnEnd") == 1
+    # The command never completed (its approval was pending): closed before the end (F2).
+    assert order[-3:] == ["interrupt", "ToolEnd", "TurnEnd"] and order.count("TurnEnd") == 1
     assert events[-1] == TurnEnd(thread)
     (sent,) = stand_in.sent("turn/interrupt")
     assert sent["params"] == {"threadId": thread, "turnId": "01a13983-1325-7e93-8684-6b21528985c3"}
@@ -1442,3 +1443,95 @@ def test_powershell_behind_codexs_wrapper_is_judged_as_powershell(project, tmp_p
     run_gate(project, tmp_path, stand_in,
              approval_turn("th", command="/bin/zsh -lc 'pwsh -c Remove-Item x'"))
     assert seen == [("pwsh -c Remove-Item x", "powershell")]
+
+
+# ---- task 10's live run: F1 (Codex namespaces the method), F2 (a tool left open at Stop) ---------
+
+
+def method_dir(project) -> str:
+    return os.path.realpath(method_binding.for_project(project).require())
+
+
+def namespaced_rows(path: str = "<METHOD>/SKILL.md", name: str = "autosound-tuning:autosound-tuning"):
+    rows = json.loads(json.dumps(frames("skills-namespaced")))
+    skill = rows[-1]["msg"]["result"]["data"][0]["skills"][0]
+    skill["path"], skill["name"] = path, name
+    return [*rows, *thread_start("th"), *turn("th")]
+
+
+def test_a_real_codexs_namespaced_method_is_ours(project, tmp_path, stand_in, monkeypatch):
+    """F1: a real Codex 0.162.1 lists the linked method as `autosound-tuning:autosound-tuning`
+    (the vendored repo carries `.claude-plugin/`), at the bound copy's real path — no Notice."""
+    monkeypatch.setenv("FAKE_CODEX_SUB", f"<METHOD>={method_dir(project)}")
+    session = make(project, stand_in.use(write(tmp_path, namespaced_rows())))
+
+    async def go():
+        try:
+            return await drain(session.start(), unchecked=True)
+        finally:
+            await session.close()
+
+    assert run(go()) == [TurnEnd("th")]
+
+
+@pytest.mark.parametrize("name", ["autosound-tuning", "autosound-tuning:autosound-tuning",
+                                  "someone:autosound-tuning"])
+def test_a_second_copy_in_either_spelling_refuses_the_start(project, tmp_path, stand_in,
+                                                             monkeypatch, name):
+    """F1: «ours» is decided by the path, not the name: the method from anywhere else refuses,
+    bare or namespaced."""
+    elsewhere = "/opt/other/autosound-tuning/SKILL.md"
+    monkeypatch.setenv("FAKE_CODEX_SUB", f"<METHOD>={method_dir(project)}")
+    rows = json.loads(json.dumps(frames("skills-namespaced")))
+    rows[-1]["msg"]["result"]["data"][0]["skills"].append(
+        {"name": name, "path": elsewhere, "scope": "user", "enabled": True})
+    session = make(project, stand_in.use(write(tmp_path, [*rows, *thread_start("th"),
+                                                          *turn("th")])))
+
+    async def go():
+        try:
+            await drain(session.start())
+        finally:
+            await session.close()
+
+    with pytest.raises(method_binding.MethodRefused, match=elsewhere):
+        run(go())
+
+
+def test_the_method_under_the_extra_root_is_ours_by_its_path(project, tmp_path, stand_in):
+    """A copy listed at the project's own link (not resolved) is the bound one, whatever its name."""
+    path = str(project / ".claude" / "skills" / "autosound-tuning" / "SKILL.md")
+    session = make(project, stand_in.use(write(tmp_path, namespaced_rows(path=path))))
+
+    async def go():
+        try:
+            return await drain(session.start(), unchecked=True)
+        finally:
+            await session.close()
+
+    assert run(go()) == [TurnEnd("th")]
+
+
+def test_a_tool_left_open_at_stop_is_closed_before_turn_end(project, stand_in):
+    """F2: the approval was pending when Stop came, so Codex sends no `item/completed` for the
+    command: `turn/completed` closes it, and the panel's running row stops."""
+    resumable(project, PENDING_THREAD)
+    bridge = RecordingBridge(None)
+    session = make(project, stand_in.use("interrupt-pending"), bridge=bridge, resume=True)
+
+    async def on(event):
+        if isinstance(event, ToolCall) and event.name == "Bash":
+            while not bridge.requests:
+                await asyncio.sleep(0.01)
+            await session.interrupt()
+
+    async def go():
+        try:
+            return await drain(session.start(), on)
+        finally:
+            await session.close()
+
+    events = run(go())
+    tools = [e for e in events if isinstance(e, (ToolCall, ToolEnd))]
+    assert tools == [ToolCall("Bash", {"command": "touch held.txt"}), ToolEnd("Bash")]
+    assert events[-1] == TurnEnd(PENDING_THREAD) and isinstance(events[-2], ToolEnd)

@@ -514,9 +514,7 @@ def _toml_string(text: str) -> str:
 def tcc_connection_args(url: str, *, timeout_sec: int) -> list[str]:
     """How Codex reaches TCC's MCP server, and nothing more: its url, the token by name from the
     environment (`TCC_MCP_TOKEN` — never in argv), and a tool timeout above a confirmation's and a
-    review's (Codex's ~60 s default would cut one). The terminal's whole share (`codex_terminal`,
-    task 8): there the user's own Codex config rules approvals and extras (the Arbiter,
-    2026-10-14)."""
+    review's (Codex's ~60 s default would cut one). `tcc_tool_args` builds on it."""
     return [
         *_c("mcp_servers.tcc.url", _toml_string(url)),
         *_c("mcp_servers.tcc.env_http_headers", '{"X-TCC-Token"="' + TOKEN_ENV + '"}'),
@@ -525,8 +523,9 @@ def tcc_connection_args(url: str, *, timeout_sec: int) -> list[str]:
 
 
 def tcc_tool_args(url: str, *, timeout_sec: int) -> list[str]:
-    """TCC's MCP server for a Codex session: the connection (`tcc_connection_args`), its tools
-    approved by TCC's own gate."""
+    """TCC's MCP server for Codex — the in-app session and the terminal alike (F3, the Arbiter,
+    2026-10-14): the connection (`tcc_connection_args`), its tools approved, since the ones that
+    change anything confirm themselves in TCC's window."""
     return [*tcc_connection_args(url, timeout_sec=timeout_sec),
             *_c("mcp_servers.tcc.default_tools_approval_mode", '"approve"')]
 

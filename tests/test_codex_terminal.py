@@ -2,8 +2,9 @@
 
 The line the terminal runs is `python -m autosound_tcc.core.codex_terminal <project> [--model M]`.
 It reads TCC's url and token from the project's `.mcp.json`, hands the token to Codex in the
-environment only, and starts Codex with TCC's connection pieces — nothing of the session's own
-switches: in a terminal the user's Codex config rules approvals and extras (the Arbiter, 2026-10-14).
+environment only, and starts Codex with TCC's server as the session has it — its connection and
+`default_tools_approval_mode="approve"` (the Arbiter, 2026-10-14, F3 of task 10's live run) — and
+nothing else of the session's: the user's Codex config rules shell and file approvals and extras.
 No real Codex runs here: `find`, `version` and the exec are stood in.
 """
 
@@ -74,18 +75,22 @@ def test_the_token_rides_in_the_environment_never_in_argv(tmp_path, started):
     assert any(p.startswith("mcp_servers.tcc.tool_timeout_sec=") for p in pairs)
 
 
-def test_none_of_the_sessions_own_switches_reach_the_terminal(tmp_path, started):
-    """Approvals and the user's extras are the user's own config's in a terminal."""
+def test_tcc_s_tools_are_approved_and_nothing_else_of_the_session_reaches_the_terminal(
+        tmp_path, started):
+    """F3 (the Arbiter, 2026-10-14): TCC's server is added per process, so the user's own Codex
+    config has no entry to approve it in — without the session's approval mode an interactive
+    Codex asks on every TCC tool call and `codex exec` refuses them. Shell and file approvals and
+    the user's extras stay his own config's: no isolation."""
     _write_config(tmp_path)
 
     codex_terminal.main([str(tmp_path)])
 
     ((argv, _env, _cwd),) = started
     pairs = _pairs(argv)
-    assert not any("default_tools_approval_mode" in p for p in pairs)
+    assert 'mcp_servers.tcc.default_tools_approval_mode="approve"' in pairs
     isolation = set(_pairs(codex_cli.isolation_args({})))
     assert not isolation & set(pairs)
-    assert len(pairs) == 3, pairs
+    assert len(pairs) == 4, pairs
 
 
 def test_the_model_passes_through_as_codex_s_own_flag(tmp_path, started):
@@ -106,14 +111,12 @@ def test_no_model_means_codex_keeps_its_own(tmp_path, started):
     assert "--model" not in argv and "-m" not in argv
 
 
-def test_the_terminal_and_the_session_build_the_connection_in_one_place():
-    """The session keeps exactly what it passed; the terminal takes the connection part of it."""
-    session = codex_cli.tcc_tool_args(URL, timeout_sec=1900)
-    terminal = codex_cli.tcc_connection_args(URL, timeout_sec=1900)
+def test_the_terminal_and_the_session_build_tcc_s_server_in_one_place():
+    """The terminal passes exactly what the session passes for TCC's server (F3)."""
+    from autosound_tcc.core.codex_session import TOOL_TIMEOUT_S
 
-    assert set(_pairs(session)) - set(_pairs(terminal)) == {
-        'mcp_servers.tcc.default_tools_approval_mode="approve"'}
-    assert set(_pairs(terminal)) < set(_pairs(session))
+    assert codex_terminal.command("codex", URL, None)[1:] == codex_cli.tcc_tool_args(
+        URL, timeout_sec=TOOL_TIMEOUT_S)
 
 
 @pytest.mark.parametrize("case", ["no-file", "unreadable-json", "no-entry", "no-token", "no-url"])
