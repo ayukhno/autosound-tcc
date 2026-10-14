@@ -1,11 +1,17 @@
 """`shell_gate.judge_action` — the one gate omp and Codex answer from (tcc#181, W-10 task 5).
 
-It is `OmpSession._auto_allowed` and the decision half of `_gate`, lifted unchanged. The table
-below is what omp answered before the move, gate by gate; the parity test runs the same rows
-through omp's own `_gate`, so the day the two disagree, one of them changed.
+It began as `OmpSession._auto_allowed` and the decision half of `_gate`, lifted unchanged (54e6b96,
+checked then against omp's old body over this table). The fixed answers below are the guard: omp's
+own `_gate` is run against them, and `_gate` is shown to decide through `judge_action`.
 
 Each cell: `pass` — runs unasked; `pass!` — runs unasked under `never` and is said in the dialog
-(`Unasked`); `ask` — the Arbiter is asked; `ask!` — asked as «cannot be undone» (`auto`).
+(`Unasked`); `ask` — the Arbiter is asked; `ask!` — asked as «cannot be undone»
+(`gateIrreversible`).
+
+**Rows that changed for omp in the fix round (the Arbiter, 2026-10-14: «виправити повністю», even
+though omp asks more often).** Before it, `foreign` let a line through as «only skill files» when
+it was destructive or named other paths (a substring test: `rm -rf process/ ~` passed), and an
+unknown tool name passed `auto` without a look. See `CHANGED_FOR_OMP`.
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ from concurrent.futures import Future
 
 import pytest
 
+from autosound_tcc.core import omp_session as omp_session_module
 from autosound_tcc.core import shell_gate
 from autosound_tcc.core.agent_events import Unasked
 from autosound_tcc.core.mcp_server import ConfirmRequest
@@ -30,7 +37,7 @@ OMP_TABLE = [
     ("read-only bash", "bash", "Command: ls -la", (),
      {GATE_WRITES: "pass", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("dangerous bash", "bash", "Command: rm -rf ~/", (),
-     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
     ("skill-file write by bash", "bash", "Command: echo done > process/plan.json", (),
      {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("foreign write by bash", "bash", "Command: echo x > /tmp/out.txt", (),
@@ -43,6 +50,8 @@ OMP_TABLE = [
      {GATE_WRITES: "pass", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("read tool", "read", '{"path": "notes.md"}', (),
      {GATE_WRITES: "pass", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("omp's inspect_image", "inspect_image", '{"path": "plot.png"}', (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("always-allowed tool", "write", '{"path": "/etc/hosts"}', ("write",),
      {GATE_WRITES: "pass", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("always-allowed dangerous bash", "bash", "Command: rm -rf ~/", ("bash",),
@@ -50,16 +59,76 @@ OMP_TABLE = [
     ("PowerShell read", "bash", "Command: powershell -c 'Get-ChildItem ~'", (),
      {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("PowerShell delete", "bash", "Command: powershell -c 'Remove-Item -Recurse -Force ~'", (),
-     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
     ("a writer with an effect", "bash", "Command: python3 rew_tool/apply.py --preset FULL", (),
      {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("unknown tool", "browser_open", '{"url": "x"}', (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "ask", GATE_NEVER: "pass!"}),
+    # The `foreign` hole, closed: danger first, and owned paths anchored.
+    ("skill path beside the home", "bash", "Command: rm -rf process/ ~", (),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+    ("a skill write, then the home", "bash", "Command: echo x > process/a.json; rm -rf ~", (),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+    ("a climb out of a skill path", "bash", "Command: rm -rf process/../../..", (),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+    ("$HOME beside a skill file", "bash", "Command: rm -rf $HOME state/x.json", (),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+    ("a skill name inside an absolute path", "bash", "Command: rm -rf /Users/x/state/", (),
      {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("a backslash path beside a skill file", "bash",
+     r"Command: Remove-Item -Recurse -Force C:\Users\me process/plan.json", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    # …and what the skill does in its own namespace still passes `foreign`.
+    ("a skill temp removed", "bash", "Command: rm process/x.tmp", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("a skill file renamed", "bash", "Command: mv state/a.json state/b.json", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("a skill file written", "bash", "Command: echo x > process/a.json", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("a skill writer by its path", "bash", "Command: python3 state/process.py add-step", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("a skill file written, errors dropped", "bash",
+     "Command: echo x > process/a.json 2>/dev/null", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    # The method's writer by the path its documents use — relative, so inside the project…
+    ("the skill's writer by a relative path", "bash",
+     "Command: python3 rew_tool/state/process.py ./process done lang ok", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    # …but not one by an absolute path or a climb: `state/process.py` anywhere is not the skill's.
+    ("a writer's name by an absolute path", "bash",
+     "Command: python3 /tmp/evil/state/process.py add-step", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("a writer's name by a climb", "bash", "Command: python3 ../x/state/process.py add-step", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("a skill file by an option's value", "bash",
+     "Command: cp --target-directory=process/ state/a.json", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
 ]
+
+#: What changed for omp in the fix round, and why — every other row is what omp answered before.
+CHANGED_FOR_OMP = {
+    # The `foreign` hole: these passed `foreign` unasked.
+    "skill path beside the home": "foreign pass -> ask!: danger is checked before the skill pass",
+    "a skill write, then the home": "foreign pass -> ask!: danger is checked before the skill pass",
+    "a climb out of a skill path": "foreign pass -> ask!: `..` takes a path out of the namespace",
+    "$HOME beside a skill file": "foreign pass -> ask!: `$HOME` is not the skill's",
+    "a skill name inside an absolute path": "foreign pass -> ask: an owned name must START a "
+                                            "relative path, not appear inside an absolute one",
+    "a backslash path beside a skill file": "foreign pass -> ask: a backslash path is not the "
+                                            "skill's",
+    "a writer's name by an absolute path": "foreign pass -> ask: the writer counts only by a "
+                                           "relative path",
+    "a writer's name by a climb": "foreign pass -> ask: `..` takes a path out of the namespace",
+    # The right reason: a command the danger check flags says «cannot be undone» in every gate.
+    "dangerous bash": "writes/foreign ask -> ask!",
+    "PowerShell delete": "writes/foreign ask -> ask!",
+    # Unknown names: `auto` passed them without a look, and `never` said nothing.
+    "unknown tool": "auto pass -> ask; never pass -> pass!",
+}
 
 
 def _command(detail: str) -> str:
-    """omp's split of `Command: …`, as `OmpSession._gate` makes it."""
+    """omp's split of `Command: …`, as `OmpSession._judge` makes it."""
     return detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
 
 
@@ -69,10 +138,14 @@ def _cell(verdict: Verdict) -> str:
     return "ask!" if verdict.reason == "gateIrreversible" else "ask"
 
 
-def _rows():
-    for name, tool, detail, ticked, cells in OMP_TABLE:
+def _rows(table=OMP_TABLE):
+    for name, tool, detail, ticked, cells in table:
         for gate in GATES:
             yield pytest.param(tool, detail, ticked, gate, cells[gate], id=f"{name}-{gate}")
+
+
+def test_every_changed_row_is_in_the_table():
+    assert set(CHANGED_FOR_OMP) <= {row[0] for row in OMP_TABLE}
 
 
 @pytest.mark.parametrize("tool, detail, ticked, gate, cell", list(_rows()))
@@ -85,7 +158,7 @@ def test_the_table(tool, detail, ticked, gate, cell, tmp_path):
         assert verdict.unasked == _command(detail)
     if not verdict.allowed:
         assert verdict.title == f"Дозволити {tool}?"
-        # Under `auto` the question is the command itself; otherwise what the tool wants.
+        # «Cannot be undone» shows the command itself; otherwise what the tool wants.
         assert verdict.detail == (_command(detail) if cell == "ask!" else detail)
 
 
@@ -98,7 +171,30 @@ def test_a_writer_is_asked_about_by_its_effect(tmp_path):
     assert verdict.title == "Дозволити bash?"
 
 
-# ---- omp's own gate gives the table's answers --------------------------------------------------
+@pytest.mark.parametrize("tool", ["Edit", "edit"])
+def test_an_edit_of_a_writer_asks_as_an_edit(tool, tmp_path):
+    """The effect names what a command RUNS; an edit of `apply.py` changes the script, it does not
+    write a ledger snapshot."""
+    verdict = judge_action(tool, "rew_tool/apply.py", gate=GATE_WRITES,
+                           read_roots=_read_roots_for(tmp_path))
+
+    assert not verdict.allowed and verdict.tool == tool
+
+
+def test_a_shell_it_cannot_read_is_refused(tmp_path):
+    with pytest.raises(ValueError):
+        judge_action("Bash", "ls", gate=GATE_AUTO, read_roots=_read_roots_for(tmp_path),
+                     shell="cmd")
+
+
+def test_omps_tools_are_all_known_to_the_gate():
+    """An omp tool the gate did not know would ask under `auto` — and a tool omp enables must be
+    one this table has a row for, not one it meets as a stranger."""
+    known = shell_gate.OMP_TOOLS
+    assert set(omp_session_module._ENABLED_TOOLS) <= known
+
+
+# ---- omp's own gate gives the table's answers, and decides through judge_action ----------------
 
 class _Bridge:
     def __init__(self) -> None:
@@ -136,21 +232,52 @@ def _omp_gate(tmp_path, tool, detail, ticked, gate):
 
 @pytest.mark.parametrize("tool, detail, ticked, gate, cell", list(_rows()))
 def test_omp_answers_the_table(tool, detail, ticked, gate, cell, tmp_path):
+    """omp's whole gate, frame in and answer out, against the FIXED cells — not against
+    `judge_action`, which would only compare the function with itself."""
     session, sent, events = _omp_gate(tmp_path, tool, detail, ticked, gate)
-    verdict = judge_action(tool, detail, gate=gate, always_allowed=frozenset(ticked),
-                           read_roots=session._read_roots, command=_command(detail))
 
-    assert session._auto_allowed(tool, detail) is verdict.allowed
-    if verdict.allowed:
-        assert session.bridge.requests == []
+    unasked = [event.command for event in events if isinstance(event, Unasked)]
+    if session.bridge.requests:
+        (request,) = session.bridge.requests
+        seen = "ask!" if request.reason == "gateIrreversible" else "ask"
+    else:
         assert sent[0]["value"] == "Approve"
+        seen = "pass!" if unasked else "pass"
+    assert seen == cell
+    assert unasked == ([_command(detail)] if cell == "pass!" else [])
+
+
+@pytest.mark.parametrize("verdict", [
+    Verdict(True),
+    Verdict(True, unasked="rm -rf ~/"),
+    Verdict(False, tool="effectLedger", title="Дозволити bash?", detail="d", reason="r"),
+])
+def test_omps_gate_decides_through_judge_action(verdict, tmp_path, monkeypatch):
+    """omp keeps no decision of its own: what `judge_action` says is what `_gate` does."""
+    calls = []
+
+    def judge(tool, detail, **kwargs):
+        calls.append((tool, detail, kwargs))
+        return verdict
+
+    monkeypatch.setattr(omp_session_module, "judge_action", judge)
+    session, sent, events = _omp_gate(tmp_path, "bash", "Command: rm -rf ~/", ("x",),
+                                      GATE_FOREIGN)
+
+    ((tool, detail, kwargs),) = calls
+    assert (tool, detail) == ("bash", "Command: rm -rf ~/")
+    assert kwargs["command"] == "rm -rf ~/"
+    assert kwargs["gate"] == GATE_FOREIGN and kwargs["always_allowed"] == frozenset({"x"})
+    assert kwargs["read_roots"] == session._read_roots
+    if verdict.allowed:
+        assert session.bridge.requests == [] and sent[0]["value"] == "Approve"
     else:
         (request,) = session.bridge.requests
         assert (request.tool, request.title, request.detail, request.reason) == (
             verdict.tool, verdict.title, verdict.detail, verdict.reason)
-    unasked = [event.command for event in events if isinstance(event, Unasked)]
-    assert unasked == ([verdict.unasked] if verdict.unasked else [])
-    assert _cell(verdict) == cell
+        assert sent[0]["value"] == "Deny"
+    assert [e.command for e in events if isinstance(e, Unasked)] == (
+        [verdict.unasked] if verdict.unasked else [])
 
 
 # ---- Codex's vocabulary reads the same table ---------------------------------------------------
@@ -160,6 +287,7 @@ CODEX_ROWS = [
     ("Bash", "ls -la", "bash", "Command: ls -la"),
     ("Bash", "rm -rf ~/", "bash", "Command: rm -rf ~/"),
     ("Bash", "echo done > process/plan.json", "bash", "Command: echo done > process/plan.json"),
+    ("Bash", "rm -rf process/ ~", "bash", "Command: rm -rf process/ ~"),
     ("Bash", "powershell -c 'Remove-Item -Recurse -Force ~'", "bash",
      "Command: powershell -c 'Remove-Item -Recurse -Force ~'"),
     ("Edit", "process/plan.json", "edit", '{"path": "process/plan.json"}'),
@@ -180,6 +308,17 @@ def test_codex_names_answer_as_omp_names(tool, detail, omp_tool, omp_detail, gat
         omp.allowed, bool(omp.unasked), omp.reason)
     if not codex.allowed:
         assert codex.title == f"Дозволити {tool}?"
+
+
+@pytest.mark.parametrize("gate", GATES)
+@pytest.mark.parametrize("tool", ["shell", "exec", "commandExecution", "apply_patch",
+                                  "mcp__other__x"])
+def test_a_name_the_gate_does_not_know_asks(tool, gate, tmp_path):
+    """Not Codex's `Bash`/`Edit`, not omp's own, not TCC's: asked about under every gate that
+    asks at all, and said under `never` — it was let through `auto` without a look."""
+    verdict = judge_action(tool, "rm -rf ~/", gate=gate, read_roots=_read_roots_for(tmp_path))
+
+    assert _cell(verdict) == ("pass!" if gate == GATE_NEVER else "ask")
 
 
 @pytest.mark.parametrize("ticked", ["Bash", "bash"])
@@ -206,18 +345,24 @@ def test_a_detail_that_says_command_cannot_hide_its_head(tmp_path):
 #: (line, {gate: cell}) — a line Codex runs in PowerShell, judged with `shell="powershell"`.
 POWERSHELL_TABLE = [
     (r"Remove-Item -Recurse -Force C:\Users",
-     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
     ("Remove-Item -Recurse $HOME",
-     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
     (r'"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -Command '
      r'"Remove-Item -Recurse -Force C:\Users"',
-     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+    (r"Remove-Item -Recurse -Force C:\Users\me process/plan.json",
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+    ("Remove-Item -Recurse -Force $HOME state/x.json",
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
     ("Get-ChildItem",
      {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("Remove-Item -Recurse -Force build",
      {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("Remove-Item process/x.tmp",
+     {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("Get-Content 'C:\\x\\y.txt",  # a quote that never closes: unknown is not safe
-     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
 ]
 
 

@@ -2171,11 +2171,17 @@ READ_ONLY_TOOLS = frozenset({"read", "glob", "grep", "ls", "list", "todo", "hub"
 # project's own files, which is the evidence everything else is built on.
 ALWAYS_GATED_TOOLS = frozenset({"write", "edit", "ast_edit", "eval", "browser", "task"})
 
+#: Every name this table has a row for: omp's tools (`omp_session._ENABLED_TOOLS` among them —
+#: a test holds that). Any other name, unless it is TCC's own `mcp__tcc…`, is a stranger: it asks
+#: under every gate that asks at all, `auto` included, and `never` says it (the fix round of
+#: tcc#181, the Arbiter 2026-10-14 — `auto` let a stranger through without a look).
+OMP_TOOLS = READ_ONLY_TOOLS | ALWAYS_GATED_TOOLS | {"bash", "ask", "inspect_image"}
+
 #: The names a Codex session passes, mapped onto omp's — the names this table is written in.
 #: `item/commandExecution/requestApproval` is "Bash" (the inner command), `item/fileChange/
 #: requestApproval` is "Edit" (its paths); TCC's tools come as `mcp__tcc__<tool>` and need no
-#: mapping (the `mcp__tcc` prefix is the rule). Any other name is taken as it is, and an unknown
-#: one asks. omp's own names (`bash`, `edit`, …) map to themselves.
+#: mapping (the `mcp__tcc` prefix is the rule). Any other name is taken as it is, and one not in
+#: `OMP_TOOLS` asks. omp's own names (`bash`, `edit`, …) map to themselves.
 TOOL_NAMES = {"Bash": "bash", "Edit": "edit"}
 
 # What the skill's own writers do, so a permission can ask about the effect instead of the command
@@ -2190,9 +2196,25 @@ _EFFECTS: tuple[tuple[str, str], ...] = (
     ("contract.py", "effectContract"),
 )
 
-# Paths the skill legitimately owns inside a project.
+# Paths the skill legitimately owns inside a project: a path is the skill's when it STARTS with one
+# of these, relative to the project (see `touches_only_skill_files`).
 _SKILL_OWNED = ("process/", "state/", "dsp_profile.json", "dsp_profile.draft.json",
                 "project.json", "autosound_context.md", "tuning-changelog", "audit-trail.md")
+
+#: The method's ledger writer, by the path its documents run it from (`rew_tool/state/process.py`,
+#: `skills/autosound-tuning/rew_tool/state/process.py`): a relative path that ENDS with it is the
+#: skill doing its job, as `foreign` always let it — the one owned name that is not a prefix.
+_SKILL_WRITER = "state/process.py"
+
+#: The owned folders by their own name, without the slash: `./process` is `process/`.
+_SKILL_FOLDERS = frozenset(owned.rstrip("/") for owned in _SKILL_OWNED if owned.endswith("/"))
+
+#: What parts a line into the words `touches_only_skill_files` reads: blanks, the shells'
+#: separators and redirects, and quotes (a quoted path is still a path).
+_PATH_SPLIT = re.compile(r"[\s;|&<>()`'\"]+")
+#: A word that names a file or folder: it has a separator, starts as the home, a variable or a
+#: drive does, or ends as the files the skill writes do.
+_PATH_LIKE = re.compile(r"[/\\]|^[~$%]|^[A-Za-z]:|\.(?:json|md|jsonl|txt)$")
 
 #: The shells `judge_action` reads a command line as.
 SHELL_BASH = "bash"
@@ -2207,8 +2229,9 @@ class Verdict:
     would have stopped: the caller says it in the dialog (`agent_events.Unasked(unasked)`), never
     silently (tcc#115). When not allowed, the rest is the confirmation's text, field for field as
     `mcp_server.ConfirmRequest` takes it: `tool` (the effect's i18n key, else the tool's name — also
-    what a «don't ask again» tick remembers), `title`, `detail` and `reason` (`gateIrreversible`
-    under `auto`, where only what cannot be undone asks)."""
+    what a «don't ask again» tick remembers; the effect only for a command), `title`, `detail` (the
+    command itself when it cannot be undone) and `reason` (`gateIrreversible` when the danger check
+    flagged the command, whichever gate asked)."""
 
     allowed: bool
     unasked: str = ""
@@ -2227,11 +2250,35 @@ def effect_of(command: str) -> Optional[str]:
 
 
 def touches_only_skill_files(command: str) -> bool:
-    """Whether every path the command names is one the skill owns (the `foreign` gate's pass)."""
-    paths = re.findall(r"[\w./\-]+\.(?:json|md|jsonl|txt)\b|\b(?:process|state)/[\w./\-]*", command)
-    if not paths:
+    """Whether every path the command names is one the skill owns (the `foreign` gate's pass).
+
+    Anchored, not a substring (the fix round of tcc#181): `rm -rf /Users/x/state/` named `state/`
+    and passed. A path is the skill's only when it is relative, STARTS with an owned prefix
+    (`./` aside), and has no `..`, no variable and no backslash; any other path-like word — absolute,
+    `~`, `$HOME`, `%USERPROFILE%`, `C:\\…`, a climb — makes the line not «only skill files». The
+    one name matched at the END is the method's writer, `…/state/process.py` (`_SKILL_WRITER`). An
+    option's value is read as its path (`--target-directory=process/`). A line that names no path at
+    all is not «only skill files» either: nothing to judge is not the same as nothing to worry
+    about. Says nothing about danger — `judge_action` asks that first."""
+    paths = []
+    for word in _PATH_SPLIT.split(command):
+        if word.startswith("-") and "=" in word:
+            word = word.split("=", 1)[1]
+        if word in _STREAM_DEVICES or word.lower() == "$null":
+            continue  # a stream, not a file: `2>/dev/null`, PowerShell's `> $null`
+        if word and _PATH_LIKE.search(word):
+            paths.append(word)
+    return bool(paths) and all(_is_skill_path(path) for path in paths)
+
+
+def _is_skill_path(path: str) -> bool:
+    if (_is_absolute(path) or any(mark in path for mark in ("\\", "$", "%", "~"))
+            or ".." in path.split("/")):
         return False
-    return all(any(owned in path for owned in _SKILL_OWNED) for path in paths)
+    while path.startswith("./"):
+        path = path[2:]
+    return (path.startswith(_SKILL_OWNED) or path in _SKILL_FOLDERS or path == _SKILL_WRITER
+            or path.endswith("/" + _SKILL_WRITER))
 
 
 def _is_dangerous(command: str, roots: Sequence[Path], shell: str) -> bool:
@@ -2252,8 +2299,9 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
     asks; `command` the shell line inside `detail` (omp's `Command: …` already split off by the
     caller — this does not parse it, so a line that SAYS «Command:» cannot hide its head), or
     `detail` itself when None. `shell`: `powershell` for a line the caller knows is PowerShell —
-    never read-only, and judged dangerous by either reader. `gate` and `always_allowed` are read
-    per call, so a gate narrowed mid-session takes effect on the next request.
+    never read-only, and judged dangerous by either reader; any other value raises ValueError.
+    `gate` and `always_allowed` are read per call, so a gate narrowed mid-session takes effect on
+    the next request. A name outside `OMP_TOOLS` and `mcp__tcc…` asks even under `auto`.
 
     Three things pass, and the reasoning for each is different. TCC's own tools raise their
     own confirmation *inside* the tool, so asking here too prompts twice for one action and
@@ -2265,13 +2313,18 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
     writes or evaluates goes in front of the Arbiter even if it looks harmless, because what
     it can overwrite is a measurement or a ledger.
     """
+    if shell not in (SHELL_BASH, SHELL_POWERSHELL):
+        raise ValueError(f"judge_action reads bash or powershell lines, not {shell!r}")
     name = TOOL_NAMES.get(tool, tool)
     line = detail if command is None else command
+    stranger = name not in OMP_TOOLS and not name.startswith("mcp__tcc")
+    dangerous = False  # read once, only where it decides or names the question
+    if name == "bash" and gate in (GATE_NEVER, GATE_AUTO, GATE_FOREIGN):
+        dangerous = _is_dangerous(line, read_roots, shell)
     if gate == GATE_NEVER:
         # `never` asks about nothing, and is never silent about what `auto` would have asked
-        # (tcc#115) — the same line as on the Agent SDK side.
-        dangerous = name == "bash" and _is_dangerous(line, read_roots, shell)
-        return Verdict(True, unasked=line if dangerous else "")
+        # (tcc#115) — the same line as on the Agent SDK side. A stranger `auto` would have asked.
+        return Verdict(True, unasked=line if dangerous or stranger else "")
     ticked = frozenset(always_allowed)
     if tool in ticked or name in ticked:
         return Verdict(True)  # a remembered tick outranks the `auto` guard below, as on the SDK side
@@ -2279,30 +2332,34 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
         # "Don't ask" never meant "don't look" (HUB-028). This returned True before any look,
         # so on omp a delete passed silently while the menu told the Arbiter `auto` still asks
         # about what cannot be undone (review of tcc#115). The SDK adapter's narrow check, shared.
-        allowed = not (name == "bash" and _is_dangerous(line, read_roots, shell))
+        # A name this table has no row for is not looked at by that check, so it asks.
+        allowed = not (dangerous or stranger)
     elif name in ALWAYS_GATED_TOOLS:
         allowed = False
     elif name.startswith("mcp__tcc") or name in READ_ONLY_TOOLS:
         allowed = True
     elif name == "bash":
         # `foreign`: the skill writing its own namespace is the skill doing its job, and asking
-        # about it teaches the Arbiter to click through the ones that matter.
+        # about it teaches the Arbiter to click through the ones that matter. Danger first: a
+        # line that also deletes the home is not the skill doing its job (`rm -rf process/ ~`).
         allowed = (shell != SHELL_POWERSHELL and bash_is_read_only(line, read_roots)
-                   or gate == GATE_FOREIGN and touches_only_skill_files(line))
+                   or gate == GATE_FOREIGN and not dangerous and touches_only_skill_files(line))
     else:
         allowed = False
     if allowed:
         return Verdict(True)
-    # Under `auto` the only thing that reaches here is what cannot be undone, and the question
-    # says so — the same reason, by the same key, as the SDK side (review of tcc#115).
-    irreversible = gate == GATE_AUTO
+    # What cannot be undone says so, whichever gate asked — under `auto` it is the only thing
+    # that asks about a command — by the same key as the SDK side (review of tcc#115).
+    if name == "bash" and gate == GATE_WRITES:
+        dangerous = _is_dangerous(line, read_roots, shell)
     return Verdict(
         False,
         # The question is what it will change, not what it will run: a command line three
         # nested calls deep is not something anyone can read and judge, so they approve it
-        # unread -- which is worse protection than no gate at all.
-        tool=effect_of(line) or tool,
+        # unread -- which is worse protection than no gate at all. Only a command has an
+        # effect: an edit of `apply.py` changes the script, it does not write a ledger.
+        tool=(effect_of(line) if name == "bash" else None) or tool,
         title=f"Дозволити {tool}?",
-        detail=line if irreversible else detail,
-        reason="gateIrreversible" if irreversible else "",
+        detail=line if dangerous else detail,
+        reason="gateIrreversible" if dangerous else "",
     )
