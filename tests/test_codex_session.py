@@ -1065,6 +1065,22 @@ def test_the_arbiters_answer_reaches_codex_once(project, stand_in, allow, said):
     assert decisions(stand_in) == [said, said] and stand_in.breaches() == []
 
 
+def test_a_bar_that_could_not_be_shown_is_declined_and_said(project, stand_in):
+    """G1-silent M2 (#206): Codex's `decline` carries no words, so the turn says the confirmation
+    could not be shown — not the Arbiter's answer."""
+    bridge = RecordingBridge(True)
+
+    def broken(request):
+        raise RuntimeError("the bridge is gone")
+
+    bridge.request_confirmation = broken
+    session = make(project, stand_in.use("command-approval"), bridge=bridge)
+    events = run_session(session)
+    said = [e.text for e in events if isinstance(e, Notice)]
+    assert decisions(stand_in) == ["decline", "decline"] and stand_in.breaches() == []
+    assert said and all("could not be shown" in t and "the bridge is gone" in t for t in said), said
+
+
 def test_never_lets_a_dangerous_command_through_and_says_so(project, tmp_path, stand_in):
     bridge = RecordingBridge(False)
     rows = approval_turn("th", command="/bin/zsh -lc 'rm -rf ~'")

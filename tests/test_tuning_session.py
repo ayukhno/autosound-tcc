@@ -162,6 +162,22 @@ def test_denial_tells_the_model_why(tmp_path):
     assert "allowlist" in result.message
 
 
+def test_a_confirmation_that_could_not_be_shown_is_not_told_as_the_arbiter_s_no(tmp_path):
+    """G1-silent M2 (#206): the bar failed to show, and the model was told «Arbiter did not
+    approve» — and told the Arbiter they had declined a question they never saw."""
+    session, arbiter = _session(tmp_path, allow=False)
+
+    def broken(request):
+        raise RuntimeError("the bridge is gone")
+
+    arbiter.request_confirmation = broken
+    result = asyncio.run(session._can_use_tool("Bash", {"command": "rm -rf /"}, None))
+
+    assert result.behavior == "deny"
+    assert "could not be shown" in result.message and "the bridge is gone" in result.message
+    assert "did not approve" not in result.message, result.message
+
+
 def test_the_tools_that_reach_outside_are_hard_blocked(tmp_path):
     """`Write` and `Edit` used to be here too; they are gated now — see
     `test_writing_a_file_is_gated_rather_than_blocked` for why blocking them backfired."""

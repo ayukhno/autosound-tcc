@@ -3409,7 +3409,7 @@ def test_a_failed_confirmation_is_logged_and_denied(caplog):
     with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
         allowed = asyncio.run(await_confirmation(_BrokenBar(), request, timeout_s=1.0))
 
-    assert allowed is False
+    assert not allowed and "boom" in allowed.failure, "why it failed, for the caller to say"
     said = " ".join(r.getMessage() for r in caplog.records)
     assert "boom" in said and "bash" in said and "rm x" in said, "which command, too"
 
@@ -3427,7 +3427,7 @@ def test_an_unanswered_confirmation_is_a_denial_with_a_trace_not_a_warning(caplo
     with caplog.at_level(logging.INFO, logger=app_log.LOGGER_NAME):
         allowed = asyncio.run(await_confirmation(_SilentBar(), request, timeout_s=0.05))
 
-    assert allowed is False
+    assert not allowed and allowed.failure == "", "nobody answering is no failure"
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert any("bash" in r.getMessage() and "no answer" in r.getMessage() for r in caplog.records)
 
@@ -3461,7 +3461,7 @@ def test_a_bridge_s_own_timeout_is_a_failure_not_silence(caplog, on_the_future):
     with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
         allowed = asyncio.run(await_confirmation(_TimingOutBar(on_the_future), request, 5.0))
 
-    assert allowed is False
+    assert not allowed and "timed out" in allowed.failure
     assert any("timed out" in r.getMessage() and r.levelno == logging.WARNING
                for r in caplog.records)
 
@@ -3505,6 +3505,9 @@ def test_a_tool_s_confirmation_that_fails_is_logged_and_writes_nothing(tmp_path,
     assert result["copied"] is False and bridge.clipboard == []
     assert any("copy_helix_eq" in r.getMessage() and "boom" in r.getMessage()
                for r in caplog.records)
+    # The model is told it was not the Arbiter's answer (G1-silent M2, #206): no bar was shown.
+    assert "not the Arbiter's answer" in result["reason"] and "boom" in result["reason"], result
+    assert "denied" not in result["reason"], result
 
 
 @pytest.mark.parametrize("text", ["[]", "null", "3", '{"mcpServers": [], "other": 1}'])

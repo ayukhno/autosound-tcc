@@ -252,6 +252,32 @@ def test_a_refused_permission_denies_the_tool(tmp_path):
     assert session.sent == [{"type": "extension_ui_response", "id": "f1", "value": "Deny"}]
 
 
+def test_a_permission_whose_bar_could_not_be_shown_is_denied_and_said(tmp_path):
+    """G1-silent M2 (#206): omp's answer is `Deny` and carries no words, so the turn says the
+    confirmation could not be shown — not the Arbiter's answer — where the Arbiter reads it."""
+    from autosound_tcc.core.agent_events import Notice
+
+    session = _session(tmp_path, allow=True)
+
+    def broken(request):
+        raise RuntimeError("the bridge is gone")
+
+    session.bridge.request_confirmation = broken
+
+    async def run():
+        await session._gate(PERMISSION_FRAME)
+        events = []
+        while not session._events.empty():
+            events.append(session._events.get_nowait())
+        return events
+
+    events = asyncio.run(run())
+
+    assert session.sent == [{"type": "extension_ui_response", "id": "f1", "value": "Deny"}]
+    assert len(events) == 1 and isinstance(events[0], Notice), events
+    assert "could not be shown" in events[0].text and "the bridge is gone" in events[0].text
+
+
 def test_tcc_tools_are_not_gated_twice(tmp_path):
     """Each `mcp__tcc` tool raises its own confirmation inside the tool; prompting here as well
     would ask the Arbiter twice for one action and train them to click through both."""

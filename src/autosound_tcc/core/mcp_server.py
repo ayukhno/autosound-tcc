@@ -515,8 +515,29 @@ class HeadlessBridge:
 
 
 
-async def await_confirmation(bridge: "UiBridge", request: ConfirmRequest, timeout_s: float) -> bool:
-    """The Arbiter's answer to `request`, False when there is none.
+@dataclass(frozen=True)
+class Confirmation:
+    """`await_confirmation`'s answer: the Arbiter's yes or no — and, when the bar could not be
+    shown at all, why (`failure`). True only for a yes. A failure is a no that is NOT the
+    Arbiter's: the three callers told the model «the Arbiter did not approve» over a bar that was
+    never on screen, and the model told the Arbiter they had declined (G1-silent M2, #206)."""
+
+    allowed: bool
+    failure: str = ""
+
+    def __bool__(self) -> bool:
+        return self.allowed
+
+    def refused(self, said: str) -> str:
+        """What the caller tells the model about a no: its own `said`, or the failure."""
+        if not self.failure:
+            return said
+        return f"the confirmation could not be shown ({self.failure}) -- not the Arbiter's answer"
+
+
+async def await_confirmation(bridge: "UiBridge", request: ConfirmRequest,
+                             timeout_s: float) -> Confirmation:
+    """The Arbiter's answer to `request`, a no when there is none (`Confirmation`).
 
     A timeout is a denial: nobody answered -- one INFO line says what was denied and after how
     long, because it once left nothing in tcc.log at all. A failure is a denial too — the gate
@@ -524,23 +545,24 @@ async def await_confirmation(bridge: "UiBridge", request: ConfirmRequest, timeou
     this way and swallowed the failure as a plain «no», so a broken confirmation bar read as the
     Arbiter refusing everything. Only this clock running out is "nobody answered": since 3.11
     every TimeoutError is asyncio's, and a bridge's own was read as silence (the G1 review). A
-    cancel is neither, and goes through."""
+    cancel is neither, and goes through. A failure carries its reason (`Confirmation.failure`)."""
     future = None
     try:
         future = bridge.request_confirmation(request)
-        return bool(await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout_s))
+        return Confirmation(bool(await asyncio.wait_for(asyncio.wrap_future(future),
+                                                        timeout=timeout_s)))
     except asyncio.TimeoutError as exc:
         if future is not None and future.cancelled():  # `wait_for` gave up on it: our clock
             app_log.logger().info("confirmation for %s (%s): no answer in %.0f s, denied",
                                   request.tool, request.title, timeout_s)
-            return False
+            return Confirmation(False)
         failure: BaseException = exc
     except Exception as exc:  # noqa: BLE001 — any failure is a denial, said in the log
         failure = exc
     app_log.logger().warning("confirmation for %s failed, read as a denial: %s: %s (%s: %s)",
                              request.tool, type(failure).__name__, failure, request.title,
                              (request.detail or "")[:200])
-    return False
+    return Confirmation(False, f"{type(failure).__name__}: {failure}")
 
 
 def build_server(
@@ -602,7 +624,7 @@ def build_server(
                 f"{process_view.process_dir(project_dir)} show`" if names else ""))
         return process.Process(str(project_dir / "process")).load(), None
 
-    async def _confirm(request: ConfirmRequest) -> bool:
+    async def _confirm(request: ConfirmRequest) -> Confirmation:
         return await await_confirmation(bridge, request, CONFIRM_TIMEOUT_S)
 
     # ---- reads -------------------------------------------------------------
@@ -1272,7 +1294,8 @@ def build_server(
             )
         )
         if not allowed:
-            return json.dumps({"applied": False, "reason": "Arbiter denied or timed out"})
+            return json.dumps({"applied": False,
+                               "reason": allowed.refused("Arbiter denied or timed out")})
         try:
             rew_api = vendor_loader.load_rew_api()
         except vendor_loader.VendorNotInitializedError as exc:
@@ -1315,7 +1338,8 @@ def build_server(
             )
         )
         if not allowed:
-            return json.dumps({"copied": False, "reason": "Arbiter denied or timed out"})
+            return json.dumps({"copied": False,
+                               "reason": allowed.refused("Arbiter denied or timed out")})
         bridge.copy_to_clipboard(text)
         return json.dumps({"copied": True, "chars": len(text)})
 

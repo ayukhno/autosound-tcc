@@ -582,7 +582,9 @@ class OmpSession:
         request = ConfirmRequest(tool=verdict.tool, title=verdict.title, detail=verdict.detail,
                                  payload=dict(frame), reason=verdict.reason)
         allowed = await await_confirmation(self.bridge, request, CONFIRM_TIMEOUT_S)
-        self._answer_frame(frame, allowed)
+        if allowed.failure:  # omp's `Deny` carries no words: the turn says it was not a no (#206)
+            await self._events.put(Notice(allowed.refused("")))
+        self._answer_frame(frame, allowed.allowed)
 
     def _judge(self, tool: str, detail: str) -> Verdict:
         """The gate's decision on one permission — `shell_gate.judge_action`, the table omp and

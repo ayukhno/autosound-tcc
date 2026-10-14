@@ -361,7 +361,9 @@ class TuningSession:
         allowed = await await_confirmation(self.bridge, request, timeout_s=600.0)
         if allowed:
             return PermissionResultAllow()
-        return PermissionResultDeny(message=f"Arbiter did not approve: {deny_reason}")
+        # A bar that could not be shown is not the Arbiter's no (G1-silent M2, #206).
+        return PermissionResultDeny(
+            message=allowed.refused(f"Arbiter did not approve: {deny_reason}"))
 
     # ---- lifecycle ---------------------------------------------------------
 

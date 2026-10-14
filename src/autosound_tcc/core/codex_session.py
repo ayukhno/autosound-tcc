@@ -781,7 +781,10 @@ class CodexSession:
                                  title=verdict.title or f"Дозволити {tool}?",
                                  detail=verdict.detail or detail, payload=dict(params),
                                  reason=verdict.reason)
-        return await await_confirmation(self.bridge, request, CONFIRM_TIMEOUT_S)
+        allowed = await await_confirmation(self.bridge, request, CONFIRM_TIMEOUT_S)
+        if allowed.failure:  # a `decline` carries no words: the turn says it was not a no (#206)
+            self._say(Notice(allowed.refused("")))
+        return allowed.allowed
 
     def _say(self, event: AgentEvent) -> None:
         """An event of the gate's into the turn, in order with Codex's notifications."""
