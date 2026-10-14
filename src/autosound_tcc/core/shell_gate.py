@@ -379,7 +379,32 @@ def _git_is_read_only(rest: list[str]) -> bool:
 #: What is here either destroys data outside a single named file, overwrites a device, rewrites
 #: published history, or runs something fetched from the network.
 #: `format` is Windows' `format.com`, which Git Bash finds on its PATH (tcc#128).
-_RUINOUS = frozenset({"mkfs", "fdisk", "shutdown", "reboot", "halt", "diskutil", "format"})
+_RUINOUS = frozenset({"mkfs", "fdisk", "shutdown", "reboot", "halt", "poweroff", "diskutil",
+                      "format", "stop-computer", "restart-computer"})
+#: `systemctl poweroff` and its kin: the machine goes down with whatever was unsaved.
+_SYSTEMCTL_DOWN = frozenset({"poweroff", "reboot", "halt", "kexec"})
+#: Writers that destroy what a file held — a delete's twin: judged by reach, as `rm` is (Fable's
+#: final review, I1: `truncate -s 0 ~/*`, `echo | tee ~/*`).
+_OVERWRITERS = frozenset({"truncate", "tee", "shred", "unlink", "srm"})
+#: PowerShell's: they empty or replace what a file held.
+_PS_OVERWRITERS = frozenset({"clear-content", "clc", "set-content"})
+#: PowerShell's listings — what feeds a delete down a pipe or a `foreach`.
+_PS_LISTERS = frozenset({"get-childitem", "gci", "dir", "ls", "get-item", "gi", "resolve-path",
+                         "rvpa"})
+#: PowerShell's process stoppers and listing.
+_PS_STOPPERS = frozenset({"stop-process", "spps", "kill"})
+_PS_PROCESS_LISTERS = frozenset({"get-process", "gps", "ps"})
+#: A .NET call that deletes, overwrites or runs code — `[IO.Directory]::Delete(…)`,
+#: `(Get-Item …).Delete($true)`, `[scriptblock]::Create(…)`, `.Invoke()`: the reader does not take
+#: PowerShell's member calls apart, so the call itself asks (Fable's final review, I2).
+_PS_DOTNET = re.compile(r"(?:::|\.)\s*(?:delete\w*|writeall\w*|create|invoke\w*|start|kill|format"
+                        r"|truncate|setlength|encrypt|movedirectory|copydirectory)\s*\(", re.I)
+#: A registry key by its hive: `HKCU:\\Software`, `HKEY_LOCAL_MACHINE\\SYSTEM`, `Registry::HKLM\\…`.
+_REGISTRY = re.compile(r"(?:registry::)?(hkey_current_user|hkcu|hkey_local_machine|hklm|"
+                       r"hkey_classes_root|hkcr|hkey_users|hku|hkey_current_config|hkcc):?(?=/|$)",
+                       re.I)
+#: Keys a delete of which is somebody's whole configuration: a hive's own first level, and these.
+_REGISTRY_WIDE_SECOND = frozenset({"microsoft", "classes", "policies", "wow6432node"})
 #: `mkfs.ext4`, `mkfs.vfat` — the family is spelled with a suffix, and matching the bare name
 #: would let every real invocation through.
 _RUINOUS_PREFIXES = ("mkfs.",)
@@ -785,8 +810,10 @@ def _cd_target(words: list[_Word], here: Optional[str], shell: str,
 
 
 def _is_absolute(text: str) -> bool:
-    """A path that does not depend on the folder a command runs in: `/x`, `\\x`, `~`, `C:\\x`."""
-    return text.startswith(("/", "\\", "~")) or bool(re.match(r"[A-Za-z]:", text))
+    """A path that does not depend on the folder a command runs in: `/x`, `\\x`, `~`, `C:\\x`, and a
+    registry key by its hive (`HKCU:\\Software`)."""
+    return text.startswith(("/", "\\", "~")) or bool(re.match(r"[A-Za-z]:", text)) or bool(
+        _REGISTRY.match(text.replace("\\", "/")))
 
 
 def _is_wide_here(text: str, cwd: Optional[str]) -> bool:
@@ -1257,7 +1284,11 @@ def _tainted(commands: list[_Command], inherited: Iterable[str] = ()) -> set[str
                 if any(_HOME_ASSIGNMENT.match(word.text) for word in words):
                     tainted.add("HOME")
                 if head in ("for", "select") and len(words) > 1:
-                    if words[1].text == "HOME" or any(_runs(word, tainted) for word in words[2:]):
+                    if words[1].text == "HOME" or any(
+                            _runs(word, tainted) or not word.dynamic and _is_wide_target(word.text)
+                            for word in words[3:]):
+                        # A loop over another command's output, or over a home or a system folder
+                        # (`for f in ~/*`): what its body deletes is that (Fable's review, I1).
                         tainted.add(words[1].text)
                 elif head in _STDIN_READERS:
                     tainted.update(word.text for word in words[1:] if _NAME.fullmatch(word.text))
@@ -1378,17 +1409,42 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
         return _remove_item_is_dangerous(arguments, command.piped, command.cwd)
     if name in _INTERPRETERS or name.startswith("python"):
         return _interpreter_is_dangerous(name, arguments, command, tainted)
-    if name in ("rm", "find", "dd", "chmod") and any(_runs(a, tainted) for a in arguments):
+    if name in ("rm", "find", "dd", "chmod", *_OVERWRITERS) and any(
+            _runs(a, tainted) for a in arguments):
         return True  # its arguments decide, and one is another command's output: `rm $(echo -rf /)`
     if name == "rm":
         return _rm_is_dangerous(arguments, command.cwd)
+    if name in _OVERWRITERS:
+        return any(_reaches_wide(operand, command.cwd) for operand in _operand_words(arguments))
+    if name in _PS_OVERWRITERS:
+        return any(_reaches_wide(operand, command.cwd) for operand in _ps_operands(arguments))
     if name in _WINDOWS_DELETES:
         # cmd's `rd /s`, and PowerShell's aliases of Remove-Item: `rd -Recurse ~` (Ruling 41).
         return _reach_is_dangerous(arguments, _is_windows_switch,
                                    lambda text: "s" in _switch_letters(text), bare=False,
-                                   cwd=command.cwd
-                                   ) or _remove_item_is_dangerous(arguments, command.piped,
-                                                                  command.cwd)
+                                   cwd=command.cwd, wide_alone=True
+                                   ) or _remove_item_is_dangerous(
+                                       [a for a in arguments if not _is_windows_switch(a.text)],
+                                       command.piped, command.cwd)
+    if name in ("icacls", "cacls", "takeown"):
+        # chmod -R's twin: `/T` (icacls) or `/R` (takeown) over a home or a system folder.
+        return _reach_is_dangerous(arguments, lambda text: bool(re.fullmatch(r"/[A-Za-z]+", text)),
+                                   lambda text: text.lower() in ("/t", "/r"), bare=False,
+                                   cwd=command.cwd)
+    if name == "reg":
+        return _reg_is_dangerous(arguments, command.cwd)
+    if name == "rsync":
+        return _rsync_is_dangerous(arguments, command.cwd)
+    if name == "systemctl":
+        return any(a.text.lower() in _SYSTEMCTL_DOWN for a in arguments)
+    if name == "crontab":
+        return any(a.text.startswith("-") and "r" in a.text[1:] for a in arguments)
+    if name == "kill":
+        return _kill_is_dangerous(arguments)
+    if name in ("pkill", "killall"):
+        return _pkill_is_dangerous(name, arguments)
+    if name == "taskkill":
+        return _taskkill_is_dangerous(arguments)
     if name == "find":
         return _find_is_dangerous(arguments, command, tainted, depth)
     if name == "dd":
@@ -1515,6 +1571,78 @@ def _is_parameter(word: _Word) -> bool:
     text = word.text
     return text.startswith("-") and len(text) > 1 and (
         not word.quoted or bool(_COLON_PARAM.match(text)))
+
+
+def _reg_is_dangerous(arguments: list[_Word], cwd: Optional[str]) -> bool:
+    """`reg delete <key>` of a hive or a key that is somebody's whole configuration; `reg restore`
+    writes over a key from a file."""
+    words = [a for a in arguments if not re.fullmatch(r"/[A-Za-z]+", a.text)]
+    if not words:
+        return False
+    verb = words[0].text.lower()
+    if verb == "restore":
+        return True
+    return verb == "delete" and any(w.dynamic or _is_wide_target(w.text) for w in words[1:2])
+
+
+def _rsync_is_dangerous(arguments: list[_Word], cwd: Optional[str]) -> bool:
+    """`rsync --delete` (any of its spellings) makes the destination match the source: an empty
+    source deletes it. Asks when that destination — the last operand — is wide or unknown."""
+    options = [a.text for a in arguments if a.text.startswith("-")]
+    if not any(o.startswith("--del") or o == "--remove-source-files" for o in options):
+        return False
+    operands = [a for a in arguments if not a.text.startswith("-")]
+    if not operands:
+        return True
+    dest = operands[-1]
+    return dest.dynamic or _is_wide_here(dest.text, cwd)
+
+
+#: `kill`'s options that take the word after them.
+_KILL_VALUED = frozenset({"-s", "-n", "--signal"})
+
+
+def _kill_is_dangerous(arguments: list[_Word]) -> bool:
+    """`kill -9 -1` (and `kill -- -1`): pid -1 is every process the user may signal — TCC and
+    REW with them, captures unsaved. The last word is a pid even when it looks like an option."""
+    words = [a.text for a in arguments]
+    if "--" in words:
+        return "-1" in words[words.index("--") + 1:]
+    at = 0
+    while at < len(words) - 1 and words[at].startswith("-"):
+        at += 2 if words[at] in _KILL_VALUED else 1
+    return "-1" in words[at:]
+
+
+#: pkill's and killall's options that take the word after them.
+_PKILL_VALUED = frozenset({"-u", "-U", "-g", "-G", "-P", "-s", "-t", "-F", "--signal", "-o",
+                           "-y", "--user", "-n"})
+_MATCHES_ALL = frozenset({".", ".*", "^", "", "*", ".+", "^.*$"})
+
+
+def _pkill_is_dangerous(name: str, arguments: list[_Word]) -> bool:
+    """`pkill .`, `killall -r .`, `pkill -u me` with no name: every process of the user."""
+    patterns: list[str] = []
+    by_user = False
+    at = 0
+    while at < len(arguments):
+        text = arguments[at].text
+        if text.startswith("-") and len(text) > 1:
+            by_user |= text in ("-u", "-U", "--user")
+            if text in _PKILL_VALUED:
+                at += 1
+        else:
+            patterns.append(text)
+        at += 1
+    return any(p in _MATCHES_ALL for p in patterns) or by_user and not patterns
+
+
+def _taskkill_is_dangerous(arguments: list[_Word]) -> bool:
+    """`taskkill /F /IM *`: every process by name."""
+    texts = [a.text for a in arguments]
+    return any(t.lower() == "/im" and at + 1 < len(texts)
+               and texts[at + 1].strip("\"'") in ("*", "*.*", "*.exe")
+               for at, t in enumerate(texts))
 
 
 def _lists_names_below_a_narrow_folder(producer: Optional[_Command]) -> bool:
@@ -1950,12 +2078,12 @@ def _rm_is_dangerous(arguments: list[_Word], cwd: Optional[str] = "") -> bool:
     """`rm` is judged by its arguments rather than by its name: `rm build/tmp.json` is a Tuesday.
     With no target it is fed by `xargs` or a pipe, and deletes what is not on the line."""
     return _reach_is_dangerous(arguments, lambda text: text.startswith("-"), _is_recursive_flag,
-                               bare=True, cwd=cwd)
+                               bare=True, cwd=cwd, wide_alone=True)
 
 
 def _reach_is_dangerous(arguments: list[_Word], is_option: Callable[[str], bool],
                         is_recursive: Callable[[str], bool], bare: bool, cwd: Optional[str] = "",
-                        mode_first: bool = False) -> bool:
+                        mode_first: bool = False, wide_alone: bool = False) -> bool:
     """A recursive delete (`rm -r`, `rd /s`) or `chmod -R`, judged by what it reaches.
 
     A target the line does not spell — `"$f"` in `for f in *`, `$(cat list)` — is unknown, and a
@@ -1993,11 +2121,23 @@ def _reach_is_dangerous(arguments: list[_Word], is_option: Callable[[str], bool]
         if not operands:
             return bare
         return any(operand.dynamic or wide(operand) for operand in operands)
+    if wide_alone and any(_reaches_wide(operand, cwd) for operand in operands):
+        return True  # `rm ~/*`: every file of a home, recursive or not (Fable's final review, I1)
     if not could_be_options:
         return False
     return (any(_may_be_several_words(word) for word in could_be_options)
             or sum(operand.dynamic for operand in operands) > 1
             or any(not operand.dynamic and wide(operand) for operand in operands))
+
+
+def _reaches_wide(operand: _Word, cwd: Optional[str]) -> bool:
+    """A non-recursive delete's or overwrite's operand that is a glob over a whole home or system
+    folder — `~/*`, `/Users/*/Desktop/*`, `*` after `cd ~` — judged where it runs. A folder named
+    alone is not: without recursion it is refused (`Remove-Item -Recurse:$false ~`)."""
+    text = operand.text
+    if operand.dynamic or not any(ch in text for ch in "*?["):
+        return False  # one unknown file, as `rm "$tmp"` always was; a wide loop taints it instead
+    return _is_wide_here(text, cwd)
 
 
 def _is_recursive_flag(text: str) -> bool:
@@ -2025,6 +2165,14 @@ def _is_wide_target(text: str) -> bool:
     climb to one (`~/../*`), which reach the same files (tcc#128). Without case: macOS and Windows
     disks ignore it."""
     path = text.replace("\\", "/").lower()
+    hive = _REGISTRY.match(path)
+    if hive:
+        # A hive, a key one level down (`HKCU:\\Software`), or Windows' own under Software.
+        keys = [key for key in path[hive.end():].split("/") if key]
+        cut = next((at for at, key in enumerate(keys) if any(ch in key for ch in "*?[")), len(keys))
+        keys = keys[:cut]
+        return len(keys) <= 1 or len(keys) == 2 and keys[0] == "software" and (
+            keys[1] in _REGISTRY_WIDE_SECOND)
     home = re.match(r"~[^/]*|\$home|\$\{home\}", path)
     if home and path[home.end():home.end() + 1] in ("", "/"):
         # A home, wherever it lives, is one folder among the homes: `~/..` is all of them.
@@ -2262,8 +2410,11 @@ def _powershell_line_is_dangerous(line: str, depth: int, cwd: Optional[str] = ""
     that is not PowerShell's own is judged by the shell rules (`cmd /c …`, `git push --force`)."""
     if depth > _MAX_DEPTH:
         return True
+    if _PS_DOTNET.search(line):
+        return True  # a .NET call that deletes, overwrites or runs code: not taken apart here
     statements: list[list[_Word]] = [[]]
     piped: list[bool] = [False]
+    fed: list[bool] = [False]  # the statement takes a pipe's input
     called: list[bool] = [False]  # after a lone `&`, PowerShell's call operator
     word: Optional[_Word] = None
     quote = ""
@@ -2319,6 +2470,7 @@ def _powershell_line_is_dangerous(line: str, depth: int, cwd: Optional[str] = ""
             piped[-1] |= pipe
             statements.append([])
             piped.append(pipe)
+            fed.append(pipe)
             called.append(ch == "&" and "&" not in (line[i - 1:i], line[i + 1:i + 2]))
         else:
             word = word or _Word(started=True)
@@ -2327,6 +2479,8 @@ def _powershell_line_is_dangerous(line: str, depth: int, cwd: Optional[str] = ""
     if quote:
         return True  # a quote that never closes: unknown is not safe
     finish()
+    if _powershell_feeds_are_dangerous(statements, fed, cwd):
+        return True
     for words, in_pipe, call in zip(statements, piped, called):
         if not words:
             continue
@@ -2336,6 +2490,84 @@ def _powershell_line_is_dangerous(line: str, depth: int, cwd: Optional[str] = ""
         moved, target = _cd_target(words, cwd, shell="powershell")  # `Set-Location ~; ri -r .`
         if moved and not in_pipe:
             cwd = target
+    return False
+
+
+def _ps_body(words: list[_Word]) -> list[_Word]:
+    """A statement without its assignment: `$all = gci ~ -r` is `gci ~ -r`."""
+    if words and words[0].text.startswith("$") and len(words) > 1 and words[1].text in (
+            "=", "+=", "-=", "*=", "/="):
+        return words[2:]
+    return words
+
+
+def _ps_operands(arguments: list[_Word]) -> list[_Word]:
+    """A cmdlet's operands: every word that is not a parameter, and a `-Name:value`'s value."""
+    out: list[_Word] = []
+    for word in arguments:
+        if _is_parameter(word):
+            value = word.text.partition(":")[2]
+            if value:
+                out.append(_Word(text=value, started=True, dynamic="$" in value))
+        else:
+            out.append(word)
+    return out
+
+
+def _ps_lister_at(words: list[_Word], names: frozenset) -> Optional[int]:
+    return next((at for at, word in enumerate(words)
+                 if not word.quoted and _command_name(word.text) in names), None)
+
+
+def _ps_lists_wide(words: list[_Word], cwd: Optional[str]) -> bool:
+    """A listing that reaches far: recursive (`-Recurse`, `-r`, `-Depth`), or over a home, a
+    system folder or a place the line does not spell (`gci ~`, `dir C:\\Users`, `gci $p`)."""
+    at = _ps_lister_at(words, _PS_LISTERS)
+    if at is None:
+        return False
+    arguments = words[at + 1:]
+    for word in arguments:
+        if _is_parameter(word):
+            name = word.text[1:].partition(":")[0].lower()
+            if name and ("recurse".startswith(name) or len(name) > 1 and "depth".startswith(name)):
+                return True
+    return any(op.dynamic or _is_wide_here(op.text, cwd) for op in _ps_operands(arguments))
+
+
+def _powershell_feeds_are_dangerous(statements: list[list[_Word]], fed: list[bool],
+                                    cwd: Optional[str]) -> bool:
+    """What a delete gets from elsewhere on the line (Fable's final review, C1 — bash's `xargs`
+    rule): a remover or an emptier fed by a pipe, or one whose target the line does not spell
+    (`% { Remove-Item $_.FullName }`, `foreach ($f in …) { ri $f }`), asks when the line lists
+    recursively or wide — `gci ~ -Recurse | Remove-Item` — and a pipe-fed one when nothing on the
+    line is a listing at all (`Get-Content list.txt | Remove-Item`: names the line does not show).
+    And a process stopper fed by an unfiltered `Get-Process`, or told `-Name *`: everything."""
+    bodies = [_ps_body(words) for words in statements]
+    reaching = any(_ps_lists_wide(body, cwd) for body in bodies)
+    listing = any(_ps_lister_at(body, _PS_LISTERS) is not None for body in bodies)
+    every_process = False
+    for body in bodies:
+        at = _ps_lister_at(body, _PS_PROCESS_LISTERS)
+        if at is not None and not _ps_operands(body[at + 1:]) and not any(
+                _is_parameter(w) and w.text[1:].partition(":")[0].lower() in (
+                    "name", "id", "n", "processname", "inputobject") for w in body[at + 1:]):
+            every_process = True
+    for body, from_pipe in zip(bodies, fed):
+        if not body or body[0].dynamic:
+            continue
+        head = _command_name(body[0].text)
+        targets = _ps_operands(body[1:])
+        if head in _PS_REMOVERS | _PS_OVERWRITERS | _WINDOWS_DELETES:
+            unspelled = not targets or any(t.dynamic for t in targets)
+            if from_pipe and (reaching or not listing) or unspelled and reaching:
+                return True
+        if head in _PS_STOPPERS:
+            names = [w.text.partition(":")[2] if ":" in w.text else ""
+                     for w in body[1:] if _is_parameter(w)]
+            if any(t.text in _MATCHES_ALL for t in targets) or "*" in names:
+                return True
+            if from_pipe and not targets and every_process:
+                return True
     return False
 
 
@@ -2384,7 +2616,9 @@ def _remove_item_is_dangerous(arguments: list[_Word], piped: bool, cwd: Optional
         targets.append(word)
     splat = any(target.text.startswith("@") for target in targets)  # `@args` may hold -Recurse
     if not (recurse or splat):
-        return False
+        # Not recursive: still a delete of every file a wide glob or name reaches (`Remove-Item
+        # ~\\*`, Fable's final review, I1); fed by a pipe it is judged with its producer.
+        return any(_reaches_wide(target, cwd) for target in targets)
     if any(_holds_a_link_out(target, cwd) for target in targets):
         return True  # Windows PowerShell 5.1 recurses through a junction inside what it deletes
     if not targets:
@@ -2948,8 +3182,13 @@ def _inside(path: str, project: Path) -> Optional[str]:
     """An absolute path relative to the project ("" for the project itself), or None outside it.
     The project as given and as resolved both count: macOS's `/var` is `/private/var`."""
     norm = posixpath.normpath(path)
-    fold = bool(re.match(r"[A-Za-z]:", norm))  # a Windows drive ignores case
-    for root in {project.as_posix(), Path(os.path.realpath(project)).as_posix()}:
+    given = {project.as_posix(), Path(os.path.realpath(project)).as_posix()}
+    # Git Bash names a drive `/c/…`: the same folder as `C:/…` (the Windows pass of PR #215). A
+    # Windows drive ignores case, in either spelling; nothing else here is folded.
+    roots = {(root, bool(re.match(r"[A-Za-z]:", root))) for root in given}
+    roots |= {(f"/{drive.group(1)}/{drive.group(2)}", True) for drive in
+              (re.match(r"([A-Za-z]):/(.*)", root) for root in given) if drive}
+    for root, fold in roots:
         here, there = (norm.lower(), root.lower()) if fold else (norm, root)
         if here == there:
             return ""

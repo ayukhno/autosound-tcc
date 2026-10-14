@@ -80,6 +80,8 @@ from autosound_tcc.core.shell_gate import (
 from autosound_tcc.core.tuning_session import SKILL_NAME, _read_roots_for, language_rule
 
 DEFAULT_MODEL = model_choices.DEFAULT_OMP_MODEL
+#: How much of a permission's detail the confirmation bar shows; the gate reads all of it.
+SHOWN_DETAIL = 400
 
 
 # What omp reads for a Google model, checked in its binary rather than assumed: `GEMINI_API_KEY`
@@ -560,7 +562,9 @@ class OmpSession:
         head, _, rest = title.partition("\n")
         args = frame.get("args")
         detail = rest.strip() or (json.dumps(args, ensure_ascii=False) if args else "")
-        return head.strip(), detail[:400]
+        # Whole: the gate reads all of it (`echo <400 a> ; rm -rf ~` was judged without its
+        # delete — Fable's final review, I3); only what the bar shows is cut (`_gate`).
+        return head.strip(), detail
 
     # ---- the Arbiter gate ---------------------------------------------------
 
@@ -579,8 +583,9 @@ class OmpSession:
                 # asked (tcc#115) — the same line as on the Agent SDK side.
                 await self._events.put(Unasked(verdict.unasked))
             return
-        request = ConfirmRequest(tool=verdict.tool, title=verdict.title, detail=verdict.detail,
-                                 payload=dict(frame), reason=verdict.reason)
+        request = ConfirmRequest(tool=verdict.tool, title=verdict.title,
+                                 detail=verdict.detail[:SHOWN_DETAIL], payload=dict(frame),
+                                 reason=verdict.reason)
         allowed = await await_confirmation(self.bridge, request, CONFIRM_TIMEOUT_S)
         if allowed.failure:  # omp's `Deny` carries no words: the turn says it was not a no (#206)
             await self._events.put(Notice(allowed.refused("")))

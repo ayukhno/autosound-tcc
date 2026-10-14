@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import Future
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -335,7 +336,12 @@ def _project(tmp_path):
                          ids=[row[0] for row in FOREIGN_ROWS])
 def test_foreign_line_by_line(name, line, shell, omp, passes, tmp_path, monkeypatch):
     project, roots = _project(tmp_path)
-    line = line.format(project=project, skill=roots[1])
+    # The platform's form of a path in a bash line is `/`-separated: unquoted, bash strips a
+    # Windows `\` before any program sees it (`rm C:\Users\…\car/process/x.tmp` is `rm
+    # C:Users…car/process/x.tmp`), so a line built with `str()` is one no bash on Windows runs —
+    # the gate refusing it was right (Windows CI, PR #215). Identical on POSIX.
+    form = (lambda path: Path(path).as_posix()) if shell == B else str
+    line = line.format(project=form(project), skill=form(roots[1]))
     monkeypatch.setenv("AUTOSOUND_SKILL_ROOT", str(roots[1]))
 
     verdict = judge_action("Bash", line, gate=GATE_FOREIGN, read_roots=roots, shell=shell)
@@ -841,12 +847,78 @@ DANGER_TABLE = [
     ("format/wipe disk", P, "wsl --shutdown"),
     ("format/wipe disk", P, "wsl -t Ubuntu"),
     ("format/wipe disk", P, "wsl -e mkfs.ext4 /dev/sdb1"),
+    # Fable's final review, C1: recursion on the PRODUCER, a deleter fed by it (bash's xargs rule).
+    ("recursive delete", B, "find ~ -type f | xargs rm -f"),
+    ("recursive delete", P, "Get-ChildItem ~ -Recurse -File | Remove-Item -Force"),
+    ("recursive delete", P, r"dir C:\Users -r -file | del"),
+    ("recursive delete", P, "gci $HOME -Recurse | % { Remove-Item $_.FullName -Force }"),
+    ("recursive delete", P, "Get-ChildItem ~ -Recurse | ForEach-Object { ri $_ }"),
+    ("recursive delete", P, "foreach ($f in Get-ChildItem ~ -Recurse -File) { Remove-Item $f }"),
+    ("recursive delete", P, "$all = gci ~ -r -file; $all | Remove-Item"),
+    ("recursive delete", P, "Get-Content list.txt | Remove-Item"),
+    ("recursive delete", P, "gci ~ -Recurse -File | Clear-Content"),
+    ("recursive delete", B, "find ~ -delete"),
+    ("recursive delete", B, "rsync -a --delete /tmp/empty/ ~/"),
+    ("recursive delete", B, "rsync -r --delete-before x/ /Users/me/"),
+    # I1: a delete or an overwrite of a wide glob, recursive or not.
+    ("wide delete or overwrite", B, "rm ~/*"),
+    ("wide delete or overwrite", B, "rm -f /Users/*/Desktop/*"),
+    ("wide delete or overwrite", B, 'for f in ~/*; do rm "$f"; done'),
+    ("wide delete or overwrite", B, "truncate -s 0 ~/*"),
+    ("wide delete or overwrite", B, "echo | tee ~/*"),
+    ("wide delete or overwrite", B, "shred -u ~/*"),
+    ("wide delete or overwrite", B, "cd ~ && rm *"),
+    ("wide delete or overwrite", P, r"Remove-Item ~\* -Force"),
+    ("wide delete or overwrite", P, r"Remove-Item C:\Users\*\Desktop\* -Force"),
+    ("wide delete or overwrite", P, r"del C:\Users\me\*"),
+    ("wide delete or overwrite", P, r"cmd /c del /q C:\Users\me\*"),
+    ("wide delete or overwrite", P, r"Clear-Content ~\*"),
+    ("wide delete or overwrite", P, r"Set-Content -Path C:\Users\*\Desktop\* -Value ''"),
+    # I2: classes one shell had and the other did not.
+    ("shutdown", B, "shutdown -h now"),
+    ("shutdown", B, "systemctl poweroff"),
+    ("shutdown", B, "poweroff"),
+    ("shutdown", P, "Stop-Computer -Force"),
+    ("shutdown", P, "Restart-Computer -Force"),
+    ("shutdown", P, "shutdown /s /t 0"),
+    ("shutdown", P, "shutdown /r"),
+    ("recursive permissions", B, "chmod -R 777 ~"),
+    ("recursive permissions", P, r"icacls C:\Users /reset /T /C"),
+    ("recursive permissions", P, r"icacls $HOME /grant Everyone:F /T"),
+    ("recursive permissions", P, r"takeown /R /F C:\Users"),
+    ("registry", B, "reg delete 'HKCU\\Software' /f"),
+    ("registry", P, r"Remove-Item -Recurse -Force HKCU:\Software"),
+    ("registry", P, r"reg delete HKCU\Software /f"),
+    ("registry", P, r"Remove-Item -Recurse Registry::HKEY_LOCAL_MACHINE\SOFTWARE"),
+    ("registry", P, r'reg delete "HKLM\SYSTEM" /f'),
+    ("kill everything", B, "kill -9 -1"),
+    ("kill everything", B, "kill -s KILL -1"),
+    ("kill everything", B, "pkill -9 ."),
+    ("kill everything", P, "Get-Process | Stop-Process -Force"),
+    ("kill everything", P, "Stop-Process -Name * -Force"),
+    ("kill everything", P, "taskkill /F /IM *"),
+    ("kill everything", P, "gps | kill -Force"),
+    ("code it cannot read", B, "crontab -r"),
+    ("code it cannot read", P, "[IO.Directory]::Delete($HOME, $true)"),
+    ("code it cannot read", P, "[System.IO.Directory]::Delete('C:\\Users\\me', $true)"),
+    ("code it cannot read", P, "(Get-Item $HOME).Delete($true)"),
+    ("code it cannot read", P, "[scriptblock]::Create('Remove-Item -Recurse ~').Invoke()"),
+    ("code it cannot read", P, "& ([scriptblock]::Create('ri -r ~'))"),
+    ("code it cannot read", P, "$d = [IO.DirectoryInfo]::new($HOME); $d.Delete($true)"),
+    ("code it cannot read", P, "[IO.File]::WriteAllText(\"$HOME\\.bashrc\", '')"),
+    ("code it cannot read", P, "iex $cmd"),
+    ("code it cannot read", P, "Invoke-Expression (Get-Content x.ps1 -Raw)"),
     ("raw device overwrite", B, "dd if=/dev/zero of=/dev/disk2"),
     ("raw device overwrite", B, "echo x > /dev/disk2"),
     ("raw device overwrite", P, r"Set-Content -Path \\.\PhysicalDrive1 -Value 0"),
     ("raw device overwrite", P, r"dd if=zero.bin of=\\.\PhysicalDrive1"),
     ("raw device overwrite", P, r"[IO.File]::WriteAllBytes('\\.\PhysicalDrive0', $b)"),
 ]
+
+
+DANGER_CLASSES = ("recursive delete", "format/wipe disk", "raw device overwrite",
+                  "wide delete or overwrite", "shutdown", "recursive permissions", "registry",
+                  "kill everything", "code it cannot read")
 
 
 def _danger_id(row):
@@ -870,8 +942,7 @@ def test_each_danger_class_asks_in_bash_and_powershell_alike(cls, shell, line, t
 
 def test_the_danger_table_covers_each_class_in_both_shells():
     assert {(cls, shell) for cls, shell, _ in DANGER_TABLE} == {
-        (cls, shell) for cls in ("recursive delete", "format/wipe disk", "raw device overwrite")
-        for shell in (B, P)}
+        (cls, shell) for cls in DANGER_CLASSES for shell in (B, P)}
 
 
 @pytest.mark.parametrize("line", [
@@ -881,7 +952,16 @@ def test_the_danger_table_covers_each_class_in_both_shells():
     "Start-Process notepad -ArgumentList 'readme.txt'", "Start-Process cmd -ArgumentList '/c dir'",
     "Start-Process powershell -ArgumentList '-c Get-ChildItem' -Wait", "Start-Process cmd",
     "wsl ls", "wsl -l", "wsl --list --verbose", "wsl --status", "wsl", "wsl -d Ubuntu",
-    "wsl -e ls -la", "wsl -- cat notes.txt", "Start-Process wsl", "Remove-Item -Path:'x.tmp'"])
+    "wsl -e ls -la", "wsl -- cat notes.txt", "Start-Process wsl", "Remove-Item -Path:'x.tmp'",
+    # Fable's round: the narrow side of each new class still passes `auto`.
+    "Get-ChildItem *.tmp | Remove-Item", "gci process -Filter *.tmp | Remove-Item -Force",
+    "Get-ChildItem build | ForEach-Object { Remove-Item $_.FullName }",
+    r"Remove-Item process\*.tmp", "Remove-Item build -Recurse -Force", r"del build\*.o",
+    "Clear-Content process/log.txt", "Get-ChildItem ~ -Recurse -Filter *.mdat",
+    r"icacls process\a.json /grant me:F", r"icacls build /T /grant me:F",
+    r"reg query HKCU\Software\Autosound", r"Remove-Item HKCU:\Software\AutosoundTCC\Cache -Recurse",
+    "Stop-Process -Id 4242", "taskkill /PID 4242", "Get-Process rew | Select-Object Id",
+    "(Get-Item process).FullName"])
 def test_the_disk_class_does_not_take_in_reads(line, tmp_path):
     """Looking at disks, and `Format-Table`, are not wiping one: they pass `auto` as before."""
     assert judge_action("Bash", line, gate=GATE_AUTO, read_roots=_read_roots_for(tmp_path),
@@ -897,7 +977,24 @@ TICK_ROWS = [row for row in OMP_TABLE if row[0] in (
 #: A PowerShell spelling a bash shell cannot run as written (bash eats `\\`, and `ri` is no bash
 #: command): the SDK route's Bash tool never runs it, and its reader is bash's alone.
 BASH_CANNOT_RUN = {r"ri -r C:\Users", r"Storage\Clear-Disk -Number 1",
-                   r"C:\Windows\System32\wsl.exe rm -rf ~"}
+                   r"C:\Windows\System32\wsl.exe rm -rf ~",
+                   # Fable's round: PowerShell's pipeline of objects, its cmdlets and `iex` — no
+                   # bash runs them; their bash twins are rows of their own (`find ~ | xargs rm`,
+                   # `rm ~/*`, `kill -9 -1`, `chmod -R`, `reg delete '…'`).
+                   "iex $cmd", "Get-Process | Stop-Process -Force", "gps | kill -Force",
+                   "Stop-Process -Name * -Force", r"dir C:\Users -r -file | del",
+                   "gci ~ -Recurse -File | Clear-Content",
+                   "gci $HOME -Recurse | % { Remove-Item $_.FullName -Force }",
+                   "Get-ChildItem ~ -Recurse -File | Remove-Item -Force",
+                   "Get-ChildItem ~ -Recurse | ForEach-Object { ri $_ }",
+                   "Get-Content list.txt | Remove-Item",
+                   r"Remove-Item -Recurse -Force HKCU:\Software",
+                   r"Remove-Item -Recurse Registry::HKEY_LOCAL_MACHINE\SOFTWARE",
+                   r"Remove-Item C:\Users\*\Desktop\* -Force", r"del C:\Users\me\*",
+                   r"Set-Content -Path C:\Users\*\Desktop\* -Value ''",
+                   # unquoted `\`, which bash strips before the program sees it
+                   r"icacls C:\Users /reset /T /C", r"takeown /R /F C:\Users",
+                   r"reg delete HKCU\Software /f", r"cmd /c del /q C:\Users\me\*"}
 
 
 def _sdk_cell(line: str, gate: str, ticked: tuple, tmp_path) -> str:
@@ -943,3 +1040,62 @@ def test_the_sdk_route_asks_about_each_danger_class(cls, shell, line, tmp_path):
     for gate in (GATE_WRITES, GATE_FOREIGN, GATE_AUTO):
         assert _sdk_cell(line, gate, ("Bash",), tmp_path) == "ask!", gate
     assert _sdk_cell(line, GATE_NEVER, ("Bash",), tmp_path) == "pass!"
+
+
+@pytest.mark.parametrize("line", [
+    "rm process/*.tmp", "rm -f build/*.o", "rm ~/.cache/tcc-x.tmp", "truncate -s 0 process/log.txt",
+    "echo x | tee process/out.txt", 'for f in process/*.tmp; do rm "$f"; done',
+    "rsync -a --delete build/ dist/", "rsync -a ~/notes/ backup/", "kill 12345", "kill -9 4242",
+    "pkill -f rew_tool/server.py", "chmod -R u+w build",
+    "shutdown_report.sh", "crontab -l"])
+def test_the_new_classes_leave_ordinary_bash_alone(line, tmp_path):
+    assert judge_action("Bash", line, gate=GATE_AUTO, read_roots=_read_roots_for(tmp_path)).allowed
+
+
+@pytest.mark.parametrize("line", [row[2] for row in DANGER_TABLE if row[0] == "code it cannot read"
+                                  and row[1] == P])
+def test_a_dotnet_call_asks_by_the_powershell_reader_s_own_rule(line):
+    """These asked only because bash's reader trips on `[`/`(` (Fable's final review, I2): the
+    PowerShell reader asks by rule — a .NET member call that deletes, writes or runs code, or
+    `iex` of what the line does not spell."""
+    assert shell_gate._powershell_line_is_dangerous(line, 0)
+
+
+@pytest.mark.parametrize("gate", [GATE_WRITES, GATE_AUTO])
+def test_omp_judges_the_whole_command_and_cuts_only_what_it_shows(gate, tmp_path):
+    """Fable's final review, I3: the detail was cut at 400 characters BEFORE the gate read it, so
+    `echo <400 a> ; rm -rf ~` was judged without its delete. The gate reads it whole; the bar
+    shows at most 400 characters of it."""
+    line = "echo " + "a" * 400 + " ; rm -rf ~"
+    session, sent, _events = _omp_gate(tmp_path, "bash", f"Command: {line}", (), gate)
+
+    (request,) = session.bridge.requests
+    assert request.reason == "gateIrreversible"
+    assert len(request.detail) <= 400
+
+
+@pytest.mark.parametrize("path, inside", [
+    ("C:/Users/Me/car/process/x.tmp", "process/x.tmp"),     # another case: one Windows folder
+    ("c:/users/me/CAR/process", "process"),
+    ("/c/Users/me/car/process/x.tmp", "process/x.tmp"),     # Git Bash's spelling of the drive
+    ("/C/Users/Me/car", ""),
+    ("C:/Users/me/car-other/process", None),
+    ("D:/Users/me/car/process", None),
+    ("/d/Users/me/car/process", None),
+])
+def test_an_absolute_windows_path_is_read_inside_the_project(path, inside):
+    """The foreign rule anchors owned paths in the project; on Windows a bash line names the
+    project as `C:/…` in any case or as Git Bash's `/c/…` — both are the project."""
+    assert shell_gate._inside(path, PureWindowsPath(r"C:\Users\me\car")) == inside
+
+
+def test_an_unquoted_windows_path_in_a_bash_line_is_not_the_projects(tmp_path, monkeypatch):
+    """Why the Windows CI rows failed: bash strips an unquoted `\\` before `rm` sees the path, so
+    `rm C:\\Users\\…\\car/process/x.tmp` deletes `C:Users…car/process/x.tmp` — not a skill file. The
+    gate's refusal under `foreign` is right; the same file by `C:/…` passes (above)."""
+    project, roots = _project(tmp_path)
+    windows_like = "C:" + "\\".join(["", "Users", "runneradmin", "car"]) + "/process/x.tmp"
+
+    verdict = judge_action("Bash", f"rm {windows_like}", gate=GATE_FOREIGN, read_roots=roots)
+
+    assert not verdict.allowed
