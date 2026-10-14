@@ -181,6 +181,9 @@ def repo(tmp_path, monkeypatch, signing_keys):
     (work / "uv.lock").write_text(
         'name = "fixture"\nversion = "0.1.24"\n', encoding="utf-8")
     (work / "README.md").write_text(README.format(tag="v0.1.24"), encoding="utf-8")
+    # README's line and TCC's updater read it from the tag (tcc#194): ship refuses a release
+    # commit without it.
+    (work / "constraints.txt").write_text("pyside6-essentials==6.11.2\n", encoding="utf-8")
     git(work, "add", "-A")
     git(work, "commit", "--quiet", "-m", "start")
     git(work, "tag", "v0.1.24")
@@ -268,6 +271,7 @@ def test_a_red_suite_rolls_the_bump_back_and_leaves_nothing(repo):
     ("changelog", "top entry"),
     ("paired", "Paired with method"),
     ("readme", "README.md should carry one install line"),
+    ("constraints", "constraints.txt"),
 ])
 def test_every_refusal_happens_before_anything_is_written(repo, break_it, expect):
     """Each INVENTORY gate, and the same assertion after each: the tree is untouched. And the
@@ -293,6 +297,10 @@ def test_every_refusal_happens_before_anything_is_written(repo, break_it, expect
         (repo / "README.md").write_text(
             README.format(tag="v0.1.24").replace("@v0.1.24", ""), encoding="utf-8")
         git(repo, "commit", "--quiet", "-am", "an install line that names no tag")
+        git(repo, "push", "--quiet", "origin", "main")
+    elif break_it == "constraints":
+        git(repo, "rm", "--quiet", "constraints.txt")
+        git(repo, "commit", "--quiet", "-m", "no locked set")
         git(repo, "push", "--quiet", "origin", "main")
 
     with pytest.raises(ship_mod.Stop) as stop:
@@ -1892,3 +1900,31 @@ def test_the_refusal_is_the_last_line_ship_prints(monkeypatch, tmp_path, capsys)
     out = capsys.readouterr()
     last = (out.out + out.err).strip().splitlines()[-1]
     assert "STOP" in last and "git ls-remote -> 128" in last and "fatal" in last, last
+
+
+def test_a_candidate_without_constraints_is_not_tagged(repo):
+    """A candidate tags HEAD as it stands: the file must be in that tree (tcc#194)."""
+    _write_changelog(repo, UNRELEASED.format(sha=METHOD_SHA))
+    git(repo, "rm", "--quiet", "constraints.txt")
+    git(repo, "commit", "--quiet", "-am", "notes, and no locked set")
+    git(repo, "push", "--quiet", "origin", "main")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, ask=channel(tag="beta-v0.1.25-rc1"), candidate="v0.1.25")
+
+    assert "constraints.txt" in str(stop.value)
+    assert git(repo, "tag", "--list", "beta-v0.1.25-rc1") == ""
+
+
+def test_a_check_at_a_commit_without_constraints_is_refused(repo):
+    """Read from THAT commit: main moving on with the file back does not pass it."""
+    git(repo, "rm", "--quiet", "constraints.txt")
+    commit = _commit_the_version(repo)
+    (repo / "constraints.txt").write_text("pyside6-essentials==6.11.2\n", encoding="utf-8")
+    git(repo, "add", "constraints.txt")
+    git(repo, "commit", "--quiet", "-m", "main moves on, the file back")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, release=False, version="v0.1.25", at=commit)
+
+    assert "constraints.txt" in str(stop.value) and commit[:12] in str(stop.value)

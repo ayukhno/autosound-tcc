@@ -2576,7 +2576,10 @@ def test_whether_uv_takes_the_file_is_asked_before_the_install_not_after(platfor
     between = script[script.index(installs[0]):script.index(installs[1])]
     assert updates.TCC_WINDOW_WORDS["unpinned"] in between, "said only on the plain path"
     assert script.count(updates.TCC_WINDOW_WORDS["unpinned"]) == 1
-    assert script.count(_WORDS["done"]) == 1 and script.count(_WORDS["failed"]) == 1
+    # sh says «failed» twice: a uv that does not run at all, and an install that failed (cmd
+    # reaches one `:failed` from both).
+    assert script.count(_WORDS["done"]) == 1
+    assert script.count(_WORDS["failed"]) == (1 if platform == "win32" else 2)
 
     plain = updates.tcc_install_script(pid=4242, tag="v1.1.4", words=_WORDS, platform=platform)
     assert plain.count("uv tool install") == 1 and "--help" not in plain
@@ -2830,3 +2833,187 @@ def test_a_constraints_entry_that_is_not_a_file_is_not_handed_to_uv(monkeypatch,
     assert "--constraints" not in ready.script.read_text(encoding="utf-8")
     assert not (ready.script.parent / "constraints.txt").exists()
     assert "a symbolic link" in caplog.text and "120000" in caplog.text, caplog.text
+
+
+# ---- the group's fix round (#194 with #195) -----------------------------------------------------
+
+def _cmd_lines(**kw):
+    return updates.tcc_install_script(pid=4242, tag="v1.1.4", platform="win32", **kw).splitlines()
+
+
+@pytest.mark.parametrize("kw", [{}, {"constraints": True}, {"sha": _VERIFIED},
+                                {"sha": _VERIFIED, "constraints": True, "check_installed": True},
+                                {"unpinned_why": "v1.1.4 carries no constraints.txt"}])
+def test_every_goto_in_the_windows_script_has_its_label(kw):
+    lines = _cmd_lines(**kw)
+    targets = {line.rsplit("goto ", 1)[1] for line in lines if "goto " in line
+               and not line.startswith("(goto)")}
+    labels = {line[1:] for line in lines if line.startswith(":")}
+
+    assert targets <= labels, targets - labels
+
+
+def test_the_windows_script_s_pinned_path_runs_in_this_order():
+    lines = _cmd_lines(constraints=True)
+    order = ["call uv --version", "if %errorlevel% neq 0 goto failed",
+             next(line for line in lines if "tool install --help" in line),
+             "if errorlevel 1 goto unpinned", 'set "tcc_pins=%~dp0constraints.txt"',
+             next(line for line in lines if line.startswith("call uv tool install")
+                  and "--constraints" in line),
+             "goto ran", ":unpinned", ":ran", "if %errorlevel% neq 0 goto failed"]
+
+    at, start = [], 0
+    for line in order:  # each one after the one before it
+        start = lines.index(line, start) + 1
+        at.append(start - 1)
+    assert at == sorted(at), list(zip(order, at))
+    assert lines.count("if %errorlevel% neq 0 goto failed") == 2
+    assert "if errorlevel 1 goto failed" not in lines, "a negative exit code is a failure too"
+
+
+def test_the_read_back_line_is_pinned_on_every_os():
+    lines = _cmd_lines(sha=_VERIFIED, check_installed=True)
+
+    assert f'if not "%tcc_got%"=="" if not "%tcc_got%"=="{_VERIFIED}" goto differs' in lines
+    assert lines.index(":differs") > lines.index("if %errorlevel% neq 0 goto failed")
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
+def test_a_missing_uv_is_the_update_s_failure_not_an_old_uv(tmp_path):
+    import os
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()  # no uv in it, nor in /usr/bin or /bin
+    path = updates.write_tcc_install_script(pid=_gone_pid(), tag="v1.1.4", words=_WORDS,
+                                            folder=tmp_path, platform="darwin", constraints=_PINS)
+
+    out = subprocess.run(["/bin/sh", str(path)], capture_output=True, text=True, encoding="utf-8",
+                         env={**os.environ, "PATH": f"{bindir}:/usr/bin:/bin"}, timeout=30).stdout
+
+    assert out.rstrip().endswith(_WORDS["failed"]), out
+    assert updates.TCC_WINDOW_WORDS["unpinned"] not in out, "not «this uv is old»"
+
+
+def test_the_installed_helper_prints_the_commit_or_nothing(tmp_path):
+    import json
+    import os
+
+    site = tmp_path / "site"
+    info = site / "autosound_tcc-1.1.4.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: autosound-tcc\nVersion: 1.1.4\n")
+    helper = tmp_path / "helper.py"
+    helper.write_text(updates._INSTALLED_HELPER_TEXT, encoding="utf-8")
+    run = lambda: subprocess.run([sys.executable, "-S", str(helper)], capture_output=True,  # noqa: E731
+                                 text=True, env={**os.environ, "PYTHONPATH": str(site)}).stdout
+
+    assert run() == "\n", "no direct_url.json: an empty line"
+    (info / "direct_url.json").write_text(json.dumps(
+        {"url": "https://github.com/ayukhno/autosound-tcc",
+         "vcs_info": {"vcs": "git", "commit_id": _VERIFIED, "requested_revision": "v1.1.4"}}))
+    assert run() == f"{_VERIFIED}\n"
+
+
+def _tool_venv(tmp_path, commit: str):
+    """`<tools>/autosound-tcc` as uv leaves it: a real venv whose site-packages has an
+    autosound-tcc installed at `commit`. Returns `<tools>`."""
+    import json
+    from pathlib import Path
+
+    tools = tmp_path / "tools"
+    venv = tools / "autosound-tcc"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True)
+    python = venv / ("Scripts/python.exe" if sys.platform.startswith("win") else "bin/python")
+    site = Path(subprocess.run([str(python), "-c", "import sysconfig; "
+                                "print(sysconfig.get_paths()['purelib'])"],
+                               capture_output=True, text=True, check=True).stdout.strip())
+    info = site / "autosound_tcc-1.1.4.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: autosound-tcc\nVersion: 1.1.4\n")
+    (info / "direct_url.json").write_text(json.dumps({"vcs_info": {"commit_id": commit}}))
+    return tools
+
+
+@pytest.mark.parametrize("installed", [_VERIFIED, "e" * 40])
+def test_the_window_reads_back_what_uv_installed_on_this_os(tmp_path, installed):
+    """Run for real — cmd on Windows, sh elsewhere — with a `uv` whose `tool dir` holds a real
+    venv: the same commit ends in «done», another in the `differs` line and that commit."""
+    import os
+
+    windows = sys.platform.startswith("win")
+    tools = _tool_venv(tmp_path, installed)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    if windows:
+        (bindir / "uv.cmd").write_text(
+            f'@echo off\r\nif "%~1 %~2"=="tool dir" (echo {tools}& exit /b 0)\r\nexit /b 0\r\n')
+        (bindir / "git.cmd").write_text(f"@echo off\r\necho {_VERIFIED}\r\n")
+    else:
+        (bindir / "uv").write_text(f'#!/bin/sh\nif [ "$1 $2" = "tool dir" ]; then '
+                                   f"echo '{tools}'; fi\nexit 0\n")
+        (bindir / "git").write_text(f"#!/bin/sh\nprintf '%s\\tx\\n' {_VERIFIED}\n")
+        for tool in ("uv", "git"):
+            (bindir / tool).chmod(0o755)
+    folder = tmp_path / "Олег Ю 50%off ^x" if windows else tmp_path / "update"
+    folder.mkdir()
+    path = updates.write_tcc_install_script(pid=_gone_pid(), tag="v1.1.4", words=_WORDS,
+                                            folder=folder, platform=sys.platform, sha=_VERIFIED)
+    argv = ["cmd", "/c", str(path)] if windows else ["/bin/sh", str(path)]
+    sep = ";" if windows else ":"
+    out = subprocess.run(argv, capture_output=True, timeout=120,
+                         env={**os.environ, "PATH": f"{bindir}{sep}{os.environ['PATH']}"},
+                         ).stdout.decode("utf-8", errors="replace")
+
+    if installed == _VERIFIED:
+        assert _WORDS["done"] in out and updates.TCC_WINDOW_WORDS["differs"] not in out, out
+    else:
+        assert updates.TCC_WINDOW_WORDS["differs"] in out and _WORDS["done"] not in out, out
+        assert "e" * 40 in out, out
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+@pytest.mark.parametrize("spoil", ["absent", "unreadable", "a link"])
+def test_a_release_that_should_carry_constraints_and_gave_none_says_so_in_the_window(
+        monkeypatch, tmp_path, spoil):
+    """From v1.1.4 every release carries `constraints.txt` (ship refuses one without). One that
+    gave none — absent, unreadable, not a file — is still installed (never fail the update for
+    the file), but the window says uv chooses the versions, and why, before uv runs."""
+    import os
+
+    _tcc_origin(monkeypatch, tmp_path)
+    origin = tmp_path / "tcc-origin"
+    if spoil == "a link":
+        if sys.platform.startswith("win"):
+            pytest.skip("a symbolic link in git, made on POSIX")
+        os.symlink("pyproject.toml", origin / "constraints.txt")
+        _git_in("add", "constraints.txt", cwd=origin)
+        _git_in("commit", "-q", "-m", "a link", cwd=origin)
+    elif spoil == "unreadable":
+        (origin / "constraints.txt").write_bytes(_PINS)
+        _git_in("add", "constraints.txt", cwd=origin)
+        _git_in("commit", "-q", "-m", "pins", cwd=origin)
+        monkeypatch.setattr(updates, "_git_show", lambda repo, spec: (None, "fatal: bad object"))
+    _git_in("-c", "gpg.format=ssh", "-c", f"user.signingkey={tmp_path / 'author'}.pub",
+            "tag", "-s", "v1.1.4", "-m", "v1.1.4", cwd=origin)
+    _offering(monkeypatch, "v1.1.4")
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None, "never refused for the file"
+    script = ready.script.read_text(encoding="utf-8")
+    assert "--constraints" not in script
+    said = updates.TCC_WINDOW_WORDS["nopins"]
+    assert said in script and script.index(said) < script.index("uv tool install --python")
+    why = {"absent": "carries no constraints.txt", "unreadable": "fatal: bad object",
+           "a link": "a symbolic link"}[spoil]
+    assert why in script, script
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_a_release_before_the_file_says_nothing_about_it_in_the_window(monkeypatch, tmp_path):
+    _tcc_origin(monkeypatch, tmp_path)
+    _offering(monkeypatch, "v0.1.45")
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert updates.TCC_WINDOW_WORDS["nopins"] not in ready.script.read_text(encoding="utf-8")

@@ -149,6 +149,10 @@ TCC_WINDOW_WORDS = {
                 "newer) — installing without them, so uv chooses the versions. This uv:",
     # Said only when the tag's signature WAS verified — the script has a `sha` (#195).
     "signed": "The signature of {tag} was checked before this update: good ({principal}).",
+    # Before uv, when a release that should carry the tested versions gave none (the group
+    # review of #194/#195); the reason follows on its own line, in git's words.
+    "nopins": "The versions this release was tested with could not be read, so uv chooses the "
+              "versions. Why:",
     # After uv, when the version it installed is not the commit that was checked (#195).
     "differs": "The version installed is not the commit whose signature was checked, so the "
                "check above does not cover it — tell the author. Installed:",
@@ -196,7 +200,8 @@ def _cmd_echo(text: str) -> str:
 def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                        words: Optional[dict] = None, platform: Optional[str] = None,
                        sha: str = "", folder: Optional[Path] = None,
-                       constraints: bool = False, check_installed: bool = False) -> str:
+                       constraints: bool = False, check_installed: bool = False,
+                       unpinned_why: str = "") -> str:
     """The update as the text of a script: the person's lines, the wait, the install, the result.
 
     **A script run by name, and its first act is to clear the window** (hub #221 ask 3, skill
@@ -277,6 +282,14 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     «checked: good» is not left over a build it did not cover. Nothing read (an older uv, a
     different tool folder) says nothing either way: the line before uv was about the check, and
     stays true. Only with a `sha`.
+
+    **`unpinned_why`: a release that should have held uv to its tested set and gave none**
+    (`_tag_constraints`): the `nopins` line and the reason before the plain install — the update
+    still goes ahead (never fail it for the file), but not silently as if pinned.
+
+    **uv itself is asked first** on the pinned path (`uv --version`): a uv that does not run is the
+    update's failure in its own words, not «this uv is too old». A failure is any non-zero exit,
+    negative ones included (`%errorlevel% neq 0`: an NTSTATUS crash is below 1).
     """
     if folder is not None and not (Path(folder).is_absolute()
                                    and Path(folder).name.startswith(_UPDATE_FOLDER_PREFIX)):
@@ -291,6 +304,8 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     signed = (said["signed"].replace("{tag}", tag).replace("{principal}", TCC_SIGNING_PRINCIPAL)
               if sha else "")
     readback = bool(sha and check_installed)
+    why = " / ".join(part.strip() for part in unpinned_why.splitlines() if part.strip())
+    nopins = bool(why and not constraints)
     if windows:
         # UTF-8 with `chcp 65001`, so the Arbiter's language arrives whole (the file is written
         # UTF-8, and cmd decodes each line it reads with the code page current at that moment).
@@ -327,7 +342,9 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             *([_cmd_echo(signed)] if signed else []),
             _cmd_echo(said["updating"]),
             # `goto` keeps the errorlevel, so `:ran` reads the install that ran, either one.
-            *(['uv tool install --help 2>nul | findstr /l /c:" --constraints " >nul',
+            *(["call uv --version",
+               "if %errorlevel% neq 0 goto failed",
+               'uv tool install --help 2>nul | findstr /l /c:" --constraints " >nul',
                "if errorlevel 1 goto unpinned",
                f'set "tcc_pins=%~dp0{TCC_CONSTRAINTS}"',
                f"call {held}",
@@ -336,9 +353,10 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                "echo.",
                _cmd_echo(said["unpinned"]),
                "call uv --version 2>nul"] if constraints else []),
+            *(["echo.", _cmd_echo(said["nopins"]), _cmd_echo(why)] if nopins else []),
             f"call {command}",
             *([":ran"] if constraints else []),
-            "if errorlevel 1 goto failed",
+            "if %errorlevel% neq 0 goto failed",
             # What uv installed, read back by its own Python; `set /p` from a file, not `for /f`
             # over a quoted command line. An empty answer compares as nothing read.
             *(['set "tcc_got="', 'set "tcc_tools="',
@@ -409,8 +427,15 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                 f"    {command}",
                 "  fi",
                 "}",
+                "if ! uv --version; then",
+                "  echo; " + say(shlex.quote(said["failed"])),
+                "  exit 1",
+                "fi",
                 "if tcc_install; then",
-            ] if constraints else [f"if {command}; then"]),
+            ] if constraints else [
+                *(["echo; " + say(shlex.quote(said["nopins"])), say(shlex.quote(why))]
+                  if nopins else []),
+                f"if {command}; then"]),
             *([
                 '  tcc_got=$("$(uv tool dir 2>/dev/null)/autosound-tcc/bin/python" '
                 f'"$(dirname -- "$0")/{_INSTALLED_HELPER}" 2>/dev/null)',
@@ -431,7 +456,8 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
 def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                              words: Optional[dict] = None, folder: Optional[Path] = None,
                              platform: Optional[str] = None, sha: str = "",
-                             constraints: Optional[bytes] = None) -> Path:
+                             constraints: Optional[bytes] = None,
+                             unpinned_why: str = "") -> Path:
     """`tcc_install_script` in a file, for `terminal_launcher.run_script` to run by name.
 
     A fresh folder of this user's each time (`mkdtemp`, mode 0700): nobody else's file can be
@@ -440,7 +466,8 @@ def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     stays. CRLF for the batch file, because cmd reads one by line; UTF-8 for both.
 
     `constraints` are the release's `TCC_CONSTRAINTS` bytes, written beside the script as they are
-    for its uv to be held to (tcc#194); None writes none, and uv resolves as it always did.
+    for its uv to be held to (tcc#194); None writes none, and uv resolves as it always did —
+    after the `nopins` line when `unpinned_why` says why a release that should carry them gave none.
     """
     windows = _is_windows(platform)
     made = None if folder else Path(tempfile.mkdtemp(prefix=_UPDATE_FOLDER_PREFIX))
@@ -452,7 +479,7 @@ def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
         (folder / _INSTALLED_HELPER).write_text(_INSTALLED_HELPER_TEXT, encoding="utf-8")
     path.write_text(tcc_install_script(pid, tag, words=words, platform=platform, sha=sha,
                                        folder=made, constraints=constraints is not None,
-                                       check_installed=bool(sha)),
+                                       check_installed=bool(sha), unpinned_why=unpinned_why),
                     encoding="utf-8", newline="\r\n" if windows else "\n")
     return path
 
@@ -1563,29 +1590,45 @@ def update_tools(names) -> ToolsUpdate:
 # ---- TCC's own tag, checked before the terminal gets it (tcc#102, hub #83 HUB-032) -------------
 
 
-def _tag_constraints(repo: Path, tag: str) -> Optional[bytes]:
-    """The verified tag's `TCC_CONSTRAINTS` as it is, or None: a release from before tcc#194
-    has none, and one git could not read is logged with git's words. Never a refusal — the
-    signature decides whether the update goes ahead; this only decides how closely uv is held."""
+#: The first release whose tree carries `TCC_CONSTRAINTS` (W-10, tcc#194); `scripts/ship.py`
+#: refuses a release without it from then on. A release at or after it that gives none to hold uv
+#: to is said in the update window; one before it installs the way it always did.
+TCC_CONSTRAINTS_FROM = (1, 1, 4)
+
+
+class _PinsMissing(str):
+    """Why a release that should carry `TCC_CONSTRAINTS` gave none — git's words, or what stood
+    there instead — as the text it is; told apart from the file's bytes by its type."""
+
+
+def _tag_constraints(repo: Path, tag: str):
+    """The verified tag's `TCC_CONSTRAINTS` as bytes; or, for a release that should carry it
+    (`TCC_CONSTRAINTS_FROM`), `_PinsMissing` with why it gave none — absent from the tree, a git
+    that could not list or read it, an entry that is not a file; or None for a release from
+    before the file. Never a refusal — the signature decides whether the update goes ahead; this
+    only decides how closely uv is held, and whether the window says it is not."""
+    expected = (channel_key(tag) or (0, 0, 0))[:3] >= TCC_CONSTRAINTS_FROM
+
+    def missing(why: str):
+        _log.warning("tcc tag %s: %s", tag, why)
+        return _PinsMissing(why) if expected else None
+
     listed, said = _git("ls-tree", "--full-tree", f"refs/tags/{tag}", "--", TCC_CONSTRAINTS,
                         cwd=repo)
     if not listed:
-        _log.warning("tcc tag %s: %s not read: %s", tag, TCC_CONSTRAINTS,
-                     said or "git ls-tree failed")
-        return None
+        return missing(f"{TCC_CONSTRAINTS} not read: {said or 'git ls-tree failed'}")
     entries = [line for line in said.splitlines() if line.partition("\t")[2] == TCC_CONSTRAINTS]
     if not entries:
-        return None
+        return _PinsMissing(f"{tag} carries no {TCC_CONSTRAINTS}") if expected else None
     # Only a file, as `_tag_contract` reads one: a symbolic link would hand uv its target's NAME
     # as the text, and a folder or a gitlink no text at all.
     mode = entries[0].split(None, 1)[0]
     if mode not in _FILE_MODES:
-        _log.warning("tcc tag %s: %s is %s in the tag, not a file (git mode %s) — not used", tag,
-                     TCC_CONSTRAINTS, _NOT_A_FILE.get(mode, "an entry"), mode)
-        return None
+        return missing(f"{TCC_CONSTRAINTS} is {_NOT_A_FILE.get(mode, 'an entry')} in the tag, "
+                       f"not a file (git mode {mode}) — not used")
     pins, why = _git_show(repo, f"refs/tags/{tag}:{TCC_CONSTRAINTS}")
     if pins is None:
-        _log.warning("tcc tag %s: %s not read: %s", tag, TCC_CONSTRAINTS, why)
+        return missing(f"{TCC_CONSTRAINTS} not read: {why}")
     return pins
 
 
@@ -1637,7 +1680,8 @@ def check_tcc_tag(tag: str, *, light: bool = False
 
     The constraints are the verified tag's `TCC_CONSTRAINTS`, read from the same fetched tree
     (`_tag_constraints`, tcc#194): the file of the release being installed, not of the running
-    one. None when nothing was fetched or verified, or the tag has none.
+    one. None when nothing was fetched or verified, or the tag has none; `_PinsMissing` (a
+    `str`) with why when a release that should carry it gave none (`_tag_constraints`).
 
     `light` (the seal of the installed TCC, #195): the tag without its files
     (`_fetch_tcc_tag`), and no constraints read — None.
@@ -1712,13 +1756,17 @@ def prepare_tcc_update(channel: str = STABLE, *, pid: Optional[int] = None,
     (_log.info if ok else _log.warning)("tcc tag %s: %s", tag, line)
     if not ok:
         return TccUpdate(None, why, line, tag=tag)
+    unpinned_why = ""
+    if isinstance(pins, _PinsMissing):
+        unpinned_why, pins = str(pins), None
     if pins is None:
         # Never a refusal (tcc#194): a release from before the file installs the way it always
-        # did, and the log says the versions are uv's choice that day, not the lock's.
+        # did, and the log says the versions are uv's choice that day, not the lock's. One that
+        # should have carried it says so in the window too (`unpinned_why`).
         _log.warning("tcc tag %s: no %s held — uv resolves the dependencies afresh, not the set "
                      "uv.lock holds and CI ran", tag, TCC_CONSTRAINTS)
     script = write_tcc_install_script(pid, tag, words=words, platform=platform, sha=sha,
-                                      constraints=pins)
+                                      constraints=pins, unpinned_why=unpinned_why)
     return TccUpdate(script, signature=line, tag=tag)
 
 
@@ -1781,14 +1829,16 @@ def _seal_key(tag: str, commit: str) -> str:
     return "\n".join((TCC_REPO, tag, commit, TCC_SIGNING_KEY))
 
 
-def _stored_seal(key: str) -> Optional[Seal]:
-    """The verdict kept for `key`, or None — a file that cannot be read costs one fetch more."""
+def _stored_seal(key: str, tag: str) -> Optional[Seal]:
+    """The «good» kept for `key` about `tag`, or None — anything else in the file, or a file that
+    cannot be read, costs one fetch more."""
     try:
         data = json.loads(_seal_store().read_text(encoding="utf-8")).get(key)
-        return Seal(**{name: str(data[name]) for name in ("state", "tag", "reason", "detail",
+        seal = Seal(**{name: str(data[name]) for name in ("state", "tag", "reason", "detail",
                                                           "principal")})
     except Exception:  # noqa: BLE001 — no file, another shape: not known
         return None
+    return seal if seal.state == "good" and seal.tag == tag else None
 
 
 def _store_seal(key: str, seal: Seal) -> None:
@@ -1800,8 +1850,16 @@ def _store_seal(key: str, seal: Seal) -> None:
         try:
             kept = json.loads(path.read_text(encoding="utf-8"))
             kept = kept if isinstance(kept, dict) else {}
-        except (OSError, ValueError):
+        except FileNotFoundError:
             kept = {}
+        except ValueError:
+            kept = {}  # not JSON: nothing in it can be read back anyway
+        except OSError as exc:
+            # A file that is there and cannot be read now: written over with one entry, every
+            # other build's verdict would go. Not kept this time, and the file stays.
+            _log.warning("the signature verdicts in %s could not be read, so nothing is added: %s",
+                         path, exc)
+            return
         kept[key] = {"state": seal.state, "tag": seal.tag, "reason": seal.reason,
                      "detail": seal.detail, "principal": seal.principal}
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1857,7 +1915,7 @@ def tcc_seal() -> Seal:
         return early
     key = _seal_key(tag, commit)
     with _SEAL_LOCK:
-        known = _TCC_SEALS.get(key) or _stored_seal(key)
+        known = _TCC_SEALS.get(key) or _stored_seal(key, tag)
         if known is not None:
             _TCC_SEALS[key] = known
             return known

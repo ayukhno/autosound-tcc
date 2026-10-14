@@ -520,7 +520,7 @@ def test_the_windows_window_reads_what_uv_installed_too():
                                         folder=None, check_installed=True)
 
     assert "uv tool dir" in script and "tcc-installed.py" in script
-    assert script.index("if errorlevel 1 goto failed") < script.index("tcc-installed.py")
+    assert script.index("if %errorlevel% neq 0 goto failed") < script.index("tcc-installed.py")
     assert updates.TCC_WINDOW_WORDS["differs"] in script
 
 
@@ -586,3 +586,46 @@ def test_a_light_fetch_the_network_failed_is_said_as_such_and_not_fetched_twice(
 
     assert (ok, why) == (False, "fetch_failed") and "Could not resolve host" in line
     assert len(fetches) == 1
+
+
+# ---- the group's fix round: what the store gives back, and what it never overwrites -----------
+
+def _stored(entries: dict) -> None:
+    import json
+
+    store = updates._seal_store()
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text(json.dumps(entries), encoding="utf-8")
+
+
+@pytest.mark.parametrize("entry", [
+    {"state": "bad", "tag": "v1.1.3", "reason": "bad_signature", "detail": "x", "principal": ""},
+    {"state": "good", "tag": "v1.1.2", "reason": "", "detail": "", "principal": "ayukhno"},
+])
+def test_the_store_gives_back_only_a_good_answer_about_the_same_tag(monkeypatch, entry):
+    asked = []
+    monkeypatch.setattr(updates, "check_tcc_tag", _answers(asked, "a" * 40))
+    _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
+    _stored({updates._seal_key("v1.1.3", "a" * 40): entry})
+
+    seal = updates.tcc_seal()
+
+    assert (seal.state, seal.tag) == ("good", "v1.1.3") and asked, "asked, not read back"
+
+
+@pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                    reason="a file this user cannot read, made with chmod")
+def test_a_store_that_could_not_be_read_is_not_overwritten_with_one_entry(monkeypatch):
+    asked = []
+    monkeypatch.setattr(updates, "check_tcc_tag", _answers(asked, "a" * 40))
+    _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
+    _stored({"another build": {"state": "good"}})
+    store = updates._seal_store()
+    before = store.read_bytes()
+    store.chmod(0)
+    try:
+        assert updates.tcc_seal().state == "good"
+    finally:
+        store.chmod(0o600)
+
+    assert store.read_bytes() == before

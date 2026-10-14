@@ -273,6 +273,18 @@ def read_at(root: Path, at: str, name: str) -> str | None:
     return run(["git", "show", f"{at}:{name}"], root)
 
 
+#: The locked set every release carries from v1.1.4 (tcc#194): README's install line names it at the
+#: tag, and TCC's updater holds uv to it — a release without it would send both to nothing.
+CONSTRAINTS = "constraints.txt"
+
+
+def check_constraints(root: Path, at: str) -> None:
+    """The commit being released carries `CONSTRAINTS`, read from that commit, not the tree."""
+    if read_at(root, at, CONSTRAINTS) is None:
+        raise Stop(f"no {CONSTRAINTS} in {at[:12]} — README's install line and TCC's updater read "
+                   f"it from the release tag (tcc#194); `make constraints` and commit it first")
+
+
 def _read_changelog(root: Path, at: str = "") -> str:
     if at:
         text = read_at(root, at, "CHANGELOG.md")
@@ -695,6 +707,7 @@ def check_at(root: Path, plan: Plan, sha: str, say: Callable[[str], None],
     plan.version = plan.tag.lstrip("v")
     changelog = check_changelog(root, plan.tag, at=sha)
     check_version_at(root, sha, plan.version)
+    check_constraints(root, sha)
     plan.method_sha = read_pinned_sha(root, sha)
     if not plan.method_sha:
         raise Stop(f"the method's pin in {sha[:12]} could not be read — a release cannot say "
@@ -769,6 +782,9 @@ def ship(root: Path, release: bool, test_command=None,
     ci = next((check for check in checks if check.name == CI_GREEN), None)
     ci_green = ci is not None and ci.verdict == CARRIER_OK
 
+    # Every tagging path tags HEAD's tree, or HEAD's plus the bump, which leaves the file alone —
+    # so HEAD is the release commit's answer, asked before anything is written.
+    check_constraints(root, run(["git", "rev-parse", "HEAD"], root))
     if plan.mode == "candidate":
         check_candidate_changelog(root, candidate)
     else:
