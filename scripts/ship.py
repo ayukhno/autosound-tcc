@@ -498,7 +498,7 @@ def method_url_at(root: Path, at: str) -> str:
                 "")
     url = run(["git", "config", "--blob", blob, "--get", f"submodule.{name}.url"], root,
               check=False) if name else ""
-    if not url or url.startswith("."):
+    if not url or url.startswith((".", "-")):  # «-»: an option to ls-remote, as git refuses it
         raise Stop(f"the method's URL could not be read from .gitmodules in {at[:12]} "
                    f"(submodule `{METHOD_TREE}`: {url or 'no url'}) — without it nothing can say "
                    "whether the pin carries a published tag")
@@ -523,7 +523,7 @@ def published_method_tags(root: Path, sha: str, remote: str = "") -> list[str]:
     `remote`: the method's URL, asked from `root` — a check at a commit reads it from that
     commit's `.gitmodules` (`method_url_at`); without it, the checkout's own `origin`.
     """
-    argv = (["git", "ls-remote", "--tags", remote] if remote
+    argv = (["git", "ls-remote", "--tags", "--", remote] if remote
             else ["git", "-C", str(root / METHOD_TREE), "ls-remote", "--tags", "origin"])
     out = run(argv, root)
     names = set()

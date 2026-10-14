@@ -1780,6 +1780,31 @@ def test_a_check_at_a_commit_refuses_a_method_url_it_cannot_read(repo):
     assert ".gitmodules" in str(stop.value) and commit[:12] in str(stop.value)
 
 
+def test_a_check_at_a_commit_refuses_a_method_url_that_reads_as_an_option(repo, tmp_path):
+    """A `.gitmodules` URL starting with «-» went into `git ls-remote --tags <url>` as an option:
+    `--upload-pack=<cmd>` ran a command (re-review of the Release tooling group). Refused, as git
+    refuses such a submodule URL, before anything is asked."""
+    commit = _pinned_release(repo, METHOD_SHA, f"--upload-pack=touch {tmp_path / 'PWNED'}")
+    asked = []
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25", at=commit,
+                      read_published_tags=lambda *a, **kw: asked.append(kw) or [],
+                      say=lambda _m: None)
+
+    assert ".gitmodules" in str(stop.value) and asked == []
+    assert not (tmp_path / "PWNED").exists()
+
+
+def test_published_tags_end_the_options_before_the_url(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(ship_mod, "run", lambda argv, _root, **_kw: seen.append(argv) or "")
+
+    ship_mod.published_method_tags(tmp_path, METHOD_SHA, remote="https://example.invalid/m.git")
+
+    assert seen == [["git", "ls-remote", "--tags", "--", "https://example.invalid/m.git"]]
+
+
 def test_a_check_at_a_commit_asks_about_the_COMMITS_pin_and_refuses_one_with_no_tag(repo):
     commit = _pinned_release(repo, METHOD_SHA, METHOD_URL)
     _record_pin(repo, "b" * 40)                  # HEAD pins something else
