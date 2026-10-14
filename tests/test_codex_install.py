@@ -131,7 +131,7 @@ def _left(folder: Path) -> list[str]:
     """Everything under the `codex/` folder, relative — what a failure must not leave."""
     if not folder.exists():
         return []
-    return sorted(str(p.relative_to(folder)) for p in folder.rglob("*"))
+    return sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*"))
 
 
 def _version_folder(target: Path) -> Path:

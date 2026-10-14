@@ -470,15 +470,23 @@ def test_a_silent_turn_names_the_running_item(project, tmp_path, stand_in, monke
 def test_interrupt_sends_turn_interrupt_and_the_turn_ends_on_its_own_completion(project, stand_in):
     """interrupt-pending (recorded on a resumed thread): the turn waits — the stand-in waits for
     `turn/interrupt` — until interrupt() sends it; `TurnEnd` comes only after `turn/completed`
-    with status `interrupted`."""
+    with status `interrupted`.
+
+    The approval stays pending — the bar up — when the interrupt goes, as it did in the recording.
+    Without a bridge the gate declined at once, racing the interrupt: a decline written after the
+    stand-in's `resolved` and before TCC read it crossed on the pipe, and the stand-in counted it
+    as an answer to a withdrawn request (exit 3, CI 2026-10-14)."""
     thread = PENDING_THREAD
     resumable(project, thread)
-    session = make(project, stand_in.use("interrupt-pending"), resume=True)
+    bridge = RecordingBridge(None)
+    session = make(project, stand_in.use("interrupt-pending"), bridge=bridge, resume=True)
     order: list[str] = []
 
     async def on(event):
         order.append(type(event).__name__)
         if isinstance(event, ToolCall) and event.name == "Bash":
+            while not bridge.requests:
+                await asyncio.sleep(0.01)
             await session.interrupt()
             order.append("interrupt")
 
@@ -494,6 +502,7 @@ def test_interrupt_sends_turn_interrupt_and_the_turn_ends_on_its_own_completion(
     assert events[-1] == TurnEnd(thread)
     (sent,) = stand_in.sent("turn/interrupt")
     assert sent["params"] == {"threadId": thread, "turnId": "01a13983-1325-7e93-8684-6b21528985c3"}
+    assert bridge.futures[0].cancelled() and stand_in.replies() == []
     assert server.returncode == 0 and stand_in.breaches() == []
 
 

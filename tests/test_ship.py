@@ -1785,7 +1785,9 @@ def test_a_check_at_a_commit_asks_the_methods_own_remote_not_tccs(repo, tmp_path
     repository — `ls-remote origin` then listed TCC's tags and said the pin carried none. The URL
     comes from the commit's `.gitmodules`, and that remote is asked."""
     pin, bare = _method_remote(tmp_path)
-    commit = _pinned_release(repo, pin, str(bare))
+    # `.gitmodules` is a git-config file: a backslash there is an escape, and a raw Windows path
+    # (`C:\Users\…`) is a "bad config line" — git writes the URL with forward slashes itself.
+    commit = _pinned_release(repo, pin, bare.as_posix())
 
     plan = ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25", at=commit,
                          say=lambda _m: None)
@@ -1807,7 +1809,7 @@ def test_a_check_at_a_commit_refuses_a_method_url_that_reads_as_an_option(repo, 
     """A `.gitmodules` URL starting with «-» went into `git ls-remote --tags <url>` as an option:
     `--upload-pack=<cmd>` ran a command (re-review of the Release tooling group). Refused, as git
     refuses such a submodule URL, before anything is asked."""
-    commit = _pinned_release(repo, METHOD_SHA, f"--upload-pack=touch {tmp_path / 'PWNED'}")
+    commit = _pinned_release(repo, METHOD_SHA, f"--upload-pack=touch {(tmp_path / 'PWNED').as_posix()}")
     asked = []
 
     with pytest.raises(ship_mod.Stop) as stop:
