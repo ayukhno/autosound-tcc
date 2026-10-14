@@ -2605,6 +2605,26 @@ def test_the_update_folder_keeps_the_tag_s_constraints_beside_the_script(tmp_pat
 _OLD_UV = "uv 0.4.30"
 
 
+def _run_update(path, bindir):
+    """Run the update script the way `terminal_launcher.run_script` does, with `bindir` first on
+    PATH: `(stdout, stderr)` as text.
+
+    On Windows cmd is handed the file's NAME, started in its folder, as the app hands it. Never
+    `cmd /c "<full path>"`: a `^` in the path (or `& < > ( ) @ |`) makes cmd take the outer quotes
+    off (`cmd /?`, its second quote rule), the path splits at its first space, and cmd runs
+    `...\\Олег` -- the script never started, and PR #215's Windows CI read cmd's own «not
+    recognized» as the script's empty window."""
+    import os
+
+    windows = sys.platform.startswith("win")
+    argv = ["cmd", "/c", path.name] if windows else ["/bin/sh", str(path)]
+    sep = ";" if windows else ":"
+    done = subprocess.run(argv, capture_output=True, timeout=120, cwd=str(path.parent),
+                          env={**os.environ, "PATH": f"{bindir}{sep}{os.environ['PATH']}"})
+    return (done.stdout.decode("utf-8", errors="replace"),
+            done.stderr.decode("utf-8", errors="replace"))
+
+
 def _recording_uv(bindir, seen, old=False, fails=False):
     """A `uv` that answers `--help` (with the option line, or without it as before 0.5.6, `old`)
     and `--version`, and keeps the arguments of every install, one call after another, with a
@@ -2706,7 +2726,6 @@ def test_uv_reads_the_constraints_from_a_windows_folder_with_a_percent_and_a_car
     """The same through cmd, in a folder with a space, Cyrillic, `%` and `^` in its name — the two
     characters `call` would have read again. `old`: a uv without the option gets the plain
     install, once, after the line. `fails`: the pinned install's failure is the update's."""
-    import os
 
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -2719,10 +2738,9 @@ def test_uv_reads_the_constraints_from_a_windows_folder_with_a_percent_and_a_car
     path = updates.write_tcc_install_script(pid=gone.pid, tag="v1.1.4", words=_WORDS,
                                             folder=folder, platform="win32", constraints=_PINS)
 
-    out = subprocess.run(["cmd", "/c", str(path)], capture_output=True, timeout=120,
-                         env={**os.environ, "PATH": f"{bindir};{os.environ['PATH']}"},
-                         ).stdout.decode("utf-8", errors="replace")
+    out, err = _run_update(path, bindir)
 
+    assert (tmp_path / "seen.txt.args").is_file(), f"uv never ran; out={out!r} err={err!r}"
     calls = (tmp_path / "seen.txt.args").read_text(encoding="utf-8",
                                                    errors="replace").splitlines()
     assert len(calls) == 1, calls
@@ -2938,7 +2956,6 @@ def _tool_venv(tmp_path, commit: str):
 def test_the_window_reads_back_what_uv_installed_on_this_os(tmp_path, installed):
     """Run for real — cmd on Windows, sh elsewhere — with a `uv` whose `tool dir` holds a real
     venv: the same commit ends in «done», another in the `differs` line and that commit."""
-    import os
 
     windows = sys.platform.startswith("win")
     tools = _tool_venv(tmp_path, installed)
@@ -2958,17 +2975,13 @@ def test_the_window_reads_back_what_uv_installed_on_this_os(tmp_path, installed)
     folder.mkdir()
     path = updates.write_tcc_install_script(pid=_gone_pid(), tag="v1.1.4", words=_WORDS,
                                             folder=folder, platform=sys.platform, sha=_VERIFIED)
-    argv = ["cmd", "/c", str(path)] if windows else ["/bin/sh", str(path)]
-    sep = ";" if windows else ":"
-    out = subprocess.run(argv, capture_output=True, timeout=120,
-                         env={**os.environ, "PATH": f"{bindir}{sep}{os.environ['PATH']}"},
-                         ).stdout.decode("utf-8", errors="replace")
+    out, err = _run_update(path, bindir)
 
     if installed == _VERIFIED:
-        assert _WORDS["done"] in out and updates.TCC_WINDOW_WORDS["differs"] not in out, out
+        assert _WORDS["done"] in out and updates.TCC_WINDOW_WORDS["differs"] not in out, (out, err)
     else:
-        assert updates.TCC_WINDOW_WORDS["differs"] in out and _WORDS["done"] not in out, out
-        assert "e" * 40 in out, out
+        assert updates.TCC_WINDOW_WORDS["differs"] in out and _WORDS["done"] not in out, (out, err)
+        assert "e" * 40 in out, (out, err)
 
 
 @pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")

@@ -139,7 +139,11 @@ def test_the_three_installers_still_agree_with_each_other():
         cwd=str(repo),
         capture_output=True,
         text=True,
-        timeout=120,
+        # 14 s on the author's Mac, but 90-107 s on windows-latest alone (the skill's own
+        # installers-windows job at v3.1.4, three runs of 2026-10-14): Git Bash and PowerShell
+        # start slowly there, and the check starts them many times. 120 s timed out on PR #215's
+        # Windows shard; 360 s is over three times the slowest seen.
+        timeout=360,
     )
     assert proc.returncode == 0, (
         f"the installers disagree (exit {proc.returncode})\n"
