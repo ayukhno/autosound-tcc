@@ -2098,7 +2098,7 @@ The Arbiter's decisions, 2026-10-14:
   same). `hub-seam` «Без двигуна»: `feature-dev:feature-dev` for features, the seats from «Process weight», and
   `Engine: none` in every PR body.
 
-Found during W-10 (for the pool, not this wave unless the Arbiter says): TCC reloads the project about 0.4 s and again ~0.94 s after its own reviewer pick lands in `.tcc/` (the folder watcher watches the whole project while `state/` is missing; #202's report) — the watch could ignore TCC's own `.tcc/` writes.
+Found during W-10 (for the pool, not this wave unless the Arbiter says): «Fresh» still resumes on the Claude route — `main_window.py:5107` passes `resumed=False`, but `TuningSession.__init__` reads the registry itself and `_options` resumes anyway (the Codex clean architect, 2026-10-14). TCC reloads the project about 0.4 s and again ~0.94 s after its own reviewer pick lands in `.tcc/` (the folder watcher watches the whole project while `state/` is missing; #202's report) — the watch could ignore TCC's own `.tcc/` writes.
 
 Next, in order:
 1. Open the milestone `W-10 · v1.1.4`. Every task becomes an issue with class · model · risk · size and a
