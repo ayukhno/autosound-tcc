@@ -232,10 +232,11 @@ def test_an_sdk_launch_never_resumes_a_codex_thread_and_omp_still_reads_any(tmp_
         assert _launch(host) is resumed, harness
 
 
-def test_a_codex_pick_launches_and_resumes_only_a_codex_thread(tmp_path, built):
+def test_a_codex_pick_launches_and_resumes_only_a_codex_thread(tmp_path, built, monkeypatch):
     """#181 task 6: a Codex pick is no longer refused — it reaches the factory, which builds a
     `CodexSession`, and the launch reads the Codex route: an SDK id in the phase is not a thread
     Codex can continue, a Codex thread id is."""
+    _codex_found(monkeypatch)
     server = _server(tmp_path)
     server.registry.sync_phase("2")
     server.registry.bind_session("2", "sdk-id", route="sdk")
@@ -300,8 +301,9 @@ def test_resume_route_per_harness(harness, route):
 def test_blocker_refuses_omp_only(tmp_path, monkeypatch):
     unwritten = _server(tmp_path, config_error="PermissionError: ro")
     omp, sdk = SimpleNamespace(harness="omp"), SimpleNamespace(harness="sdk")
+    _codex_found(monkeypatch)
     assert session_routes.blocker(SimpleNamespace(harness="codex"), unwritten) is None, \
-        "Codex takes the url and token directly; its own blockers are tasks 8/9's"
+        "Codex takes the url and token directly; its own blockers: test_codex_menu"
 
     monkeypatch.setattr(omp_session, "is_available", lambda: False)
     assert session_routes.blocker(omp, unwritten) == Refusal("ompMissing"), "missing comes first"

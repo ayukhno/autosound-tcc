@@ -180,10 +180,6 @@ _CENTRE_MIN_PX = 320
 _FLOOR_CELLS = {"hp": {"f": 3500, "type": "LR", "slope": 24},
                 "lp": {"f": 3500, "type": "LR", "slope": 24},
                 "gain_db": -12.5, "ta_ms": 15.75, "polarity": "NORM"}
-#: How an MCP client names itself in the handshake → the command a person knows it by.
-_CLIENT_NAMES = {"antigravity": "agy", "antigravity-cli": "agy", "gemini-cli": "gemini",
-                 "gemini-cli-mcp-client": "gemini", "claude-code": "claude", "codex": "codex",
-                 "codex-mcp-client": "codex"}
 #: The border between the plan and the capture card in the right column, where it was left.
 _RIGHT_SPLIT_KEY = "ui/right_split"
 #: How often the REW-online dot re-asks, while this window has the focus. Thirty seconds because
@@ -5449,7 +5445,7 @@ class MainWindow(QMainWindow):
             self._ext_session_lbl.setVisible(False)
             return
         client = str(info.get("client") or "")
-        who = _CLIENT_NAMES.get(client.lower(), client) or "?"
+        who = mcp_view.client_name(client)
         model = str(info.get("model") or "") or i18n.t("extNoModel")
         self._ext_session_lbl.setText(i18n.t("extTerminal").format(who=who, model=model))
         self._ext_session_tip.set_text(i18n.t("extTip").format(
@@ -5776,6 +5772,7 @@ class MainWindow(QMainWindow):
             gate.cancel()
         qt_shutdown.stop_or_detach(gate, 3000)
         qt_shutdown.stop_or_detach(getattr(self, "_capture_check", None), 5000)
+        menu_registry.stop_workers(self)  # a feature's own work: Codex's install or sign-in (#181)
         # Both can outlast any wait worth making at quit: a probe is a real model call, and the
         # catalogue can be mid-read. Asked to stop and handed over if they will not, rather than
         # left for Qt to destroy running (F-027) — with `done` cut first, so a late answer never

@@ -37,6 +37,8 @@ from autosound_tcc.core import codex_cli, config
 #: TCC's entry in `.mcp.json` and the header its token rides in (`mcp_server.write_mcp_config`).
 SERVER_NAME = "tcc"
 TOKEN_HEADER = "x-tcc-token"
+#: TCC's menu line that installs Codex, in English (`strings/codex.py`, `codexInstall`).
+INSTALL_LINE = "Install Codex"
 
 
 class Refused(Exception):
@@ -72,13 +74,21 @@ def _codex() -> codex_cli.Found:
     """The native Codex binary (never a shim), not one known to be too old — or `Refused`."""
     found = codex_cli.find()
     if found is None:
-        raise Refused("Codex is not installed on this computer: install it "
-                      "(`npm install -g @openai/codex`), then run this again.")
+        raise Refused(f"Codex is not installed on this computer: in TCC, choose {_install_line()}, "
+                      "then run this again.")
     read = codex_cli.version(found)  # this is a terminal, not the GUI thread: it may run
     if codex_cli.too_old(found):
         raise Refused(f"Codex {codex_cli.version_text(read)} at {found.path} is too old: TCC needs "
-                      f"{codex_cli.version_text(codex_cli.MIN_VERSION)} or newer.")
+                      f"{codex_cli.version_text(codex_cli.MIN_VERSION)} or newer — in TCC, "
+                      f"{_install_line()} puts its own copy beside it.")
     return found
+
+
+def _install_line() -> str:
+    """TCC's menu line that installs Codex, as the English UI shows it: a terminal has no i18n,
+    and TCC's language lives in its Qt settings, which this module does not read. The words are
+    `strings/codex.py`'s English (`codexInstall`; core imports no UI — a test holds them equal)."""
+    return f"☰ → ⚙ Settings → {INSTALL_LINE}"
 
 
 def command(binary: str, url: str, model: Optional[str]) -> list[str]:

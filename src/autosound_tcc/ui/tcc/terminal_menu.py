@@ -37,7 +37,7 @@ def codex_note() -> str:
         start = f'"{sys.executable}" -m {session_routes.CODEX_TERMINAL} .'
     else:
         start = shlex.join([sys.executable, "-m", session_routes.CODEX_TERMINAL, "."])
-    return f"To start Codex with TCC's tools: {start}"
+    return i18n.t("codexTerminalHint").format(command=start)
 
 
 def open_in(host, client: Optional[str] = None) -> None:

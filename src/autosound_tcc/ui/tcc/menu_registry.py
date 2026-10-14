@@ -63,8 +63,10 @@ class MenuEntry:
 SECTIONS: tuple[tuple[str, str], ...] = (("project", "menuProject"), ("session", "menuSession"),
                                          ("tools", "menuTools"), ("help", "menuHelp"))
 
-#: Modules whose `menu_entries()` adds lines; read when `collect()` runs.
-PROVIDERS: tuple[str, ...] = ()
+#: Modules whose `menu_entries()` adds lines; read when `collect()` runs. A provider whose lines
+#: start work of their own may also have `stop_workers(host)`: the window calls it on its way out
+#: (`stop_workers` below).
+PROVIDERS: tuple[str, ...] = ("autosound_tcc.ui.tcc.codex_menu",)
 
 #: The window attributes tests drive lines by — closed at these five (G13, #161).
 WINDOW_ALIASES = frozenset({"_intake_action", "_reload_action", "_import_action",
@@ -221,6 +223,19 @@ def collect() -> list[MenuEntry]:
         except Exception:  # noqa: BLE001 — one bad feature must not stop the window opening
             app_log.logger().exception("main menu: the lines of %s are left out", name)
     return entries
+
+
+def stop_workers(host) -> None:
+    """The window is closing: every provider that started work of its own stops it
+    (`codex_menu.stop_workers` — an install or a sign-in under way). One that fails is logged; the
+    rest still stop."""
+    for name in PROVIDERS:
+        try:
+            stop = getattr(importlib.import_module(name), "stop_workers", None)
+            if callable(stop):
+                stop(host)
+        except Exception:  # noqa: BLE001 — one feature must not keep the others' work running
+            app_log.logger().exception("main menu: the work of %s could not be stopped", name)
 
 
 def ordered(entries, place: str) -> list[MenuEntry]:

@@ -12,8 +12,8 @@ Qt-free. Three costs, kept apart on purpose:
   `models()` read what it left and never spawn.
 
 The Arbiter's rule: an installed Codex is used. A version TCC cannot read is used too, with a
-warning in the log; only one known to be older than `MIN_VERSION` is not — the blocker (tasks 8/9)
-offers TCC's own copy then.
+warning in the log; only one known to be older than `MIN_VERSION` is not — the blocker (task 9)
+offers TCC's own copy then (`codex_install`), and `find` prefers it to the old one.
 """
 
 from __future__ import annotations
@@ -216,7 +216,11 @@ def find(*, environ: Optional[Mapping[str, str]] = None, home: Optional[Path] = 
          windows: Optional[bool] = None) -> Optional[Found]:
     """Where this machine's Codex is: PATH, then the places a Dock-started app misses, then TCC's
     own copy. Stat calls only; cached until `forget()` (pass any argument to look afresh, uncached
-    — the tests' door)."""
+    — the tests' door).
+
+    A Codex whose version was already read as older than `MIN_VERSION` is passed over for the next
+    one — TCC's own copy is what the blocker offers then (task 9) — and is still the answer when
+    there is no other, so the blocker can say «too old» rather than «not installed»."""
     global _FOUND, _LOOKED
     fresh = environ is not None or home is not None or windows is not None
     with _lock:
@@ -226,19 +230,25 @@ def find(*, environ: Optional[Mapping[str, str]] = None, home: Optional[Path] = 
     env = os.environ if environ is None else environ
     path_dirs = [Path(p) for p in (env.get("PATH") or "").split(";" if win else os.pathsep) if p]
     found: Optional[Found] = None
+    stale: Optional[Found] = None
     for source, folders in ((SOURCE_PATH, path_dirs),
                             (SOURCE_FOLDER, dock_folders(home=home, environ=env, windows=win))):
         for folder in folders:
             hit = _usable_in(folder, win)
-            if hit is not None:
-                found = Found(str(hit[0]), source, hit[1])
+            if hit is None:
+                continue
+            candidate = Found(str(hit[0]), source, hit[1])
+            if not too_old(candidate):
+                found = candidate
                 break
+            stale = stale or candidate
         if found is not None:
             break
     if found is None:
         own = tcc_copy_path(home=home, environ=env, windows=win)
         if own.is_file() and (win or os.access(own, os.X_OK)):
             found = Found(str(own), SOURCE_TCC)
+    found = found or stale
     if not fresh:
         with _lock:
             _FOUND, _LOOKED = found, True
@@ -291,6 +301,14 @@ def version(found: Found) -> Optional[tuple]:
         if stamp is not None:
             _VERSIONS[stamp] = read
     return read
+
+
+def known_version(found: Optional[Found]) -> Optional[tuple]:
+    """The version `version()` already read for `found`, never running anything; None when it
+    was not read (or could not be)."""
+    stamp = _stamp(found) if found is not None else None
+    with _lock:
+        return _VERSIONS.get(stamp) if stamp is not None else None
 
 
 def too_old(found: Optional[Found]) -> bool:
@@ -422,6 +440,12 @@ def probe(*, force: bool = False) -> Probe:
     else:
         read = version(found)
         if read is not None and read < MIN_VERSION:
+            # Read too old just now: look again — `find` passes it over for TCC's own copy.
+            forget()
+            other = find()
+            if other is not None and other != found:
+                found, read = other, version(other)
+        if read is not None and read < MIN_VERSION:
             result = Probe(asked=True, why=(f"Codex {version_text(read)} is older than "
                                             f"{version_text(MIN_VERSION)}, the oldest TCC speaks to"))
         else:
@@ -539,7 +563,7 @@ def unknown_enabled_features(config_read: Mapping) -> list[str]:
 
 __all__ = [
     "Found", "Probe", "MIN_VERSION", "PIN", "SOURCE_PATH", "SOURCE_FOLDER", "SOURCE_TCC",
-    "find", "forget", "version", "too_old", "usable", "probe", "signed_in", "models",
+    "find", "forget", "version", "known_version", "too_old", "usable", "probe", "signed_in", "models",
     "supported_efforts", "efforts_in", "tcc_copy_path", "dock_folders", "tcc_tool_args",
     "tcc_connection_args",
     "isolation_args",

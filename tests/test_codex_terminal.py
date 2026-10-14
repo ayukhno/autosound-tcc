@@ -16,6 +16,7 @@ import pytest
 
 from autosound_tcc.core import codex_cli, codex_terminal
 from autosound_tcc.core.codex_cli import Found
+from autosound_tcc.ui.tcc.strings import codex as codex_strings
 
 TOKEN = "s3cret-token-0123456789"
 URL = "http://127.0.0.1:8765/mcp"
@@ -139,7 +140,9 @@ def test_codex_not_found_is_one_sentence_and_a_failure(tmp_path, started, monkey
     assert codex_terminal.main([str(tmp_path)]) != 0
 
     assert started == []
-    assert "Codex" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "Codex" in err and "npm" not in err
+    assert codex_strings.STRINGS["codexInstall"]["en"] in err, "names TCC's menu line"
 
 
 def test_codex_too_old_is_one_sentence_and_a_failure(tmp_path, started, monkeypatch, capsys):

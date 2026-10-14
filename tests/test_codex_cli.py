@@ -151,6 +151,48 @@ def test_tccs_own_copy_on_windows_is_under_localappdata(tmp_path):
         str(own), codex_cli.SOURCE_TCC)
 
 
+def test_a_codex_known_too_old_gives_way_to_tccs_own_copy(tmp_path, monkeypatch):
+    """The blocker's advice — install TCC's copy — has to work with an old Codex still on PATH
+    (task 9): one whose version was read too old is passed over for TCC's copy, and is still
+    what `find` answers when there is nothing else, so the blocker can say «too old»."""
+    old = _file(tmp_path / "bin" / "codex")
+    found_old = Found(str(old), codex_cli.SOURCE_PATH)
+    assert _find(tmp_path, path=str(old.parent)) == found_old
+    monkeypatch.setitem(codex_cli._VERSIONS, codex_cli._stamp(found_old), (0, 150, 0))
+    assert _find(tmp_path, path=str(old.parent)) == found_old, "nothing else: still said"
+    own = _file(codex_cli.tcc_copy_path(home=tmp_path / "home", environ={}, windows=False))
+    assert _find(tmp_path, path=str(old.parent)) == Found(str(own), codex_cli.SOURCE_TCC)
+
+
+@POSIX_ONLY
+def test_a_probe_that_reads_a_too_old_codex_asks_tccs_own_copy_instead(tmp_path, monkeypatch):
+    old = _says(tmp_path, "codex-cli 0.150.0")
+    monkeypatch.setattr(codex_cli, "dock_folders", lambda **_kw: [])
+    monkeypatch.setattr(codex_cli, "find", _REAL_FIND)
+    home = tmp_path / "home"
+    monkeypatch.setattr(codex_cli.Path, "home", lambda: home)
+    monkeypatch.setenv("PATH", str(Path(old.path).parent))
+    own = codex_cli.tcc_copy_path(home=home, environ={}, windows=False)
+    _file(own, f"#!{sys.executable}\nprint('codex-cli {codex_cli.PIN}')\n".encode())
+    asked: list[str] = []
+    monkeypatch.setattr(codex_cli, "_run_probe", lambda found: asked.append(found.path)
+                        or codex_cli.Probe(signed_in=True, asked=True))
+    codex_cli.forget()
+
+    said = codex_cli.probe()
+
+    assert asked == [str(own)] and said.signed_in is True
+    assert codex_cli.find() == Found(str(own), codex_cli.SOURCE_TCC)
+    codex_cli.forget()
+
+
+def test_the_version_read_is_told_without_running_anything(tmp_path, monkeypatch):
+    found = Found(str(_file(tmp_path / "bin" / "codex")), codex_cli.SOURCE_PATH)
+    assert codex_cli.known_version(found) is None
+    monkeypatch.setitem(codex_cli._VERSIONS, codex_cli._stamp(found), (0, 150, 0))
+    assert codex_cli.known_version(found) == (0, 150, 0)
+
+
 def test_find_is_cached_until_forget(tmp_path, monkeypatch):
     monkeypatch.setattr(codex_cli, "find", _REAL_FIND)
     monkeypatch.setattr(codex_cli, "dock_folders", lambda **_kw: [])
@@ -278,6 +320,21 @@ def test_the_picker_rows_come_from_the_probe_and_a_failed_one_says_why(monkeypat
     assert model_choices._LIST_WHY["codex"] == "codex app-server: boom"
 
 
+def test_after_an_install_or_a_sign_in_the_rows_come_from_the_probe_just_run(monkeypatch):
+    """Task 9: the worker that installed or signed Codex in has just probed; the pickers' rows are
+    built from that answer, with no second app-server."""
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: harness == "codex")
+    monkeypatch.setattr(model_choices, "_save_cached_catalogue", lambda: None)
+    monkeypatch.setattr(model_choices, "_CLI_CACHE", {})
+    monkeypatch.setattr(codex_cli, "probe", None)  # a spawn here would raise
+    monkeypatch.setattr(codex_cli, "_PROBE", codex_cli.Probe(
+        signed_in=True, asked=True, models=({"model": "gpt-a", "displayName": "GPT-A"},)))
+
+    model_choices.store_codex_rows()
+
+    assert [c.key for c in model_choices._CLI_CACHE["codex"]] == ["codex:gpt-a"]
+
+
 # ---- picker and launch -----------------------------------------------------------------------
 
 
@@ -292,8 +349,11 @@ def test_codex_rows_are_offered_once_to_the_generator_and_the_reviewer(monkeypat
     assert keys.count("codex:gpt-a") == 1
 
 
-def test_a_codex_pick_is_not_refused_at_launch_now_that_it_has_its_session():
-    """Task 6 lifted the «not yet» refusal; Codex's own blockers are tasks 8/9's."""
+def test_a_codex_pick_is_not_refused_at_launch_now_that_it_has_its_session(tmp_path, monkeypatch):
+    """Task 6 lifted the «not yet» refusal; a Codex found, not known too old and not known signed
+    out starts (its own blockers, task 9: `test_codex_menu`)."""
+    found = Found(str(_file(tmp_path / "bin" / "codex")), codex_cli.SOURCE_PATH)
+    monkeypatch.setattr(codex_cli, "find", lambda **_kw: found)
     pick = Choice(harness="codex", model="gpt-a", label="GPT-A", provider="openai")
     assert session_routes.blocker(pick, server=object()) is None
 

@@ -16,6 +16,8 @@ from autosound_tcc.core import (
     app_log,
     availability,
     claude_sdk,
+    codex_install,
+    codex_login,
     contract_check,
     critic,
     model_choices,
@@ -295,6 +297,76 @@ class _CaptureCheckWorker(QThread):
             self.failed.emit(capture_check_not_run(exc))
             return
         self.result.emit(list(self._titles or []))
+
+
+class CodexInstallWorker(QThread):
+    """TCC's own Codex from the official wheel (`codex_install.install`, W-10 task 9): ~130 MB
+    downloaded, unpacked and checked, never on the GUI thread. A cancel is the thread's
+    interruption, read between chunks — the strip's «Cancel» and a closing window both ask it.
+    `then` runs here after a success (the probe and the pickers' rows)."""
+
+    progress = Signal(object, object)  # bytes done, bytes in all
+    done = Signal(object)  # None = installed; else the `InstallError`
+
+    def __init__(self, then=None) -> None:
+        super().__init__()
+        self._then = then
+        qt_shutdown.watch(self)
+
+    def run(self) -> None:
+        try:
+            codex_install.install(lambda got, total: self.progress.emit(got, total),
+                                  self.isInterruptionRequested)
+        except codex_install.InstallError as exc:
+            self.done.emit(exc)
+            return
+        except Exception as exc:  # noqa: BLE001 — said on the strip, not lost in a thread
+            app_log.logger().exception("codex install failed")
+            self.done.emit(codex_install.InstallError(str(exc), key="codexInstallDisk",
+                                                      error=str(exc)))
+            return
+        if self._then is not None:
+            try:
+                self._then()
+            except Exception:  # noqa: BLE001 — installed is installed; the rows come with ↻
+                app_log.logger().exception("codex install: reading Codex after the install")
+        self.done.emit(None)
+
+
+class CodexSignInWorker(QThread):
+    """Signing in to Codex (`codex_login.SignIn`, W-10 task 9): the app-server and the wait for
+    the browser, never on the GUI thread. `url` is the address the window opens; a cancel is the
+    thread's interruption — the strip's «Cancel» and a closing window both ask it, and the sign-in
+    is cancelled in Codex and its child closed before `done`. `then` runs here after a success."""
+
+    url = Signal(str)
+    done = Signal(object)  # (signed in, Codex's sentence, cancelled)
+
+    def __init__(self, then=None) -> None:
+        super().__init__()
+        self._then = then
+        qt_shutdown.watch(self)
+
+    def run(self) -> None:
+        sign_in = codex_login.SignIn()
+        try:
+            self.url.emit(sign_in.begin())
+            ok = sign_in.wait(cancelled=self.isInterruptionRequested)
+        except codex_login.SignInError as exc:
+            self.done.emit((False, str(exc), False))
+            return
+        except Exception as exc:  # noqa: BLE001 — said on the strip, not lost in a thread
+            app_log.logger().exception("codex sign-in failed")
+            self.done.emit((False, str(exc), False))
+            return
+        finally:
+            sign_in.close()
+        if ok and self._then is not None:
+            try:
+                self._then()
+            except Exception:  # noqa: BLE001 — signed in is signed in; the rows come with ↻
+                app_log.logger().exception("codex sign-in: reading Codex after the sign-in")
+        self.done.emit((ok, sign_in.error, sign_in.cancelled))
 
 
 def capture_check_not_run(exc: Exception) -> str:

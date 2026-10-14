@@ -809,7 +809,19 @@ def _ask_codex_models() -> list[Choice]:
     """
     if not cli_available("codex"):
         return []
-    said = codex_cli.probe(force=True)
+    return _codex_rows(codex_cli.probe(force=True))
+
+
+def store_codex_rows() -> None:
+    """Codex's rows from the probe that just ran, with no second app-server: after TCC installed
+    Codex or signed it in (W-10 task 9), the worker that did it has probed already. **Off the GUI
+    thread** (it writes the catalogue's cache); the window then reloads its pickers."""
+    _store("codex", _codex_rows(codex_cli.last_probe()) if cli_available("codex") else [])
+    _save_cached_catalogue()
+
+
+def _codex_rows(said) -> list[Choice]:
+    """The picker rows of one probe's `model/list`; why there are none in `_LIST_WHY`."""
     out = [Choice(harness="codex", model=str(entry.get("model") or entry.get("id")),
                   label=str(entry.get("displayName") or entry.get("model") or entry.get("id")),
                   provider="openai")

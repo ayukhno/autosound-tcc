@@ -135,6 +135,8 @@ def test_the_plain_terminal_starts_no_client_and_names_how_to_start_codex(tmp_pa
     assert kind == "shell"
     assert kw["env"] == {"ENV": "1"}
     assert "autosound_tcc.core.codex_terminal" in kw["note"]
+    assert kw["note"] == terminal_menu.codex_note()
+    assert kw["note"].startswith(i18n.t("codexTerminalHint").split("{")[0]), "an i18n key"
     assert notes == [i18n.t("terminalOpened").format(cli=i18n.t("terminalPlain"))]
 
 

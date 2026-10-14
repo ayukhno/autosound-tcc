@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
-from autosound_tcc.core import codex_session, omp_session, terminal_launcher
+from autosound_tcc.core import codex_cli, codex_session, omp_session, terminal_launcher
 from autosound_tcc.core.session_registry import CODEX_ROUTE, SDK_ROUTE
 from autosound_tcc.core.tuning_session import TuningSession
 
@@ -103,14 +103,32 @@ def blocker(choice, server) -> Optional[Refusal]:
 
     The SDK route takes TCC's url and token directly, so an unwritten `.mcp.json` refuses nothing
     there; omp reaches TCC only through that file, unwritten, it would run without TCC's tools.
-    Codex takes the url and token directly too; its own blockers (not found, too old, signed out)
-    come with tasks 8/9 — until then the session's start says each of them itself.
+    Codex takes the url and token directly too; its own blockers (task 9) each name the menu line
+    that fixes it, as omp's do: not found and too old → «Install Codex», signed out → «Sign in to
+    Codex». All three are read without running anything — `too_old` is known only once a worker
+    ran `version()` (the probe does), and an unread version or login is not a block.
     """
     if choice.harness == "omp":
         if not omp_session.is_available():
             return Refusal("ompMissing")
         if getattr(server, "config_error", ""):
             return omp_without_config(server)
+    if choice.harness == "codex":
+        return codex_blocker()
+    return None
+
+
+def codex_blocker() -> Optional[Refusal]:
+    """Codex's own refusals, stat calls and cached readings only (the GUI thread asks)."""
+    found = codex_cli.find()
+    if found is None:
+        return Refusal("codexMissing")
+    if codex_cli.too_old(found):
+        return Refusal("codexTooOld", {
+            "version": codex_cli.version_text(codex_cli.known_version(found)),
+            "min": codex_cli.version_text(codex_cli.MIN_VERSION)})
+    if codex_cli.signed_in() is False:
+        return Refusal("codexSignedOut")
     return None
 
 

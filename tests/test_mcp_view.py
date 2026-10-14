@@ -52,3 +52,13 @@ def test_a_file_tcc_could_not_write_keeps_the_folder_advice():
 
     assert mcp_view.omp_without_config(server) == i18n.t("mcpNoConfigOmp").format(
         error="PermissionError: read-only")
+
+
+def test_an_mcp_client_is_named_by_the_command_a_person_knows_it_by():
+    """Moved out of the window with W-10 task 9 (`main_window.py` may not grow): the footer's
+    «a session outside TCC» names the client by its command."""
+    assert mcp_view.client_name("Codex-MCP-Client") == "codex"
+    assert mcp_view.client_name("antigravity-cli") == "agy"
+    assert mcp_view.client_name("claude-code") == "claude"
+    assert mcp_view.client_name("someone-new") == "someone-new"
+    assert mcp_view.client_name("") == "?"
