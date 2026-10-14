@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
@@ -192,6 +194,47 @@ def test_the_checkbox_shows_what_the_skill_wrote(tmp_path):
                          ).findChild(QCheckBox).isChecked()
     assert not _PhaseStepRow(todo, _PlanProgress(), lambda *_: None, lambda _s: None
                              ).findChild(QCheckBox).isChecked()
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_a_done_step_is_drawn_as_a_green_box_with_a_tick_and_a_todo_step_is_not(monkeypatch, mode):
+    """tcc#166: the done step's box is the ok green with a tick inside, in either theme; an open
+    step's box carries none of that green. Drawn under the sheet, and counted in the pixels."""
+    _app()
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QCheckBox, QVBoxLayout
+
+    from tests import _windows
+
+    host = QWidget()
+    palette = _windows.theme_on(monkeypatch, host, mode)
+    layout = QVBoxLayout(host)
+    done = PlanStep(id="x.1", name={"en": "done one", "uk": "зроблено"}, tag_class="ok")
+    todo = PlanStep(id="x.2", name={"en": "todo one", "uk": "треба"})
+    rows = [_PhaseStepRow(step, _PlanProgress(), lambda *_: None, lambda _s: None)
+            for step in (done, todo)]
+    for row in rows:
+        layout.addWidget(row)
+    host.resize(320, 80)
+    host.show()
+    try:
+        _app().processEvents()
+        picture = host.grab().toImage()
+
+        def count(box, colour):
+            origin = box.mapTo(host, QPoint(0, 0))
+            return sum(QColor(picture.pixel(origin.x() + x, origin.y() + y)).name() == colour
+                       for x in range(box.width()) for y in range(box.height()))
+
+        green_box, open_box = (row.findChild(QCheckBox) for row in rows)
+        # The fill and the ring are the ok green; the tick is the phase header's ink (`.st-done`).
+        assert count(green_box, palette.ok) >= 40, f"{mode}: the done box is not green"
+        assert count(green_box, "#04160d") >= 6, f"{mode}: the done box has no tick"
+        assert count(open_box, palette.ok) == 0, f"{mode}: an open step is green"
+        assert count(open_box, palette.accent) == 0, f"{mode}: an open step is accent"
+    finally:
+        host.close()
 
 
 def test_the_checkbox_cannot_be_clicked(tmp_path):

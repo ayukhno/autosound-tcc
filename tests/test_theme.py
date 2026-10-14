@@ -490,10 +490,13 @@ def test_every_check_box_wears_the_radios_ring_in_both_themes():
                  if "::indicator" in one and not one.startswith("QRadioButton")}
         radio = dict(rules)
         assert boxes, f"{name}: no check box rule at all"
+        # The one exception is the plan's done step (tcc#166): its box is the ok green with a tick,
+        # on purpose, and is checked on its own below.
+        plan_done = 'QCheckBox[class~="plan-step-check"]::indicator:checked'
         assert set(boxes) <= {f"{kind}::indicator{state}" for kind in ("QCheckBox",
                                                                       "QAbstractItemView")
                               for state in ("", ":hover", ":checked", ":disabled",
-                                            ":checked:disabled")}, (
+                                            ":checked:disabled")} | {plan_done}, (
             f"{name}: a class with a box of its own: {sorted(boxes)}")
 
         def drawn(body, prop):
@@ -515,6 +518,38 @@ def test_every_check_box_wears_the_radios_ring_in_both_themes():
                 ground = palette.tokens[surface]
                 assert _contrast(ring, ground) >= 3, (
                     f"{name}: the ring {ring} is {_contrast(ring, ground):.2f}:1 on {surface}")
+
+
+def test_a_done_plan_step_box_is_ok_green_with_a_tick_and_the_generic_box_is_unchanged():
+    """tcc#166: a plan step the skill closed drew its box in the accent, as every checked box
+    does, with no tick. The plan's checked box now takes the ok green (the phase header's ✔ and
+    the `ok` chips) and an SVG tick from `assets/icons`, in both themes. Every other checked box
+    keeps the accent exactly as before."""
+    import re
+    from pathlib import Path
+
+    from autosound_tcc.ui.tcc import theme
+
+    def colour(body, prop):
+        return _hex(re.search(r"(?:^|\s)" + prop + r":\s*([^;]+);", body).group(1)
+                    .replace("2px solid", "").strip())
+
+    for name in ("dark", "light"):
+        palette = theme.get_theme(name)
+        rules = dict((one.strip(), body) for selector, body in _rules(theme.build_qss(palette))
+                     for one in selector.split(","))
+        said = f"{name}: the plan's done box"
+        done = rules.get('QCheckBox[class~="plan-step-check"]::indicator:checked')
+        assert done is not None, f"{said} has no rule"
+        for prop in ("border", "background"):
+            assert colour(done, prop) == _hex(palette.ok), f"{said}'s {prop} is not the ok green"
+        icon = re.search(r'image:\s*url\("([^"]+)"\)', done)
+        assert icon, f"{said} has no tick"
+        assert Path(icon.group(1)).is_file(), f"{said}'s tick {icon.group(1)} is missing"
+        generic = rules["QCheckBox::indicator:checked"]
+        assert colour(generic, "border") == _hex(palette.accent), f"{name}: generic box moved"
+        assert colour(generic, "background") == _hex(palette.accent), f"{name}: generic box moved"
+        assert "image:" not in generic, f"{name}: the generic checked box gained a tick"
 
 
 @pytest.mark.parametrize("mode", ["dark", "light"])

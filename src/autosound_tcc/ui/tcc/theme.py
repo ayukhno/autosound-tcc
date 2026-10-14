@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
@@ -21,6 +22,10 @@ from PySide6.QtGui import QFont, QFontMetrics, QFontMetricsF, QPalette
 from PySide6.QtWidgets import QComboBox, QStyle, QStyleOptionComboBox, QStylePainter, QWidget
 
 Mode = Literal["dark", "light"]
+
+#: The tick a done plan step draws in its box (`.plan-step-check`). The app's icons ship as SVG
+#: files beside each other in `assets/icons`; a stylesheet's `image:` reads one from the same place.
+_CHECK_ICON = (Path(__file__).resolve().parents[2] / "assets" / "icons" / "check.svg").as_posix()
 
 
 #: What a `.mini-select` popup spends on something other than the label: 28 px of left padding
@@ -858,6 +863,15 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QCheckBox::indicator:checked, QAbstractItemView::indicator:checked {{
         border: 2px solid {t.accent};
         background: {t.accent};
+    }}
+    /* .plan-step-check — a plan step's box once the skill has closed the step (tcc#166): the green
+    the phase header's ✔ and the `ok` chips wear (`t.ok`), with a tick drawn in it in the same ink
+    as `.st-done`. Only the plan's boxes: every other checked box keeps the accent above. The tick
+    is an SVG beside the other icons, since a sheet can draw one only through `image:`. */
+    QCheckBox[class~="plan-step-check"]::indicator:checked {{
+        border: 2px solid {t.ok};
+        background: {t.ok};
+        image: url("{_CHECK_ICON}");
     }}
     QRadioButton::indicator:checked {{
         border: 2px solid {t.accent};

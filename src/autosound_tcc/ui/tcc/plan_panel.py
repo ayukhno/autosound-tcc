@@ -177,6 +177,9 @@ class _PhaseStepRow(QWidget):
 
         check = QCheckBox()
         check.setChecked(done)
+        # Its own class, so the sheet gives a done step's box the ok green and a tick (tcc#166),
+        # and no other check box in the app.
+        check.setProperty("class", "plan-step-check")
         # Read-only on purpose (SCR-004): v1's only writer is the skill, and the Arbiter changes
         # the plan by saying so in the dialog -- which lands as a journal event -- not by clicking
         # a box that writes nowhere.
