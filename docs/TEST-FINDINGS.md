@@ -3683,3 +3683,17 @@ picked model; picking Fable does.
 **Weight.** Medium: the switch to Sonnet cannot be made from the window the way the switch to Fable is.
 
 **Task.** W-9's pool.
+
+### 157. «Sonnet 5 is gone — take Opus 5.5?» accepted, and the selector still says Sonnet 5; no Sonnet 5.5 in the list
+
+**What.** The Arbiter, 2026-10-14, on the VM, starting an older TCC (not v1.1.3; the exact version not named): TCC said
+the Sonnet 5 model no longer exists and offered Opus 5.5. He agreed. After that the MAIN selector still reads
+`SDK · Claude Sonnet 5`, and its list has no Sonnet 5.5 — it holds SDK Opus 5.5, Opus 5, Sonnet 5, Fable 5.1, Fable 5;
+OMP Opus 5.5, Sonnet 5 and three gemini models. In the same start the AI CRITIC's model (`API · gemini-3.1-pro-p…`)
+was checked and turned green: the critic's check works where the main model's switch did not.
+
+**Where.** Windows VM, the bottom bar: MAIN, EFFORT `x-high`, AI CRITIC; the Arbiter's screenshot of the open list.
+
+**Weight.** High: the agreed switch did not happen, and the window keeps showing a model TCC itself called gone.
+
+**Task.** W-10's pool (collection).
