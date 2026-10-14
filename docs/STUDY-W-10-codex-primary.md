@@ -191,3 +191,13 @@ than bash — TCC's gate parses bash (`shell_gate.py:482`, `:2099`); a guess, to
 4. **Codex's own reviewer.** Codex can let an AI reviewer approve its commands (`auto_review`).
    Is that acceptable in place of asking you, or must every non-read command come to you as today?
 5. **When.** Spike in W-10 and build in a later wave, or both in W-10?
+
+### The Arbiter's answers (2026-10-14)
+
+1. **Terms — yes:** TCC is local and open-source in that sense.
+2. **For every user, under each user's own licence:** each signs in to Codex with their own account; TCC
+   brings the engine integration and the logic, not the access.
+3. **Windows — from the first build.**
+4. **Approvals follow TCC's own setting** when Codex runs inside TCC (the same gate as the other backends);
+   in a terminal, Codex's own configuration applies.
+5. **The spike is in W-10.** The build is decided on the spike's result (all six points pass).

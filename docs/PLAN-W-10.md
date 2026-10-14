@@ -54,6 +54,7 @@ result goes to the ledger below and one line to the hub's H-019.
 
 | issue | state | implementer | commits | review | note |
 |---|---|---|---|---|---|
-| #201 | built — task review running | opus · high | 0a01d66, 5e24c74 | opus · high | ship skips the local suite on `ci-green` ok; `make ship VERSION= AT=` dry check; CHANGELOG v1.1.3 corrected; fallback cannot run today (the hub fails ci-green and windows-ran on unreadable CI) |
-| #202 | building | opus · medium | | — (ordinary) | |
+| #201 | task review: 1 Important (the AT check refuses a paired train release — runs TCC's own checks only), 3 Minor — fix round running | opus · high | 0a01d66, 5e24c74 | opus · high | ship skips the local suite on `ci-green` ok; `make ship VERSION= AT=` dry check; CHANGELOG v1.1.3 corrected; fallback cannot run today (the hub fails ci-green and windows-ran on unreadable CI) |
+| #202 | built | opus · medium | 05230bb, b3f722e | — (ordinary; the group seats) | a test race with the folder watcher's reload (400 ms); `ci_shard.py` prints UTF-8 on a cp1252 pipe. Found: TCC reloads ~0.4 s and ~0.94 s after its own pick lands in `.tcc/` — a pool line (F-102) |
+| #181 spike | building | opus · high | | — | the Arbiter's answers in the study §5 |
 | #181 | done — the study, `docs/STUDY-W-10-codex-primary.md` | opus · high | (this commit) | — | feasible, L (2–4 days); next: a ≤1-day spike on six points; five questions for the Arbiter (§5) |
