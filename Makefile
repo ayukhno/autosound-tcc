@@ -17,9 +17,12 @@ help:
 	@echo "                    in a hurry, and willing to re-run a dead worker (~1 min):"
 	@echo "                    PYTEST_ADDOPTS='-n auto --dist loadfile' make test"
 	@echo "make ship           dry run: work out the next patch, check everything, write nothing"
-	@echo "make ship REAL=1    the real release — bump, test, commit, tag, push"
+	@echo "make ship REAL=1    the real release — bump, test, commit, tag, push (a version already"
+	@echo "                    committed and green on CI is tagged without a local suite)"
 	@echo "make ship CANDIDATE=vX.Y.Z   dry run of a beta candidate (beta-vX.Y.Z-rcN on HEAD); REAL=1 tags it"
 	@echo "make ship VERSION=vX.Y.Z     dry run of a named release instead of the next patch; REAL=1 cuts it"
+	@echo "make ship VERSION=vX.Y.Z AT=<commit>   TCC's own pre-tag checks at that commit: dry, no"
+	@echo "                    local suite; exit 0 = ready, 1 = not, with the reason (the release train's check)"
 	@echo ""
 	@echo "Asking for a release — \"new tag\", \"ship it\", \"cut a patch\" — means REAL=1,"
 	@echo "but it is never the first thing done: the dry run and its plan come first, and"
@@ -55,9 +58,11 @@ test:
 #: one, and an environment variable must not turn a patch into something else.
 #: `CANDIDATE=vX.Y.Z` cuts the next beta candidate for that version and writes nothing but the tag;
 #: `VERSION=vX.Y.Z` releases that version instead of the next patch (a minor is the `release`
-#: role's — the hub decides, from HUB_ROLE).
+#: role's — the hub decides, from HUB_ROLE). `AT=<commit>` with `VERSION` only checks that release
+#: against the commit — dry, no local suite (tcc#201, hub #246); command line only, like the others.
 SHIP_ARGS = $(if $(filter command line,$(origin CANDIDATE)),--candidate $(CANDIDATE)) \
-            $(if $(filter command line,$(origin VERSION)),--tag $(VERSION))
+            $(if $(filter command line,$(origin VERSION)),--tag $(VERSION)) \
+            $(if $(filter command line,$(origin AT)),--at $(AT))
 
 ship:
 ifeq ($(REAL),1)

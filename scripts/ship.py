@@ -2,6 +2,8 @@
 
     make ship              # dry run — reads everything, writes nothing
     make ship REAL=1       # the real thing
+    make ship VERSION=vY AT=<commit>   # TCC's own pre-tag checks at a commit: dry, no suite;
+                                       # exit 0 = ready, 1 = not, with the reason
 
 **Dry run is the default, and that is not politeness.** The last step publishes a tag, and a
 published tag can never be moved or deleted by anyone — including the `release` role
@@ -76,6 +78,22 @@ README's install line names, which the suite holds to the version, so `bump` mov
 Everything up to and including the local tag is reversible. The single irreversible act is the
 last line of the script, on its own, by name.
 
+## CI's green run on the commit is the release's test run (tcc#201, hub #277, #246)
+
+Hub `RELEASE-CHANNEL.md` §9.9.1, the user's word 2026-10-14: the PR's green `pull_request` run on
+the very commit being tagged is the release's test run, and ship does not run the suite again.
+v1.1.3 ran it three times on one commit — the PR, `main`'s push, and here, 15 min serially with the
+VM paused. So where the tag goes on a commit CI saw (the version committed on the wave branch), the
+carrier's `ci-green` for that commit decides: `ok` — no local run; anything that did not refuse and
+is not `ok` (the check missing, or `не перевірено`) — CI could not be read, and the whole suite runs
+here as the fallback. One line says which. Unknown is never green, and a refusal stays a refusal:
+whether CI that could not be read refuses is the carrier's call (`Check.gates`, today it does), not
+one ship overrides. A bump makes a new commit CI never saw, so the suite runs there as before.
+
+`VERSION=vY AT=<commit>` is the same checks against a commit instead of HEAD — the carrier's
+(`preflight(at=…)`) and the inventory read from that commit (`git show`, `git ls-tree`) — with no
+suite and no writes, so the release train can ask TCC «ready?» about its candidate (hub #246).
+
 ## The tag is signed, and checked before it leaves (tcc#102, hub #83 HUB-032)
 
 From `v0.1.45` TCC's updater installs a release tag only when it verifies against the author's key,
@@ -118,6 +136,12 @@ CARRIER = Path(__file__).resolve().parents[2] / "hub" / "scripts" / "release-pre
 #: the shell it was cut from. Parallel runs killed a Qt worker in 2 of 15 full runs on this
 #: machine and did not reproduce on demand (tcc#22) — a release is the last place to accept that.
 TEST_COMMAND = [sys.executable, "-m", "pytest", "tests/", "-q", "-n", "0"]
+
+#: The carrier's check that judges CI on the commit, and its word for a pass. Copies, so ship can
+#: read a verdict without holding the module — pinned to the real ones by
+#: `test_the_stand_in_has_the_carriers_shape`. Only this word skips the suite: unknown is not green.
+CI_GREEN = "ci-green"
+CARRIER_OK = "ok"
 
 
 #: A full git object name. `ls-tree` prints a mode, a type, the sha and the path, and only the
@@ -182,12 +206,13 @@ def load_carrier(path: Path = CARRIER):
 
 
 def channel_checks(root: Path, path: Path = CARRIER, *, candidate: str | None = None,
-                   version: str | None = None):
+                   version: str | None = None, at: str | None = None):
     """Every channel precondition, asked of the carrier. Returns `(tag, checks)`, writes nothing.
 
     One question per mode: the next patch, the next candidate for `candidate`, or the named
     `version`. The carrier names the tag in the first two and judges it in all three — including
     whether `candidate` or `version` looks like a version at all; ship keeps no copy of that pattern.
+    `at` asks it about that commit instead of HEAD (`make ship VERSION=… AT=…`).
 
     The role is the session's (`HUB_ROLE`), and `tcc` when there is none. It decides which
     repository and line the carrier reports on and which tags the hook lets this session cut: a
@@ -197,6 +222,8 @@ def channel_checks(root: Path, path: Path = CARRIER, *, candidate: str | None = 
     carrier = load_carrier(path)
     if candidate:
         return carrier.preflight(root, role=role, candidate=candidate)
+    if version and at:
+        return carrier.preflight(root, role=role, tag=version, at=at)
     if version:
         return carrier.preflight(root, role=role, tag=version)
     return carrier.preflight(root, role=role, want_next=True)
@@ -229,14 +256,26 @@ def _filled(body: str) -> int:
     return sum(1 for line in body.splitlines() if line.strip())
 
 
-def _read_changelog(root: Path) -> str:
+def read_at(root: Path, at: str, name: str) -> str | None:
+    """`name` as commit `at` carries it, or None when that commit has no such file."""
+    done = subprocess.run(["git", "show", f"{at}:{name}"], cwd=str(root), capture_output=True,
+                          text=True, encoding="utf-8", errors="replace")
+    return done.stdout if done.returncode == 0 else None
+
+
+def _read_changelog(root: Path, at: str = "") -> str:
+    if at:
+        text = read_at(root, at, "CHANGELOG.md")
+        if text is None:
+            raise Stop(f"no CHANGELOG.md in {at[:12]}")
+        return text
     path = root / "CHANGELOG.md"
     if not path.is_file():
         raise Stop("no CHANGELOG.md")
     return path.read_text(encoding="utf-8")
 
 
-def check_changelog(root: Path, tag: str) -> str:
+def check_changelog(root: Path, tag: str, at: str = "") -> str:
     """The top entry must already be this release's.
 
     A gate, not a convenience. The heading is a sentence about what changed — content, and ship
@@ -245,9 +284,9 @@ def check_changelog(root: Path, tag: str) -> str:
 
     So `## [Unreleased]` must be gone by then: the notes gathered under it are renamed to this
     heading, by hand, in the commit the release is cut from — the skill's model (hub
-    RELEASE-CHANNEL.md §11.3, `tag-check.sh`).
+    RELEASE-CHANNEL.md §11.3, `tag-check.sh`). With `at`, the file as that commit carries it.
     """
-    text = _read_changelog(root)
+    text = _read_changelog(root, at)
     if _UNRELEASED.search(text):
         raise Stop(f"CHANGELOG.md still has a `## [Unreleased]` heading — rename it to `## [{tag}]` "
                    "first; the heading is yours to word, not ship's")
@@ -315,11 +354,21 @@ def check_paired_method(changelog: str, method_sha: str, tag: str) -> None:
 # ---------------------------------------------------------------- the writing half
 
 
-def current_version(root: Path) -> str:
-    """`pyproject.toml`'s version as it stands, or "" when there is no version line."""
-    found = re.search(r'^version = "([^"]+)"', (root / "pyproject.toml").read_text(encoding="utf-8"),
-                      re.M)
+def current_version(root: Path, at: str = "") -> str:
+    """`pyproject.toml`'s version as it stands — or as commit `at` carries it — or "" when there
+    is no version line."""
+    text = (read_at(root, at, "pyproject.toml") if at
+            else (root / "pyproject.toml").read_text(encoding="utf-8")) or ""
+    found = re.search(r'^version = "([^"]+)"', text, re.M)
     return found.group(1) if found else ""
+
+
+def check_version_at(root: Path, at: str, version: str) -> None:
+    """A commit tagged where it stands is not bumped: it must already say the version."""
+    said = current_version(root, at)
+    if said != version:
+        raise Stop(f"pyproject.toml in {at[:12]} says {said or 'no version'}, and the tag is "
+                   f"v{version} — a commit tagged where it stands carries its version already")
 
 
 #: The tag README's install line names (tcc#174): `…/autosound-tcc@v1.1.2'`. That line is what a
@@ -387,13 +436,14 @@ def relock(root: Path) -> None:
 METHOD_TREE = "vendor/autosound-tuning-skill"
 
 
-def pinned_method_sha(root: Path) -> str:
-    """The method commit this repository RECORDS — the gitlink, not the working checkout.
+def pinned_method_sha(root: Path, at: str = "HEAD") -> str:
+    """The method commit this repository RECORDS — the gitlink, not the working checkout — in
+    HEAD, or in commit `at`.
 
     `git ls-tree` rather than anything inside the submodule: what a person gets when they clone
     the tag is whatever the parent commit points at, and that is this.
     """
-    line = run(["git", "ls-tree", "HEAD", METHOD_TREE], root, check=False)
+    line = run(["git", "ls-tree", at, METHOD_TREE], root, check=False)
     parts = line.split()
     return parts[2] if len(parts) > 2 and _SHA.match(parts[2]) else ""
 
@@ -495,10 +545,11 @@ def method_sha(root: Path) -> str:
 SIGNERS = "allowed_signers"
 
 
-def tag_command(tag: str) -> list[str]:
+def tag_command(tag: str, at: str = "") -> list[str]:
     """The one tag line, signed, in the skill's form (`tag-check.sh`: `git tag -s X -m X`). The plan
-    shows it and `publish` runs it, from here both, so the line shown is the line run."""
-    return ["git", "tag", "-s", tag, "-m", tag]
+    shows it and `publish` runs it, from here both, so the line shown is the line run. `at` names
+    the commit when it is not HEAD — shown only: a check at a commit runs nothing."""
+    return ["git", "tag", "-s", tag, "-m", tag, *([at] if at else [])]
 
 
 def drop_tag(root: Path, tag: str) -> str:
@@ -582,6 +633,39 @@ def publish(root: Path, tag: str, say: Callable[[str], None]) -> None:
     say(f"  pushed {tag}")
 
 
+def check_at(root: Path, plan: Plan, at: str, say: Callable[[str], None],
+             read_pinned_sha: Callable[..., str],
+             read_published_tags: Callable[[Path, str], list]) -> Plan:
+    """TCC's own pre-tag inventory against commit `at`, after the carrier's — read-only, no suite.
+
+    Everything is read from the commit, not the working tree: the CHANGELOG entry, the version
+    (a commit tagged where it stands is not bumped), and the pin the `Paired with method` line is
+    held to — CI tested the recorded pin, and no local checkout is in question because nothing
+    runs here. The commit's tests are CI's run on it, which the carrier's `ci-green` judged.
+    """
+    sha = run(["git", "rev-parse", "--verify", "--quiet", f"{at}^{{commit}}"], root, check=False)
+    if not sha:
+        raise Stop(f"`{at}` does not resolve to a commit in {root}")
+    plan.version = plan.tag.lstrip("v")
+    changelog = check_changelog(root, plan.tag, at=sha)
+    check_version_at(root, sha, plan.version)
+    plan.method_sha = read_pinned_sha(root, sha)
+    if not plan.method_sha:
+        raise Stop(f"the method's pin in {sha[:12]} could not be read — a release cannot say "
+                   "which method it was built against")
+    check_paired_method(changelog, plan.method_sha, plan.tag)
+    plan.method_tags = list(read_published_tags(root, plan.method_sha))
+    check_published_method(plan.method_sha, plan.method_tags)
+    plan.commands = [" ".join(tag_command(plan.tag, sha)), "git push origin main",
+                     f"git push origin {plan.tag}"]
+    say(f"  version          : {plan.tag} at {sha[:12]}")
+    say(f"  method           : {plan.method_sha[:12]}  published as "
+        f"{', '.join(plan.method_tags)}")
+    say(f"\n  READY — {plan.tag} at {sha[:12]}: TCC's own checks pass. Dry: nothing was written, "
+        "and no suite ran here — CI's run on that commit is its test run.")
+    return plan
+
+
 def ship(root: Path, release: bool, test_command=None,
          channel: Callable[..., tuple] = channel_checks,
          read_method_sha: Callable[[Path], str] = method_sha,
@@ -589,18 +673,26 @@ def ship(root: Path, release: bool, test_command=None,
          read_published_tags: Callable[[Path, str], list] = published_method_tags,
          relock_with: Callable[[Path], None] = relock,
          say: Callable[[str], None] = print,
-         candidate: str = "", version: str = "") -> Plan:
+         candidate: str = "", version: str = "", at: str = "") -> Plan:
     """The whole thing. Reads and decides first; writes only when `release` is true.
 
     Three modes, the skill's model (hub RELEASE-CHANNEL.md §11): the next patch; a candidate for
     `candidate`, which writes nothing and tags HEAD `beta-vX.Y.Z-rcN`; a named `version`, released
-    the way a patch is.
+    the way a patch is. With `at`, the named `version` is only checked against that commit: dry,
+    no suite, nothing written (tcc#201, hub #246).
     """
     if candidate and version:
         raise Stop("CANDIDATE and VERSION exclude each other — one run cuts one tag")
+    if at and (candidate or not version):
+        raise Stop("AT checks a named release at a commit — give it VERSION=vX.Y.Z, without "
+                   "CANDIDATE")
+    if at and release:
+        raise Stop("AT is a dry check and never cuts anything — drop REAL=1; the release itself "
+                   "goes through `make ship VERSION=… REAL=1` on that commit, or the release train")
     plan = Plan(root=root, mode="candidate" if candidate else "version" if version else "patch")
 
-    tag, checks = channel(root, candidate=candidate or None, version=version or None)
+    asked = {"at": at} if at else {}
+    tag, checks = channel(root, candidate=candidate or None, version=version or None, **asked)
     say("  channel preflight — hub/scripts/release-preflight.py:")
     for check in checks:
         # The carrier's own verdicts and sentences, not a translation of them: rewording somebody
@@ -616,6 +708,10 @@ def ship(root: Path, release: bool, test_command=None,
         raise Stop("the channel preflight worked out no tag and refused nothing — ask it "
                    "directly before shipping")
     plan.tag = tag
+    ci_green = any(check.name == CI_GREEN and check.verdict == CARRIER_OK for check in checks)
+
+    if at:
+        return check_at(root, plan, at, say, read_pinned_sha, read_published_tags)
 
     if plan.mode == "candidate":
         check_candidate_changelog(root, candidate)
@@ -665,18 +761,25 @@ def ship(root: Path, release: bool, test_command=None,
         # release commit on top would be one CI never checked — so nothing is written, and the tag
         # goes on the commit that was checked.
         say(f"\n  version {plan.version} is already committed — tagging this commit, writing nothing")
-        say("  running the suite…")
-        done = subprocess.run(test_command or TEST_COMMAND, cwd=str(root))
-        if done.returncode != 0:
-            raise Stop(f"the suite failed ({done.returncode}) — nothing was written and nothing "
-                       "was tagged")
+        if ci_green:
+            # Hub RELEASE-CHANNEL.md §9.9.1: that run IS the release's test run (tcc#201).
+            say(f"  {CI_GREEN} is ok on this commit — CI's run is the release's test run; "
+                "the suite is not run again here")
+        else:
+            say(f"  {CI_GREEN} could not be read for this commit — running the whole suite "
+                "locally instead, the fallback (hub RELEASE-CHANNEL.md §9.9.1)…")
+            done = subprocess.run(test_command or TEST_COMMAND, cwd=str(root))
+            if done.returncode != 0:
+                raise Stop(f"the suite failed ({done.returncode}) — nothing was written and "
+                           "nothing was tagged")
         publish(root, plan.tag, say)
         return plan
 
     was = bump(root, plan.version)
     relock_with(root)
     say(f"\n  version {was} -> {plan.version}")
-    say("  running the suite…")
+    say("  the release commit is new — CI has not run on it, so the whole suite runs "
+        "locally…")
     done = subprocess.run(test_command or TEST_COMMAND, cwd=str(root))
     if done.returncode != 0:
         bump(root, was)
@@ -713,12 +816,16 @@ def main(argv=None) -> int:
     mode.add_argument("--tag", metavar="vX.Y.Z", default="",
                       help="release this version instead of the next patch; the hub decides "
                            "whether this role may")
+    parser.add_argument("--at", metavar="COMMIT", default="",
+                        help="with --tag: only check that release against this commit — dry, no "
+                             "suite; exit 0 = ready (the release train's `check`, hub #246)")
     args = parser.parse_args(argv)
 
     root = Path(args.root)
-    print(f"ship {'REAL' if args.release else '(dry run)'} — {root}")
+    print(f"ship {'REAL' if args.release else '(dry run)'} — {root}"
+          + (f" — at {args.at}" if args.at else ""))
     try:
-        ship(root, release=args.release, candidate=args.candidate, version=args.tag)
+        ship(root, release=args.release, candidate=args.candidate, version=args.tag, at=args.at)
     except Stop as stop:
         # Flushed first, or the refusal overtakes the lines it refers to: `say` goes to stdout,
         # which is block-buffered the moment this is piped anywhere, and stderr is not. Seen on

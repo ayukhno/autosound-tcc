@@ -199,9 +199,12 @@ def _relock(root):
 
 
 def _run(repo, release=True, test_exit=0, ask=None, say=lambda _m: None, published=None,
-         **mode):
-    """Ship on the fixture, with the suite stubbed and the channel half stood in for."""
-    stub = [sys.executable, "-c", f"import sys; sys.exit({test_exit})"]
+         ran=None, **mode):
+    """Ship on the fixture, with the suite stubbed and the channel half stood in for.
+
+    `ran`: a path the stubbed suite touches, so a case can tell whether the suite ran at all."""
+    touch = f"import pathlib; pathlib.Path({str(ran)!r}).touch(); " if ran else ""
+    stub = [sys.executable, "-c", f"{touch}import sys; sys.exit({test_exit})"]
     return ship_mod.ship(repo, release=release, test_command=stub,
                          channel=ask or channel(),
                          read_method_sha=lambda _root: METHOD_SHA,
@@ -214,7 +217,7 @@ def _run(repo, release=True, test_exit=0, ask=None, say=lambda _m: None, publish
                          # for as well — agreeing with the checkout, which is the state a release
                          # is allowed to happen in. `test_a_release_refuses_when_the_checkout_is_
                          # not_the_recorded_pin` covers the disagreement directly.
-                         read_pinned_sha=lambda _root: METHOD_SHA,
+                         read_pinned_sha=lambda _root, _at="HEAD": METHOD_SHA,
                          relock_with=_relock, say=say, **mode)
 
 
@@ -679,6 +682,11 @@ def test_the_stand_in_has_the_carriers_shape():
     asks = inspect.signature(carrier.preflight).parameters
     assert {"tag", "want_next", "candidate"} <= set(asks), (
         "ship asks the carrier for a patch, a candidate or a named tag; one of those questions is gone")
+    assert "at" in asks, "`make ship VERSION=… AT=…` asks the carrier about a commit, not HEAD"
+    assert carrier.OK == ship_mod.CARRIER_OK, (
+        "ship skips its suite only on the carrier's own `ok` for ci-green — that word has moved")
+    names = {check.name for check in [carrier.ci_verdict(None, "github.com/o/r", "f" * 40)]}
+    assert names == {ship_mod.CI_GREEN}, "ship reads the CI verdict by the carrier's check name"
 
     real = carrier.Check(name="n", verdict=FAIL, line="l")
     stand_in = checks(("n", FAIL))[0]
@@ -1468,3 +1476,216 @@ def test_the_carrier_refuses_a_tag_git_would_not_sign_and_names_the_fix(tmp_path
 
     sign_with(tree, signing_keys["author"])
     assert not carrier.check_signing(tree, tcc).gates, "the key in allowed_signers passes"
+
+
+# --- one green CI run per commit is the release's test run (tcc#201, hub #277 ask 1) -------
+#
+# Hub `RELEASE-CHANNEL.md` §9.9.1 and `WAVES.md` §1 step 4: the PR's green run on the very commit
+# being tagged is the release's test run. v1.1.3's `make ship` ran the whole suite a third time on
+# that commit, serially, 15 min, with the VM paused beside it. Ship reads the carrier's `ci-green`
+# for the commit it tags; it runs the suite itself only when that verdict is not `ok` and did not
+# refuse — CI that could not be read — and the line says which of the two happened. Unknown is
+# never green.
+
+
+def _commit_the_version(repo, version="0.1.25"):
+    """The wave's shape: the version and its notes committed on the branch, landed on main."""
+    (repo / "pyproject.toml").write_text(PYPROJECT.format(version=version), encoding="utf-8")
+    _relock(repo)
+    git(repo, "commit", "--quiet", "-am", f"v{version}: version and notes, on the wave branch")
+    git(repo, "push", "--quiet", "origin", "main")
+    return git(repo, "rev-parse", "HEAD")
+
+
+def test_a_committed_version_with_ci_green_is_tagged_without_running_the_suite(repo, tmp_path):
+    head = _commit_the_version(repo)
+    ran = tmp_path / "suite-ran"
+    lines = []
+
+    _run(repo, test_exit=1, ran=ran, say=lines.append,
+         ask=channel(answers=(("clean-tree", OK), ("ci-green", OK), ("rule", OK))))
+
+    assert not ran.exists(), "CI's green run on this commit is the test run — no local re-run"
+    assert git(repo, "rev-parse", "v0.1.25^{commit}") == head
+    said = [line for line in lines if "suite" in line]
+    assert len(said) == 1, f"one line says what happened to the suite: {lines}"
+    assert "ci-green" in said[0] and "not run" in said[0], said
+
+
+@pytest.mark.parametrize("answers", [
+    (("clean-tree", OK), ("ci-green", UNKNOWN), ("rule", OK)),
+    (("clean-tree", OK), ("rule", OK)),
+], ids=["ci-green-unchecked", "ci-green-not-asked"])
+def test_a_committed_version_whose_ci_could_not_be_read_runs_the_suite_here(repo, tmp_path,
+                                                                             answers):
+    """Unknown is never green: a CI verdict the carrier could not make — and did not refuse —
+    sends ship back to the local serial suite, and the line names it as the fallback."""
+    _commit_the_version(repo)
+    ran = tmp_path / "suite-ran"
+    lines = []
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, test_exit=1, ran=ran, say=lines.append, ask=channel(answers=answers))
+
+    assert ran.exists(), "the suite is the fallback when CI cannot be read"
+    assert "suite failed" in str(stop.value)
+    assert git(repo, "tag", "--list", "v0.1.25") == ""
+    said = [line for line in lines if "suite" in line]
+    assert len(said) == 1, f"one line says what happened to the suite: {lines}"
+    assert "could not be read" in said[0] and "locally" in said[0], said
+
+
+def test_ci_that_refused_stops_the_release_before_any_suite(repo, tmp_path):
+    """The carrier's refusal stays a refusal — red, running, no run, or no answer: ship does not
+    turn it into a local run (the gate is `Check.gates`, the carrier's own)."""
+    _commit_the_version(repo)
+    ran = tmp_path / "suite-ran"
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, ran=ran, ask=channel(answers=(("clean-tree", OK), ("ci-green", FAIL))))
+
+    assert "ci-green" in str(stop.value)
+    assert not ran.exists()
+    assert git(repo, "tag", "--list", "v0.1.25") == ""
+
+
+def test_a_bump_runs_the_suite_even_with_ci_green_and_says_why(repo, tmp_path):
+    """Outside the wave path ship makes the release commit itself: CI's green run was on the
+    commit before it, so it is not this commit's test run."""
+    ran = tmp_path / "suite-ran"
+    lines = []
+
+    _run(repo, ran=ran, say=lines.append,
+         ask=channel(answers=(("clean-tree", OK), ("ci-green", OK), ("rule", OK))))
+
+    assert ran.exists(), "a commit CI never saw is tested here"
+    said = [line for line in lines if "suite" in line]
+    assert len(said) == 1, f"one line says what happened to the suite: {lines}"
+    assert "new" in said[0] and "locally" in said[0], said
+
+
+# --- `make ship VERSION=vY AT=<commit>`: TCC's own checks at a commit, dry (tcc#201, hub #246) --
+
+
+def _at_commit(repo):
+    """A commit carrying v0.1.25 — version and notes — then main moves on past it: the check must
+    read the COMMIT, not the working tree, which says something else by then."""
+    commit = _commit_the_version(repo)
+    _write_changelog(repo, UNRELEASED.format(sha=METHOD_SHA))
+    (repo / "pyproject.toml").write_text(PYPROJECT.format(version="0.1.26"), encoding="utf-8")
+    git(repo, "commit", "--quiet", "-am", "main moves on")
+    git(repo, "push", "--quiet", "origin", "main")
+    return commit
+
+
+def test_a_check_at_a_commit_reads_that_commit_and_writes_nothing(repo, tmp_path):
+    commit = _at_commit(repo)
+    head = git(repo, "rev-parse", "HEAD")
+    ran = tmp_path / "suite-ran"
+    seen, lines = {}, []
+
+    def ask(_root, **asked):
+        seen.update(asked)
+        return "v0.1.25", checks(("clean-tree", OK), ("ci-green", OK), ("rule", OK))
+
+    plan = _run(repo, release=False, test_exit=1, ran=ran, ask=ask, say=lines.append,
+                version="v0.1.25", at=commit)
+
+    assert seen == {"candidate": None, "version": "v0.1.25", "at": commit}, \
+        "the carrier is asked about the commit, not HEAD"
+    assert (plan.mode, plan.tag, plan.version) == ("version", "v0.1.25", "0.1.25")
+    assert plan.commands[0] == f"git tag -s v0.1.25 -m v0.1.25 {commit}"
+    assert not ran.exists(), "a check at a commit never runs the local suite"
+    assert git(repo, "rev-parse", "HEAD") == head
+    assert git(repo, "tag", "--list", "v0.1.25") == ""
+    assert git(repo, "status", "--porcelain") == ""
+    assert any("READY" in line for line in lines), lines
+
+
+@pytest.mark.parametrize("spoil, expect", [
+    ("version", "says 0.1.24"),
+    ("changelog", "top entry is `v0.1.24`"),
+])
+def test_a_check_at_a_commit_refuses_what_that_commit_does_not_carry(repo, spoil, expect):
+    if spoil == "version":
+        commit = git(repo, "rev-parse", "HEAD")   # v0.1.25's notes, the version still 0.1.24
+    else:
+        _write_changelog(repo, UNRELEASED.format(sha=METHOD_SHA).replace("## [Unreleased]\n\n"
+                                                                        "- a candidate carries "
+                                                                        "this\n\n", ""))
+        commit = _commit_the_version(repo)
+    # main moves on to a tree that WOULD pass, so a check reading the working tree is caught.
+    (repo / "pyproject.toml").write_text(PYPROJECT.format(version="0.1.25"), encoding="utf-8")
+    (repo / "CHANGELOG.md").write_text(CHANGELOG.format(tag="v0.1.25", sha=METHOD_SHA),
+                                       encoding="utf-8")
+    git(repo, "commit", "--quiet", "--allow-empty", "-am", "main moves on")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, release=False, version="v0.1.25", at=commit)
+
+    assert expect in str(stop.value)
+
+
+def test_a_check_at_a_commit_pairs_the_changelog_with_the_pin_recorded_THERE(repo):
+    commit = _commit_the_version(repo)
+    asked = []
+
+    def pinned(_root, at="HEAD"):
+        asked.append(at)
+        return "b" * 40
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25", at=commit,
+                      read_method_sha=lambda _root: METHOD_SHA, read_pinned_sha=pinned,
+                      read_published_tags=lambda _root, _sha: ["v3.0.58"], say=lambda _m: None)
+
+    assert asked == [commit], "the pin is read from the commit being checked"
+    assert "b" * 12 in str(stop.value), "the CHANGELOG is held to that pin, not the checkout"
+
+
+@pytest.mark.parametrize("mode, expect", [
+    ({"release": True, "version": "v0.1.25"}, "dry"),
+    ({"release": False}, "VERSION"),
+    ({"release": False, "candidate": "v0.1.25"}, "VERSION"),
+])
+def test_a_check_at_a_commit_is_dry_and_names_its_version(repo, mode, expect):
+    commit = git(repo, "rev-parse", "HEAD")
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.ship(repo, channel=channel(), at=commit, say=lambda _m: None, **mode)
+    assert expect in str(stop.value)
+    assert git(repo, "tag", "--list") == "v0.1.24", "nothing was tagged"
+
+
+def test_the_recorded_pin_is_read_at_a_given_commit_for_real():
+    root = Path(__file__).resolve().parents[1]
+    if not (root / "vendor" / "autosound-tuning-skill").exists():
+        pytest.skip("submodule not checked out")
+    first = subprocess.run(["git", "rev-list", "--max-count=1", "HEAD~1"], cwd=str(root),
+                           capture_output=True, text=True).stdout.strip()
+
+    said = subprocess.run(["git", "ls-tree", first, "vendor/autosound-tuning-skill"],
+                          cwd=str(root), capture_output=True, text=True).stdout.split()
+    assert ship_mod.pinned_method_sha(root, first) == said[2]
+
+
+def test_the_command_line_takes_a_commit_and_answers_ready_by_its_exit(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(ship_mod, "ship", lambda root, **kw: seen.update(kw))
+    assert ship_mod.main(["--root", str(tmp_path), "--tag", "v0.2.0", "--at", "abc1234"]) == 0
+    assert (seen["version"], seen["at"], seen["release"]) == ("v0.2.0", "abc1234", False)
+
+    def refuse(_root, **_kw):
+        raise ship_mod.Stop("not ready")
+    monkeypatch.setattr(ship_mod, "ship", refuse)
+    assert ship_mod.main(["--root", str(tmp_path), "--tag", "v0.2.0", "--at", "abc1234"]) == 1
+
+
+@pytest.mark.skipif(shutil.which("make") is None, reason="no make on this machine")
+def test_make_ship_passes_the_commit_from_the_command_line_only():
+    done = _make_n("ship", "VERSION=v0.2.0", "AT=abc1234")
+    assert done.returncode == 0, done.stderr
+    assert "--tag v0.2.0" in done.stdout and "--at abc1234" in done.stdout, done.stdout
+
+    done = _make_n("ship", "VERSION=v0.2.0", env={**os.environ, "AT": "abc1234"})
+    assert done.returncode == 0, done.stderr
+    assert "--at" not in done.stdout, "an AT in the environment must not move the check"
