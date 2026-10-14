@@ -139,6 +139,50 @@ def test_compare_offers_name_each_version_with_the_day_it_was_made(tmp_path, mon
         "the days are remembered per file: only the open version's own file is read again"
 
 
+def test_a_tz_aware_created_is_read_as_the_local_day():
+    """#203: a `created` with its offset is the day it was where this machine is."""
+    from datetime import datetime
+
+    stamp = "2026-09-20T23:30:00+00:00"
+    assert ledger_line._day(stamp) == datetime.fromisoformat(stamp).astimezone().strftime("%d.%m")
+
+
+@pytest.mark.parametrize("stamp", ["0001-01-01T00:00:00+14:00", "9999-12-31T23:59:59-14:00",
+                                   "not a time", "", 20260920])
+def test_a_created_that_cannot_be_a_local_day_is_no_day(stamp):
+    """#203: `astimezone()` raises `OverflowError` at the year-1/9999 edges, and on Windows
+    `OSError` before 1970; either made `compare_offer` raise and the project load fail."""
+    assert ledger_line._day(stamp) is None
+
+
+def test_a_created_windows_cannot_place_is_no_day(monkeypatch):
+    """#203: Windows' `astimezone()` raises `OSError` for a time before 1970."""
+    from datetime import datetime as real
+
+    class _Moment(real):
+        def astimezone(self, tz=None):
+            raise OSError(22, "Invalid argument")
+
+    class _Clock:
+        @staticmethod
+        def fromisoformat(text):
+            moment = real.fromisoformat(text)
+            return _Moment(moment.year, moment.month, moment.day, tzinfo=moment.tzinfo)
+
+    monkeypatch.setattr(ledger_line, "datetime", _Clock)
+    assert ledger_line._day("1969-07-20T20:17:00+00:00") is None
+
+
+def test_compare_offer_survives_a_created_it_cannot_place(tmp_path):
+    """#203: one version's `created` at the edge of the calendar costs that version its day, not
+    the offer."""
+    _arbiter_example(tmp_path)
+    _made_on(tmp_path, {"v_003": "0001-01-01T00:00:00+14:00", "v_002": "2026-09-19T09:00:00"})
+    offer = ledger_line.compare_offer(tmp_path, "SQ", "v_006")
+    assert offer.labels["v_003"] == "v_003 · SQ-1"
+    assert offer.labels["v_002"] == "v_002 · 19.09"
+
+
 def test_compare_offers_the_previous_configuration_by_default(tmp_path):
     """«Порівняти з» for SQ-2 (v_006): its own versions with the names they were saved under, then
     FULL's, keyed by their preset; selected by default the PREVIOUS configuration — SQ-1's v_003,

@@ -102,10 +102,12 @@ def _day(created) -> Optional[str]:
         return None
     try:
         moment = datetime.fromisoformat(created)
-    except ValueError:
+        if moment.tzinfo is not None:
+            # `OverflowError` at the year-1/9999 edges, `OSError` on Windows before 1970: a day
+            # that cannot be placed is no day, not a project that fails to load (#203).
+            moment = moment.astimezone()
+    except (ValueError, OverflowError, OSError):
         return None
-    if moment.tzinfo is not None:
-        moment = moment.astimezone()
     return moment.strftime("%d.%m")
 
 
