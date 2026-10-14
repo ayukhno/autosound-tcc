@@ -15,7 +15,7 @@ def test_missing_file_reads_as_an_empty_registry(tmp_path):
     registry = SessionRegistry(tmp_path)
 
     assert registry.current_phase() is None
-    assert registry.resumable_session() is None
+    assert registry.resumable_session(route="sdk") is None
 
 
 def test_sync_phase_keeps_session_bookkeeping_and_no_process_data(tmp_path):
@@ -38,7 +38,7 @@ def test_entering_a_new_phase_closes_the_previous_one(tmp_path):
 
     registry.sync_phase("2")
 
-    assert registry.resumable_session("1") is None  # closed -> next launch starts fresh
+    assert registry.resumable_session("1", route="sdk") is None  # closed -> next launch starts fresh
     assert registry.load()["phases"]["1"]["closed"] is True
     assert registry.current_phase() == "2"
 
@@ -48,12 +48,12 @@ def test_open_phase_is_resumable_and_closed_phase_is_not(tmp_path):
     registry.sync_phase("2")
     registry.bind_session("2", "sess-abc")
 
-    assert registry.resumable_session() == "sess-abc"
-    assert registry.resumable_session("2") == "sess-abc"
+    assert registry.resumable_session(route="sdk") == "sess-abc"
+    assert registry.resumable_session("2", route="sdk") == "sess-abc"
 
     registry.close_phase("2")
 
-    assert registry.resumable_session("2") is None
+    assert registry.resumable_session("2", route="sdk") is None
 
 
 def test_writes_are_atomic_and_leave_no_temp_file(tmp_path):
@@ -117,7 +117,7 @@ def test_a_registry_that_is_not_an_object_is_set_aside_not_an_attribute_error(tm
     registry = SessionRegistry(tmp_path)
     registry.path.write_text("[]", encoding="utf-8")
 
-    assert registry.resumable_session() is None
+    assert registry.resumable_session(route="sdk") is None
     registry.sync_phase("1")
 
     assert registry.current_phase() == "1"
@@ -142,7 +142,7 @@ def test_a_registry_shaped_wrong_inside_is_set_aside_not_an_error(tmp_path, app_
     registry = SessionRegistry(tmp_path)
     registry.path.write_bytes(misshapen)
 
-    assert registry.resumable_session() is None
+    assert registry.resumable_session(route="sdk") is None
     registry.sync_phase("3")
 
     assert registry.current_phase() == "3"
@@ -174,7 +174,7 @@ def test_a_registry_that_cannot_be_opened_reads_as_empty_and_is_never_written_ov
     before = registry.path.read_bytes()
     registry.path.chmod(0)
     try:
-        assert registry.resumable_session() is None
+        assert registry.resumable_session(route="sdk") is None
         with pytest.raises(OSError) as refused:
             write(registry)
     finally:
@@ -199,7 +199,7 @@ def test_a_registry_that_cannot_be_opened_is_refused_on_every_platform(tmp_path,
     registry.path.mkdir(parents=True)
     (registry.path / "inside").write_text("kept", encoding="utf-8")
 
-    assert registry.resumable_session() is None
+    assert registry.resumable_session(route="sdk") is None
     with pytest.raises(OSError) as refused:
         write(registry)
 
@@ -208,3 +208,60 @@ def test_a_registry_that_cannot_be_opened_is_refused_on_every_platform(tmp_path,
     assert [p.name for p in tcc.iterdir()] == ["sessions.json"], (
         "not set aside, and no temp file left beside it")
     assert len(app_log_told) == 1 and str(registry.path) in app_log_told[0], "said once"
+
+
+# ---- routes (tcc #181): an id is resumed only by the harness that made it --------------------
+
+
+def test_bind_session_writes_its_route(tmp_path):
+    registry = SessionRegistry(tmp_path)
+    registry.sync_phase("2")
+
+    registry.bind_session("2", "sess-claude")
+    assert registry.load()["phases"]["2"]["route"] == "sdk", "the SDK's, unless said otherwise"
+    registry.bind_session("2", "thread-codex", route="codex")
+    assert registry.load()["phases"]["2"]["route"] == "codex"
+    assert registry.load()["schema_version"] == 1, "additive: the schema stays 1"
+
+
+def test_a_claude_id_is_never_handed_to_codex_and_the_reverse(tmp_path):
+    registry = SessionRegistry(tmp_path)
+    registry.sync_phase("2")
+
+    registry.bind_session("2", "sess-claude", route="sdk")
+    assert registry.resumable_session(route="codex") is None
+    assert registry.resumable_session(route="sdk") == "sess-claude"
+
+    registry.bind_session("2", "thread-codex", route="codex")
+    assert registry.resumable_session(route="sdk") is None
+    assert registry.resumable_session(route="codex") == "thread-codex"
+
+
+def test_an_entry_from_before_routes_reads_as_the_sdks(tmp_path):
+    """Every id written before the field existed was the SDK's: it still resumes there, and only
+    there."""
+    registry = SessionRegistry(tmp_path)
+    registry.path.write_text(json.dumps({
+        "schema_version": 1, "current_phase": "3",
+        "phases": {"3": {"session_id": "sess-old", "closed": False}},
+    }), encoding="utf-8")
+
+    assert registry.resumable_session(route="sdk") == "sess-old"
+    assert registry.resumable_session(route="codex") is None
+
+
+def test_no_route_asked_means_any_route_and_a_closed_phase_still_gives_none(tmp_path):
+    """omp's rule: it resumes by folder and asks only whether the phase has a live session."""
+    registry = SessionRegistry(tmp_path)
+    registry.sync_phase("2")
+    registry.bind_session("2", "thread-codex", route="codex")
+
+    assert registry.resumable_session(route=None) == "thread-codex"
+    registry.close_phase("2")
+    assert registry.resumable_session(route=None) is None
+
+
+def test_the_route_cannot_be_left_out():
+    """Required, so no new caller gets another harness's id by forgetting to name its own."""
+    with pytest.raises(TypeError):
+        SessionRegistry.resumable_session(SessionRegistry(os.devnull))  # type: ignore[call-arg]

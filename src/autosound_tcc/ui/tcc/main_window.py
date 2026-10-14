@@ -79,6 +79,7 @@ from autosound_tcc.core import (
     project_trust,
     reviewer_key,
     self_check,
+    session_routes,
     shell_gate,
     target_curve,
     terminal_launcher,
@@ -88,7 +89,6 @@ from autosound_tcc.core import (
 from autosound_tcc.core.contract_check import ContractReport
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.core.rew_bridge import RewBridge
-from autosound_tcc.core.tuning_session import TuningSession
 from autosound_tcc.state import (
     acoustics_view,
     ledger_line,
@@ -4958,38 +4958,10 @@ class MainWindow(QMainWindow):
         self._launch_session(fresh=mode == "fresh")
 
     def _session_factory(self, choice, server, resumed: bool, effort: Optional[str]):
-        """How the session for `choice` is built — called on the worker's thread, once.
-
-        Both routes get the project's language, the same one the interview has always been given.
-        It went into `get_tcc_state` and nowhere else, so the model could only learn it by asking —
-        and the first turn answers before it has. Put into the omp factory alone (wave 2.1), it
-        was a keyword omp did not take, and the SDK route it was meant for never got it (tcc#56).
-        """
-        language = i18n.current_language()
-        if choice.harness == "omp":
-            # omp reads the project's own `.mcp.json`, which the MCP server wrote on start, so it
-            # needs no url/token of its own.
-            return lambda: omp_session.OmpSession(
-                project_dir=server.project_dir,
-                bridge=self._bridge,
-                model=choice.model,
-                resume=resumed,
-                gate=self._effective_gate(),
-                always_allowed=self._always_allowed(),
-                effort=effort,
-                language=language,
-            )
-        return lambda: TuningSession(
-            project_dir=server.project_dir,
-            mcp_url=server.url,
-            mcp_token=server.token,
-            bridge=self._bridge,
-            model=choice.model,
-            gate=self._effective_gate(),
-            always_allowed=self._always_allowed(),
-            effort=effort,
-            language=language,
-        )
+        return session_routes.factory(
+            choice, project_dir=server.project_dir, bridge=self._bridge, mcp_url=server.url,
+            mcp_token=server.token, gate=self._effective_gate, always_allowed=self._always_allowed,
+            resumed=resumed, effort=effort, language=i18n.current_language())
 
     def _launch_session(self, opening: Optional[str] = None, fresh: bool = False) -> None:
         # A server that started and then died is as down as one that never started (F3c).
@@ -5010,18 +4982,14 @@ class MainWindow(QMainWindow):
         choice = self._generator_choice()
         if choice is None:
             return
-        if choice.harness == "omp" and not omp_session.is_available():
-            self._dialog._add_system_message(i18n.t("ompMissing"))
+        if refusal := session_routes.blocker(choice, server):
+            self._dialog._add_system_message(mcp_view.say(refusal))
             return
-        if choice.harness == "omp" and getattr(server, "config_error", ""):
-            # omp reaches TCC only through `.mcp.json`: unwritten, it ran without TCC's tools.
-            self._dialog._add_system_message(mcp_view.omp_without_config(server))
-            return
-        probe = TuningSession(project_dir=server.project_dir)  # cheap: only reads the registry
         # "Start a new session" means an empty context on purpose: the project's state is on disk
         # and the new session reads it, which is cheaper than carrying a long transcript that has
         # already been written down.
-        resumed = probe.resumed_from is not None and not fresh
+        route = session_routes.resume_route(choice.harness)
+        resumed = server.registry.resumable_session(route=route) is not None and not fresh
         # Fixed for the session's whole life on both routes (the SDK takes it at client
         # construction), so it is read here, once, at the moment the session is built.
         effort = model_choices.resolve_effort(self._project_setting(_EFFORT_KEY))
@@ -5756,22 +5724,11 @@ class MainWindow(QMainWindow):
             self._hand_off(worker, "fresh")
 
     def _open_terminal(self) -> None:
-        """Front-end B: hand the project to the user's own CLI in their own terminal.
-
-        Same choice as the in-app session, same reasoning: the model picker decides the harness,
-        so the terminal opens on the CLI that carries it -- `claude` for an SDK choice, `omp` for
-        an omp one -- rather than on whatever happens to be first on PATH. Two front-ends that
-        disagree about which model is running would make the picker a lie in one of them.
-        """
+        """Front-end B: the project in the user's own CLI — the one that carries the pick
+        (`session_routes.terminal_invocation`) — in their own terminal."""
         project_dir = self._mcp_server.project_dir if self._mcp_server else config.project_dir()
         choice = self._generator_choice()
-        if choice.harness == "omp":
-            cli, model = "omp", choice.model
-            # Without the overlay TCC's own tools stay behind xd:// and never reach the model --
-            # the terminal would be quietly weaker than the in-app session for no visible reason.
-            extra = ("--config", str(omp_session.overlay_path(project_dir)))
-        else:
-            cli, model, extra = "claude", choice.model, ()
+        cli, model, extra = session_routes.terminal_invocation(choice, project_dir)
         try:
             launched = terminal_launcher.launch(
                 project_dir, cli=cli, model=model, extra=extra,

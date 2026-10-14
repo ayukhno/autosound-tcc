@@ -15,9 +15,10 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from autosound_tcc.core import critic, omp_session, terminal_launcher  # noqa: E402
+from autosound_tcc.core import critic, omp_session, session_routes, terminal_launcher  # noqa: E402
 from autosound_tcc.core.omp_session import OmpSession  # noqa: E402
 from autosound_tcc.core.session_registry import SessionRegistry  # noqa: E402
+from autosound_tcc.core.session_routes import Refusal  # noqa: E402
 from autosound_tcc.core.tuning_session import TuningSession  # noqa: E402
 from autosound_tcc.ui.tcc import i18n, mcp_view  # noqa: E402
 from autosound_tcc.ui.tcc.main_window import MainWindow  # noqa: E402
@@ -213,3 +214,90 @@ def test_a_terminal_that_cannot_open_says_why_on_the_strip(tmp_path, monkeypatch
     MainWindow._open_terminal(host)
 
     assert notes == ["'claude' is not on PATH"]
+
+
+def test_an_sdk_launch_never_resumes_a_codex_thread_and_omp_still_reads_any(tmp_path, monkeypatch):
+    """The window asks the registry for its route's id (`resume_route`): a Codex thread id is not
+    the SDK's to resume. omp keeps its rule — any live session in the phase."""
+    monkeypatch.setattr(omp_session, "is_available", lambda: True)
+    server = _server(tmp_path)
+    server.registry.sync_phase("2")
+    server.registry.bind_session("2", "thread-codex", route="codex")
+
+    for harness, resumed in (("sdk", False), ("omp", True)):
+        host, _ = _launch_host(tmp_path, SimpleNamespace(harness=harness, model="m"), server)
+        assert _launch(host) is resumed, harness
+
+
+# ---- session_routes as plain functions ------------------------------------------------------
+
+
+def _made(choice, tmp_path, gate=lambda: "writes", resumed=False):
+    return session_routes.factory(
+        choice, project_dir=tmp_path, bridge="the-bridge", mcp_url="http://u", mcp_token="tok",
+        gate=gate, always_allowed=lambda: frozenset({"Bash"}), resumed=resumed, effort="max",
+        language="de")
+
+
+def test_factory_builds_each_routes_session(tmp_path, built):
+    _made(SimpleNamespace(harness="sdk", model="claude-opus-5"), tmp_path)()
+    _made(SimpleNamespace(harness="omp", model="google/gemini"), tmp_path, resumed=True)()
+
+    assert built == [
+        (TuningSession, dict(project_dir=tmp_path, mcp_url="http://u", mcp_token="tok",
+                             bridge="the-bridge", model="claude-opus-5", gate="writes",
+                             always_allowed=frozenset({"Bash"}), effort="max", language="de")),
+        (OmpSession, dict(project_dir=tmp_path, bridge="the-bridge", model="google/gemini",
+                          resume=True, gate="writes", always_allowed=frozenset({"Bash"}),
+                          effort="max", language="de")),
+    ]
+
+
+def test_factory_builds_nothing_until_called_and_asks_the_gate_then(tmp_path, built):
+    asked: list[str] = []
+    factory = _made(SimpleNamespace(harness="sdk", model="m"), tmp_path,
+                    gate=lambda: asked.append("gate") or "auto")
+    assert built == [] and asked == []
+
+    factory()
+
+    assert asked == ["gate"] and built[0][1]["gate"] == "auto"
+
+
+@pytest.mark.parametrize("harness, route", [("sdk", "sdk"), ("omp", None), ("codex", "codex")])
+def test_resume_route_per_harness(harness, route):
+    assert session_routes.resume_route(harness) == route
+
+
+def test_blocker_refuses_omp_only(tmp_path, monkeypatch):
+    unwritten = _server(tmp_path, config_error="PermissionError: ro")
+    omp, sdk = SimpleNamespace(harness="omp"), SimpleNamespace(harness="sdk")
+
+    monkeypatch.setattr(omp_session, "is_available", lambda: False)
+    assert session_routes.blocker(omp, unwritten) == Refusal("ompMissing"), "missing comes first"
+    assert session_routes.blocker(sdk, unwritten) is None
+    monkeypatch.setattr(omp_session, "is_available", lambda: True)
+    assert session_routes.blocker(omp, _server(tmp_path)) is None
+    assert session_routes.blocker(omp, unwritten) == Refusal(
+        "mcpNoConfigOmp", {"error": "PermissionError: ro"})
+
+
+def test_omp_without_config_names_the_file_it_could_not_read_or_move(tmp_path):
+    path = tmp_path / ".mcp.json"
+    unread = SimpleNamespace(config_error="e", config_unreadable=path)
+    unmoved = SimpleNamespace(config_error="e", config_unmoved=path, config_unreadable=path)
+
+    assert session_routes.omp_without_config(unread) == Refusal(
+        "mcpConfigUnreadOmp", {"path": path, "error": "e"})
+    assert session_routes.omp_without_config(unmoved) == Refusal(
+        "mcpConfigUnmovedOmp", {"path": path, "error": "e"}), "unmoved is said before unread"
+    assert mcp_view.say(Refusal("ompMissing")) == i18n.t("ompMissing")
+
+
+@pytest.mark.parametrize("harness, cli", [("sdk", "claude"), ("omp", "omp"), ("codex", "claude")])
+def test_terminal_invocation_per_harness(tmp_path, harness, cli):
+    """A Codex pick still opens `claude`: today's gap, closed by task 8, pinned until then."""
+    got = session_routes.terminal_invocation(SimpleNamespace(harness=harness, model="m"), tmp_path)
+
+    extra = ("--config", str(omp_session.overlay_path(tmp_path))) if harness == "omp" else ()
+    assert got == (cli, "m", extra)

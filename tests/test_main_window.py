@@ -2332,7 +2332,7 @@ def test_changing_the_permission_mode_reaches_the_running_session(tmp_path, monk
     window._reload_model_choices()
     assert effort.currentData() == level, "the picker does not snap back to the store's"
     built = {}
-    monkeypatch.setattr(main_window, "TuningSession", lambda **kw: built.update(kw))
+    monkeypatch.setattr(main_window.session_routes, "TuningSession", lambda **kw: built.update(kw))
     server = SimpleNamespace(project_dir=tmp_path, url="http://127.0.0.1:1", token="t")
     window._session_factory(SimpleNamespace(harness="sdk", model="m"), server, False, level)()
     assert built["gate"] == omp_session.GATE_FOREIGN
@@ -8373,6 +8373,7 @@ def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):
     it now says why the server is down, once, as it does for one that never started."""
     from autosound_tcc.core import model_choices as mc
     from autosound_tcc.core.mcp_server import TccMcpServer
+    from autosound_tcc.core.session_registry import SessionRegistry
 
     _app()
     window = MainWindow()
@@ -8405,17 +8406,18 @@ def test_a_session_is_not_started_on_a_server_that_died(tmp_path, monkeypatch):
         unread = tmp_path / ".mcp.json"
         window._mcp_server = SimpleNamespace(stopped_reason=None, serving=True,
                                              config_error="StoreUnreadable: x",
-                                             config_unreadable=unread, project_dir=tmp_path)
+                                             config_unreadable=unread, project_dir=tmp_path,
+                                             registry=SessionRegistry(tmp_path / ".tcc"))
         window._launch_session()
 
         # A Claude session never reads `.mcp.json`: the same unwritten file refuses nothing.
         class _PastTheGate(Exception):
             pass
 
-        def past_the_gate(**_kwargs):
+        def past_the_gate(*_args, **_kwargs):
             raise _PastTheGate
 
-        monkeypatch.setattr(main_window, "TuningSession", past_the_gate)
+        monkeypatch.setattr(window, "_session_factory", past_the_gate)
         picked["choice"] = mc.Choice(harness="sdk", model="claude-opus-5", label="Opus 5")
         with pytest.raises(_PastTheGate):
             window._launch_session()

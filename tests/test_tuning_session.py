@@ -13,6 +13,7 @@ import shlex
 import sys
 from concurrent.futures import Future
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -192,6 +193,19 @@ def test_resume_is_driven_by_the_registry(tmp_path):
     session.registry.bind_session("2", "sess-xyz")
 
     assert TuningSession(project_dir=tmp_path).resumed_from == "sess-xyz"
+
+
+def test_the_sdk_route_binds_its_id_as_the_sdks_and_never_resumes_a_codex_thread(tmp_path):
+    """tcc #181: a Codex thread id handed to the SDK as `resume` fails, or opens a context that
+    is not this one."""
+    session, _ = _session(tmp_path, allow=False)
+    session.registry.sync_phase("2")
+    session._remember_session(SimpleNamespace(session_id="sess-xyz"))
+    assert session.registry.load()["phases"]["2"]["route"] == "sdk"
+
+    session.registry.bind_session("2", "thread-codex", route="codex")
+
+    assert TuningSession(project_dir=tmp_path).resumed_from is None
 
 
 def test_a_closed_phase_starts_a_fresh_session(tmp_path):

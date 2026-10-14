@@ -31,6 +31,13 @@ from autosound_tcc.core import own_store
 
 SCHEMA_VERSION = 1
 
+#: Which harness an id belongs to (tcc #181): a Claude SDK session id handed to Codex — or a Codex
+#: thread id to the SDK — is a resume that fails or, worse, opens someone else's context. Additive,
+#: so the schema stays 1: an entry with no route was written before routes existed, and only the
+#: SDK route bound ids then.
+SDK_ROUTE = "sdk"
+CODEX_ROUTE = "codex"
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -80,7 +87,7 @@ class SessionRegistry:
     def load(self) -> dict[str, Any]:
         """The registry as it stands — an empty one when there is none, and never an exception.
 
-        A plain read (R-l): the window builds a session only to read this, unguarded. A broken
+        A plain read (R-l): the window reads it before every launch, unguarded. A broken
         file — or one shaped wrong inside (`_misshapen`) — has been set aside with its bytes and
         said by `own_store`, and one that cannot be opened has been said; here both read as an
         empty registry, the way a missing one does.
@@ -99,11 +106,18 @@ class SessionRegistry:
     def current_phase(self) -> Optional[str]:
         return self.load().get("current_phase")
 
-    def resumable_session(self, phase: Optional[str] = None) -> Optional[str]:
-        """The session id to resume for `phase`, or None if it's closed/unknown/never started.
+    def resumable_session(
+        self, phase: Optional[str] = None, *, route: Optional[str]
+    ) -> Optional[str]:
+        """The session id to resume for `phase` on `route`, or None if it's closed/unknown/never
+        started — or was bound by another route.
 
         None is the signal to start a fresh session — the caller does not need to distinguish
         "phase finished" from "never ran", because both mean the same thing here.
+
+        `route` is required, so no caller gets another harness's id by leaving it out. `None`
+        asks for an id of any route: omp's rule, which resumes by folder and only asks whether
+        the phase has a live session at all (`session_routes.resume_route`).
         """
         data = self.load()
         phase = phase or data.get("current_phase")
@@ -111,6 +125,8 @@ class SessionRegistry:
             return None
         entry = data["phases"].get(str(phase)) or {}
         if entry.get("closed"):
+            return None
+        if route is not None and entry.get("route", SDK_ROUTE) != route:
             return None
         return entry.get("session_id") or None
 
@@ -141,11 +157,13 @@ class SessionRegistry:
         self._write(data)
         return entry
 
-    def bind_session(self, phase: str, session_id: str) -> None:
-        """Attach the SDK's session id to a phase, so a later launch can resume it."""
+    def bind_session(self, phase: str, session_id: str, *, route: str = SDK_ROUTE) -> None:
+        """Attach a session id to a phase, with the route that made it, so a later launch on the
+        same route can resume it."""
         data = self._read()
         entry = data["phases"].setdefault(str(phase), {"closed": False})
         entry["session_id"] = session_id
+        entry["route"] = route
         entry["updated"] = _now()
         data.setdefault("current_phase", str(phase))
         self._write(data)

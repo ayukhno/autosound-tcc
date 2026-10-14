@@ -38,7 +38,7 @@ from autosound_tcc.core.agent_events import (
 from autosound_tcc.core.agent_session import language_name
 from autosound_tcc.core.mcp_server import (ConfirmRequest, HeadlessBridge, UiBridge,
                                            await_confirmation)
-from autosound_tcc.core.session_registry import SessionRegistry
+from autosound_tcc.core.session_registry import SDK_ROUTE, SessionRegistry
 from autosound_tcc.core.shell_gate import (
     GATE_AUTO,
     GATE_NEVER,
@@ -192,8 +192,8 @@ def _read_roots_for(project_dir: Path,
     it; `shell_gate._is_within` resolves what is read, so a path that merely *looks* like it is
     under a root doesn't slip through.
 
-    Never raises: `TuningSession.__init__` asks it, and the window builds a session only to read
-    the registry, unguarded. Where TCC's own copy cannot even be looked up — `~nosuchuser` in
+    Never raises: `TuningSession.__init__` asks it, and the worker builds the session unguarded
+    (the window's launch once built one only to read the registry, too). Where TCC's own copy cannot even be looked up — `~nosuchuser` in
     `AUTOSOUND_SKILL_DIR` raises RuntimeError there — the project alone is the answer, and the
     binding, refused for the same reason, is what a start says.
     """
@@ -266,7 +266,7 @@ class TuningSession:
         self.always_allowed = always_allowed or frozenset()
         self.session_id: Optional[str] = None
         self._read_roots = _read_roots_for(self.project_dir)
-        self.resumed_from: Optional[str] = self.registry.resumable_session()
+        self.resumed_from: Optional[str] = self.registry.resumable_session(route=SDK_ROUTE)
         self._phase_at_start = self.registry.current_phase()
         self._mcp_servers: dict[str, Any] = {}
         if mcp_url:
@@ -595,7 +595,7 @@ class TuningSession:
         self.session_id = result.session_id
         phase = self.registry.current_phase() or self._phase_at_start
         if phase:
-            self.registry.bind_session(phase, result.session_id)
+            self.registry.bind_session(phase, result.session_id, route=SDK_ROUTE)
 
     async def close(self) -> None:
         if self._started and self._client is not None:
