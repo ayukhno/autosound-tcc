@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
-from autosound_tcc.core import codex_cli, critic, terminal_launcher  # noqa: E402
+from autosound_tcc.core import child, codex_cli, critic, terminal_launcher  # noqa: E402
 from autosound_tcc.ui.tcc import i18n, main_menu, menu_registry, terminal_menu  # noqa: E402
 
 LABELS = ["Claude", "Codex", "Antigravity", "OMP"]
@@ -121,7 +121,7 @@ def test_codex_opens_the_codex_line_with_the_pick_s_model(tmp_path, launched):
     terminal_menu.open_in(_host(tmp_path, notes, harness="codex", model="gpt-5.6-luna"), "codex")
 
     ((kind, kw),) = launched
-    assert kw["cli"] == sys.executable and kw["model"] == "gpt-5.6-luna"
+    assert kw["cli"] == child.script_interpreter() and kw["model"] == "gpt-5.6-luna"
     assert kw["extra"] == ("-m", "autosound_tcc.core.codex_terminal", str(tmp_path))
     assert notes == [i18n.t("terminalOpened").format(cli="codex")]
 
@@ -185,3 +185,33 @@ def test_the_launcher_never_falls_back_when_a_client_is_named(monkeypatch, tmp_p
 
     with pytest.raises(terminal_launcher.TerminalLaunchError):
         terminal_launcher.launch(Path(tmp_path), cli="agy")
+
+
+_WINDOWED = r"C:\Users\u\AppData\Roaming\uv\tools\autosound-tcc\Scripts\pythonw.exe"
+_CONSOLE = _WINDOWED[: -len("pythonw.exe")] + "python.exe"
+
+
+@pytest.fixture
+def windows_gui(monkeypatch):
+    """TCC as it runs on Windows: the GUI's interpreter is `pythonw.exe`, `python.exe` beside it."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "executable", _WINDOWED)
+    real = Path.exists
+    monkeypatch.setattr(Path, "exists", lambda self, *a, **k: (
+        str(self) == _CONSOLE or real(self, *a, **k)))
+
+
+def test_on_windows_the_codex_line_runs_the_console_interpreter(tmp_path, launched, windows_gui):
+    """`pythonw.exe` has no console: `codex_terminal`'s refusals print to nowhere and Codex gets a
+    console of its own. The line runs `python.exe` beside it (`child.script_interpreter`)."""
+    terminal_menu.open_in(_host(tmp_path, [], harness="codex"), "codex")
+
+    ((_kind, kw),) = launched
+    assert kw["cli"] == _CONSOLE
+
+
+def test_on_windows_the_plain_terminal_s_note_names_the_console_interpreter(windows_gui):
+    note = terminal_menu.codex_note()
+
+    assert f'"{_CONSOLE}" -m autosound_tcc.core.codex_terminal .' in note
+    assert "pythonw" not in note

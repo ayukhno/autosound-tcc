@@ -19,7 +19,7 @@ from typing import Optional
 
 from PySide6.QtCore import QTimer
 
-from autosound_tcc.core import config, critic, session_routes, terminal_launcher
+from autosound_tcc.core import child, config, critic, session_routes, terminal_launcher
 from autosound_tcc.ui.tcc import control_layout, i18n, main_menu, menu_registry
 
 
@@ -32,11 +32,13 @@ def label(client: str) -> str:
 
 def codex_note() -> str:
     """The plain terminal's one printed line: how to start Codex there with TCC's tools. The
-    project is `.` — the shell is already in it — so no path needs quoting but the interpreter's."""
+    project is `.` — the shell is already in it — so no path needs quoting but the interpreter's,
+    and that is the console one (`python.exe`, not the GUI's `pythonw.exe`)."""
+    python = child.script_interpreter()
     if sys.platform.startswith("win"):
-        start = f'"{sys.executable}" -m {session_routes.CODEX_TERMINAL} .'
+        start = f'"{python}" -m {session_routes.CODEX_TERMINAL} .'
     else:
-        start = shlex.join([sys.executable, "-m", session_routes.CODEX_TERMINAL, "."])
+        start = shlex.join([python, "-m", session_routes.CODEX_TERMINAL, "."])
     return i18n.t("codexTerminalHint").format(command=start)
 
 

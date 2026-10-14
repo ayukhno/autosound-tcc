@@ -16,7 +16,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from autosound_tcc.core import critic, omp_session, session_routes, terminal_launcher  # noqa: E402
+from autosound_tcc.core import (  # noqa: E402
+    child, critic, omp_session, session_routes, terminal_launcher)
 from autosound_tcc.core.codex_session import CodexSession  # noqa: E402
 from autosound_tcc.core.omp_session import OmpSession  # noqa: E402
 from autosound_tcc.core.session_registry import SessionRegistry  # noqa: E402
@@ -343,10 +344,29 @@ def test_terminal_invocation_per_harness(tmp_path, monkeypatch, harness, cli):
     got = session_routes.terminal_invocation(SimpleNamespace(harness=harness, model="m"), tmp_path)
 
     if harness == "codex":
-        assert got == (sys.executable, "m", _codex_line(tmp_path))
+        assert got == (child.script_interpreter(), "m", _codex_line(tmp_path))
     else:
         extra = ("--config", str(omp_session.overlay_path(tmp_path))) if harness == "omp" else ()
         assert got == (cli, "m", extra)
+
+
+def test_on_windows_the_codex_line_runs_python_exe_not_pythonw(tmp_path, monkeypatch):
+    """The GUI runs under `pythonw.exe` — no console, so `codex_terminal`'s refusals would print
+    to nowhere and Codex would get a console of its own (C1)."""
+    from pathlib import Path
+    windowed = r"C:\tools\autosound-tcc\Scripts\pythonw.exe"
+    console = r"C:\tools\autosound-tcc\Scripts\python.exe"
+    _codex_found(monkeypatch)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "executable", windowed)
+    real = Path.exists
+    monkeypatch.setattr(Path, "exists", lambda self, *a, **k: str(self) == console or real(
+        self, *a, **k))
+
+    cli, _model, _extra = session_routes.client_invocation(
+        "codex", SimpleNamespace(harness="codex", model="m"), tmp_path)
+
+    assert cli == console
 
 
 @pytest.mark.parametrize("client", session_routes.TERMINAL_CLIENTS[1:])

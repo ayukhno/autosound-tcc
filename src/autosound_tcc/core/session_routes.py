@@ -10,11 +10,10 @@ change. Qt-free: the window translates a refusal (`Refusal` carries an i18n key,
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
-from autosound_tcc.core import codex_cli, codex_session, omp_session, terminal_launcher
+from autosound_tcc.core import child, codex_cli, codex_session, omp_session, terminal_launcher
 from autosound_tcc.core.session_registry import CODEX_ROUTE, SDK_ROUTE
 from autosound_tcc.core.tuning_session import TuningSession
 
@@ -180,7 +179,9 @@ def client_invocation(client: str, choice, project_dir: Path
         if not terminal_launcher.client_available("codex"):
             raise terminal_launcher.TerminalLaunchError(
                 "Codex is not installed on this computer, so no terminal was opened for it")
-        return sys.executable, model, ("-m", CODEX_TERMINAL, str(project_dir))
+        # The console interpreter: under the GUI `sys.executable` is `pythonw.exe` on Windows, and
+        # a line run with it has no console for `codex_terminal`'s refusals or for Codex.
+        return child.script_interpreter(), model, ("-m", CODEX_TERMINAL, str(project_dir))
     return client, model, ()
 
 
