@@ -188,7 +188,7 @@ class CodexSession:
         #: Approvals with the gate or on the bar, by request id: cancelled when Codex withdraws one
         #: or the turn ends — the bar comes down and nothing is sent.
         self._gating: dict[Any, asyncio.Task] = {}
-        self._timers: set[asyncio.TimerHandle] = set()
+        self._timers: dict[Any, asyncio.TimerHandle] = {}
         self._retry_said = False
         self._last_error = ""
         self._getter: Optional[asyncio.Future] = None
@@ -544,8 +544,12 @@ class CodexSession:
         elif method == "turn/completed":
             # Here, in the reader and in order, not when the turn's reader gets to it: a gate that
             # finished in between would otherwise put its `Unasked` behind `turn/completed`, where
-            # it shows as the next turn's first event (re-review M1).
-            self._sweep_gates()
+            # it shows as the next turn's first event (re-review M1). Only this thread's turn in
+            # flight (N3); before its id is known, the one turn there is.
+            turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+            if params.get("threadId") == self.session_id and (
+                    not self._turn_id or turn.get("id") == self._turn_id):
+                self._sweep_gates()
 
     def _drop_gate(self, rid: Any, *, decline: bool = False) -> None:
         """Codex withdrew `rid`, or its turn ended: the gate task is cancelled — the bar's future
@@ -557,10 +561,11 @@ class CodexSession:
         if task is not None and not task.done():
             task.cancel()
         if decline and task is not None:
-            handle = asyncio.get_running_loop().call_later(SWEEP_DECLINE_S, self._late_decline, rid)
-            self._timers.add(handle)
+            self._timers[rid] = asyncio.get_running_loop().call_later(
+                SWEEP_DECLINE_S, self._late_decline, rid)
 
     def _late_decline(self, rid: Any) -> None:
+        self._timers.pop(rid, None)  # fired: no longer one to cancel (N4)
         server = self._server
         # `respond` refuses one Codex withdrew, one already answered, and any once it has ended.
         if server is not None and not server.ended and not server.withdrawn(rid):
@@ -618,7 +623,9 @@ class CodexSession:
 
     def _where(self, cwd: Any) -> Optional[str]:
         """None when `cwd` is the project itself (or not given); "outside" when it is not in the
-        project; else the folder inside the project the line runs in."""
+        project; else the folder the line runs in, RELATIVE to the project (realpaths) — the gate
+        reads operands from the project, and an absolute `cd` would leave `../..` read as text
+        (task 7's re-review, N2)."""
         if not cwd:
             return None
         try:
@@ -633,7 +640,7 @@ class CodexSession:
                 Path(os.path.normcase(str(home))))
         except ValueError:
             inside = False
-        return str(cwd) if inside else "outside"
+        return os.path.relpath(here, home) if inside else "outside"
 
     @staticmethod
     def _in_folder(line: str, cwd: str, shell: str) -> str:
@@ -648,12 +655,10 @@ class CodexSession:
         """What asks whatever the gate said: a file delete cannot be undone, so it asks under
         `auto` too (the plan, decided 2026-10-14 after task 5's review, I1); a line the gate cannot
         judge — run outside the project, input to a running terminal, no command — asks under
-        every gate. `never` lets either through and says so; a «don't ask again» tick for the tool
-        outranks, as `judge_action`'s does."""
+        every gate. Only `never` lets either through, and says so: a «don't ask again» tick never
+        outranks them (the Arbiter, 2026-10-14 — `judge_action` says the same of a dangerous line)."""
         if gate == GATE_NEVER:
             return Verdict(True, unasked=detail)
-        if tool in ticks or tool.lower() in ticks:
-            return verdict
         reason = "gateIrreversible" if why == "irreversible" else verdict.reason
         if verdict.allowed:
             return Verdict(False, tool=tool, title=f"Дозволити {tool}?", detail=detail,
@@ -983,8 +988,9 @@ class CodexSession:
         whole close 2.5 s before it cancels — past the grace it is terminated, then its tree."""
         self._drop_getter()
         self._sweep_gates()
-        for timer in list(self._timers):
+        for timer in list(self._timers.values()):
             timer.cancel()
+        self._timers.clear()
         for task in list(self._tasks):
             task.cancel()
         server = self._server

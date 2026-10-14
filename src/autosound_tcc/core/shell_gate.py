@@ -2919,8 +2919,13 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
         return Verdict(True, unasked=line if dangerous or stranger or rooted else "")
     ticked = frozenset(always_allowed)
     if tool in ticked or name in ticked:
-        return Verdict(True)  # a remembered tick outranks the `auto` guard below, as on the SDK side
-    if gate == GATE_AUTO:
+        # The Arbiter, 2026-10-14: a «don't ask again» tick removes the question for an ordinary
+        # command only — it never outranks «cannot be undone» (it did since 2026-09-11; a tick
+        # on any Bash question then let `cd ~ && rm -rf *` through). The same on the SDK route.
+        if name == "bash" and gate == GATE_WRITES:
+            dangerous = _is_dangerous(line, read_roots, shell)
+        allowed = not dangerous
+    elif gate == GATE_AUTO:
         # "Don't ask" never meant "don't look" (HUB-028). This returned True before any look,
         # so on omp a delete passed silently while the menu told the Arbiter `auto` still asks
         # about what cannot be undone (review of tcc#115). The SDK adapter's narrow check, shared.
@@ -2944,7 +2949,7 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
         return Verdict(True)
     # What cannot be undone says so, whichever gate asked — under `auto` it is the only thing
     # that asks about a command — by the same key as the SDK side (review of tcc#115).
-    if name == "bash" and gate == GATE_WRITES:
+    if name == "bash" and gate == GATE_WRITES and not dangerous:
         dangerous = _is_dangerous(line, read_roots, shell)
     return Verdict(
         False,

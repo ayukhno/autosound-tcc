@@ -57,7 +57,11 @@ OMP_TABLE = [
     ("always-allowed tool", "write", '{"path": "/etc/hosts"}', ("write",),
      {GATE_WRITES: "pass", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("always-allowed dangerous bash", "bash", "Command: rm -rf ~/", ("bash",),
-     {GATE_WRITES: "pass", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass!"}),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+    ("a Codex tick, a home wipe", "Bash", "cd ~ && rm -rf *", ("Bash",),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+    ("always-allowed ordinary bash", "bash", "Command: echo x > /tmp/out.txt", ("bash",),
+     {GATE_WRITES: "pass", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("PowerShell read", "bash", "Command: powershell -c 'Get-ChildItem ~'", (),
      {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
     ("PowerShell delete", "bash", "Command: powershell -c 'Remove-Item -Recurse -Force ~'", (),
@@ -426,6 +430,13 @@ CHANGED_FOR_SDK = {
                                    "a link made to outside the project")
     for name, line, shell in AUTO_LINK_ROWS if shell == B
 }
+#: The Arbiter, 2026-10-14: a «don't ask again» tick never outranks «cannot be undone» — for omp,
+#: the SDK route (`TuningSession._can_use_tool`) and Codex alike.
+TICK = "the Arbiter, 2026-10-14: a tick never outranks cannot-be-undone"
+CHANGED_FOR_SDK.update({
+    "always-allowed dangerous bash": f"writes/foreign/auto pass -> ask!: {TICK}",
+    "a Codex tick, a home wipe": f"writes/foreign/auto pass -> ask!: {TICK}",
+})
 CHANGED_FOR_OMP.update(CHANGED_FOR_SDK)
 
 
@@ -687,11 +698,13 @@ def test_a_name_the_gate_does_not_know_asks(tool, gate, tmp_path):
 @pytest.mark.parametrize("ticked", ["Bash", "bash"])
 def test_a_tick_holds_in_either_spelling(ticked, tmp_path):
     """The bar remembers the name it asked under (`Bash` for Codex and the SDK, `bash` for omp);
-    both stand for the same tool, so a tick in either stops the asking."""
-    verdict = judge_action("Bash", "rm -rf ~/", gate=GATE_AUTO, always_allowed={ticked},
-                           read_roots=_read_roots_for(tmp_path))
-
-    assert verdict.allowed
+    both stand for the same tool, so a tick in either stops the asking — for an ordinary command.
+    For one that cannot be undone neither does (the Arbiter, 2026-10-14)."""
+    roots = _read_roots_for(tmp_path)
+    assert judge_action("Bash", "echo x > /tmp/out.txt", gate=GATE_WRITES,
+                        always_allowed={ticked}, read_roots=roots).allowed
+    assert _cell(judge_action("Bash", "rm -rf ~/", gate=GATE_AUTO, always_allowed={ticked},
+                              read_roots=roots)) == "ask!"
 
 
 def test_a_detail_that_says_command_cannot_hide_its_head(tmp_path):

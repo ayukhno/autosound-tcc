@@ -1047,22 +1047,22 @@ async def _answer(asked, args):
     return "asked"
 
 
-def test_a_remembered_permission_stops_the_asking_even_for_a_dangerous_command(tmp_path):
-    """The tick says "stop asking me about this", and a tick that keeps asking is a broken promise.
+def test_a_remembered_permission_never_outranks_what_cannot_be_undone(tmp_path):
+    """The Arbiter, 2026-10-14: a «don't ask again» tick removes the question for an ordinary
+    command only. It outranked the irreversible-command guard before (the loosening of
+    2026-09-11); a line the danger check flags asks now, ticked or not — under every gate but
+    `never`."""
+    for gate in ("writes", "auto"):
+        session, arbiter = _session(tmp_path, allow=True)
+        session.gate = gate
+        session.always_allowed = {"Bash"}
 
-    Both dials led into one branch, where a Bash command was re-examined for danger and asked
-    about again — so "Don't ask again for this in this project" never silenced anything it was
-    ticked for, however many times the Arbiter ticked it (reported 2026-09-11).
+        _decide(session, "Bash", {"command": "rm -rf /"})
+        assert [r.reason for r in arbiter.asked] == ["gateIrreversible"], gate
 
-    This is a deliberate loosening, asked for by the Arbiter and recorded as such: an explicit
-    remembered decision now outranks the irreversible-command guard. The DEFAULT does not change,
-    which is the next test.
-    """
-    session, arbiter = _session(tmp_path, allow=True)
-    session.always_allowed = {"Bash"}
-
-    assert _decide(session, "Bash", {"command": "rm -rf /"}) == "allow"
-    assert arbiter.asked == [], "remembered means remembered"
+        arbiter.asked.clear()
+        assert _decide(session, "Bash", {"command": "echo x > /tmp/out.txt"}) == "allow", gate
+        assert arbiter.asked == [], "an ordinary command: the tick holds"
 
 
 def test_do_not_ask_mode_still_guards_what_cannot_be_undone(tmp_path):

@@ -828,7 +828,8 @@ def test_auto_mode_on_omp_still_asks_about_what_cannot_be_undone(tmp_path):
     assert [frame["value"] for frame in session.sent] == ["Deny", "Approve"]
 
 
-def test_a_remembered_tool_outranks_the_auto_guard_on_omp_as_on_the_sdk_side(tmp_path):
+def test_a_remembered_tool_never_outranks_cannot_be_undone_on_omp_as_on_the_sdk_side(tmp_path):
+    """The Arbiter, 2026-10-14: a tick never outranks «cannot be undone»."""
     session = OmpSession(project_dir=tmp_path, bridge=RecordingBridge(False),
                          gate=omp_session_module.GATE_AUTO, always_allowed=frozenset({"bash"}))
     session.sent = []
@@ -836,8 +837,8 @@ def test_a_remembered_tool_outranks_the_auto_guard_on_omp_as_on_the_sdk_side(tmp
 
     asyncio.run(session._gate({**PERMISSION_FRAME, "title": "Allow tool: bash\nCommand: rm -rf ~/"}))
 
-    assert session.bridge.requests == []
-    assert session.sent[0]["value"] == "Approve"
+    assert [r.reason for r in session.bridge.requests] == ["gateIrreversible"]
+    assert session.sent[0]["value"] == "Deny"
 
 
 def test_auto_mode_stops_asking_about_the_harness(tmp_path):

@@ -1334,7 +1334,43 @@ def test_a_delete_in_a_project_subfolder_is_judged_from_there(project, tmp_path,
     run_gate(project, tmp_path, stand_in,
              approval_turn("th", command="/bin/zsh -lc 'rm -rf *'", cwd=places["inside"]),
              gate="auto")
-    assert seen == [f"cd {places['inside']} && rm -rf *"]
+    assert seen == ["cd process && rm -rf *"], "relative to the project, as the gate reads paths"
+
+
+@pytest.mark.parametrize("line", ["rm -rf ../..", "rm -rf ../../.."])
+def test_a_climb_out_of_a_project_subfolder_asks(project, tmp_path, stand_in, places, line):
+    """N2: from `P/process`, `../..` is the folder above the project."""
+    bridge, _ = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command=f"/bin/zsh -lc '{line}'",
+                                       cwd=places["inside"]), gate="auto")
+    assert len(bridge.requests) == 1 and decisions(stand_in) == ["decline"]
+
+
+@pytest.mark.parametrize("cwd_of, line", [("home", "rm -rf *"), ("project", "rm -rf ~")])
+def test_a_bash_tick_never_outranks_cannot_be_undone_on_codex(project, tmp_path, stand_in,
+                                                               places, cwd_of, line):
+    """The Arbiter, 2026-10-14: the tick removes the question for an ordinary command only."""
+    cwd = places["home"] if cwd_of == "home" else project
+    bridge, _ = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command=f"/bin/zsh -lc '{line}'", cwd=cwd),
+                         gate="auto", always_allowed=frozenset({"Bash"}))
+    assert len(bridge.requests) == 1 and decisions(stand_in) == ["decline"]
+
+
+def test_a_bash_tick_still_passes_an_ordinary_command_on_codex(project, tmp_path, stand_in):
+    bridge, _ = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command="/bin/zsh -lc 'touch a'", cwd=project),
+                         gate="writes", always_allowed=frozenset({"Bash"}))
+    assert bridge.requests == [] and decisions(stand_in) == ["accept"]
+
+
+@pytest.mark.parametrize("kind, command", [("writeStdin", "/bin/zsh -lc 'ls'"), ("command", "")])
+def test_a_bash_tick_does_not_pass_what_the_gate_cannot_read(project, tmp_path, stand_in,
+                                                             kind, command):
+    bridge, _ = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command=command, kind=kind),
+                         gate="auto", always_allowed=frozenset({"Bash"}))
+    assert len(bridge.requests) == 1
 
 
 @pytest.mark.parametrize("kind, command", [("writeStdin", "/bin/zsh -lc 'ls'"),
