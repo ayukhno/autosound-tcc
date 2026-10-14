@@ -199,7 +199,8 @@ def test_find_is_cached_until_forget(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path / "bin"))
     codex_cli.forget()
     assert codex_cli.find() is None
-    binary = _file(tmp_path / "bin" / "codex")
+    # The platform's own shape: on Windows only a `codex.exe` counts (`_usable_in`).
+    binary = _file(tmp_path / "bin" / ("codex.exe" if os.name == "nt" else "codex"))
     assert codex_cli.find() is None, "cached: no new look until ↻"
     codex_cli.forget()
     assert codex_cli.find() == Found(str(binary), codex_cli.SOURCE_PATH)

@@ -303,6 +303,8 @@ def test_an_old_codex_on_path_gives_way_to_tccs_installed_copy(tmp_path, monkeyp
     codex_cli.forget()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX scripts stand in for codex: on Windows only a "
+                    "codex.exe counts, and no stand-in .exe can print a version it is given")
 def test_two_old_codexes_both_give_way_to_tccs_installed_copy(tmp_path, monkeypatch):
     """The re-review's I1: one more look skipped the first old Codex and landed on a second (a
     Homebrew one and an npm one, say), read it too old and stopped there. Each look marks one

@@ -155,7 +155,9 @@ def test_stand_in_replays_the_scenario(name: str, tmp_path: Path) -> None:
     text = json.dumps(client.got, ensure_ascii=False)
     assert "<WORK>" not in text
     if "<WORK>" in json.dumps(recorded_in, ensure_ascii=False):
-        assert str(client.work) in text
+        # As the dump spells it: a Windows path's backslashes are doubled in JSON text, and the
+        # raw path was never found there (the PR's Windows run; the ü came through whole).
+        assert json.dumps(str(client.work), ensure_ascii=False)[1:-1] in text
 
     verdict = json.loads(client.log.read_text(encoding="utf-8").splitlines()[-1])["verdict"]
     assert verdict["breaches"] == []
