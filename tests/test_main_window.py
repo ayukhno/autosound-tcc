@@ -763,16 +763,32 @@ def _catalogue(monkeypatch, models):
     )
 
 
-def test_the_picker_offers_claudes_models_out_of_the_box():
-    """Nothing marked, no omp needed: TCC is usable on a machine that only has the Claude CLI."""
+def test_the_picker_offers_claudes_models_out_of_the_box(monkeypatch):
+    """Nothing marked, no omp needed: TCC is usable on a machine that only has the Claude CLI.
+
+    Codex's shipped pair follows, greyed and not selectable: a route whose CLI is missing keeps the
+    rows this file knows without asking (`codex_choices`), saying what they need — the same rule
+    as any route the picker can name with its CLI gone. `agy` names none (no catalogue without its
+    CLI) and omp shows only what was marked, so neither adds a row here."""
+    from autosound_tcc.core import model_choices
+
+    monkeypatch.setattr(model_choices, "cli_available", lambda harness: False)
+    monkeypatch.setattr(model_choices, "_CLI_CACHE", {})
+    monkeypatch.setattr(model_choices, "_load_cached_catalogue", lambda: None)
     _app()
     window = MainWindow()
+    combo = window._ai_main_combo
 
-    keys = [window._ai_main_combo.itemData(i) for i in range(window._ai_main_combo.count())]
+    keys = [combo.itemData(i) for i in range(combo.count())]
 
     # Opus 5.5 and Fable 5.1 beside their predecessors, which are still served (finding 48, tcc#64).
-    assert keys[1:] == ["sdk:claude-opus-5-5", "sdk:claude-opus-5", "sdk:claude-sonnet-5",
-                        "sdk:claude-fable-5-1", "sdk:claude-fable-5"]
+    claude = ["sdk:claude-opus-5-5", "sdk:claude-opus-5", "sdk:claude-sonnet-5",
+              "sdk:claude-fable-5-1", "sdk:claude-fable-5"]
+    codex = [f"codex:{model}" for model in model_choices.CODEX_MODELS]
+    assert keys[1:] == claude + codex
+    assert all(combo.model().item(combo.findData(key)).isEnabled() for key in claude)
+    assert not any(combo.model().item(combo.findData(key)).isEnabled() for key in codex), \
+        "Codex is not here: its rows are shown greyed, not offered"
 
 
 def test_a_row_from_the_shipped_list_says_when_the_list_was_checked():
