@@ -3756,6 +3756,8 @@ at once.
 
 **Task.** The next wave's collection (the Arbiter: «запиши ще», with finding 160).
 
+**Taken in W-10** (the Arbiter, the Windows pass's round 3): every submenu line bold on every level, by one rule (`MenuEntry.bold` is `submenu`).
+
 ### 162. While the model thinks without a tool, nothing on screen moves
 
 **What.** The W-10 Windows pass, 2026-10-14 (Codex route): after a Stop the Arbiter sent a new message and read the

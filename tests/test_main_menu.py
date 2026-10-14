@@ -134,6 +134,32 @@ def test_the_window_s_lines_draw_today_s_menu():
     assert menu.button.menu() is drawn and drawn.property("class") == "support-menu"
 
 
+def _every_action(menu):
+    for action in menu.actions():
+        yield action
+        if action.menu() is not None:
+            yield from _every_action(action.menu())
+
+
+def test_every_line_that_opens_a_submenu_is_bold_and_no_other_line_is():
+    """The Arbiter, W-10 (TEST-FINDINGS 161): «Open a terminal ›», «EQ card field order ›»,
+    «Ask about ›», «Language ›» were plain beside a bold «⚙ Settings ›». One rule, every level —
+    including a submenu inside a submenu inside a submenu, and one a feature adds."""
+    entries = [*menu_registry.window_entries(),
+               MenuEntry("deep", "language", label="Deeper", submenu=True),
+               MenuEntry("deeper", "deep", label="Deeper still", submenu=True),
+               MenuEntry("leaf", "deeper", label="A leaf", on=print)]
+    drawn = _menu(entries).render()
+
+    actions = [a for a in _every_action(drawn) if not a.isSeparator() and a.isEnabled()
+               or a.menu() is not None]
+    submenus = [a.text() for a in actions if a.menu() is not None]
+    assert {i18n.t("menuTerminal"), i18n.t("eqOrderMenu"), i18n.t("gateMode"),
+            i18n.t("menuLanguage"), "Deeper", "Deeper still"} <= set(submenus)
+    for action in actions:
+        assert action.font().bold() is (action.menu() is not None), action.text()
+
+
 def test_by_default_the_renderer_draws_every_provider_s_line(monkeypatch):
     feature = types.ModuleType("tcc_fake_menu_feature")
     feature.menu_entries = lambda: [MenuEntry("save_car", "project", label="Save the car…",

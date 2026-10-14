@@ -22,8 +22,9 @@ def pinned_rows() -> list[tuple]:
     def line(depth, text, tip_key="", checkable=False):
         return (depth, "line", text, t(tip_key) if tip_key else "", checkable, False)
 
-    def menu(depth, text, bold=False):
-        return (depth, "menu", text, "", False, bold)
+    def menu(depth, text):
+        # Every submenu's line bold, on every level (the Arbiter, W-10, TEST-FINDINGS 161).
+        return (depth, "menu", text, "", False, True)
 
     return [
         heading("menuProject"),
@@ -49,7 +50,7 @@ def pinned_rows() -> list[tuple]:
         line(0, t("menuDiagnostics"), "diagBtnTip"),
         line(0, t("riImport"), "riImportTip"),
         line(0, t("menuTargetTool"), "targetToolTip"),
-        menu(0, "⚙ " + t("menuSettings"), bold=True),
+        menu(0, "⚙ " + t("menuSettings")),
         menu(1, t("eqOrderMenu")),
         line(2, t("eqOrderAuto"), checkable=True),
         line(2, "Freq · Gain · Q", checkable=True),
@@ -69,7 +70,7 @@ def pinned_rows() -> list[tuple]:
         line(1, t("menuZoomOut")),
         SEP,
         heading("menuHelp"),
-        menu(0, "📖 " + t("menuGuides"), bold=True),
+        menu(0, "📖 " + t("menuGuides")),
         line(1, t("menuGuideQuick"), "menuGuideQuickTip"),
         line(1, t("menuGuideFull"), "menuGuideFullTip"),
         line(1, t("menuGuideCurve"), "menuGuideCurveTip"),

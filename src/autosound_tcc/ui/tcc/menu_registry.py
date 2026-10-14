@@ -45,7 +45,6 @@ class MenuEntry:
     enabled: Optional[Callable[[Any], bool]] = None
     checked: Optional[Callable[[Any], bool]] = None  # set → the line is checkable
     submenu: bool = False
-    bold: bool = False
     before: str = ""
     after: str = ""
     alias: str = ""  # the window attribute the tests drive this line by
@@ -58,6 +57,14 @@ class MenuEntry:
 
     def tip(self) -> str:
         return i18n.t(self.tip_key) if self.tip_key else ""
+
+    @property
+    def bold(self) -> bool:
+        """Every line that opens a submenu is bold, on every level, and no other line is: one
+        rule, not a flag per line (the Arbiter, W-10, TEST-FINDINGS 161 — «Open a terminal ›»,
+        «EQ card field order ›», «Ask about ›», «Language ›» were plain beside a bold «⚙ Settings
+        ›»). Bold reads as «opens more», as it did for Settings (finding 91) and Guides (134)."""
+        return self.submenu
 
 
 #: The sections, top to bottom: (place, heading key).
@@ -211,10 +218,9 @@ def window_entries() -> list[MenuEntry]:
         MenuEntry("target_tool", "tools", label_key="menuTargetTool", tip_key="targetToolTip",
                   on=lambda w: w._open_target_curve_tool()),
         # «Налаштування»: every technical setting of TCC in one place (finding 70, tcc#67). The
-        # last line of TOOLS (the Arbiter, 2026-09-27); bold, so it reads as a submenu (finding
-        # 91, tcc#81).
-        MenuEntry("settings", "tools", label_key="menuSettings", prefix="⚙ ", submenu=True,
-                  bold=True),
+        # last line of TOOLS (the Arbiter, 2026-09-27); bold as every submenu is (finding 91,
+        # tcc#81; `MenuEntry.bold`).
+        MenuEntry("settings", "tools", label_key="menuSettings", prefix="⚙ ", submenu=True),
         MenuEntry("eq_order", "settings", label_key="eqOrderMenu", submenu=True),
         *_eq_orders(),
         MenuEntry("models", "settings", label_key="menuModels", tip_key="menuModelsTip",
@@ -232,7 +238,7 @@ def window_entries() -> list[MenuEntry]:
         MenuEntry("zoom_out", "settings", label_key="menuZoomOut", on=lambda w: w._zoom_out()),
         # The three pages in one submenu, bold like «Налаштування» (the Arbiter, finding 134,
         # tcc#120: «підменю (жирним), в середині квік-гайд, фул-гайд і цільова крива гайд»).
-        MenuEntry("guides", "help", label_key="menuGuides", prefix="📖 ", submenu=True, bold=True),
+        MenuEntry("guides", "help", label_key="menuGuides", prefix="📖 ", submenu=True),
         *_guides(),
         MenuEntry("feedback", "help", label_key="fbBig", prefix="💬 ", tip_key="fbBigTip",
                   on=lambda w: w._open_feedback()),
