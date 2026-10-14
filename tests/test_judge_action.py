@@ -116,6 +116,14 @@ OMP_TABLE = [
     ("a skill file by an option's value", "bash",
      "Command: cp --target-directory=process/ state/a.json", (),
      {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    # The Arbiter, 2026-10-15: one file deleted passes `auto` in the project; outside it, or one the
+    # line does not spell, it is «cannot be undone» (`ONE_FILE`).
+    ("a file of the project removed", "bash", "Command: rm notes.txt", (),
+     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+    ("a file outside the project removed", "bash", "Command: rm /tmp/one-file.txt", (),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+    ("a file the line does not spell removed", "bash", 'Command: rm "$tmp"', (),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
 ]
 
 #: What changed for omp in the fix round, and why — every other row is what omp answered before.
@@ -450,6 +458,16 @@ CHANGED_FOR_SDK.update({
 OUTSIDE = "auto pass -> ask!: the Arbiter's rule, outside the project (2026-10-14)"
 CHANGED_FOR_SDK.update({"a skill name inside an absolute path": OUTSIDE,
                         "a backslash path beside a skill file": OUTSIDE})
+#: The Arbiter, 2026-10-15, on a delete of one file: «це ж робота скіла; якщо це за текою чи
+#: рекурсивне — тоді може; всі ці питання ніхто не читає а вони тільки дратують». In the project it
+#: passes `auto` (as `rm` always did; Codex's PowerShell delete and its file-change delete asked);
+#: outside the project, or a target the line does not spell, it is «cannot be undone» — on omp, Codex
+#: and the SDK route alike (`TuningSession._can_use_tool` asks `bash_is_dangerous`).
+ONE_FILE = ("auto pass -> ask!, writes/foreign ask -> ask!, never pass -> pass!: the Arbiter, "
+            "2026-10-15 — one file deleted passes `auto` in the project, not outside it, nor one "
+            "the line does not spell")
+ONE_FILE_ROWS = ("a file outside the project removed", "a file the line does not spell removed")
+CHANGED_FOR_SDK.update(dict.fromkeys(ONE_FILE_ROWS, ONE_FILE))
 CHANGED_FOR_OMP.update(CHANGED_FOR_SDK)
 
 
@@ -1150,15 +1168,54 @@ def test_an_unquoted_windows_path_in_a_bash_line_is_not_the_projects(tmp_path, m
 
 @pytest.mark.parametrize("line, shell", [
     ("rm -rf process/tmp", B), ("rm -rf build", B), ("rm -f process/*.tmp", B),
-    ("rm /tmp/one-file.txt", B), ("rm -f ~/Documents/one.wav", B),
     ('for f in process/*.tmp; do rm "$f"; done', B), ("rsync -a --delete build/ dist/", B),
     (r"Remove-Item -Recurse .\build", P), (r"Remove-Item process\*.tmp", P),
-    (r"Remove-Item C:\Users\me\one.txt", P), ("Remove-Item -Recurse:$false ~", P),
     ("rm -rf {skill}/rew_tool/__pycache__", B),
+    # One file of the project or the method's copy (the Arbiter, 2026-10-15), however spelled.
+    ("rm process/a.json", B), ("unlink process/a.json", B), ("rm {skill}/rew_tool/x.pyc", B),
+    ("Remove-Item process/a.json", P), ("ri a.txt", P), ("del a.txt", P), ("rm a.txt", P),
+    ("$t = 'a.txt'; Remove-Item -LiteralPath $t", P),
+    ("$t = (Resolve-Path -LiteralPath 'a.txt').Path; Remove-Item -LiteralPath $t", P),
 ])
-def test_inside_the_project_or_one_file_outside_still_passes_auto(line, shell, tmp_path):
-    """The Arbiter's rule is inside vs outside for a recursive or glob delete only: inside the
-    project (or the method's copy) as before, and a single file outside as today."""
+def test_inside_the_project_still_passes_auto(line, shell, tmp_path):
+    """The Arbiter's rule is inside vs outside: inside the project (or the method's copy) a
+    recursive or glob delete passes as before, and so does one file."""
     roots = _read_roots_for(_car(tmp_path))
     line = line.format(skill=Path(roots[1]).as_posix())
     assert judge_action("Bash", line, gate=GATE_AUTO, read_roots=roots, shell=shell).allowed
+
+
+#: One file deleted that asks under `auto` (the Arbiter, 2026-10-15): outside the project and the
+#: method's copy, or a target the line does not spell — these passed `auto` before.
+ONE_FILE_ASKS = [
+    ("rm /tmp/one-file.txt", B), ("rm -f ~/Documents/one.wav", B), ("unlink /tmp/x", B),
+    ('rm "$tmp"', B), ('x=/tmp/a.txt; rm "$x"', B),
+    (r"Remove-Item C:\Users\me\one.txt", P), ("Remove-Item -Recurse:$false ~", P),
+    (r"Remove-Item ..\a.txt", P), ("Remove-Item $t", P), ("Remove-Item -LiteralPath $env:TEMP", P),
+    ("$t = 'a.txt'; $t = 'C:/x.txt'; Remove-Item $t", P), ("Remove-Item $t; $t = 'a.txt'", P),
+    ("Get-Content list.txt | ForEach-Object { Remove-Item $_ }", P),
+]
+
+
+@pytest.mark.parametrize("line, shell", ONE_FILE_ASKS)
+def test_one_file_outside_the_project_or_not_spelled_asks_under_auto(line, shell, tmp_path):
+    roots = _read_roots_for(_car(tmp_path))
+    verdict = judge_action("Bash", line, gate=GATE_AUTO, read_roots=roots, shell=shell)
+    assert _cell(verdict) == "ask!"
+
+
+@pytest.mark.parametrize("line", [line for line, shell in ONE_FILE_ASKS if shell == B])
+def test_the_sdk_route_asks_about_one_file_outside_or_not_spelled(line, tmp_path):
+    """The same rule on the SDK route: under `auto` asked as «cannot be undone», under `never`
+    let through and said; one file of the project passes both."""
+    tmp_path = _car(tmp_path)
+    assert _sdk_cell(line, GATE_AUTO, (), tmp_path) == "ask!"
+    assert _sdk_cell(line, GATE_NEVER, (), tmp_path) == "pass!"
+    assert _sdk_cell("rm process/a.json", GATE_AUTO, (), tmp_path) == "pass"
+
+
+@pytest.mark.parametrize("name", ONE_FILE_ROWS)
+def test_the_sdk_route_answers_the_one_file_rows_as_omp_and_codex_do(name, tmp_path):
+    (row,) = [row for row in OMP_TABLE if row[0] == name]
+    for gate in (GATE_AUTO, GATE_NEVER):
+        assert _sdk_cell(_command(row[2]), gate, (), tmp_path) == row[4][gate], gate

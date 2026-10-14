@@ -293,10 +293,21 @@ def test_a_script_body_inherits_what_the_line_made_unknown(tmp_path):
 
 
 @pytest.mark.parametrize("command", [
-    # Deletes and chmods that stay where the project is, or name one file through a variable.
-    'rm "$tmp"',
-    'rm -f "$tmp" out.json',
-    'rm "$dir/a.json" "$dir/b.json"',
+    'rm "$tmp"', 'rm -f "$tmp" out.json', 'rm "$dir/a.json" "$dir/b.json"',
+    'x=a.json rm "$x"', 'x=a.json; x=/etc/hosts; rm "$x"', 'rm "$x"; x=a.json',
+    "rm /tmp/one-file.txt", "unlink /tmp/one-file.txt", 'x=/tmp/a; rm "$x"',
+])
+def test_one_file_outside_the_project_or_not_spelled_asks(command, tmp_path):
+    """The Arbiter, 2026-10-15: under `auto` a delete of one file of the project passes — «це ж
+    робота скіла; якщо це за текою чи рекурсивне — тоді може». One outside the project, or one the
+    line does not spell (a variable it did not assign from a literal, before the delete), asks."""
+    assert bash_is_dangerous(command, [tmp_path, tmp_path / "method"]) is True, command
+
+
+@pytest.mark.parametrize("command", [
+    # Deletes and chmods that stay where the project is, or name one file the line spells.
+    'x=process/a.json; rm "$x"',
+    'dir=process; rm -f "$dir/a.json" "$dir/b.json"',
     "rm -rf build",
     "rm -rf ~/.cache/autosound",
     "rm -rf build/*/tmp",

@@ -1193,10 +1193,18 @@ def test_stop_while_the_bar_waits_takes_the_bar_down_and_sends_nothing(
     assert server.returncode == 0
 
 
-@pytest.mark.parametrize("kind, asks", [("delete", True), ("add", False), ("update", False)])
-def test_under_auto_a_file_delete_asks_and_an_edit_passes(project, tmp_path, stand_in, kind, asks):
+#: The Arbiter, 2026-10-15: one file of the project deleted does not ask under `auto` — «це ж
+#: робота скіла; якщо це за текою чи рекурсивне — тоді може» (until then every delete asked, the
+#: call of 2026-10-14 after task 5's review, I1). One outside the project still asks.
+@pytest.mark.parametrize("kind, where, asks", [
+    ("delete", "outside", True), ("delete", "inside", False), ("delete", "the method", False),
+    ("add", "inside", False), ("update", "inside", False)])
+def test_under_auto_a_file_delete_outside_asks_and_one_inside_passes(project, tmp_path, stand_in,
+                                                                     kind, where, asks):
     bridge = RecordingBridge(False)
-    path = str(project / "process" / "ledger.json")
+    path = {"outside": str(tmp_path / "elsewhere" / "ledger.json"),
+            "inside": str(project / "process" / "ledger.json"),
+            "the method": str(Path(method_dir(project)) / "SKILL.md")}[where]
     rows = approval_turn("th", changes=[{"path": path, "kind": {"type": kind}, "diff": ""}])
     session = make(project, stand_in.use(write(tmp_path, rows)), bridge=bridge, gate="auto")
     run_session(session)
@@ -1209,14 +1217,35 @@ def test_under_auto_a_file_delete_asks_and_an_edit_passes(project, tmp_path, sta
     assert stand_in.breaches() == []
 
 
-def test_a_file_delete_under_never_passes_and_says_so(project, tmp_path, stand_in):
-    path = str(project / "x.txt")
+@pytest.mark.parametrize("where, said", [("outside", True), ("inside", False)])
+def test_a_file_delete_under_never_passes_and_says_what_auto_would_ask(project, tmp_path, stand_in,
+                                                                        where, said):
+    path = str(tmp_path / "x.txt" if where == "outside" else project / "x.txt")
     rows = approval_turn("th", changes=[{"path": path, "kind": {"type": "delete"}, "diff": ""}])
     session = make(project, stand_in.use(write(tmp_path, rows)), bridge=RecordingBridge(False),
                    gate="never")
     events = run_session(session)
-    assert any(isinstance(e, Unasked) and path in e.command for e in events)
+    assert any(isinstance(e, Unasked) and path in e.command for e in events) is said
     assert decisions(stand_in) == ["accept"]
+
+
+@pytest.mark.parametrize("gate", ["writes", "foreign"])
+def test_where_writes_ask_a_file_delete_inside_asks_as_before(project, tmp_path, stand_in, gate):
+    path = str(project / "x.txt")
+    rows = approval_turn("th", changes=[{"path": path, "kind": {"type": "delete"}, "diff": ""}])
+    bridge, _ = run_gate(project, tmp_path, stand_in, rows, gate=gate)
+    (request,) = bridge.requests
+    assert request.reason == "gateIrreversible" and decisions(stand_in) == ["decline"]
+
+
+def test_a_file_change_deleting_a_folder_of_the_project_asks_under_auto(project, tmp_path,
+                                                                         stand_in):
+    (project / "process").mkdir(exist_ok=True)
+    rows = approval_turn("th", changes=[{"path": str(project / "process"),
+                                         "kind": {"type": "delete"}, "diff": ""}])
+    bridge, _ = run_gate(project, tmp_path, stand_in, rows, gate="auto")
+    (request,) = bridge.requests
+    assert request.reason == "gateIrreversible"
 
 
 @pytest.mark.parametrize("command, shell, detail", [
@@ -1536,18 +1565,19 @@ def test_powershell_text_is_the_line_powershell_runs(command, shown):
 def test_a_windows_delete_shows_the_line_as_it_runs_and_names_powershell(project, tmp_path,
                                                                          stand_in, monkeypatch):
     """The Arbiter's VM, W-10: the bar showed Codex's quoting — `\\\\` and `'"'` — and said «Bash»
-    for a PowerShell line. The gate still reads the whole line; only what is shown is unwrapped."""
+    for a PowerShell line. The gate reads the whole line Codex sent; what is shown is unwrapped.
+    Under `writes` it asks; under `auto` it no longer does (one file of the project, the target
+    assigned from a literal on the line — the Arbiter, 2026-10-15)."""
     seen: list = []
     real = codex_session.judge_action
     monkeypatch.setattr(codex_session, "judge_action",
                         lambda tool, line, **kw: seen.append(line) or real(tool, line, **kw))
     bridge, _ = run_gate(project, tmp_path, stand_in,
-                         approval_turn("th", command=WINDOWS_DELETE), gate="auto")
+                         approval_turn("th", command=WINDOWS_DELETE), gate="writes")
     (request,) = bridge.requests
     assert seen == [WINDOWS_DELETE]
     assert request.detail == WINDOWS_DELETE_RUNS
     assert "\\\\" not in request.detail and "'\"'" not in request.detail
-    assert request.reason == "gateIrreversible"
     assert (request.title, request.title_args) == (shell_gate.ALLOW_TITLE, {"tool": "PowerShell"})
     assert request.tool == "Bash"  # what a «don't ask again» tick remembers stays the tool
 
@@ -1557,9 +1587,20 @@ def test_a_windows_delete_run_in_a_subfolder_shows_the_folder_and_the_line(proje
     (project / "process").mkdir(exist_ok=True)
     bridge, _ = run_gate(project, tmp_path, stand_in,
                          approval_turn("th", command=WINDOWS_DELETE, cwd=project / "process"),
-                         gate="auto")
+                         gate="writes")
     (request,) = bridge.requests
     assert request.detail == "Set-Location 'process'; " + WINDOWS_DELETE_RUNS
+
+
+@pytest.mark.parametrize("cwd", [None, "process"])
+def test_the_arbiters_windows_delete_passes_auto(project, tmp_path, stand_in, cwd):
+    """The Arbiter's VM, W-10 round 3: Codex's own shape for a delete of one file — the target
+    resolved from a literal on the line and checked — asked as «cannot be undone» under `auto`."""
+    (project / "process").mkdir(exist_ok=True)
+    bridge, _ = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command=WINDOWS_DELETE,
+                                       cwd=None if cwd is None else project / cwd), gate="auto")
+    assert bridge.requests == [] and decisions(stand_in) == ["accept"]
 
 
 # ---- task 10's live run: F1 (Codex namespaces the method), F2 (a tool left open at Stop) ---------
@@ -1834,13 +1875,15 @@ def test_a_disabled_stray_copy_does_not_refuse_the_start(project, tmp_path, stan
     assert run(go()) == [TurnEnd("th")]
 
 
-@pytest.mark.parametrize("gate", ["writes", "foreign", "auto"])
-def test_an_edit_tick_never_lets_a_file_delete_through(project, tmp_path, stand_in, gate):
+@pytest.mark.parametrize("gate, where", [("writes", "inside"), ("foreign", "inside"),
+                                         ("auto", "outside")])
+def test_an_edit_tick_never_lets_a_file_delete_through(project, tmp_path, stand_in, gate, where):
     """I4: a «don't ask again» tick on `Edit` removes the question for an ordinary edit, never for
     a delete — the gate's tick is read first and the delete's «cannot be undone» after it, so the
-    order in `_judge` cannot be swapped without this failing."""
-    rows = approval_turn("th", changes=[{"path": str(project / "a.txt"),
-                                         "kind": {"type": "delete"}}])
+    order in `_judge` cannot be swapped without this failing. (Under `auto` one file of the project
+    passes without a tick — the Arbiter, 2026-10-15 — so the row there is one outside it.)"""
+    path = project / "a.txt" if where == "inside" else tmp_path / "a.txt"
+    rows = approval_turn("th", changes=[{"path": str(path), "kind": {"type": "delete"}}])
     bridge, _ = run_gate(project, tmp_path, stand_in, rows, gate=gate,
                          always_allowed=frozenset({"Edit"}))
 

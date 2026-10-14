@@ -478,6 +478,25 @@ _PS_KEYWORDS = frozenset({"if", "elseif", "else", "foreach", "for", "while", "do
                           "switch", "try", "catch", "finally", "function", "filter", "param",
                           "begin", "process", "end", "return", "break", "continue", "exit",
                           "throw"})
+#: `[string]::Format(…)` reads: it is not the `Format()` `_PS_DOTNET` asks about (W-10).
+_PS_STRING_FORMAT = re.compile(r"\[(?:system\.)?string\]::format\s*\(", re.I)
+#: A type literal leading a statement: `[int]`, `[PSCustomObject]`, `[IO.File]`, `[string[]]`.
+_PS_TYPE = re.compile(r"(?:\[[A-Za-z_][\w.]*(?:\[[^\[\]]*\])*\])+")
+#: A pipeline's item: `$_`, `$PSItem`, and a property of it (`$_.FullName`).
+_PS_ITEM = re.compile(r"\$(?:_|psitem)(?:\.\w+)*", re.I)
+#: A variable a PowerShell line assigns once from a literal path before it uses it — `$t = 'a.txt'`,
+#: `$t = (Resolve-Path -LiteralPath 'a.txt').Path` (Codex's own shape, W-10): that path.
+_PS_LITERAL_ASSIGNMENT = re.compile(
+    r"(?:^|(?<=[;\n{]))\s*\$(?P<name>[A-Za-z_]\w*)\s*=\s*(?:"
+    r"'(?P<single>[^']*)'|\"(?P<double>[^\"`$]*)\""
+    r"|\(\s*(?:resolve-path|rvpa|convert-path|cvpa|get-item|gi)\s+"
+    r"(?:-(?:literalpath|lp|path|pspath)\s+)?(?:'(?P<rsingle>[^']*)'|\"(?P<rdouble>[^\"`$]*)\")"
+    r"\s*\)(?:\.(?:path|fullname|providerpath))?)\s*(?=;|\n|$)", re.I)
+#: Variables PowerShell sets itself, or that a scope hands in: never taken as the line's literal.
+_PS_AUTOMATIC = frozenset({"_", "psitem", "this", "input", "args", "matches", "home", "pwd", "env",
+                           "null", "true", "false", "error", "host", "profile", "pshome",
+                           "psscriptroot", "myinvocation", "lastexitcode", "foreach", "switch",
+                           "sender", "event", "eventargs", "ofs"})
 #: The commands that move the folder a line runs in, by the shell that reads them.
 _CD_COMMANDS = {"bash": ("cd", "pushd", "chdir"), "cmd": ("cd", "chdir", "pushd"),
                 "powershell": ("cd", "chdir", "sl", "set-location", "pushd", "push-location")}
@@ -566,6 +585,11 @@ _PROJECT: ContextVar[Optional[Path]] = ContextVar("shell_gate_project", default=
 #: Every root the line may read — the project and the method's copy (`read_roots`): what is
 #: «inside» for the Arbiter's rule on recursive and glob deletes (`_outside_roots`).
 _ROOTS: ContextVar[tuple[Path, ...]] = ContextVar("shell_gate_roots", default=())
+#: The bash variables the line has given a literal value before the command being judged
+#: (`_known_values`): `x=process/a.json; rm "$x"` deletes that file (the Arbiter, 2026-10-15).
+_KNOWN: ContextVar[dict[str, tuple[str, ...]]] = ContextVar("shell_gate_known", default={})
+#: Whether a PowerShell line's pipeline items (`$_`) are names a narrow listing gave.
+_PS_ITEMS_NARROW: ContextVar[bool] = ContextVar("shell_gate_ps_items", default=False)
 
 
 @contextmanager
@@ -682,6 +706,9 @@ class _Word:
     glob: bool = False
     #: The variables it reads — for `f=$(…); bash -c "$f"`.
     refs: set[str] = field(default_factory=set)
+    #: What the line itself gave it, when it is a variable the line assigned a literal: a delete of
+    #: one file is judged by that (`_single_delete_asks`, the Arbiter 2026-10-15). Nothing else is.
+    known: tuple[str, ...] = ()
 
     def take(self, other: "_Word") -> None:
         self.dynamic |= other.dynamic
@@ -732,9 +759,13 @@ def _script_is_dangerous(text: str, depth: int, inherited: Iterable[str] = (),
         _Reader(text, commands, depth).read()
         _follow_cd(commands, cwd)
         tainted = _tainted(commands, inherited)
-        for command in commands:
-            if _command_is_dangerous(command, tainted, depth):
-                return True
+        for command, known in zip(commands, _known_values(commands, tainted)):
+            token = _KNOWN.set(known)
+            try:
+                if _command_is_dangerous(command, tainted, depth):
+                    return True
+            finally:
+                _KNOWN.reset(token)
             _ran(command.words)
         return False
     except (_Unreadable, RecursionError):
@@ -1421,6 +1452,9 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
         return True  # its arguments decide, and one is another command's output: `rm $(echo -rf /)`
     if name == "rm":
         return _rm_is_dangerous(arguments, command.cwd)
+    if name == "unlink" and any(_single_delete_asks(operand, command.cwd)
+                                for operand in _operand_words(arguments)):
+        return True  # one file, by the Arbiter's rule (2026-10-15), as `rm` is
     if name in _OVERWRITERS:
         return any(_reaches_wide(operand, command.cwd) for operand in _operand_words(arguments))
     if name in _PS_OVERWRITERS:
@@ -2113,13 +2147,13 @@ def _rm_is_dangerous(arguments: list[_Word], cwd: Optional[str] = "") -> bool:
     """`rm` is judged by its arguments rather than by its name: `rm build/tmp.json` is a Tuesday.
     With no target it is fed by `xargs` or a pipe, and deletes what is not on the line."""
     return _reach_is_dangerous(arguments, lambda text: text.startswith("-"), _is_recursive_flag,
-                               bare=True, cwd=cwd, wide_alone=True, outside=True)
+                               bare=True, cwd=cwd, wide_alone=True, outside=True, single=True)
 
 
 def _reach_is_dangerous(arguments: list[_Word], is_option: Callable[[str], bool],
                         is_recursive: Callable[[str], bool], bare: bool, cwd: Optional[str] = "",
                         mode_first: bool = False, wide_alone: bool = False,
-                        outside: bool = False) -> bool:
+                        outside: bool = False, single: bool = False) -> bool:
     """A recursive delete (`rm -r`, `rd /s`) or `chmod -R`, judged by what it reaches.
 
     A target the line does not spell — `"$f"` in `for f in *`, `$(cat list)` — is unknown, and a
@@ -2130,7 +2164,8 @@ def _reach_is_dangerous(arguments: list[_Word], is_option: Callable[[str], bool]
     `rm -rf ~`, and xargs's appended word may be `-R`. An unquoted one (or `"$@"`) may split into
     several words, the flag and the target at once (`x='-rf ~'; rm $x`); a quoted one is one word,
     either the flag or the target, so it takes another unknown or wide word beside it to be both.
-    `rm "$tmp"` stays a delete of one file.
+    `rm "$tmp"` is a delete of one file — `single`: one outside the project and the method's copy,
+    or one the line does not spell, asks (the Arbiter, 2026-10-15; `_single_delete_asks`).
 
     A relative operand is judged where the command runs (`cwd`, `_follow_cd`); chmod's mode — its
     first operand (`mode_first`) — is not a path and is judged as it is written.
@@ -2159,6 +2194,8 @@ def _reach_is_dangerous(arguments: list[_Word], is_option: Callable[[str], bool]
         return any(operand.dynamic or wide(operand) for operand in operands)
     if wide_alone and any(_reaches_wide(operand, cwd) for operand in operands):
         return True  # `rm ~/*`: every file of a home, recursive or not (Fable's final review, I1)
+    if single and any(_single_delete_asks(operand, cwd) for operand in operands):
+        return True  # one file outside the project, or one the line does not spell (2026-10-15)
     if not could_be_options:
         return False
     return (any(_may_be_several_words(word) for word in could_be_options)
@@ -2172,7 +2209,7 @@ def _reaches_wide(operand: _Word, cwd: Optional[str]) -> bool:
     alone is not: without recursion it is refused (`Remove-Item -Recurse:$false ~`)."""
     text = operand.text
     if operand.dynamic or not any(ch in text for ch in "*?["):
-        return False  # one unknown file, as `rm "$tmp"` always was; a wide loop taints it instead
+        return False  # one file, not a glob: `_single_delete_asks` judges it; a wide loop taints it
     return _is_wide_here(text, cwd) or _outside_roots(text, cwd)
 
 
@@ -2446,21 +2483,27 @@ def _powershell_line_is_dangerous(line: str, depth: int, cwd: Optional[str] = ""
     that is not PowerShell's own is judged by the shell rules (`cmd /c …`, `git push --force`)."""
     if depth > _MAX_DEPTH:
         return True
-    if _PS_DOTNET.search(line):
+    if _PS_DOTNET.search(_PS_STRING_FORMAT.sub("", line)):
         return True  # a .NET call that deletes, overwrites or runs code: not taken apart here
+    known = _ps_literal_variables(line)
     statements: list[list[_Word]] = [[]]
     piped: list[bool] = [False]
     fed: list[bool] = [False]  # the statement takes a pipe's input
     called: list[bool] = [False]  # after a lone `&`, PowerShell's call operator
+    #: The statement stands inside `@{ … }`: a hashtable's `key = value`, not a command (W-10).
+    entries: list[bool] = [False]
+    #: What each open `{`/`(` is: a hashtable (`@{`) or anything else.
+    open_: list[bool] = []
     word: Optional[_Word] = None
     quote = ""
 
     def finish() -> None:
         nonlocal word
         if word is not None:
-            text = _PS_HOME.sub("~", word.text)
-            word = replace(word, text=text, dynamic=word.dynamic or "$" in text
-                           or text.startswith("@"))
+            value = known.get(word.text.lower()) if word.dynamic else None
+            # `$t = 'a.txt'; Remove-Item $t` deletes that file (`_single_delete_asks`, W-10).
+            word = replace(word, text=_PS_HOME.sub("~", word.text),
+                           known=(value,) if value is not None else ())
             statements[-1].append(word)
             word = None
 
@@ -2477,6 +2520,8 @@ def _powershell_line_is_dangerous(line: str, depth: int, cwd: Optional[str] = ""
                 word.text += line[i + 1]
                 i += 1
             else:
+                # Only a double-quoted `$` expands: `'$_.Line'` is those characters (W-10).
+                word.dynamic |= ch == "$" and quote == '"' and not _PS_HOME.match(line, i)
                 word.text += ch
         elif ch in "'\"":
             word = word or _Word(started=True)
@@ -2489,6 +2534,7 @@ def _powershell_line_is_dangerous(line: str, depth: int, cwd: Optional[str] = ""
         elif ch == "$" and line[i + 1:i + 2] == "{":
             end = line.find("}", i)
             word = word or _Word(started=True)
+            word.dynamic |= not _PS_HOME.match(line, i)
             word.text += line[i:] if end < 0 else line[i:end + 1]
             i = len(line) if end < 0 else end
         elif ch == "#" and word is None:
@@ -2502,14 +2548,23 @@ def _powershell_line_is_dangerous(line: str, depth: int, cwd: Optional[str] = ""
                 finish()
                 statements[-1].append(_Word(text="(…)", started=True, dynamic=True))
             finish()
+            if ch in "{(":
+                open_.append(ch == "{" and line[i - 1:i] == "@")
+            elif ch in "})" and open_:
+                open_.pop()
             pipe = ch == "|" and "|" not in (line[i - 1:i], line[i + 1:i + 2])
             piped[-1] |= pipe
             statements.append([])
             piped.append(pipe)
             fed.append(pipe)
             called.append(ch == "&" and "&" not in (line[i - 1:i], line[i + 1:i + 2]))
+            entries.append(bool(open_) and open_[-1])
         else:
             word = word or _Word(started=True)
+            # `$x`, and `@x`/`@(…)` at a word's start (a splat, an array): values the line does
+            # not spell.
+            word.dynamic |= (ch == "$" and not _PS_HOME.match(line, i)
+                             or ch == "@" and not word.text)
             word.text += ch
         i += 1
     if quote:
@@ -2517,16 +2572,130 @@ def _powershell_line_is_dangerous(line: str, depth: int, cwd: Optional[str] = ""
     finish()
     if _powershell_feeds_are_dangerous(statements, fed, cwd):
         return True
-    for words, in_pipe, call in zip(statements, piped, called):
-        if not words:
+    # Pipeline items (`$_`) are names a listing gave: known to be the project's when the line
+    # lists, and lists nothing wide or recursive (`_powershell_feeds_are_dangerous` asks then).
+    bodies = [_ps_body(words) for words in statements]
+    narrow = (any(_ps_lister_at(body, _PS_LISTERS) is not None for body in bodies)
+              and not any(_ps_lists_wide(body, cwd) for body in bodies))
+    items = _PS_ITEMS_NARROW.set(narrow)
+    others = _KNOWN.set({})  # a bash line's variables are not this line's
+    try:
+        for words, in_pipe, call, entry in zip(statements, piped, called, entries):
+            if not words:
+                continue
+            if entry:
+                words = _ps_entry(words)
+            if _powershell_statement_is_dangerous(words, in_pipe, call, depth, cwd):
+                return True
+            _ran(words)
+            moved, target = _cd_target(words, cwd, shell="powershell")  # `Set-Location ~; ri -r .`
+            if moved and not in_pipe:
+                cwd = target
+        return False
+    finally:
+        _KNOWN.reset(others)
+        _PS_ITEMS_NARROW.reset(items)
+
+
+def _ps_literal_variables(line: str) -> dict[str, str]:
+    """`$name` (lower case) → the literal path the line assigns it (`_PS_LITERAL_ASSIGNMENT`), for
+    a variable assigned there once, before any other use, and never otherwise named: not by
+    `-OutVariable name`, `$script:name`, `${name}`, `foreach ($name in …)`, `[ref]` — each of
+    those sets it by other means. Anything less certain stays a value the line does not spell."""
+    found: dict[str, str] = {}
+    if "[ref]" in line.lower():
+        return found
+    for match in _PS_LITERAL_ASSIGNMENT.finditer(line):
+        name = match.group("name")
+        if name.lower() in _PS_AUTOMATIC:
             continue
-        if _powershell_statement_is_dangerous(words, in_pipe, call, depth, cwd):
-            return True
-        _ran(words)
-        moved, target = _cd_target(words, cwd, shell="powershell")  # `Set-Location ~; ri -r .`
-        if moved and not in_pipe:
-            cwd = target
-    return False
+        value = next(v for v in match.group("single", "double", "rsingle", "rdouble")
+                     if v is not None)
+        mentions = [m for m in re.finditer(rf"(?<![\w-]){re.escape(name)}(?!\w)", line, re.I)]
+        uses = [m for m in mentions if line[m.start() - 1:m.start()] == "$"]
+        assigned = re.findall(rf"\${re.escape(name)}\s*[-+*/%]?=(?!=)|\${re.escape(name)}\s*(?:\+\+|--)",
+                              line, re.I)
+        if (len(uses) == len(mentions) and len(assigned) == 1 and uses
+                and uses[0].start() == match.start("name") and value):
+            found["$" + name.lower()] = value
+    return found
+
+
+def _single_delete_asks(target: _Word, cwd: Optional[str]) -> bool:
+    """One file deleted (`rm f`, `Remove-Item f`): the Arbiter, 2026-10-15 — «це ж робота скіла;
+    якщо це за текою чи рекурсивне — тоді може». In the project or the method's copy it passes;
+    outside them it asks, and so does a target the line does not spell — a variable not assigned
+    from a literal on the line — unless it is a narrow listing's pipeline item (`$_`)."""
+    if not target.dynamic:
+        return _outside_roots(target.text, cwd)
+    values = target.known or _known_texts(target)
+    if not values:
+        return not (_PS_ITEMS_NARROW.get() and _PS_ITEM.fullmatch(target.text))
+    return any(_reaches_wide(_Word(text=value, started=True), cwd) or _outside_roots(value, cwd)
+               for value in values)
+
+
+def _known_values(commands: list[_Command], tainted: set[str]) -> list[dict[str, tuple[str, ...]]]:
+    """For each command of a bash line, the variables it may read as literal values: set by an
+    assignment standing alone (`x=process/a.json;`, `export x=…`) or a loop over literal words
+    (`for f in process/*.tmp`), earlier on the line, in its own subshell or an outer one — and set
+    nowhere else on the line, by nothing else (`read`, a prefix `x=… cmd`, `x+=`, `${x:=…}`,
+    `printf -v`, a substitution: `_tainted`). The rest is a value the line does not spell."""
+    counts: dict[str, int] = {}
+    for command in commands:
+        for word in command.words:
+            for name in re.findall(r"(?<![\w$])([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=", word.text):
+                counts[name] = counts.get(name, 0) + 1
+            for name in _DEFAULT_ASSIGNMENT.findall(word.text):
+                counts[name] = counts.get(name, 0) + 2
+    known: list[dict[str, tuple[str, ...]]] = []
+    given: list[tuple[tuple[int, ...], str, tuple[str, ...]]] = []
+    for command in commands:
+        here = {name: values for scope, name, values in given
+                if command.scope[:len(scope)] == scope}
+        known.append(here)
+        if command.piped:
+            continue
+        for words in _segments(command):
+            head = words[0].text
+            if head in ("for", "select") and len(words) > 3 and words[2].text == "in":
+                name, values = words[1].text, words[3:]
+                if (_NAME.fullmatch(name) and name not in tainted and name not in counts
+                        and not any(v.dynamic or v.output for v in values)):
+                    given.append((command.scope, name, tuple(v.text for v in values)))
+                continue
+            body = words[1:] if head in _DECLARERS else words
+            if any(not _ASSIGNMENT.match(word.text) for word in body):
+                continue  # a prefix to a command: `x=a rm "$x"` expands the old `$x`
+            for word in body:
+                match = _ASSIGNMENT.match(word.text)
+                name, value = match.group(1), word.text[match.end():]
+                if (counts.get(name) == 1 and name not in tainted and not word.dynamic
+                        and word.text[len(name)] == "=" and value):
+                    given.append((command.scope, name, (value,)))
+    return known
+
+
+def _known_texts(word: _Word) -> tuple[str, ...]:
+    """What a bash word is, its variables put in from `_known_values` — one text per value of a
+    loop, at most 64 — or () when any part of it is not known or it would split (unquoted, a value
+    with a blank)."""
+    known = _KNOWN.get()
+    names = sorted(word.refs)
+    if (word.output or not names or any(name not in known for name in names)
+            or not word.quoted and any(any(ch.isspace() for ch in value)
+                                       for name in names for value in known[name])):
+        return ()
+    combos = list(itertools.islice(itertools.product(*(known[name] for name in names)), 65))
+    texts = []
+    for combo in combos:
+        text = word.text
+        for name, value in zip(names, combo):
+            text = re.sub(rf"\$\{{{name}\}}|\${name}(?!\w)", lambda _m, v=value: v, text)
+        if re.search(r"[$`]", text) or not word.quoted and "{" in text:
+            return ()  # something else the line does not spell is left in it
+        texts.append(text)
+    return tuple(texts) if len(combos) <= 64 else ()
 
 
 def _ps_body(words: list[_Word]) -> list[_Word]:
@@ -2608,17 +2777,65 @@ def _powershell_feeds_are_dangerous(statements: list[list[_Word]], fed: list[boo
     return False
 
 
+def _ps_entry(words: list[_Word]) -> list[_Word]:
+    """A hashtable's entry — `key=value`, `key = value`, `'key'=value` inside `@{ … }` — as what
+    it runs: its value, an expression or a pipeline (`@{ a = Get-Date }`). The key is a name, not
+    a command: `schema_version=$state.schema_version` asked as one under `auto` (W-10)."""
+    head = words[0]
+    key, eq, value = head.text.partition("=")
+    if eq and key:
+        rest = [_Word(text=value, started=True, quoted=head.quoted, dynamic=head.dynamic)
+                ] if value else []
+        return rest + words[1:]
+    if len(words) > 1 and words[1].text.startswith("=") and not words[1].quoted:
+        value = words[1].text[1:]
+        return ([replace(words[1], text=value)] if value else []) + words[2:]
+    return words
+
+
+def _ps_uncast(words: list[_Word]) -> list[_Word]:
+    """A statement without the type literal it starts with: `[int]$n = 5` is `$n = 5`,
+    `[PSCustomObject]@{…}` an `@{…}`, `[IO.File]::ReadAllText(…)` a `::ReadAllText` — an
+    expression; a .NET call that deletes or runs code asks by `_PS_DOTNET` first (W-10)."""
+    if not words or words[0].quoted:
+        return words
+    head = words[0]
+    match = _PS_TYPE.match(head.text)
+    if not match:
+        return words
+    rest = head.text[match.end():]
+    if not rest:
+        return words[1:]
+    return [_Word(text=rest, started=True, dynamic=head.dynamic or rest.startswith("@")),
+            *words[1:]]
+
+
+def _ps_is_expression(head: _Word) -> bool:
+    """A statement that starts as a value, not a command: a variable (`$p`, `$_.Line`), a string
+    that expands (`"$n items"`), a parenthesised pipeline (`(…)`, read as statements of its own),
+    an array or a hashtable (`@(…)`, `@{…}`), a static member (`::Now`). It runs nothing unless
+    called (`&`)."""
+    text = head.text
+    return (text.startswith(("$", "::")) or head.quoted and head.dynamic
+            or head.dynamic and (text == "(…)" or text.startswith("@")))
+
+
 def _powershell_statement_is_dangerous(words: list[_Word], piped: bool, called: bool,
                                        depth: int, cwd: Optional[str] = "") -> bool:
+    words = _ps_uncast(words)
+    if not words:
+        return False
     if words[0].text.startswith("$"):
         if len(words) > 1 and words[1].text in ("=", "+=", "-=", "*=", "/="):
-            words = words[2:]  # `$p = Get-Location`: what is assigned is the statement
+            words = _ps_uncast(words[2:])  # `$p = Get-Location`: what is assigned is the statement
             if not words:
                 return False
         else:
             # An expression — `$p`, `$_.Name -like '*.tmp'` — runs nothing; `& $cmd` runs what
             # the line does not spell.
             return called
+    if _ps_is_expression(words[0]):
+        return called  # `$t = (Resolve-Path …).Path`: the inside was read on its own (W-10)
     name = _command_name(words[0].text)
     if words[0].dynamic:
         return True  # what runs is not written on the line
@@ -2654,8 +2871,11 @@ def _remove_item_is_dangerous(arguments: list[_Word], piped: bool, cwd: Optional
     splat = any(target.text.startswith("@") for target in targets)  # `@args` may hold -Recurse
     if not (recurse or splat):
         # Not recursive: still a delete of every file a wide glob or name reaches (`Remove-Item
-        # ~\\*`, Fable's final review, I1); fed by a pipe it is judged with its producer.
-        return any(_reaches_wide(target, cwd) for target in targets)
+        # ~\\*`, Fable's final review, I1); fed by a pipe it is judged with its producer. One
+        # file, by the Arbiter's rule (2026-10-15): in the project or the method's copy it passes,
+        # outside them — or one the line does not spell — it asks.
+        return any(_reaches_wide(target, cwd) or _single_delete_asks(target, cwd)
+                   for target in targets)
     if any(_holds_a_link_out(target, cwd) for target in targets):
         return True  # Windows PowerShell 5.1 recurses through a junction inside what it deletes
     if not targets:
@@ -3289,15 +3509,48 @@ def _is_owned(path: str) -> bool:
     return path.startswith(_SKILL_OWNED) or path.rstrip("/") in _SKILL_FOLDERS
 
 
+#: PowerShell's names, and the switches it takes before `-Command` that take no value.
+_POWERSHELLS = frozenset({"powershell", "pwsh"})
+_PS_SWITCHES = frozenset({"-noprofile", "-nop", "-noninteractive", "-noni", "-nologo", "-mta",
+                          "-sta"})
+
+
+def powershell_command_text(command: str) -> Optional[str]:
+    """What a `powershell -Command …` argv runs: the `-Command` text as PowerShell gets it. Codex
+    on Windows sends its argv joined the POSIX way (`"C:\\…\\powershell.exe" -Command '…'"'"'…'`),
+    so `shlex` takes it apart exactly. None for any other shape — not PowerShell, an option before
+    `-Command` that may take a value, `-EncodedCommand`, `-File`, stdin (`-Command -`)."""
+    try:
+        words = shlex.split(command or "")
+    except ValueError:
+        return None
+    if not words or _command_name(words[0]) not in _POWERSHELLS:
+        return None
+    for at, word in enumerate(words[1:], start=1):
+        flag = word.lower()
+        if flag == "-c" or len(flag) > 3 and "-command".startswith(flag):
+            rest = words[at + 1:]
+            return " ".join(rest) if rest and rest[0] != "-" else None
+        if flag not in _PS_SWITCHES:
+            return None
+    return None
+
+
 def _is_dangerous(command: str, roots: Sequence[Path], shell: str) -> bool:
-    """`bash_is_dangerous`, and for a line the caller knows is PowerShell its own reader as well:
-    read as bash, `C:\\Users` loses its backslash and a recursive delete of it passes. Either
-    reading that flags it asks, so a PowerShell line is never judged more loosely than a bash one."""
-    if bash_is_dangerous(command, roots):
+    """`bash_is_dangerous` for a bash line. A PowerShell line by PowerShell's reader, which reads
+    `C:\\Users` with its backslash where bash's reading would drop it. Codex's argv
+    (`powershell.exe -Command '…'`, joined the POSIX way) by both: bash's reading of an argv
+    joined that way is exact and hands the `-Command` text to PowerShell's reader, and that text is
+    read as PowerShell too. What neither reads is the argv as if it were PowerShell's own line, nor
+    a PowerShell line as bash: each is a misreading — `@{…}`, `[int]$n`, `{ $_.Line }` and an
+    apostrophe Codex closes and reopens tripped it into «cannot be undone» (W-10)."""
+    if shell != SHELL_POWERSHELL:
+        return bash_is_dangerous(command, roots)
+    text = powershell_command_text(command)
+    if text is not None and bash_is_dangerous(command, roots):
         return True
     with _in_project(roots):
-        return shell == SHELL_POWERSHELL and _powershell_line_is_dangerous(command.strip(),
-                                                                           depth=0)
+        return _powershell_line_is_dangerous((command if text is None else text).strip(), depth=0)
 
 
 #: The method's root as the line may READ it; any other mention of the name sets it, or might.

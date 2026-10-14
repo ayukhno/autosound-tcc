@@ -46,9 +46,10 @@ from autosound_tcc.core.mcp_server import (CONFIRM_TIMEOUT_S, ConfirmRequest, He
                                            UiBridge, await_confirmation)
 from autosound_tcc.core.omp_session import FRAME_LOG_MAX_BYTES
 from autosound_tcc.core.session_registry import CODEX_ROUTE, SessionRegistry
-from autosound_tcc.core.shell_gate import (ALLOW_TITLE, GATE_NEVER, GATE_WRITES, SHELL_BASH,
-                                           SHELL_POWERSHELL, Verdict, allow_title_args,
-                                           judge_action)
+from autosound_tcc.core.shell_gate import (ALLOW_TITLE, GATE_AUTO, GATE_NEVER, GATE_WRITES,
+                                           SHELL_BASH, SHELL_POWERSHELL, Verdict,
+                                           allow_title_args, judge_action,
+                                           powershell_command_text)
 from autosound_tcc.core.tuning_session import SKILL_NAME, _read_roots_for, system_prompt_append
 
 #: Every frame both ways, next to the project's other TCC state — omp's `omp-frames.jsonl`, for the
@@ -118,30 +119,10 @@ def shown_command(command: str) -> str:
     it. Codex on Windows sends its argv joined the POSIX way (`"C:\\…\\powershell.exe" -Command
     '…'"'"'…'`), so shown whole a doubled backslash and a `'"'` stood between the Arbiter and the
     line (W-10). Any other shape — not PowerShell, an option before `-Command` that may take a value,
-    `-EncodedCommand`, `-File` — is returned whole: nothing is hidden by the unwrapping. Only what is
-    shown: the gate reads the whole line, as Codex sent it."""
-    try:
-        words = shlex.split(command or "")
-    except ValueError:
-        return command
-    if not words:
-        return command
-    name = words[0].replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
-    if name not in _POWERSHELL:
-        return command
-    for at, word in enumerate(words[1:], start=1):
-        flag = word.lower()
-        if flag == "-c" or len(flag) > 3 and "-command".startswith(flag):
-            rest = words[at + 1:]
-            return " ".join(rest) if rest and rest[0] != "-" else command
-        if flag not in _PS_SWITCHES:
-            return command
-    return command
-
-
-#: The PowerShell switches that take no value, so a `-Command` after them is still the line's.
-_PS_SWITCHES = frozenset({"-noprofile", "-nop", "-noninteractive", "-noni", "-nologo", "-mta",
-                          "-sta"})
+    `-EncodedCommand`, `-File` — is returned whole: nothing is hidden by the unwrapping. The gate
+    takes it apart the same way (`shell_gate.powershell_command_text`)."""
+    text = powershell_command_text(command)
+    return command if text is None else text
 
 
 def _names_the_method(name: str) -> bool:
@@ -711,8 +692,10 @@ class CodexSession:
 
     def _asked(self, method: str, params: dict) -> tuple[str, str, str, str, str]:
         """`(tool, detail, shell, always, shown)` for one approval, as the gate reads it. `always`
-        names why it asks whatever the gate says — `irreversible` (a file delete) or `unknown`
-        (Codex did not say what runs, or where TCC cannot judge it) — and is "" otherwise. `shown`
+        names why it asks whatever the gate says — `irreversible` (a file delete outside the
+        project, or a change Codex did not describe), `delete` (one file of the project deleted:
+        asks only where the gate asks about writes, `_judge`) or `unknown` (Codex did not say what
+        runs, or where TCC cannot judge it) — and is "" otherwise. `shown`
         is `detail` as the bar shows it: a PowerShell line by the text it runs (`shown_command`)."""
         if method == COMMAND_APPROVAL:
             tool, detail, shell, always = self._asked_command(params)
@@ -724,7 +707,9 @@ class CodexSession:
         reason = str(params.get("reason") or "").strip()
         if changes:
             detail = "\n".join(f"{kind or 'change'}: {path}" for path, kind in changes)
-            always = "irreversible" if any(kind == "delete" for _, kind in changes) else ""
+            deletes = [path for path, kind in changes if kind == "delete"]
+            always = "" if not deletes else "delete" if all(
+                self._one_file_inside(path) for path in deletes) else "irreversible"
         else:
             # Codex named no change TCC saw: what it does is unknown, so it is asked about as a
             # delete would be — under `auto` too.
@@ -772,11 +757,24 @@ class CodexSession:
     def _where(self, cwd: Any) -> Optional[str]:
         return where(cwd, self.project_dir)
 
+    def _one_file_inside(self, path: str) -> bool:
+        """A file-change delete's path is one file in the project or the method's copy: not a
+        folder, not either root itself, not one a link takes outside them (`where` reads realpaths)."""
+        target = Path(_plain(path))
+        target = target if target.is_absolute() else self.project_dir / target
+        if target.is_dir():
+            return False
+        return any(where(str(target), root) not in (None, "outside") for root in self._read_roots)
+
     @staticmethod
     def _in_folder(line: str, cwd: str, shell: str) -> str:
-        """The line as it runs in `cwd`, for the gate to judge from there."""
+        """The line as it runs in `cwd`, for the gate to judge from there. Codex's PowerShell argv
+        by the `-Command` text it runs: behind a `Set-Location` it is a PowerShell line, and the argv
+        joined the POSIX way is not one (W-10)."""
         if shell == SHELL_POWERSHELL:
-            return "Set-Location '" + cwd.replace("'", "''") + "'; " + line
+            text = powershell_command_text(line)
+            return "Set-Location '" + cwd.replace("'", "''") + "'; " + (line if text is None
+                                                                        else text)
         return f"cd {shlex.quote(cwd)} && {line}"
 
     @staticmethod
@@ -818,6 +816,11 @@ class CodexSession:
     async def _judge(self, method: str, params: dict) -> bool:
         gate, ticks = self.gate, frozenset(self.always_allowed)
         tool, detail, shell, always, shown = self._asked(method, params)
+        if always == "delete":
+            # The Arbiter, 2026-10-15: one file of the project deleted is the skill's work —
+            # «всі ці питання ніхто не читає а вони тільки дратують». `auto` lets it through (and
+            # `never` has nothing to say of it); where every write asks, it asks as before.
+            always = "" if gate in (GATE_AUTO, GATE_NEVER) else "irreversible"
         # Off the loop: the gate reads the disk (realpaths, globs, a walk for a recursive delete),
         # and a slow drive must not hold Codex's notifications.
         verdict = await asyncio.to_thread(judge_action, tool, detail, gate=gate,
