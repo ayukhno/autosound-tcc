@@ -140,6 +140,39 @@ def shell_of(command: str, *, windows: Optional[bool] = None) -> str:
     return SHELL_POWERSHELL if windows else SHELL_BASH
 
 
+def _plain(path: str) -> str:
+    """`\\\\?\\C:\\x` → `C:\\x`, `\\\\?\\UNC\\host\\share` → `\\\\host\\share`: Windows' long-path
+    spelling names the same folder, and a realpath keeps the prefix it was given."""
+    if path.startswith(("\\\\?\\UNC\\", "//?/UNC/")):
+        return "\\\\" + path[8:]
+    if path.startswith(("\\\\?\\", "//?/")):
+        return path[4:]
+    return path
+
+
+def where(cwd: Any, project: Any, *, paths=os.path) -> Optional[str]:
+    """None when `cwd` is the project itself (or not given); "outside" when it is not in the
+    project; else the folder the line runs in, RELATIVE to the project (realpaths) — the gate
+    reads operands from the project, and an absolute `cd` would leave `../..` read as text
+    (task 7's re-review, N2). Windows' spellings of one folder — any case, `\\\\?\\` — are one
+    folder; another drive is outside. `paths`: `ntpath` for the tests' Windows rows."""
+    if not cwd:
+        return None
+    try:
+        here = paths.realpath(_plain(str(cwd)))
+        home = paths.realpath(_plain(str(project)))
+    except (OSError, ValueError):
+        return "outside"
+    mine, root = paths.normcase(here), paths.normcase(home)
+    if mine == root:
+        return None
+    try:
+        inside = paths.commonpath([mine, root]) == root
+    except ValueError:  # another drive, or one relative and one absolute
+        inside = False
+    return paths.relpath(here, home) if inside else "outside"
+
+
 class CodexSession:
     """A tuning conversation bound to one project folder, run by a `codex app-server` process."""
 
@@ -681,25 +714,7 @@ class CodexSession:
         return "Bash", self._in_folder(line, where, shell), shell, ""
 
     def _where(self, cwd: Any) -> Optional[str]:
-        """None when `cwd` is the project itself (or not given); "outside" when it is not in the
-        project; else the folder the line runs in, RELATIVE to the project (realpaths) — the gate
-        reads operands from the project, and an absolute `cd` would leave `../..` read as text
-        (task 7's re-review, N2)."""
-        if not cwd:
-            return None
-        try:
-            here = Path(os.path.realpath(str(cwd)))
-            home = Path(os.path.realpath(self.project_dir))
-        except (OSError, ValueError):
-            return "outside"
-        if os.path.normcase(str(here)) == os.path.normcase(str(home)):
-            return None
-        try:
-            inside = Path(os.path.normcase(str(here))).is_relative_to(
-                Path(os.path.normcase(str(home))))
-        except ValueError:
-            inside = False
-        return os.path.relpath(here, home) if inside else "outside"
+        return where(cwd, self.project_dir)
 
     @staticmethod
     def _in_folder(line: str, cwd: str, shell: str) -> str:

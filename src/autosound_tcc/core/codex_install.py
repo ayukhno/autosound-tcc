@@ -203,6 +203,12 @@ def _download(opener: Callable, entry: dict, into: Path, progress, cancelled) ->
                 digest.update(chunk)
                 done += len(chunk)
                 progress(done, total)
+            if total and done < total:
+                # The server closed early: what came hashes to something else, and «not the file
+                # TCC expects» would be the wrong sentence (the group review, M3).
+                said = (f"the download stopped early ({done} of {total} bytes) — try again")
+                raise InstallError(f"Codex could not be downloaded: {said}",
+                                   key="codexInstallNetwork", error=said)
     except InstallError:
         _remove(path)
         raise

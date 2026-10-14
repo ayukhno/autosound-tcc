@@ -1745,3 +1745,51 @@ def test_an_edit_tick_lets_an_ordinary_edit_through(project, tmp_path, stand_in)
                          always_allowed=frozenset({"Edit"}))
 
     assert bridge.requests == [] and decisions(stand_in) == ["accept"]
+
+
+# ---- Windows inputs, as pure functions (group fix I5) -------------------------------------------
+
+WIN_PROJECT = r"C:\Users\Me\Documents\car"
+
+
+@pytest.mark.parametrize("cwd, said", [
+    (WIN_PROJECT, None),
+    (r"c:\users\me\documents\CAR", None),                      # another case, the same folder
+    (r"\\?\C:\Users\Me\Documents\car", None),                  # the long-path spelling
+    (WIN_PROJECT + r"\process", "process"),
+    (r"C:\USERS\ME\DOCUMENTS\CAR\Process\Sub", r"Process\Sub"),
+    (r"\\?\C:\Users\Me\Documents\car\state", "state"),
+    (r"C:\Users\Me", "outside"),
+    (r"C:\Users\Me\Documents\car-other", "outside"),           # a sibling sharing the prefix
+    (r"D:\Users\Me\Documents\car", "outside"),                 # another drive
+    (r"\\?\D:\x", "outside"),
+])
+def test_where_reads_a_windows_cwd(cwd, said):
+    """Codex on Windows names its `cwd` as Windows does: any case, the `\\\\?\\` prefix. The same
+    folder in another spelling is the project, not «outside» (which asks about everything)."""
+    import ntpath
+    assert codex_session.where(cwd, WIN_PROJECT, paths=ntpath) == said
+
+
+@pytest.mark.parametrize("cwd", ["process", r"C:\Users\O'Brien\car's folder"])
+def test_in_folder_for_powershell_quotes_the_folder_as_powershell_does(cwd):
+    line = CodexSession._in_folder("Remove-Item -Recurse -Force ..", cwd, "powershell")
+
+    assert line == "Set-Location '" + cwd.replace("'", "''") + "'; Remove-Item -Recurse -Force .."
+
+
+def test_a_powershell_line_run_in_a_subfolder_is_judged_from_there(tmp_path):
+    """The gate reads the PowerShell line `_in_folder` builds: `..` from `process` is the project
+    itself — a recursive delete of it asks; a delete of a file there does not under `auto`."""
+    from autosound_tcc.core.shell_gate import GATE_AUTO, SHELL_POWERSHELL, judge_action
+    from autosound_tcc.core.tuning_session import _read_roots_for
+    (tmp_path / "process").mkdir()
+    roots = _read_roots_for(tmp_path)
+
+    wide = CodexSession._in_folder("Remove-Item -Recurse -Force ..\\..", "process", "powershell")
+    narrow = CodexSession._in_folder("Remove-Item x.tmp", "process", "powershell")
+
+    assert not judge_action("Bash", wide, gate=GATE_AUTO, read_roots=roots,
+                            shell=SHELL_POWERSHELL).allowed
+    assert judge_action("Bash", narrow, gate=GATE_AUTO, read_roots=roots,
+                        shell=SHELL_POWERSHELL).allowed

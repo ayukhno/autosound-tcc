@@ -625,3 +625,103 @@ def test_a_complete_copy_put_there_by_another_install_is_a_success(monkeypatch, 
 
     assert path == target and target.is_file()
     assert [p.name for p in target.parents[3].iterdir()] == [codex_cli.PIN]
+
+
+# ---- the group fix: a cut download, the Windows wheel, the default target ----------------------
+
+
+def test_a_download_cut_short_says_so_not_a_checksum_mismatch(monkeypatch, target):
+    """M3: the server closed early; the bytes that came hash to something else, and the person
+    was told the file was the wrong one. A short read against the size announced is said as what
+    it is — the download stopped early — and leaves nothing."""
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+    marker = _old_copy(target)
+
+    class Cut(_Opener):
+        def __call__(self, url, timeout=None):
+            response = super().__call__(url, timeout)
+            if url == FILE_URL:
+                cut = _Response(self.wheel[: len(self.wheel) // 2], url)
+                cut.headers = {"Content-Length": str(len(self.wheel))}
+                return cut
+            return response
+
+    with pytest.raises(InstallError) as caught:
+        _install(Cut(wheel), target)
+
+    assert caught.value.key == "codexInstallNetwork"
+    assert "stopped early" in str(caught.value) and "try again" in str(caught.value)
+    assert "stopped early" in caught.value.fields["error"]
+    _assert_nothing_left(target, marker)
+
+
+WIN_KEY = "windows-amd64"
+WIN_ROW = LAYOUT["wheels"][WIN_KEY]
+
+
+def _windows_wheel() -> bytes:
+    """The Windows wheel's members as the fixture lists them (`bin/codex.exe`,
+    `codex-command-runner.exe`, …); the binary a script that says the pin — the test runs on a
+    POSIX machine, where a `.exe` with a `#!` line runs as well."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for member in WIN_ROW["members"]:
+            path = member["path"]
+            data = _codex_says(codex_cli.PIN) if path == WIN_ROW["binary"] else f"{path}\n".encode()
+            info = zipfile.ZipInfo(path)
+            info.external_attr = int(member["mode"], 8) << 16
+            zf.writestr(info, data)
+        for path in WIN_ROW["dist_info"]:
+            zf.writestr(path, "x\n")
+    return buf.getvalue()
+
+
+def test_tcc_s_windows_copy_path_is_the_windows_wheel_s_binary(tmp_path):
+    """I5: `tcc_copy_path(windows=True)` ends in the Windows wheel's own `binary` — the install
+    puts the folder there and checks that very file."""
+    path = codex_cli.tcc_copy_path(home=tmp_path, windows=True,
+                                   environ={"LOCALAPPDATA": r"C:\Users\u\AppData\Local"})
+    assert path.parts[-3:] == tuple(WIN_ROW["binary"].split("/"))
+    assert path.parts[-4] == codex_cli.PIN
+
+
+@POSIX_ONLY
+def test_the_windows_wheel_is_unpacked_whole_where_find_looks_on_windows(monkeypatch, tmp_path):
+    """I5: a fake Windows wheel built from the fixture's Windows rows, installed to the Windows
+    path: every member there, the `.exe` the install asked its version."""
+    wheel = _windows_wheel()
+    monkeypatch.setitem(codex_install.WHEELS, WIN_KEY, codex_install.Wheel(
+        WIN_ROW["filename"], hashlib.sha256(wheel).hexdigest()))
+    local = tmp_path / "Local"
+    target = codex_cli.tcc_copy_path(home=tmp_path, environ={"LOCALAPPDATA": str(local)},
+                                     windows=True)
+    opener = _Opener(wheel, file_url="https://files.pythonhosted.org/packages/xx/"
+                     + WIN_ROW["filename"])
+    opener.index["urls"][0]["filename"] = WIN_ROW["filename"]
+
+    path = codex_install.install(lambda done, total: None, lambda: False, opener=opener,
+                                 target=target, platform=WIN_KEY)
+
+    assert path == target and target.is_file()
+    for member in WIN_ROW["members"]:
+        assert (target.parents[2] / member["path"]).is_file(), member["path"]
+    assert (target.parents[1] / "codex-resources" / "codex-command-runner.exe").is_file()
+    assert not (target.parents[2] / WIN_ROW["dist_info"][0]).exists()
+
+
+@POSIX_ONLY
+def test_install_with_no_target_puts_codex_where_tcc_copy_path_says(monkeypatch, tmp_path):
+    """I5: once with the module's own default — `codex_cli.tcc_copy_path()` under a temporary
+    HOME and LOCALAPPDATA, never the developer's."""
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+
+    path = codex_install.install(lambda done, total: None, lambda: False, opener=_Opener(wheel),
+                                 platform=KEY)
+
+    assert path == codex_cli.tcc_copy_path(windows=False) and path.is_file()
+    assert str(path).startswith(str(tmp_path))
