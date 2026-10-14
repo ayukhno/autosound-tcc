@@ -525,7 +525,7 @@ def test_a_long_step_shows_its_short_title_and_a_hint_with_the_full_name():
     hint = next(w for w in row.findChildren(QLabel) if w.property("class") == "step-title-hint")
     assert name.text() == "2a: зчитати поточні фільтри кожного каналу"
     assert hint.text() == "?"
-    assert _LONG_STEP in hint.toolTip()
+    assert _LONG_STEP in hint.hover_tip.text()
 
 
 def test_a_short_step_has_no_hint():

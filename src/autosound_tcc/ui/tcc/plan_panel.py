@@ -243,11 +243,11 @@ class _PhaseStepRow(QWidget):
             name.setProperty("class", "substep-name")
         layout.addWidget(name, 1)
         if rest:
-            # The rest of the name, one hover away, right after the title (tcc#167). Plain text,
-            # escaped and wrapped in a paragraph so Qt breaks the tooltip into lines.
+            # The rest of the name, one hover away, right after the title (tcc#167), in the panel's
+            # own rounded tip as the chips beside it. Plain text, escaped: the name is the method's.
             hint = QLabel("?")
             hint.setProperty("class", "step-title-hint")
-            hint.setToolTip(f"<p>{html.escape(rest)}</p>")
+            attach_tip(hint, html.escape(rest))
             layout.addWidget(hint, 0, Qt.AlignmentFlag.AlignTop)
 
         has_chip = False
