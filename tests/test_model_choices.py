@@ -1239,49 +1239,12 @@ def test_with_the_live_list_the_shipped_floor_stays_out(tmp_path, monkeypatch):
             Choice(harness="sdk", model="claude-sonnet-5-5", label="Claude Sonnet 5.5",
                    provider="anthropic")]
     monkeypatch.setattr(mc, "_ask_claude_models", lambda: list(live))
-    monkeypatch.setattr(mc, "_CLAUDE_ASKED", False)
+    monkeypatch.setattr(mc, "_claude_stamp", lambda: "claude@1")
 
     mc.refresh_cli_catalogue()
 
     assert [c.model for c in mc.sdk_choices()] == ["claude-opus-5-5", "claude-sonnet-5-5"]
     assert mc.shipped_note(mc.sdk_choices()[1]) == ""
-
-
-# ---- a reviewer pick with no sign-in here is offered the signed-in route (hub #262, tcc#196) --
-
-def _agy_signed_in_by_adc(monkeypatch):
-    agy = [Choice(harness="agy", model="gemini-3.1-pro-low", label="Gemini 3.1 Pro (Low)",
-                  provider="google"),
-           Choice(harness="agy", model="gemini-3.8-flash-high", label="Gemini 3.8 Flash (High)",
-                  provider="google")]
-    monkeypatch.setattr(mc, "_CLI_CACHE", {"agy": agy})
-    monkeypatch.setattr(mc, "agy_on_adc", lambda: True)
-    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
-    # No key on this machine: only agy's rows reach (conftest stubs the real question).
-    monkeypatch.setattr(mc, "critic_reaches", lambda choice: choice.harness == "agy")
-
-
-def test_an_api_reviewer_with_no_key_is_offered_the_agy_model_that_answers(monkeypatch):
-    """hub #262: the pick was `gemini-3.1-pro-preview` through the API, the machine had no key and
-    reached Gemini only through agy signed in by ADC — and TCC asked for GEMINI_API_KEY. The model
-    agy answers with there is the method's ADC reviewer."""
-    _agy_signed_in_by_adc(monkeypatch)
-    pick = Choice(harness="api", model="gemini-3.1-pro-preview", label="gemini-3.1-pro-preview",
-                  provider="google")
-    assert not mc.critic_reaches(pick)
-
-    offered = mc.reviewer_on_a_signed_in_route(pick)
-
-    assert offered is not None and offered.key == "agy:gemini-3.8-flash-high"
-
-
-def test_a_pick_that_reaches_or_has_no_other_route_is_offered_nothing(monkeypatch):
-    _agy_signed_in_by_adc(monkeypatch)
-    reaching = Choice(harness="agy", model="gemini-3.8-flash-high", label="x", provider="google")
-    claude = Choice(harness="api", model="claude-opus-5", label="x", provider="anthropic")
-
-    assert mc.reviewer_on_a_signed_in_route(reaching) is None
-    assert mc.reviewer_on_a_signed_in_route(claude) is None
 
 
 # ---- the Codex list is read from `codex app-server` (tcc#182) -------------------------------
@@ -1348,3 +1311,168 @@ def test_the_app_server_is_kept_open_until_it_answers(tmp_path):
                      {"method": "model/list", "id": 1, "params": {}}], 1, 5.0)
 
     assert frame == {"id": 1, "result": {"data": [{"id": "m1"}]}}
+
+
+# ---- the group review: a list that could not be read is said, never a confident answer --------
+
+def _claude_answer(models, *, before="") -> str:
+    return before + json.dumps({"type": "control_response", "response": {
+        "subtype": "success", "request_id": "tcc-models", "response": {"models": models}}}) + "\n"
+
+
+def _claude_says(monkeypatch, stdout, code=0, stderr=""):
+    monkeypatch.setattr(mc.claude_sdk, "cli_path", lambda: "/usr/local/bin/claude")
+    monkeypatch.setattr(mc.child, "run_bounded",
+                        lambda args, **k: subprocess.CompletedProcess(args, code, stdout, stderr))
+
+
+def test_a_json_line_that_is_not_an_object_does_not_stop_the_read(monkeypatch):
+    """`frame.get` ran before `isinstance`: a `[]` line raised, and the start's read stopped with
+    agy and Claude «not checked» for the whole launch."""
+    _claude_says(monkeypatch, _claude_answer(
+        [{"value": "sonnet", "resolvedModel": "claude-sonnet-5-5", "displayName": "Sonnet 5.5"}],
+        before='[]\n"x"\n'))
+
+    assert [c.model for c in _REAL_ASK_CLAUDE()] == ["claude-sonnet-5-5"]
+
+
+def test_an_alias_with_no_resolved_model_is_named_by_its_own_name(monkeypatch):
+    """`opus[1m]` with no `resolvedModel` — the alias row of a CLI that does not resolve it."""
+    _claude_says(monkeypatch, _claude_answer(
+        [{"value": "opus[1m]", "displayName": "Opus 5.5", "description": "Opus 5.5 · 1M"}]))
+
+    assert [c.key for c in _REAL_ASK_CLAUDE()] == ["sdk:claude-opus-5-5"]
+    assert mc._SDK_CLI_ROUTE not in mc._PARTIAL
+
+
+def test_a_partial_read_keeps_the_floor_so_nothing_is_called_gone(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    _claude_says(monkeypatch, _claude_answer(
+        [{"value": "sonnet", "resolvedModel": "claude-sonnet-5-5", "displayName": "Sonnet 5.5"},
+         {"value": "mystery"}, 7]))
+
+    mc._store(mc._SDK_CLI_ROUTE, _REAL_ASK_CLAUDE())
+
+    models = [c.model for c in mc.sdk_choices()]
+    assert models[0] == "claude-sonnet-5-5"
+    assert "claude-opus-5" in models, "the shipped floor stays beside a partial read"
+
+
+def test_a_claude_that_did_not_answer_is_said_on_the_rows_and_as_a_quiet_route(tmp_path,
+                                                                               monkeypatch):
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    _claude_says(monkeypatch, "", code=1, stderr="Error: not logged in")
+
+    assert _REAL_ASK_CLAUDE() == []
+
+    assert "not logged in" in mc._LIST_WHY[mc._SDK_CLI_ROUTE]
+    assert "claude" in mc.cli_routes_without_models()
+    floor = mc.find(mc.sdk_choices(), "sdk:claude-opus-5")
+    assert "not logged in" in mc.list_note(floor)
+
+
+def _codex_on_path(monkeypatch, exchange):
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
+    monkeypatch.setattr(mc.shutil, "which", lambda name: "/usr/local/bin/codex")
+    monkeypatch.setattr(mc, "_app_server_exchange", exchange)
+
+
+@pytest.mark.parametrize("frame, said", [
+    ({"id": 1, "error": {"code": -32600, "message": "not signed in"}}, "not signed in"),
+    (None, "no answer"),
+])
+def test_a_codex_list_that_failed_marks_the_pair_not_checked_and_says_why(monkeypatch, frame,
+                                                                          said):
+    """A JSON-RPC error, a timeout, a crash were `[]`, and the hard-coded pair stood unmarked —
+    a confident wrong answer where Codex had said nothing."""
+    _codex_on_path(monkeypatch, lambda *a: frame)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+
+    mc._store("codex", _REAL_ASK_CODEX())
+
+    rows = mc.codex_choices()
+    assert [c.model for c in rows] == list(mc.CODEX_MODELS)
+    assert all(mc.unconfirmed(c) for c in rows), "not checked, not ready"
+    assert said in mc.list_note(rows[0])
+    assert "codex" in mc.cli_routes_without_models()
+
+
+def test_codex_pages_are_all_read_and_hidden_rows_left_out(monkeypatch):
+    pages = {None: {"id": 1, "result": {"data": [_CODEX_FRAMES[1]["result"]["data"][0],
+                                                 {"id": "old", "model": "old", "hidden": True}],
+                                        "nextCursor": "p2"}},
+             "p2": {"id": 1, "result": {"data": [{"id": "gpt-x", "model": "gpt-x",
+                                                  "displayName": "GPT-X"}]}}}
+    _codex_on_path(monkeypatch, lambda binary, requests, want, timeout:
+                   pages[requests[-1]["params"].get("cursor")])
+
+    assert [c.model for c in _REAL_ASK_CODEX()] == ["gpt-6.1-sol", "gpt-x"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX script stands in for codex")
+def test_an_app_server_that_quits_at_stdins_end_still_answers_while_it_is_open(tmp_path):
+    """Pins the pipe held open: this stand-in, like codex 0.162.1, leaves without a word once its
+    stdin has ended — so a write-and-close gets nothing, and only an open pipe gets the reply."""
+    import textwrap
+
+    codex = tmp_path / "codex"
+    codex.write_text(textwrap.dedent('''\
+        #!/usr/bin/env python3
+        import json, select, sys, time
+        wanted = None
+        for line in sys.stdin:
+            msg = json.loads(line)
+            if msg.get("method") == "model/list":
+                wanted = msg["id"]
+                break
+        time.sleep(0.3)
+        ready, _, _ = select.select([sys.stdin], [], [], 0)
+        if ready and sys.stdin.readline() == "":
+            sys.exit(0)
+        print(json.dumps({"id": wanted, "result": {"data": []}}), flush=True)
+        '''), encoding="utf-8")
+    codex.chmod(0o755)
+
+    frame = mc._app_server_exchange(
+        str(codex), [{"method": "initialize", "id": 0, "params": {}}, {"method": "initialized"},
+                     {"method": "model/list", "id": 1, "params": {}}], 1, 5.0)
+
+    assert frame == {"id": 1, "result": {"data": []}}
+
+
+def test_a_normal_refresh_asks_the_cli_lists_once_and_the_recheck_again(tmp_path, monkeypatch):
+    """A `claude` per start is a console on Windows (the agy lesson): asked when its binary
+    changed or on ↻; Codex once per launch and on ↻."""
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    asked = []
+    monkeypatch.setattr(mc, "_ask_claude_models", lambda: asked.append("claude") or [])
+    monkeypatch.setattr(mc, "_ask_codex_models", lambda: asked.append("codex") or [])
+    stamp = ["claude@1"]
+    monkeypatch.setattr(mc, "_claude_stamp", lambda: stamp[0])
+
+    mc.ask_cli_lists()
+    mc.ask_cli_lists()
+    assert asked == ["codex", "claude"]
+
+    mc.ask_cli_lists(recheck=True)
+    assert asked == ["codex", "claude", "codex", "claude"]
+
+    stamp[0] = "claude@2"  # an updated CLI
+    mc.ask_cli_lists()
+    assert asked[-1] == "claude" and len(asked) == 5
+
+
+def test_a_forced_refresh_in_the_suite_runs_no_real_cli(monkeypatch):
+    """The conftest guard: the ↻ path reaches both asks, and neither may start `claude` or `codex`."""
+    spawned = []
+    monkeypatch.setattr(mc.child, "run_bounded", lambda *a, **k: spawned.append(a))
+    monkeypatch.setattr(mc.subprocess, "Popen", lambda *a, **k: spawned.append(a))
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
+    monkeypatch.setattr(mc, "_fetch_sdk_choices", lambda: [])
+
+    mc.refresh_cli_catalogue(force=True)
+
+    assert spawned == []

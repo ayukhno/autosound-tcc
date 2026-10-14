@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -223,9 +224,10 @@ def sdk_choices() -> list[Choice]:
     live = list(_CLI_CACHE.get(_SDK_CLI_ROUTE, []))
     fetched = live + [choice for choice in _CLI_CACHE.get("sdk", [])
                       if choice.model not in {row.model for row in live}]
-    if live:
+    if live and _SDK_CLI_ROUTE not in _PARTIAL:
         # The person's own `claude` said what it runs (tcc#196): that is the list, and a shipped
-        # row it does not offer is a model this login cannot run — no floor under it.
+        # row it does not offer is a model this login cannot run — no floor under it. Not after a
+        # partial read: a row missing from it is not a model gone (the group review).
         return fetched
     known = {choice.model for choice in fetched}
     for label, model in SDK_MODELS:
@@ -288,19 +290,87 @@ def _fetch_sdk_choices() -> list[Choice]:
 
 #: The cache route for the list the person's own `claude` gave (`_ask_claude_models`).
 _SDK_CLI_ROUTE = "sdk-cli"
-#: Asked once per launch (and again on ↻): the list changes with a CLI update, not by the minute,
-#: and on Windows a `claude` child may flash a console (see `claude_sdk.probe_signed_in`).
-_CLAUDE_ASKED = False
+
+#: Why the last ask of a CLI's own list gave none — "" when it answered, absent when not asked.
+#: Said on the rows that stand in for it and in the quiet-routes note: a failed read must not
+#: look like an answer (the group review of tcc#182/#196).
+_LIST_WHY: dict[str, str] = {}
+#: Routes whose last answer could not all be read: the shipped floor stays beside it.
+_PARTIAL: set[str] = set()
+#: Which `claude` binary the list was last asked of (path, mtime, size), kept on disk: the list is
+#: asked again only when that changes or on ↻ — a `claude` child per start puts a console on
+#: screen on Windows, the agy lesson (`_skip_agy`).
+_ASKED_STAMP: dict[str, str] = {}
+#: Codex's list: once per launch, and again on ↻.
+_CODEX_ASKED = False
 
 #: What `claude` is asked: the SDK's own first control request, answered before any turn — so no
 #: model runs and nothing is billed. Its answer carries the CLI's /model list.
 _CLAUDE_INIT_REQUEST = json.dumps({"type": "control_request", "request_id": "tcc-models",
                                    "request": {"subtype": "initialize", "hooks": None}})
+#: A display name that is a Claude model: «Opus 5.5», «Sonnet 5».
+_CLAUDE_NAME = re.compile(r"^(opus|sonnet|haiku|fable)\s+(\d+(?:\.\d+)?)$", re.I)
+
+
+def _claude_stamp() -> str:
+    """Which `claude` this is, without running it: its resolved path, mtime and size."""
+    binary = claude_sdk.cli_path()
+    if binary is None:
+        return ""
+    try:
+        real = os.path.realpath(binary)
+        info = os.stat(real)
+    except OSError:
+        return ""
+    return f"{real}:{info.st_mtime_ns}:{info.st_size}"
+
+
+def _claude_id(entry: dict) -> Optional[str]:
+    """The model id an entry of `claude`'s list runs; "" for one to skip (`default`, which repeats
+    another row); None when it cannot be read. `[1m]` is the long-context flag, not a model, and
+    an alias with no `resolvedModel` (`opus[1m]`) is named by its own display name."""
+    resolved = str(entry.get("resolvedModel") or "").split("[", 1)[0]
+    value = str(entry.get("value") or "").split("[", 1)[0]
+    if resolved.startswith("claude-"):
+        return resolved
+    if value.startswith("claude-"):
+        return value
+    if value == "default":
+        return ""
+    name = str(entry.get("displayName") or "")
+    if not _CLAUDE_NAME.match(name):
+        name = str(entry.get("description") or "").split("·", 1)[0].strip()
+    found = _CLAUDE_NAME.match(name)
+    if not found:
+        return None
+    return f"claude-{found.group(1).lower()}-{found.group(2).replace('.', '-')}"
+
+
+def _claude_rows(models: list) -> tuple[list[Choice], bool]:
+    """`claude`'s list as rows, and whether any entry could not be read."""
+    out: list[Choice] = []
+    seen: set[str] = set()
+    partial = False
+    for entry in models:
+        model = _claude_id(entry) if isinstance(entry, dict) else None
+        if model is None:
+            partial = True
+            continue
+        if not model or model in seen:
+            continue
+        seen.add(model)
+        name = str(entry.get("displayName") or "")
+        if not name or name.lower().startswith("default"):
+            name = str(entry.get("description") or "").split("·", 1)[0].strip() or model
+        label = name if name.lower().startswith("claude") else f"Claude {name}"
+        out.append(Choice(harness="sdk", model=model, label=label, provider="anthropic"))
+    return out, partial
 
 
 def _ask_claude_models() -> list[Choice]:
     """The Claude models the person's own `claude` offers, as the Critic's list is read from its
-    CLI (tcc#196). [] when there is no `claude` or it did not answer — the shipped list stays then.
+    CLI (tcc#196). [] when there is no `claude` or it did not answer — why is in `_LIST_WHY`, and
+    the shipped list stays.
 
     Finding 157: the list was TCC's own (`SDK_MODELS`, dated) and had no Sonnet 5.5 while the CLI
     on the same machine served it. No settings and no MCP servers are loaded for the ask: it wants
@@ -316,44 +386,34 @@ def _ask_claude_models() -> list[Choice]:
              "--verbose", "--setting-sources", "", "--strict-mcp-config"],
             input=_CLAUDE_INIT_REQUEST + "\n", text=True, encoding="utf-8", errors="replace",
             timeout=CLI_TIMEOUT_S, **kwargs)
-    except (subprocess.SubprocessError, OSError):
+    except subprocess.TimeoutExpired:
+        _LIST_WHY[_SDK_CLI_ROUTE] = f"no answer in {int(CLI_TIMEOUT_S)} s"
         return []
-    models: list = []
+    except (subprocess.SubprocessError, OSError) as exc:
+        _LIST_WHY[_SDK_CLI_ROUTE] = str(exc) or type(exc).__name__
+        return []
+    models = None
     for line in (proc.stdout or "").splitlines():
         try:
             frame = json.loads(line)
         except ValueError:
             continue
-        reply = frame.get("response") if isinstance(frame, dict) else None
-        if frame.get("type") == "control_response" and isinstance(reply, dict):
-            models = ((reply.get("response") or {}).get("models")) or []
-            break
-    out: list[Choice] = []
-    seen: set[str] = set()
-    for entry in models:
-        if not isinstance(entry, dict):
+        # An object first: a line that is JSON but not one (`[]`, `"x"`) raised here, and the
+        # start's read stopped with agy and Claude «not checked» for the launch.
+        if not isinstance(frame, dict) or frame.get("type") != "control_response":
             continue
-        # `resolvedModel` is the id behind an alias (`sonnet` → `claude-sonnet-5-5`); `[1m]` is
-        # the long-context flag, not a model.
-        model = str(entry.get("resolvedModel") or entry.get("value") or "").split("[", 1)[0]
-        if not model.startswith("claude-") or model in seen:
-            continue
-        seen.add(model)
-        name = str(entry.get("displayName") or "")
-        if not name or name.lower().startswith("default"):
-            name = str(entry.get("description") or "").split("·", 1)[0].strip() or model
-        label = name if name.lower().startswith("claude") else f"Claude {name}"
-        out.append(Choice(harness="sdk", model=model, label=label, provider="anthropic"))
-    return out
-
-
-def _fetch_sdk_cli_choices() -> list[Choice]:
-    """`_ask_claude_models`, once per launch."""
-    global _CLAUDE_ASKED
-    if _CLAUDE_ASKED:
+        reply = frame.get("response")
+        inner = reply.get("response") if isinstance(reply, dict) else None
+        models = inner.get("models") if isinstance(inner, dict) else None
+        break
+    if not isinstance(models, list) or not models:
+        tail = (proc.stderr or "").strip().splitlines()[-1:] or [f"exit {proc.returncode}"]
+        _LIST_WHY[_SDK_CLI_ROUTE] = f"no model list in its answer ({tail[0][:200]})"
         return []
-    _CLAUDE_ASKED = True
-    return _ask_claude_models()
+    rows, partial = _claude_rows(models)
+    (_PARTIAL.add if partial else _PARTIAL.discard)(_SDK_CLI_ROUTE)
+    _LIST_WHY[_SDK_CLI_ROUTE] = "" if rows else "no model it lists could be read"
+    return rows
 
 
 def omp_available() -> bool:
@@ -405,6 +465,13 @@ def _load_cached_catalogue() -> None:
         routes = data["routes"] if isinstance(data, dict) else {}
     except (OSError, ValueError, KeyError, TypeError):
         return
+    asked = data.get("asked") if isinstance(data.get("asked"), dict) else {}
+    for route, said in asked.items():
+        if isinstance(said, dict):
+            _ASKED_STAMP[str(route)] = str(said.get("stamp") or "")
+            _LIST_WHY[str(route)] = str(said.get("why") or "")
+            if said.get("partial"):
+                _PARTIAL.add(str(route))
     for route, rows in (routes or {}).items():
         entries = [
             Choice(
@@ -435,6 +502,9 @@ def _save_cached_catalogue() -> None:
                 ]
                 for route, entries in _CLI_CACHE.items()
             },
+            "asked": {route: {"stamp": stamp, "why": _LIST_WHY.get(route, ""),
+                              "partial": route in _PARTIAL}
+                      for route, stamp in _ASKED_STAMP.items()},
         }
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -444,8 +514,20 @@ def _save_cached_catalogue() -> None:
 
 
 def unconfirmed(choice: Choice) -> bool:
-    """Was this entry remembered from a previous launch rather than confirmed by the CLI now."""
-    return choice.key in _UNCONFIRMED
+    """Was this entry remembered from a previous launch rather than confirmed by the CLI now — or
+    is it Codex's shipped pair, standing in for a list Codex did not give (the group review)."""
+    return choice.key in _UNCONFIRMED or (
+        choice.harness == "codex" and not _CLI_CACHE.get("codex"))
+
+
+def list_note(choice: Choice) -> str:
+    """Why this row stands in for a CLI's own list, in that CLI's words — or "" (cf. `shipped_note`).
+    """
+    if choice.harness == "codex" and not _CLI_CACHE.get("codex"):
+        return _LIST_WHY.get("codex", "")
+    if choice.key in _SHIPPED:
+        return _LIST_WHY.get(_SDK_CLI_ROUTE, "")
+    return ""
 
 
 def agy_choices() -> list[Choice]:
@@ -461,11 +543,17 @@ def cli_routes_without_models() -> list[str]:
     and has been seen come back empty, and a route that silently disappears is exactly how a user
     ends up believing it does not exist and paying for the metered one instead.
     """
-    return [
+    quiet = [
         harness
         for harness in ("agy",)
         if cli_available(harness) and not _CLI_CACHE.get(harness) and harness in _LAST_ASKED
     ]
+    # Codex and Claude asked for their own lists and gave none: the picker shows a stand-in then.
+    if cli_available("codex") and not _CLI_CACHE.get("codex") and _LIST_WHY.get("codex"):
+        quiet.append("codex")
+    if not _CLI_CACHE.get(_SDK_CLI_ROUTE) and _LIST_WHY.get(_SDK_CLI_ROUTE):
+        quiet.append("claude")
+    return quiet
 
 
 #: How long a route that answered with NOTHING is left alone before it is asked again.
@@ -517,8 +605,8 @@ def _skip_agy(now) -> bool:
     return asked is not None and (now() - asked) < EMPTY_ROUTE_RETRY_S
 
 
-def refresh_cli_catalogue(*, force: bool = False, now=None,
-                          active_omp: Optional[list] = None) -> dict[str, list[Choice]]:
+def refresh_cli_catalogue(*, force: bool = False, now=None, active_omp: Optional[list] = None,
+                          cli_lists: bool = True, done=None) -> dict[str, list[Choice]]:
     """Ask every CLI that needs asking, and cache the answer. **Call this off the GUI thread.**
 
     `agy models` fetches over the network and has been seen take seconds; the picker is built on
@@ -531,28 +619,19 @@ def refresh_cli_catalogue(*, force: bool = False, now=None,
     by `SW_HIDE` and shows a console anyway; it also drags a `node`/playwright child that opens its
     own). That relaunch on every start was the startup flash of TCC-006. The picker reads the
     cache (`agy_choices`), so a cached route is fully present without agy being run again.
+
+    `done(route)` is called as each of agy and the API's Claude list is settled, so the start can
+    finish a route the moment its own answer is in. `cli_lists`: then ask Codex and `claude` for
+    theirs (`ask_cli_lists`, again on `force`); the start asks them itself, after the rest.
     """
     now = now or time.monotonic
     _load_cached_catalogue()
-    global _CLAUDE_ASKED, _CODEX_ASKED
-    if force:
-        _CLAUDE_ASKED = _CODEX_ASKED = False  # ↻ asks `claude` and `codex` again too
-    for route, fetch in (("agy", _fetch_agy_choices), ("sdk", _fetch_sdk_choices),
-                         (_SDK_CLI_ROUTE, _fetch_sdk_cli_choices),
-                         ("codex", _fetch_codex_choices)):
-        if route == "agy" and not force and _skip_agy(now):
-            continue
-        if (route == _SDK_CLI_ROUTE and _CLAUDE_ASKED) or (route == "codex" and _CODEX_ASKED):
-            continue
-        _LAST_ASKED[route] = now()
-        fetched = fetch()
-        # A failed refresh keeps the previous answer; only a first-ever failure stores the empty
-        # list, and for `sdk` that is the ordinary case (no API key — see `_fetch_sdk_choices`).
-        if fetched or route not in _CLI_CACHE:
-            _CLI_CACHE[route] = fetched
-        if fetched:
-            # Confirmed by the CLI just now: these stop being "remembered from last time".
-            _UNCONFIRMED.difference_update(choice.key for choice in fetched)
+    for route, fetch in (("agy", _fetch_agy_choices), ("sdk", _fetch_sdk_choices)):
+        if not (route == "agy" and not force and _skip_agy(now)):
+            _LAST_ASKED[route] = now()
+            _store(route, fetch())
+        if done is not None:
+            done(route)
     # And omp — but ONLY when somebody has marked an omp model, and only once. Two holes were
     # measured on the Arbiter's machine the first time this moved here (probe30, 2026-09-11):
     #
@@ -567,8 +646,37 @@ def refresh_cli_catalogue(*, force: bool = False, now=None,
             omp_catalogue()
         except OmpCatalogueError:
             _OMP_CATALOGUE = []  # asked, and it said nothing. Asking again buys the same nothing.
+    if cli_lists:
+        ask_cli_lists(recheck=force)
     _save_cached_catalogue()
     return dict(_CLI_CACHE)
+
+
+def _store(route: str, fetched: list[Choice]) -> None:
+    """A failed refresh keeps the previous answer; only a first-ever failure stores the empty
+    list, and for `sdk` that is the ordinary case (no API key — see `_fetch_sdk_choices`)."""
+    if fetched or route not in _CLI_CACHE:
+        _CLI_CACHE[route] = fetched
+    if fetched:
+        # Confirmed by the CLI just now: these stop being "remembered from last time".
+        _UNCONFIRMED.difference_update(choice.key for choice in fetched)
+
+
+def ask_cli_lists(*, recheck: bool = False) -> None:
+    """Ask Codex (once per launch) and `claude` (when its binary changed) for their own model
+    lists; both again on `recheck` (↻). **Off the GUI thread.** Never before agy and the API list:
+    the start calls this after its own read, so a slow Codex holds nothing else (the group review).
+    """
+    global _CODEX_ASKED
+    _load_cached_catalogue()
+    if recheck or not _CODEX_ASKED:
+        _CODEX_ASKED = True
+        _store("codex", _ask_codex_models())
+    stamp = _claude_stamp()
+    if stamp and (recheck or _ASKED_STAMP.get(_SDK_CLI_ROUTE) != stamp):
+        _ASKED_STAMP[_SDK_CLI_ROUTE] = stamp
+        _store(_SDK_CLI_ROUTE, _ask_claude_models())
+    _save_cached_catalogue()
 
 
 #: What agy needs from the method's machine file to sign in through Google Cloud's ADC (tcc#135,
@@ -733,36 +841,42 @@ def _app_server_exchange(binary: str, requests: list, want, timeout: float) -> O
 def _ask_codex_models() -> list[Choice]:
     """The models this machine's Codex offers its login, from `codex app-server`'s `model/list`
     (tcc#182) — the supported way to ask (`codex models` wants a terminal). No turn runs; [] when
-    there is no Codex or it did not answer, and the shipped pair stands in."""
+    there is no Codex or it did not answer — why is in `_LIST_WHY`, and the shipped pair stands in.
+    """
     binary = shutil.which("codex") if cli_available("codex") else None
     if binary is None:
         return []
-    frame = _app_server_exchange(binary, [
-        {"method": "initialize", "id": 0,
-         "params": {"clientInfo": {"name": "autosound-tcc", "title": "TCC", "version": "1"}}},
-        {"method": "initialized"},
-        {"method": "model/list", "id": 1, "params": {}},
-    ], 1, CLI_TIMEOUT_S)
-    data = ((frame or {}).get("result") or {}).get("data") or []
     out: list[Choice] = []
-    for entry in data:
-        if not isinstance(entry, dict) or entry.get("hidden"):
-            continue
-        model = str(entry.get("model") or entry.get("id") or "")
-        if model:
-            out.append(Choice(harness="codex", model=model,
-                              label=str(entry.get("displayName") or model), provider="openai"))
+    cursor = None
+    for _page in range(10):
+        params = {"cursor": cursor} if cursor else {}
+        frame = _app_server_exchange(binary, [
+            {"method": "initialize", "id": 0,
+             "params": {"clientInfo": {"name": "autosound-tcc", "title": "TCC", "version": "1"}}},
+            {"method": "initialized"},
+            {"method": "model/list", "id": 1, "params": params},
+        ], 1, CLI_TIMEOUT_S)
+        if frame is None:
+            _LIST_WHY["codex"] = f"codex app-server gave no answer in {int(CLI_TIMEOUT_S)} s"
+            return []
+        error = frame.get("error")
+        if error is not None:
+            said = error.get("message") if isinstance(error, dict) else error
+            _LIST_WHY["codex"] = f"codex app-server: {said}"
+            return []
+        result = frame.get("result") if isinstance(frame.get("result"), dict) else {}
+        for entry in result.get("data") or []:
+            if not isinstance(entry, dict) or entry.get("hidden"):
+                continue
+            model = str(entry.get("model") or entry.get("id") or "")
+            if model:
+                out.append(Choice(harness="codex", model=model,
+                                  label=str(entry.get("displayName") or model), provider="openai"))
+        cursor = result.get("nextCursor")
+        if not cursor:
+            break
+    _LIST_WHY["codex"] = "" if out else "codex app-server listed no models"
     return out
-
-
-def _fetch_codex_choices() -> list[Choice]:
-    """`_ask_codex_models`, once per launch (and again on ↻), as the Claude list is asked."""
-    global _CODEX_ASKED
-    _CODEX_ASKED = True
-    return _ask_codex_models()
-
-
-_CODEX_ASKED = False
 
 
 #: The catalogue as last read in this process, so `choices()` can put a label on a model the user
@@ -1093,27 +1207,6 @@ def critic_reaches(choice: Choice) -> bool:
     if any(reviewer_key.has_key(name) for name in keys):
         return True
     return any(shutil.which(binary) for binary in binaries)
-
-
-def reviewer_on_a_signed_in_route(choice: Choice) -> Optional[Choice]:
-    """For a reviewer pick nothing here can call, the same vendor's model on a CLI this machine is
-    signed in to; None when the pick reaches or there is no such route (hub #262, tcc#196).
-
-    The pick was `api:gemini-3.1-pro-preview` on a machine that reaches Gemini only through agy
-    signed in by Google Cloud's ADC: TCC asked for `GEMINI_API_KEY` and never said that agy
-    answers. Under ADC the model is the method's own (`ADC_REVIEWER`); otherwise the recommended
-    reviewer the CLI lists, else its first row."""
-    if choice.harness != "api" or critic_reaches(choice):
-        return None  # the API route is the one that needs a key; the CLIs have their own sign-in
-    vendor = vendor_of(choice)
-    if not vendor:
-        return None
-    offered = [c for c in agy_choices() + codex_choices()
-               if c.available and c.key != choice.key and vendor_of(c) == vendor
-               and critic_reaches(c)]
-    return (next((c for c in offered if _adc_reviewer(c)), None)
-            or next((c for c in offered if recommended(c, critic=True)), None)
-            or (offered[0] if offered else None))
 
 
 def critic_choices(active_omp: list[str]) -> list[Choice]:

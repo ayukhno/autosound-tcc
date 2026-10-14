@@ -191,36 +191,36 @@ def record_reviewer_outcome(key: str, result, *, reaches=None) -> None:
     if result.mode == critic.MODE_CHOOSE_MODEL:
         reason = reason or REFUSED
     if reason == LOCATION:
-        refused(key, reason, _region_refusal(choice, model_choices))
+        # The CLI's own line, kept: the sentence around it — the model, the route, what that route
+        # offers instead — is said in the person's language by `availability_view.detail` (hub #262).
+        refused(key, reason, _own_line(result.detail, critic._LOCATION_WORDS)
+                or critic.remedy(result.detail, harness=harness))
     elif reason:
         # The detail is what a tooltip shows: the one thing to do when it can be named, the CLI's
         # own words when it cannot.
         refused(key, reason, critic.remedy(result.detail, harness=harness) or result.detail)
 
 
-def _region_refusal(choice, model_choices) -> str:
-    """A region refusal in words: which model, by whom, and what that route offers instead (hub
-    #262). agy's «Selected model is not supported in the selected location» read as a failure, and
-    the model that worked there was found by hand."""
-    route = model_choices.ROUTES.get(choice.harness, (choice.harness.upper(), ""))[0]
-    said = (f"{choice.model} is not offered where this machine is: {route} refused it by region, "
-            f"before the model ran. ↻ will not change that.")
-    if choice.harness != "agy":
-        return said + " Pick a different Critic model in TCC's footer."
+def _own_line(detail: str, words) -> str:
+    """The line of a CLI's refusal that says the region — as it said it."""
+    return next((line.strip() for line in (detail or "").splitlines()
+                 if any(word in line.lower() for word in words)), "")
+
+
+def being_read(harness: str) -> bool:
+    """Whether `harness`'s list is still being read — the Claude rows while `claude`'s own list is
+    (`sdk-cli`) too. A row missing then is «not read yet», never «gone» (the group review)."""
     with _lock:
-        by_region = {key for key, (why, _detail) in _refusals.items() if why == LOCATION}
-    instead = [c.label or c.model for c in model_choices.agy_choices()
-               if c.key != choice.key and c.key not in by_region]
-    if not instead:
-        return said + " Pick a different Critic model in TCC's footer."
-    return said + f" AGY offers instead: {', '.join(instead)} — pick a different Critic model in TCC's footer from those."
+        return harness in _reading or (harness == "sdk" and "sdk-cli" in _reading)
 
 
 #: How long a Windows start waits inside its console for the catalogues (the Arbiter, 2026-09-13).
 STARTUP_MODELS_CAP_S = 8.0
-#: What the start's read asks. Not codex: it is found through PATH when a picker is filled, and a
-#: harness marked as being read that the read never asks stays "not checked" until it is over.
-_STARTUP_HARNESSES = ("agy", "sdk")
+#: What the start's read asks: agy and the API's Claude list first, each finished the moment its
+#: own answer is in; then Codex's list and `claude`'s (`sdk-cli`), after them, so a slow one holds
+#: nothing else (the group review). `sdk-cli` is no harness: it only keeps a Claude row missing
+#: from the shipped list from reading as «gone» while `claude` is asked (`being_read`).
+_STARTUP_HARNESSES = ("agy", "sdk", "codex", "sdk-cli")
 _startup: "Optional[StartupReading]" = None
 
 
@@ -233,10 +233,20 @@ def read_catalogues() -> None:
     from autosound_tcc.core import claude_sdk, model_choices
 
     begin_reading(_STARTUP_HARNESSES)
-    model_choices.refresh_cli_catalogue(force=True)
-    finish_reading("agy")
+
+    def done(route: str) -> None:
+        if route == "agy":
+            finish_reading("agy")
+
+    model_choices.refresh_cli_catalogue(force=True, cli_lists=False, done=done)
+    finish_reading("agy")  # settled by its own fetch already; here for a read that skipped it
     claude_sdk.probe_signed_in(force=True)
     finish_reading("sdk")
+    # Not forced: Codex once per launch, `claude` only when its binary changed (a console per
+    # start on Windows otherwise); ↻ asks both again.
+    model_choices.ask_cli_lists()
+    finish_reading("codex")
+    finish_reading("sdk-cli")
 
 
 class StartupReading:

@@ -237,14 +237,16 @@ def test_a_refusal_carries_the_remedy_rather_than_the_clis_own_words():
     says what to do about it (final review, Minor 4)."""
     from autosound_tcc.core import critic
 
-    said = "error: Selected model is not supported in the selected location."
+    said = "error: unknown model gemini-3.1-pro-high"
     availability.record_reviewer_outcome(
         "agy:gemini-3.1-pro-high", _result(critic.MODE_CLIPBOARD, said), reaches=lambda _c: True)
 
     state = _status(_choice())
-    assert state.reason == availability.LOCATION
-    assert "Pick a different Critic model" in state.detail
+    assert state.reason == availability.REFUSED
+    assert "pick another Critic" in state.detail
     assert said not in state.detail
+    # A region refusal is the exception since hub #262: its sentence is said by the view in the
+    # person's language, and agy's own line is kept under it (the region test below).
 
 
 def test_words_no_remedy_can_be_named_for_are_kept_as_they_were():
@@ -258,21 +260,33 @@ def test_words_no_remedy_can_be_named_for_are_kept_as_they_were():
     assert (state.reason, state.detail) == (availability.REFUSED, "the reviewer hung up")
 
 
-def test_codex_is_not_marked_as_being_read_at_start(monkeypatch):
-    """Codex is found through PATH when a picker is filled; the start's read never asks it, so
-    marking it as being read left its rows "not checked" for the whole read (final review, Minor 7).
-    """
+def test_a_slow_codex_list_holds_neither_agy_nor_claude_at_start(monkeypatch):
+    """The group review: Codex's list is read at start, but after agy and the API's list, each of
+    those finished by its own answer — a slow `codex app-server` holds nothing else. (It used to
+    be left out of the start altogether, so its rows read «ready» with nothing asked, Minor 7.)"""
+    import threading
+
     from autosound_tcc.core import claude_sdk, model_choices
 
-    seen = []
-    monkeypatch.setattr(
-        model_choices, "refresh_cli_catalogue",
-        lambda **kw: seen.append(_status(_choice(harness="codex", model="gpt-5.2")).reason))
+    asked, release = threading.Event(), threading.Event()
+    monkeypatch.setattr(model_choices, "_fetch_agy_choices", lambda: [])
+    monkeypatch.setattr(model_choices, "_fetch_sdk_choices", lambda: [])
+    monkeypatch.setattr(model_choices, "_save_cached_catalogue", lambda: None)
     monkeypatch.setattr(claude_sdk, "probe_signed_in", lambda **kw: None)
-
-    availability.read_catalogues()
-
-    assert seen == [None]
+    monkeypatch.setattr(model_choices, "_ask_codex_models",
+                        lambda: (asked.set(), release.wait(5), [])[2])
+    reader = threading.Thread(target=availability.read_catalogues)
+    reader.start()
+    try:
+        assert asked.wait(5)
+        codex = _choice(harness="codex", model="gpt-6.1-sol")
+        assert _status(_choice()).ready, "agy finished by its own fetch"
+        assert _status(_choice(harness="sdk", model="claude-opus-5")).ready
+        assert _status(codex).reason == availability.NOT_CHECKED
+    finally:
+        release.set()
+        reader.join(5)
+    assert _status(codex).ready
 
 
 def test_a_refused_reviewer_goes_red_like_a_refused_clipboard_fallback():
@@ -354,25 +368,30 @@ def test_an_api_key_is_a_login_for_the_session_and_not_for_a_reviewer(monkeypatc
     assert availability.status(sdk, unconfirmed=lambda _c: False).ready
 
 
-def test_a_region_refusal_names_the_model_and_what_agy_offers_instead(monkeypatch):
+def test_a_region_refusal_names_the_model_and_only_the_rows_known_ready(monkeypatch):
     """hub #262: agy's «Selected model is not supported in the selected location» read as a failure.
-    It is said as a region refusal of that model, with the models agy offers instead."""
+    Said as a region refusal of that model, in the person's language, with the agy rows known
+    ready instead — not one refused by region too — and agy's own line kept under it."""
     from autosound_tcc.core import critic, model_choices
     from autosound_tcc.core.model_choices import Choice
+    from autosound_tcc.ui.tcc import availability_view, i18n
 
-    monkeypatch.setattr(model_choices, "agy_choices", lambda: [
-        Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)",
-               provider="google"),
-        Choice(harness="agy", model="gemini-3.8-flash-high", label="Gemini 3.8 Flash (High)",
-               provider="google")])
-    key = "agy:gemini-3.1-pro-high"
-    availability.record_reviewer_outcome(
-        key, _result(critic.MODE_CLIPBOARD,
-                     "error: Selected model is not supported in the selected location."),
-        reaches=lambda _c: True)
+    rows = [Choice(harness="agy", model=m, label=label, provider="google") for m, label in (
+        ("gemini-3.1-pro-high", "Gemini 3.1 Pro (High)"),
+        ("gemini-3.1-pro-low", "Gemini 3.1 Pro (Low)"),
+        ("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)"))]
+    monkeypatch.setattr(model_choices, "agy_choices", lambda: rows)
+    monkeypatch.setattr(model_choices, "unconfirmed", lambda _c: False)
+    said = "error: Selected model is not supported in the selected location."
+    for key in ("agy:gemini-3.1-pro-high", "agy:gemini-3.1-pro-low"):
+        availability.record_reviewer_outcome(key, _result(critic.MODE_CLIPBOARD, said),
+                                             reaches=lambda _c: True)
 
-    state = _status(_choice())
+    state = availability.status(rows[0], reviewer=True)
+    text = availability_view.detail(state, rows[0])
+
     assert state.reason == availability.LOCATION
-    assert "gemini-3.1-pro-high" in state.detail
-    assert "Gemini 3.8 Flash (High)" in state.detail
-    assert "Gemini 3.1 Pro (High)" not in state.detail.split("instead", 1)[-1]
+    assert text.startswith(i18n.t("availRegionRefusal").format(model="gemini-3.1-pro-high",
+                                                               route="AGY"))
+    assert "Gemini 3.8 Flash (High)" in text and "Pro (Low)" not in text
+    assert said in text, "agy's own line is kept"

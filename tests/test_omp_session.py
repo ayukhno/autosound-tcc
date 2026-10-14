@@ -732,6 +732,17 @@ def test_the_key_omp_actually_reads_counts(tmp_path, monkeypatch):
     assert session.credential_warning() is None
 
 
+def test_the_key_provider_named_before_the_model_still_warns(tmp_path, monkeypatch):
+    """The group review: the login exception is for omp's OAuth providers only — `google/…` takes
+    the key, and without one it is still the silent failure."""
+    for name in omp_session_module._GOOGLE_KEY_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+    session = OmpSession(project_dir=tmp_path, model="google/gemini-3.1-pro-preview")
+
+    assert "GEMINI_API_KEY" in (session.credential_warning() or "")
+
+
 @pytest.mark.parametrize("model", ["google-antigravity/gemini-3.8-flash",
                                    "google-gemini-cli/gemini-3.1-pro-preview"])
 def test_a_google_model_behind_an_omp_login_is_not_flagged(tmp_path, monkeypatch, model):

@@ -61,7 +61,6 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core import (
     app_log,
     availability,
-    claude_sdk,
     config,
     contract_check,
     critic,
@@ -72,6 +71,7 @@ from autosound_tcc.core import (
     intake_form,
     model_choices,
     model_overrides,
+    model_picks,
     omp_session,
     process_writer,
     project_settings,
@@ -521,19 +521,12 @@ def _mark_missing(combo, entries, warn: bool = False, reviewer: bool = False) ->
     combo.style().polish(combo)
 
 
-def _sdk_login_note(choice, reviewer: bool = False) -> tuple[str, str]:
-    """"You picked Claude and this machine has no Claude login" — headline and detail, or both empty.
-
-    Only for a `False` from `signed_in()`. `None` means the probe could not tell (no CLI to ask, a
-    timeout, output we do not recognise) and must stay silent: sending somebody to redo a login
-    that was fine is a worse error than saying nothing.
-    """
-    if choice is None or getattr(choice, "harness", "") != "sdk":
+def _said(note) -> tuple[str, str]:
+    """A `model_picks.Note` in the person's language: (headline, why), or two empty strings."""
+    if note is None:
         return "", ""
-    # A reviewer's `claude -p` runs without `ANTHROPIC_API_KEY` (tcc#127): only the login counts.
-    if claude_sdk.signed_in(reviewer=reviewer) is not False:
-        return "", ""
-    return i18n.t("sdkNoLogin"), i18n.t("sdkNoLoginTip").format(cmd=claude_sdk.LOGIN_HINT)
+    return (i18n.t(note.note).format(**note.args),
+            i18n.t(note.tip).format(**note.args) if note.tip else note.text)
 
 
 def _cap_combo_width(combo) -> None:
@@ -607,26 +600,6 @@ def _rows_keep_their_colour(combo) -> None:
     stylesheet's `::item` rule. It draws no check mark by the current row; the closed picker
     names it."""
     combo.setItemDelegate(QStyledItemDelegate(combo))
-
-
-def _replacements_for(key: str, entries: list) -> list:
-    """`entries`, ordered so the sensible stand-ins for `key` come first.
-
-    Same vendor first (user, 2026-08-11). A replacement is meant to be the nearest thing that
-    still runs, and the list is alphabetical by route otherwise — so the default selection was
-    whatever happened to sort first. That is how a Gemini reviewer became a Claude one, which is
-    not a replacement at all: it is the end of cross-vendor review, chosen by a combo box.
-    """
-    wanted = key.partition(":")[2] or key
-    marker = next(
-        (vendor for token, vendor in model_choices._CRITIC_VENDOR_MARKERS if token in wanted.lower()),
-        "",
-    )
-    if not marker:
-        return list(entries)
-    same = [c for c in entries if model_choices.vendor_of(c) == marker]
-    other = [c for c in entries if model_choices.vendor_of(c) != marker]
-    return same + other
 
 
 def _force_project_dir_env(project_dir: Path) -> None:
@@ -4566,73 +4539,11 @@ class MainWindow(QMainWindow):
 
     def _critic_notes(self) -> tuple[list[tuple[str, str]], bool]:
         """What is wrong with the reviewer pick, as (note, why) pairs, and whether any of it means
-        the pick cannot review at all.
-
-        * **Substituted** — the stored key is aliased on this machine, so the model that answers is
-          not the one named (it is in `get_tcc_state` as `substituted`).
-        * **Answered by another model** — the only condition backed by evidence rather than
-          configuration: the script fell back and another model did the reviewing (2026-08-12).
-        * **No transport** — the reviewer script cannot call it; the first sign of that used to be a
-          package where a critique should have been (2026-08-23).
-        * **Same vendor as the Generator** — it reviews, but cross-vendor anti-anchoring is the
-          reason the reviewer is another vendor (SCR-041).
-        """
+        the pick cannot review at all — decided in `model_picks.critic_notes`."""
         key = str(self._ai_critic_combo.currentData() or "")
-        resolved = model_choices.resolve(self._critic_choices, key)
-        pairs: list[tuple[str, str]] = []
-        hard = False
-        self._critic_instead = None
-        if resolved.note:
-            pairs.append((i18n.t("criticSubstituted"), resolved.note))
-        actual = self_check.reviewer_mismatch()
-        if actual:
-            pairs.append((i18n.t("criticAnswered").format(model=actual[1]),
-                          i18n.t("selfReviewerDiffDetail").format(wanted=actual[0],
-                                                                   answered=actual[1])))
-        generator = self._generator_choice()
-        chosen = resolved.choice
-        for_reach = chosen or model_choices.Choice(
-            harness=key.partition(":")[0] or "omp",
-            model=key.partition(":")[2] or key, label=key, provider="",
-        )
-        why_not = model_choices.not_a_reviewer(for_reach, generator=generator) if key else ""
-        if why_not == model_choices.NOT_A_REVIEWER_SELF:
-            pairs.append((i18n.t("criticRowSelf"), i18n.t("criticSelfTip")))
-            hard = True
-        elif why_not == model_choices.NOT_A_REVIEWER_OMP:
-            # Not "clipboard only": nothing is called at all until the method goes through omp.
-            pairs.append((i18n.t("criticRowViaOmp"), i18n.t("criticViaOmpTip")))
-            hard = True
-        elif key and not model_choices.critic_reaches(for_reach):
-            vendor = model_choices.vendor_of(for_reach)
-            # The same vendor on a route this machine IS signed in to — agy by ADC where the pick
-            # wanted an API key (hub #262): named, and the «!»'s box takes it in one click.
-            self._critic_instead = model_choices.reviewer_on_a_signed_in_route(for_reach)
-            tip = (i18n.t("criticSignedInRoute").format(
-                       model=for_reach.model,
-                       instead=f"{self._critic_instead.route} · {self._critic_instead.label}")
-                   if self._critic_instead is not None else
-                   i18n.t("criticClipboardOnlyTip" if vendor else "criticUnknownVendorTip")
-                   .format(model=for_reach.model, vendor=vendor))
-            pairs.append((i18n.t("criticClipboardOnly"), tip))
-            hard = True
-        if key and not why_not and model_choices.reviewer_caution(for_reach):
-            # Picked, and it reviews: the method advises a Pro tier, the choice is the Arbiter's
-            # (finding 129, tcc#118). A warning, so not `hard`; a refused pick has its refusal.
-            pairs.append((i18n.t("criticRowNotRecommended"), i18n.t("criticNotFlashTip")))
-        if chosen is not None and generator is not None and why_not != model_choices.NOT_A_REVIEWER_SELF:
-            # `vendor_of`, not `critic_vendor`: the latter falls back to google for a name it
-            # does not recognise, which would make any two unknown models look like a matched pair.
-            vendor = model_choices.vendor_of(chosen)
-            if vendor and vendor == model_choices.vendor_of(generator):
-                pairs.append((i18n.t("criticSameVendor"),
-                              i18n.t("criticSameVendorTip").format(vendor=vendor)))
-        # ...and the one the Generator has too: the Claude route with nothing to authenticate with.
-        login_note, login_tip = _sdk_login_note(chosen, reviewer=True)
-        if login_note:
-            pairs.append((login_note, login_tip))
-            hard = True
-        return pairs, hard
+        notes, self._critic_instead = model_picks.critic_notes(
+            key, self._critic_choices, self._generator_choice(), self_check.reviewer_mismatch())
+        return [_said(note) for note in notes], any(note.hard for note in notes)
 
     def _refresh_main_warning(self) -> None:
         """The Generator's own caveat, and it is only ever one.
@@ -4644,7 +4555,7 @@ class MainWindow(QMainWindow):
         warn = getattr(self, "_main_warn", None)
         if warn is None:
             return
-        note, tip = _sdk_login_note(self._generator_choice())
+        note, tip = _said(model_picks.sdk_login_note(self._generator_choice()))
         warn.setVisible(bool(note))
         self._main_warn_tip.set_text(note)
         self._main_warn_detail = f"{note}\n\n{tip}" if note else ""
@@ -4677,8 +4588,10 @@ class MainWindow(QMainWindow):
     def _take_critic(self, key: str) -> None:
         """Put `key` in the reviewer picker, as a pick there would (hub #262)."""
         index = self._ai_critic_combo.findData(key)
-        if index >= 0:
-            self._ai_critic_combo.setCurrentIndex(index)
+        if index < 0:
+            self._status_strip.notify(i18n.t("criticTakeMissing").format(model=key), level="warn")
+            return
+        self._ai_critic_combo.setCurrentIndex(index)
 
     def _critic_pick(self):
         """The reviewer picked in the footer, or None — None too while the window is being built."""
@@ -4748,7 +4661,8 @@ class MainWindow(QMainWindow):
             # beside it (tcc#129); «not checked yet» is what the check is finding out.
             if not state.ready and not (checking and state.reason == availability.NOT_CHECKED):
                 self._critic_status.setText(f"{chosen.label} · {availability_view.phrase(state)}")
-                self._critic_status.set_tip(state.detail or availability_view.phrase(state))
+                self._critic_status.set_tip(availability_view.detail(state, chosen)
+                                            or availability_view.phrase(state))
                 self._paint_critic_status(state.reason != availability.NOT_CHECKED)
                 return
         # A pin the pick's last run set aside, as the method named it (finding 130, tcc#113): the
@@ -4843,7 +4757,10 @@ class MainWindow(QMainWindow):
             # Same model: nothing to do. A different one: the running conversation ends, because
             # neither harness can swap a model under a live session.
             chosen = self._generator_choice()
-            if chosen is None or self._running_model == chosen.key:
+            if chosen is None:
+                self._status_strip.notify(i18n.t("startNoModel"), level="warn")
+                return
+            if self._running_model == chosen.key:
                 return
             self._hand_off_then_restart(worker)
             return
@@ -5293,15 +5210,14 @@ class MainWindow(QMainWindow):
         active = self._active_omp()
         self._model_choices = model_choices.choices(active)
         self._critic_choices = model_choices.critic_choices(active)
-        generator = self._project_setting(_GENERATOR_KEY)
         critic = self._project_setting(_CRITIC_KEY)
-        # A Generator key nothing offers, mapped by an alias to one that is: the selector shows
-        # the model that runs, not a red row for the gone one (finding 157, tcc#196).
-        shown = generator
-        if generator and model_choices.find(self._model_choices, str(generator)) is None:
-            resolved = model_choices.resolve(self._model_choices, str(generator))
-            shown = resolved.choice.key if resolved.ok else generator
-        self._fill_combo(self._ai_main_combo, self._model_choices, shown)
+        plan = model_picks.plan_pickers(self._model_choices, self._critic_choices,
+                                        self._project_setting(_GENERATOR_KEY), critic)
+        if plan.honoured:  # the old «gone» dialog's alias for this pick, honoured once (157)
+            self._set_project_setting(_GENERATOR_KEY, plan.honoured[1])
+            self._status_strip.notify(i18n.t("modelAliasHonoured").format(
+                old=plan.honoured[0], new=plan.honoured[1]))
+        self._fill_combo(self._ai_main_combo, self._model_choices, plan.generator_shown)
         self._fill_combo(self._ai_critic_combo, self._critic_choices, critic, critic=True,
                          generator=self._generator_choice())
         # An unset project reads as the default rather than as an empty row: unlike the model,
@@ -5310,10 +5226,8 @@ class MainWindow(QMainWindow):
         blocked = self._ai_effort_combo.blockSignals(True)
         self._ai_effort_combo.setCurrentIndex(max(0, self._ai_effort_combo.findData(level)))
         self._ai_effort_combo.blockSignals(blocked)
-        for setting, key, entries in ((_GENERATOR_KEY, generator, self._model_choices),
-                                      (_CRITIC_KEY, critic, self._critic_choices)):
-            if key and not model_choices.resolve(entries, str(key)).ok:
-                self._offer_replacement(str(key), entries, setting)
+        for setting, key, entries in plan.offers:
+            self._offer_replacement(key, entries, setting)
         self._refresh_main_warning()
         self._refresh_critic_warning()
 
@@ -5339,7 +5253,7 @@ class MainWindow(QMainWindow):
         box.setWindowTitle(i18n.t("modelGoneTitle"))
         box.setText(i18n.t("modelGone").format(model=key))
         combo = MiniCombo(box)  # its list as wide as its rows (tcc#145's review, I1)
-        for choice in _replacements_for(key, entries):
+        for choice in model_picks.replacements_for(key, entries):
             combo.addItem(f"{choice.route} · {choice.label}", choice.key)
         box.layout().addWidget(combo, 1, 1)
         box.setStandardButtons(
@@ -5403,8 +5317,11 @@ class MainWindow(QMainWindow):
                 tip += "\n" + i18n.t("modelShippedList").format(date=checked)
             if not choice.available:
                 tip += "\n" + i18n.t("modelInstallCli").format(cli=choice.harness)
+            unread = model_choices.list_note(choice)
+            if unread:  # a stand-in for a list its CLI did not give (the group review)
+                tip += "\n" + i18n.t("modelListNotRead").format(why=unread)
             if state.detail:
-                tip += "\n" + state.detail
+                tip += "\n" + availability_view.detail(state, choice)
             if caution:
                 tip += "\n" + i18n.t("criticNotFlashTip")
             combo.setItemData(row, tip, Qt.ItemDataRole.ToolTipRole)
@@ -5454,11 +5371,7 @@ class MainWindow(QMainWindow):
         _mark_missing(combo, entries, reviewer=critic)
 
     def _generator_choice(self) -> Optional[model_choices.Choice]:
-        key = str(self._ai_main_combo.currentData() or "")
-        # A row picked by name runs itself; an alias is for a key nothing offers. An old alias
-        # sent Sonnet's row to the model already running — no restart, nothing said (finding 156).
-        return (model_choices.find(self._model_choices, key)
-                or model_choices.resolve(self._model_choices, key).choice)
+        return model_picks.chosen(self._model_choices, self._ai_main_combo.currentData())
 
     def _on_generator_model_changed(self, _index: int) -> None:
         # `_refresh_main_warning` marks the combo itself, so no separate `_mark_missing` here —
@@ -5524,7 +5437,7 @@ class MainWindow(QMainWindow):
         # conversation that is already running. Starting is what sending the first message does,
         # so a second control for that is one more thing to explain -- it stays out of the way
         # until it has something to say.
-        restart = running and choice is not None and self._running_model not in (None, choice.key)
+        restart = running and model_picks.restart_offered(self._running_model, choice)
         self._session_btn.setHidden(not restart)
         if restart:
             self._session_btn.setText(i18n.t("restartSession").format(model=choice.label))

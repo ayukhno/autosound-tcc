@@ -1785,3 +1785,26 @@ def test_a_codex_refusal_cut_to_its_banner_says_the_reason_did_not_arrive():
 
     assert "did not reach TCC" in fix, fix
     assert "workdir" not in fix
+
+
+def test_a_codex_key_refusal_behind_the_banner_is_the_keys_not_cut_reason():
+    """The group review: `_codex_refusal` ran first whenever the banner was there, and matched only
+    `ERROR:` — a lowercase `error: … Incorrect API key` read as «reason did not reach TCC»."""
+    detail = ("CLI 'codex': OpenAI Codex v0.162.1\n--------\nworkdir: /tmp/project\n"
+              "error: unexpected status 401 Unauthorized: Incorrect API key provided")
+
+    fix = critic.remedy(detail, harness="codex")
+
+    assert "did not reach" not in fix
+    assert "Incorrect API key" in fix
+    assert "Pick another Codex model" not in fix, "the key, not the model, is what was refused"
+
+
+def test_a_codex_refusal_that_does_not_name_the_model_does_not_send_to_another_model():
+    detail = ('OpenAI Codex v0.162.1\nmodel: gpt-6.1-sol\nERROR: {"type":"error","status":429,'
+              '"error":{"message":"You have hit your usage limit."}}')
+
+    fix = critic.remedy(detail, harness="codex")
+
+    assert fix.startswith("Codex: You have hit your usage limit.")
+    assert "Pick another Codex model" not in fix

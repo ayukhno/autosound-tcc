@@ -161,7 +161,8 @@ class _CliCatalogueWorker(QThread):
         # A forced read that came back settles what a failed start left "not checked" — without
         # this, a start whose read raised kept those rows red for the whole launch.
         if self._force:
-            availability.finish_reading("agy")
+            for harness in ("agy", "codex", "sdk-cli"):
+                availability.finish_reading(harness)
         # Same thread, same reason: `claude auth status` is a subprocess, and the pickers are
         # built during construction. Asking there would put a process launch in front of the
         # first paint on every startup.

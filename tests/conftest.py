@@ -1176,3 +1176,8 @@ def _no_claude_asked_for_its_models(monkeypatch):
     monkeypatch.setattr(model_choices, "_ask_claude_models", lambda: [])
     # And `codex app-server` for Codex's (tcc#182).
     monkeypatch.setattr(model_choices, "_ask_codex_models", lambda: [])
+    # What was asked, and why it failed, is per test: one test's ask must not stop the next's.
+    monkeypatch.setattr(model_choices, "_CODEX_ASKED", False)
+    monkeypatch.setattr(model_choices, "_ASKED_STAMP", {})
+    monkeypatch.setattr(model_choices, "_LIST_WHY", {})
+    monkeypatch.setattr(model_choices, "_PARTIAL", set())

@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 from autosound_tcc.core import config  # noqa: E402
 
 from tests import _intake  # noqa: E402
+from autosound_tcc.core import model_picks  # noqa: E402
 from autosound_tcc.ui.tcc import i18n, main_window  # noqa: E402
 from autosound_tcc.ui.tcc.main_window import MainWindow, _force_project_dir_env  # noqa: E402
 
@@ -2891,60 +2892,6 @@ def test_a_project_whose_model_retired_is_offered_a_replacement(tmp_path, monkey
     assert mc.resolve(window._model_choices, "sdk:claude-opus-4-1").ok
 
 
-def test_an_accepted_replacement_lands_in_the_selector_and_the_session(tmp_path, monkeypatch):
-    """Finding 157 (tcc#196): «Sonnet 5 is gone — take Opus 5.5?», accepted — and MAIN still read
-    the gone model: the alias was written, the project still named the old key, and the picker was
-    filled from that. What the Arbiter accepted is what the selector shows and what a session runs."""
-    from PySide6.QtWidgets import QMessageBox
-
-    from autosound_tcc.core import config, model_choices as mc, project_settings
-
-    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
-    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
-    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
-    monkeypatch.setattr(mc, "_CLI_CACHE", {})
-    monkeypatch.setattr(mc, "cli_available", lambda harness: False)
-    project_settings.set_value(config.tcc_dir(tmp_path), "generator", "sdk:claude-opus-4-1")
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Ok)
-
-    _app()
-    window = MainWindow()
-    _KEEP_WINDOWS.append(window)
-
-    taken = "sdk:claude-opus-5-5"  # the first offer: same vendor first, the list's own order
-    assert window._ai_main_combo.currentData() == taken
-    assert window._generator_choice().key == taken
-    assert project_settings.get(config.tcc_dir(tmp_path), "generator") == taken
-
-
-def test_a_row_picked_by_name_runs_that_model_and_offers_the_restart(tmp_path, monkeypatch):
-    """Finding 156 (tcc#196): with a session running, picking Sonnet brought no restart; Fable did.
-    An alias left by an earlier «gone — take Opus 5.5?» sent Sonnet's key to the model already
-    running, so the pick changed nothing and said nothing. A row the Arbiter picks by name, and
-    that is on offer, runs itself; an alias is for a key nothing offers."""
-    from autosound_tcc.core import model_overrides
-
-    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
-    _catalogue(monkeypatch, [])
-    model_overrides.set_alias("sdk:claude-sonnet-5", "sdk:claude-opus-5-5")
-    _app()
-    window = MainWindow()
-    _KEEP_WINDOWS.append(window)
-    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5-5"))
-    window._running_model = "sdk:claude-opus-5-5"
-
-    class _Worker:
-        def shutdown(self, *a, **kw):
-            return True
-
-    window._agent_worker = _Worker()
-    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
-
-    assert window._generator_choice().key == "sdk:claude-sonnet-5"
-    assert not window._session_btn.isHidden()
-    assert "sonnet" in window._session_btn.text().lower()
-
-
 def test_the_replacement_list_holds_its_models_whole(tmp_path, monkeypatch):
     """tcc#145's review, I1: every combo's list has `.mini-select`'s room for the check mark, and a
     plain box's list is only as wide as the box. The retired model's replacement list is read
@@ -3314,7 +3261,7 @@ def test_a_replacement_is_offered_from_the_same_vendor_first(tmp_path, monkeypat
     route, so the default selection was whatever sorted first — which is how a Gemini reviewer
     became a Claude one, ending cross-vendor review by combo box (user, 2026-08-11)."""
     from autosound_tcc.core import model_choices as mc
-    from autosound_tcc.ui.tcc.main_window import _replacements_for
+    from autosound_tcc.core.model_picks import replacements_for as _replacements_for
 
     entries = [
         mc.Choice(harness="sdk", model="claude-opus-5", label="Opus 5", provider="anthropic"),
@@ -3332,7 +3279,7 @@ def test_an_unrecognised_key_leaves_the_replacement_list_as_it_was(tmp_path):
     """No marker matched means we know nothing about the vendor — and guessing an order would be
     presenting a preference we do not have."""
     from autosound_tcc.core import model_choices as mc
-    from autosound_tcc.ui.tcc.main_window import _replacements_for
+    from autosound_tcc.core.model_picks import replacements_for as _replacements_for
 
     entries = [mc.Choice(harness="omp", model="mistral-large", label="M", provider="mistral")]
 
@@ -5400,7 +5347,7 @@ def test_the_catalogue_worker_forces_agy_only_when_asked(monkeypatch):
         main_window.model_choices, "refresh_cli_catalogue",
         lambda *, force=False, active_omp=None: seen.append((force, active_omp)) or {},
     )
-    monkeypatch.setattr(main_window.claude_sdk, "probe_signed_in",
+    monkeypatch.setattr(model_picks.claude_sdk, "probe_signed_in",
                         lambda *, force=False: None)
 
     main_window._CliCatalogueWorker().run()
@@ -5452,7 +5399,7 @@ def test_the_reload_press_settles_what_a_failed_start_left_unchecked(monkeypatch
         raise RuntimeError("agy exploded")
 
     monkeypatch.setattr(main_window.model_choices, "refresh_cli_catalogue", boom)
-    monkeypatch.setattr(main_window.claude_sdk, "probe_signed_in", lambda *, force=False: None)
+    monkeypatch.setattr(model_picks.claude_sdk, "probe_signed_in", lambda *, force=False: None)
     assert availability.StartupReading().start().wait(2.0)
     agy = model_choices.Choice(harness="agy", model="gemini-3.1-pro-high", label="x")
     sdk = model_choices.Choice(harness="sdk", model="claude-opus-5", label="y")
@@ -8509,39 +8456,87 @@ def test_the_signal_nudge_reads_every_open_signals_id_from_the_brief(tmp_path, m
         window._mcp_server = None
 
 
-def test_a_reviewer_with_no_sign_in_here_is_offered_the_route_that_answers(monkeypatch):
-    """hub #262 (tcc#196): `API · gemini-3.1-pro-preview` on a machine that reaches Gemini only
-    through agy by ADC — the «!» said there was no key and stopped. It names the agy model that
-    answers there, and one click in its box takes it."""
+def _window_half(**attrs):
+    """A QWidget carrying only the window methods under test — no full window (the ratchet)."""
+    from PySide6.QtWidgets import QComboBox, QWidget
+
+    class _Half(QWidget):
+        _explain_critic_warning = MainWindow._explain_critic_warning
+        _take_critic = MainWindow._take_critic
+        _start_tuning_session = MainWindow._start_tuning_session
+        _offer_replacement = MainWindow._offer_replacement
+
+    _app()
+    half = _Half()
+    half._ai_critic_combo = QComboBox(half)
+    half.said = []
+    half._status_strip = type("Strip", (), {"notify": lambda _s, text, level="info":
+                                            half.said.append((text, level))})()
+    for name, value in attrs.items():
+        setattr(half, name, value)
+    _KEEP_WINDOWS.append(half)
+    return half
+
+
+def test_the_reviewer_box_takes_the_route_that_answers_in_one_click(monkeypatch):
+    """hub #262 (tcc#196): the «!» names the agy model that answers; its box takes it."""
     from PySide6.QtWidgets import QMessageBox
 
     from autosound_tcc.core import model_choices
 
-    _app()
-    window = MainWindow()
-    _KEEP_WINDOWS.append(window)
     instead = model_choices.Choice(harness="agy", model="gemini-3.8-flash-high",
                                    label="Gemini 3.8 Flash (High)", provider="google")
-    window._critic_choices = list(window._critic_choices) + [instead]
-    window._fill_combo(window._ai_critic_combo, window._critic_choices, "api:gemini-3.1-pro-preview",
-                       critic=True)
-    monkeypatch.setattr(model_choices, "critic_reaches", lambda choice: choice.harness == "agy")
-    monkeypatch.setattr(model_choices, "reviewer_on_a_signed_in_route",
-                        lambda choice: instead if choice.harness == "api" else None)
-
-    window._refresh_critic_warning()
-
-    assert "AGY · Gemini 3.8 Flash (High)" in window._critic_warn_detail
-    taken = []
+    half = _window_half(_critic_warn_detail="clipboard only", _critic_instead=instead)
+    half._ai_critic_combo.addItem("API", "api:gemini-3.1-pro-preview")
+    half._ai_critic_combo.addItem("AGY", instead.key)
 
     def click(box):
-        taken.append([b.text() for b in box.buttons()])
-        offer = next(b for b in box.buttons() if "Gemini 3.8 Flash" in b.text())
-        offer.click()
+        next(b for b in box.buttons() if "Gemini 3.8 Flash" in b.text()).click()
         return 0
 
     monkeypatch.setattr(QMessageBox, "exec", click)
-    window._explain_critic_warning()
+    half._explain_critic_warning()
 
-    assert taken, "the box was shown"
-    assert window._ai_critic_combo.currentData() == "agy:gemini-3.8-flash-high"
+    assert half._ai_critic_combo.currentData() == instead.key
+
+
+def test_taking_a_reviewer_no_longer_listed_says_so(monkeypatch):
+    """The group review: the click did nothing when the row had gone between the «!» and the box."""
+    half = _window_half()
+
+    half._take_critic("agy:gone")
+
+    assert half.said and "agy:gone" in half.said[0][0] and half.said[0][1] == "warn"
+
+
+def test_a_restart_with_no_model_picked_says_so(monkeypatch):
+    """Start with a session running and nothing resolvable picked returned in silence."""
+    class _Layout:
+        active = False
+
+    half = _window_half(_control_layout=_Layout(), _agent_worker=object(), _running_model="x")
+    monkeypatch.setattr(half, "_generator_choice", lambda: None, raising=False)
+
+    half._start_tuning_session()
+
+    assert half.said and half.said[0][0] == i18n.t("startNoModel")
+
+
+def test_accepting_a_reviewers_replacement_names_it_in_the_project(monkeypatch):
+    """The Critic side of an accept (157): the alias, and the project's reviewer setting takes
+    the accepted key, so the picker filled from it holds the new one."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from autosound_tcc.core import model_choices, model_overrides
+
+    entries = [model_choices.Choice(harness="agy", model="gemini-3.8-flash-high", label="F",
+                                    provider="google")]
+    written = {}
+    half = _window_half(_set_project_setting=lambda key, value: written.update({key: value}),
+                        _reload_model_choices=lambda: None)
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Ok)
+
+    half._offer_replacement("agy:gemini-3.1-pro-high", entries, main_window._CRITIC_KEY)
+
+    assert written == {main_window._CRITIC_KEY: "agy:gemini-3.8-flash-high"}
+    assert model_overrides.resolve_key("agy:gemini-3.1-pro-high")[0] == "agy:gemini-3.8-flash-high"

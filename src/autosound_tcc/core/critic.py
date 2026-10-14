@@ -794,17 +794,21 @@ def _refused_tool(said: str) -> str:
 
 #: Codex's start banner, which `codex exec` prints before anything else (0.162.1).
 _CODEX_BANNER = re.compile(r"OpenAI Codex v\d")
-#: Codex's own refusal line: `ERROR: {"type":"error","status":400,"error":{"message":"…"}}`.
-_CODEX_ERROR = re.compile(r"^\s*ERROR:\s*(.+)$", re.M)
+#: Codex's own refusal line: `ERROR: {"type":"error","status":400,"error":{"message":"…"}}`, or
+#: `error: unexpected status 401 …` — either case (the group review).
+_CODEX_ERROR = re.compile(r"^\s*error:\s*(.+)$", re.M | re.I)
+#: What Codex is told when its refusal names the model.
+_CODEX_PICK = ("Pick another Codex model in TCC's footer — the list is read from Codex itself, and "
+               "↻ reads it again.")
 
 
 def _codex_refusal(detail: str) -> str:
-    """Codex's reason for a failed review, in its own words, or "" when `detail` is not Codex's.
+    """Codex's reason for a failed review, in its own words; "" when `detail` is not Codex's or
+    holds no `error:` line — then the other checks run, and `_codex_cut` speaks only if none did.
 
     tcc#182: the tooltip held the banner (`workdir:`, `model:`, `sandbox:`…) and the echoed prompt,
-    and the reason came last, after `ERROR:`. The method keeps 400 characters of a CLI's failure
-    counted from its first `error:` line, and Codex writes `ERROR:` — so most often only the banner
-    arrives. Then that is what is said: the reason did not arrive, and where it is usually found."""
+    and the reason came last. «Pick another model» only when the reason names the model: a key or a
+    usage limit is not cured by another model (the group review)."""
     if not _CODEX_BANNER.search(detail or ""):
         return ""
     reasons: list[str] = []
@@ -817,13 +821,20 @@ def _codex_refusal(detail: str) -> str:
             text = raw.strip()
         if text not in reasons:
             reasons.append(text)
-    pick = ("Pick another Codex model in TCC's footer — the list is read from Codex itself, and ↻ "
-            "reads it again.")
-    if reasons:
-        return f"Codex: {' '.join(reasons)} {pick}"
+    if not reasons:
+        return ""
+    said = " ".join(reasons)
+    return f"Codex: {said}" + (f" {_CODEX_PICK}" if re.search(r"\bmodel\b", said, re.I) else "")
+
+
+def _codex_cut(detail: str) -> str:
+    """The banner arrived and no reason did: said as that, not shown as the reason (tcc#182). The
+    method keeps 400 characters from a lowercase `error:` line; Codex's `ERROR:` is not one."""
+    if not _CODEX_BANNER.search(detail or ""):
+        return ""
     return ("Codex stopped before answering, and its reason did not reach TCC: the method's report "
             "kept only Codex's start banner, and Codex prints the reason after it. Most often the "
-            "model is not offered to this Codex login. " + pick)
+            "model is not offered to this Codex login. " + _CODEX_PICK)
 
 
 def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None) -> str:
@@ -891,7 +902,7 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
             "its own list; pick another Critic in TCC's footer, or press ↻ beside it to re-read "
             "what this machine can actually run."
         )
-    return ""
+    return _codex_cut(detail)
 
 
 def refusal_reason(detail: str) -> Optional[str]:
