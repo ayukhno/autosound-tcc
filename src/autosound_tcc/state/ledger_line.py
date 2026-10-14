@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple, Optional
 
@@ -89,31 +90,65 @@ def versions(root, preset: str) -> list[str]:
     return sorted(names, key=_number)
 
 
-#: `_made_for`'s answers, one slot per version file: `{path: ((path, st_mtime_ns, st_size),
-#: preset)}` (#172). A slot is replaced when its file changes — and a version file is written once.
-_MADE_FOR: dict = {}
+#: `_entry`'s answers, one slot per version file: `{path: ((path, st_mtime_ns, st_size),
+#: (preset, day))}` (#172, #203). A slot is replaced when its file changes — and a version file is
+#: written once.
+_ENTRIES: dict = {}
 
 
-def _made_for(root, version: str) -> Optional[str]:
-    """The preset a project-line version was proposed for, as its own file says.
+def _day(created) -> Optional[str]:
+    """`created` as the local day, `DD.MM` (#203); None when it is not a readable timestamp."""
+    if not isinstance(created, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(created)
+    except ValueError:
+        return None
+    if moment.tzinfo is not None:
+        moment = moment.astimezone()
+    return moment.strftime("%d.%m")
+
+
+def _entry(path: Path) -> tuple[Optional[str], Optional[str]]:
+    """What a version's own file says of it: the preset it was proposed for and the day it was
+    made (`created`), each None where the file does not say, or cannot be read.
 
     Remembered per file by its path, mtime and size (#172): every reload asks this of every
-    version, on the GUI thread, and each one is a whole DSP state read for this one field."""
-    path = version_path(root, "", version)
+    version, on the GUI thread, and each one is a whole DSP state read for two fields."""
     try:
         stat = path.stat()
     except OSError:
-        return None
+        return None, None
     key = (str(path), stat.st_mtime_ns, stat.st_size)
-    held = _MADE_FOR.get(key[0])
+    held = _ENTRIES.get(key[0])
     if held is None or held[0] != key:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return None
+            return None, None
         preset = data.get("preset") if isinstance(data, dict) else None
-        held = _MADE_FOR[key[0]] = (key, preset if isinstance(preset, str) and preset else None)
+        found = (preset if isinstance(preset, str) and preset else None,
+                 _day(data.get("created")) if isinstance(data, dict) else None)
+        held = _ENTRIES[key[0]] = (key, found)
     return held[1]
+
+
+def _made_for(root, version: str) -> Optional[str]:
+    """The preset a project-line version was proposed for, as its own file says."""
+    return _entry(version_path(root, "", version))[0]
+
+
+def created_days(root, preset: str, versions: list[str]) -> dict[str, str]:
+    """`{version: "DD.MM"}` — the day each of `versions` was made, from its own file (#203).
+
+    A version whose file has no readable `created` is left out, and so is labelled with its number
+    alone. Read through `_entry`, the same reader as the preset a version was made for."""
+    days = {}
+    for version in versions:
+        day = _entry(version_path(root, preset, version))[1]
+        if day:
+            days[version] = day
+    return days
 
 
 def compare_groups(root, preset: str, current: Optional[str]) -> list[tuple[str, list[str]]]:
@@ -243,11 +278,15 @@ def previous_of(root, preset: str, version: str) -> Optional[str]:
     return below[-1] if below else None
 
 
-def label(root, version: str, names: Optional[dict[str, list[str]]] = None) -> str:
-    """`v_006 · SQ-2` — the number, and the names it was saved under."""
+def label(root, version: str, names: Optional[dict[str, list[str]]] = None,
+          days: Optional[dict[str, str]] = None) -> str:
+    """`v_006 · 22.09 · SQ-2` — the number, the day it was made (#203), and the names it was saved
+    under. `days` is `created_days`' answer, passed in as `names` is, so a list reads each once;
+    a version with no day, or no name, has none in its text."""
     names = saved_names(root) if names is None else names
     codes = names.get(version) or []
-    return f"{version} · {', '.join(codes)}" if codes else version
+    day = (days or {}).get(version)
+    return " · ".join([version] + ([day] if day else []) + ([", ".join(codes)] if codes else []))
 
 
 class CompareOffer(NamedTuple):
@@ -268,9 +307,12 @@ def compare_offer(root, preset: str, current: Optional[str]) -> CompareOffer:
     groups = compare_groups(root, preset, current)
     own = groups[0][1] if groups else []
     names = saved_names(root)
-    labels = {v: label(root, v, names) for v in own}
-    others = [(p, [(f"{p}/{v}", label(root, v, names)) for v in theirs])
-              for p, theirs in groups[1:]]
+    own_days = created_days(root, preset, own)
+    labels = {v: label(root, v, names, own_days) for v in own}
+    others = []
+    for p, theirs in groups[1:]:
+        days = created_days(root, p, theirs)
+        others.append((p, [(f"{p}/{v}", label(root, v, names, days)) for v in theirs]))
     previous = previous_of(root, preset, current)
     if previous in own:
         default = previous

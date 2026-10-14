@@ -99,6 +99,46 @@ def test_a_version_is_named_by_what_it_was_saved_under(tmp_path):
     assert ledger_line.dsp_preset(tmp_path, "SQ") == "1"
 
 
+def test_a_version_is_named_with_the_day_it_was_made_beside_its_names(tmp_path):
+    """#203: `v_007 · 05.10 · SQ-2` — the day comes in as `days`, the names as `names`, as the
+    names already do, and each is left out where there is none."""
+    names = {"v_007": ["SQ-2"]}
+    days = {"v_007": "05.10"}
+    assert ledger_line.label(tmp_path, "v_007", names, days) == "v_007 · 05.10 · SQ-2"
+    assert ledger_line.label(tmp_path, "v_007", {}, days) == "v_007 · 05.10"
+    assert ledger_line.label(tmp_path, "v_007", names, {}) == "v_007 · SQ-2"
+    assert ledger_line.label(tmp_path, "v_007", {}, {}) == "v_007"
+
+
+def _made_on(root, stamps: dict) -> None:
+    """Gives each version file of the project line its `created`, as the method writes it (#203)."""
+    for version, stamp in stamps.items():
+        path = root / "versions" / f"{version}.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["created"] = stamp
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_compare_offers_name_each_version_with_the_day_it_was_made(tmp_path, monkeypatch):
+    """#203: the day comes from each version's own `created`, for this preset's versions and for
+    the other preset's alike; a version with no `created` keeps its number alone. The day is read
+    once per version: a second offer opens none of the version files it has already read."""
+    _arbiter_example(tmp_path)
+    _made_on(tmp_path, {"v_002": "2026-09-19T09:00:00", "v_003": "2026-09-20T10:00:00",
+                        "v_004": "2026-09-21T10:00:00", "v_005": "2026-09-23T08:00:00",
+                        "v_006": "2026-09-22T10:00:00"})
+    offer = ledger_line.compare_offer(tmp_path, "SQ", "v_006")
+    assert offer.labels == {"v_006": "v_006 · 22.09 · SQ-2", "v_003": "v_003 · 20.09 · SQ-1",
+                            "v_002": "v_002 · 19.09", "v_001": "v_001"}
+    assert offer.others == [("FULL", [("FULL/v_005", "v_005 · 23.09"),
+                                      ("FULL/v_004", "v_004 · 21.09 · FULL-1")])]
+
+    opened = _reads.opened_under(monkeypatch, tmp_path)
+    ledger_line.compare_offer(tmp_path, "SQ", "v_006")
+    assert [p for p in opened if "/versions/" in p and not p.endswith("v_006.json")] == [], \
+        "the days are remembered per file: only the open version's own file is read again"
+
+
 def test_compare_offers_the_previous_configuration_by_default(tmp_path):
     """«Порівняти з» for SQ-2 (v_006): its own versions with the names they were saved under, then
     FULL's, keyed by their preset; selected by default the PREVIOUS configuration — SQ-1's v_003,
