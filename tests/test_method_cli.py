@@ -1086,6 +1086,8 @@ def test_a_note_on_a_write_that_landed_is_told_once_per_run(tmp_path, monkeypatc
 
     assert answers == [(code, "step 2.1 added", err)] * 2
     assert app_log_told == [note]
+    # A write that landed: a warning on the strip, not «Something went wrong» (#205, Fable's M3).
+    assert app_log_told.warned == [note]
 
 
 def test_a_busy_answer_carries_its_note_and_does_not_tell_it_apart(tmp_path, monkeypatch,

@@ -227,9 +227,9 @@ def _version_string() -> str:
         return "unknown"
 
 
-#: Reports made while no sink was registered, oldest first, for the next one (`set_ui_sink`).
-#: Bounded: the log keeps every one of them, and a window needs the latest.
-_held: list[str] = []
+#: Reports made while no sink was registered, oldest first, for the next one (`set_ui_sink`), each
+#: with whether it was a warning (`warn`). Bounded: the log keeps every one, a window needs the latest.
+_held: list[tuple[str, bool]] = []
 _HELD_MAX = 20
 #: Whether one was dropped past the bound since a sink last took them: logged once (`_hold`).
 _held_dropped = False
@@ -244,15 +244,17 @@ def set_ui_sink(sink: Optional[Callable[[str, Optional[Path]], None]]) -> None:
     A sink registered after reports were made hears them now, in order and once each. On every
     launch the ☰ menu reads `tcc-project.json` while the header is built, before the window gets
     here, and a file found broken then was said to the log alone (the review of Task 17). Only
-    `report`s are held; the excepthooks tell a window when there is one, as before."""
+    `report`s and `warn`s are held; the excepthooks tell a window when there is one, as before.
+
+    A warning is told as `sink(message, path, warning=True)`, a report as `sink(message, path)`."""
     global _ui_sink, _held, _held_dropped
     with _sink_lock:
         _ui_sink = sink
-        held: list[str] = []
+        held: list[tuple[str, bool]] = []
         if sink is not None:
             held, _held, _held_dropped = _held, [], False
-    for message in held:
-        _tell(message)
+    for message, warning in held:
+        _tell(message, warning)
 
 
 def clear_ui_sink(sink: Callable[[str, Optional[Path]], None]) -> None:
@@ -267,13 +269,16 @@ def clear_ui_sink(sink: Callable[[str, Optional[Path]], None]) -> None:
             _ui_sink = None
 
 
-def _notify(message: str) -> None:
+def _notify(message: str, warning: bool = False) -> None:
     """Tell the sink, with the log file to point at — or None when `setup` could not open one:
     the machine whose log cannot hold the sentence is no reason for the strip not to."""
     if _ui_sink is None:
         return
     try:
-        _ui_sink(message, _log_path)
+        if warning:
+            _ui_sink(message, _log_path, warning=True)
+        else:
+            _ui_sink(message, _log_path)
     except Exception:  # noqa: BLE001 — a failing notifier must never mask the error it reports
         logger().exception("the UI log sink raised")
 
@@ -299,23 +304,37 @@ def report(message: str) -> None:
     to the failure of what reports it.
     """
     logger().error("%s", message)
+    _say(message, warning=False)
+
+
+def warn(message: str) -> None:
+    """Something the person should hear that is NOT a failure: a WARNING line in the log and the
+    strip told it is a warning, so it says the sentence itself rather than «Something went
+    wrong». A method's `note:` on a write that landed is one (#205, Fable's M3 on the re-pin to
+    v3.1.3). Held, guarded and handed over as `report` is."""
+    logger().warning("%s", message)
+    _say(message, warning=True)
+
+
+def _say(message: str, *, warning: bool) -> None:
+    """`report`'s and `warn`'s road to the sink: told now, or held for the next one."""
     with _sink_lock:
         told = _ui_sink is not None
-        first_drop = False if told else _hold(message)
+        first_drop = False if told else _hold(message, warning)
     if told:
-        _tell(message)
+        _tell(message, warning)
     elif first_drop:
         logger().warning("more than %d reports came with no window to tell: a window that "
                          "registers hears the latest %d, and every one is in this log",
                          _HELD_MAX, _HELD_MAX)
 
 
-def _hold(message: str) -> bool:
+def _hold(message: str, warning: bool = False) -> bool:
     """Keep `message` for the next sink, the latest `_HELD_MAX` of them (under `_sink_lock`). True
     when it drops the first one since a sink last took them: a window that registers later is told
     the latest and nothing about the rest, so the log says it once (the group review, G7)."""
     global _held_dropped
-    _held.append(message)
+    _held.append((message, warning))
     if len(_held) <= _HELD_MAX:
         return False
     del _held[:-_HELD_MAX]
@@ -323,13 +342,13 @@ def _hold(message: str) -> bool:
     return first
 
 
-def _tell(message: str) -> None:
+def _tell(message: str, warning: bool = False) -> None:
     """One report to the sink, unless this thread is already inside the sink (`report`)."""
     if getattr(_reporting, "active", False):
         return
     _reporting.active = True
     try:
-        _notify(message)
+        _notify(message, warning)
     finally:
         _reporting.active = False
 

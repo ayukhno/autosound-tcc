@@ -381,7 +381,7 @@ _NOTES_TOLD: set[str] = set()
 
 
 def _tell_notes(err: str) -> None:
-    """Each `note: ` line on a run's stderr, to the person (`app_log.report`) the first time in
+    """Each `note: ` line on a run's stderr, to the person (`app_log.warn`) the first time in
     this run and to the log alone after that. From v3.1.3 such a line says what a write that landed
     did not do: `<project> cannot be locked` (a shared folder on Windows, where TCC's own lock takes
     none across processes), `capture-start`'s plan file not written. Not only at exit 0:
@@ -394,4 +394,4 @@ def _tell_notes(err: str) -> None:
             app_log.logger().warning("%s", line)
             continue
         _NOTES_TOLD.add(line)
-        app_log.report(line)
+        app_log.warn(line)  # a write that landed: not «Something went wrong» (#205)

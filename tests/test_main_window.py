@@ -8262,11 +8262,27 @@ def test_a_logged_error_with_no_log_file_is_said_without_a_path():
 
     MainWindow._on_logged_error(host, "the store was set aside", None)
     MainWindow._on_logged_error(host, "the store was set aside", Path("logs") / "tcc.log")
-    for message, path in emitted:
-        MainWindow._show_logged_error(host, message, path)
+    for args in emitted:
+        MainWindow._show_logged_error(host, *args)
 
     assert "None" not in notes[0] and notes[0].endswith("the store was set aside"), notes
     assert str(Path("logs") / "tcc.log") in notes[1], "with a file, the file is still named"
+
+
+def test_a_logged_warning_is_said_as_itself_not_as_something_gone_wrong():
+    """#205: a method note is told as a warning — a write that landed and did not take the lock —
+    and the strip said «Something went wrong: note: … cannot be locked» over it. It stands on the
+    strip in its own words, as a report does: until its ✕."""
+    emitted, notes = [], []
+    host = SimpleNamespace(
+        loggedError=SimpleNamespace(emit=lambda *a: emitted.append(a)),
+        _status_strip=SimpleNamespace(notify=lambda text, **k: notes.append((text, k))))
+
+    MainWindow._on_logged_error(host, "note: car cannot be locked", None, warning=True)
+    for args in emitted:
+        MainWindow._show_logged_error(host, *args)
+
+    assert notes == [("note: car cannot be locked", {"level": "warn", "sticky": True})], notes
 
 
 def _over_its_settings_file():

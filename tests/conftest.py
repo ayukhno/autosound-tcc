@@ -299,13 +299,28 @@ def app_log_told(_machine_dir, monkeypatch):
     The sink is told with or without a log file to point at; one is named in the machine folder
     anyway (nothing here writes it), so it hears a path as it would in the app. The sink and the
     path are both put back at the test's end. One copy for every store that is set aside or
-    refused and says so (#173) — the log half of the same sentence is `app_log_errors`."""
+    refused and says so (#173) — the log half of the same sentence is `app_log_errors`. Those told
+    as a warning (`app_log.warn`) are in `told.warned` as well."""
     from autosound_tcc.core import app_log
 
-    told: list[str] = []
+    told = _Told()
+
+    def sink(message, _path, warning=False):
+        told.append(message)
+        if warning:
+            told.warned.append(message)
+
     monkeypatch.setattr(app_log, "_log_path", _machine_dir / "tcc.log")
-    monkeypatch.setattr(app_log, "_ui_sink", lambda message, _path: told.append(message))
+    monkeypatch.setattr(app_log, "_ui_sink", sink)
     return told
+
+
+class _Told(list):
+    """`app_log_told`'s list, with the warnings among them apart."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.warned: list[str] = []
 
 
 @pytest.fixture(scope="session", autouse=True)

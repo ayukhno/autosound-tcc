@@ -195,6 +195,33 @@ def test_reports_dropped_past_their_bound_are_logged_once_per_stretch(tmp_path, 
     assert len(heard) == app_log._HELD_MAX and len(dropped()) == 2, dropped()
 
 
+def test_a_warning_reaches_the_window_as_a_warning_and_the_log_as_one(tmp_path, monkeypatch,
+                                                                     app_log_warnings):
+    """#205 (Fable's M3 on the re-pin to v3.1.3): a method note says what a write that LANDED did
+    not do, and through `report` the strip said «Something went wrong» over it. `warn` is the
+    same road at a warning's level — a WARNING line, the sink told it is a warning — held for a
+    window that registers later as a report is, and a sink that takes no level still hears a
+    report as before."""
+    monkeypatch.setattr(app_log, "_log_path", tmp_path / "tcc.log")
+    monkeypatch.setattr(app_log, "_ui_sink", None)
+    monkeypatch.setattr(app_log, "_held", [])
+    heard = []
+
+    app_log.warn("note: held")
+    app_log.report("an error, held")
+    app_log.set_ui_sink(lambda message, path, warning=False: heard.append((message, warning)))
+    app_log.warn("note: told")
+
+    assert heard == [("note: held", True), ("an error, held", False), ("note: told", True)]
+    levels = {record.getMessage(): record.levelno for record in app_log_warnings}
+    assert levels["note: told"] == logging.WARNING and levels["an error, held"] == logging.ERROR
+
+    plain = []
+    app_log.set_ui_sink(lambda message, path: plain.append(message))
+    app_log.report("an error")
+    assert plain == ["an error"], "a sink with no level still hears a report"
+
+
 def test_a_report_reaches_the_window_with_no_log_file_to_point_at(monkeypatch):
     """`setup()` leaves no log path when the log folder cannot be written, and the sink heard
     nothing then: the one machine whose log cannot hold the sentence was the one whose strip

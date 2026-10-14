@@ -713,7 +713,7 @@ class MainWindow(QMainWindow):
     # An error was written to the log. A plain signal because `threading.excepthook` fires on the
     # thread that failed, and touching a widget from there is undefined behaviour -- Qt marshals
     # it back onto the GUI thread for us.
-    loggedError = Signal(str, str)
+    loggedError = Signal(str, str, bool)  # message, log path or "", a warning (`app_log.warn`)
 
     def __init__(self) -> None:
         super().__init__()
@@ -5721,16 +5721,16 @@ class MainWindow(QMainWindow):
         the pick when none is named (`terminal_menu.open_in`, #180)."""
         terminal_menu.open_in(self, client)
 
-    def _on_logged_error(self, message: str, path) -> None:
+    def _on_logged_error(self, message: str, path, warning: bool = False) -> None:
         """Called from `app_log` when something was written to the log. Never from a worker
         thread's own stack -- `threading.excepthook` runs on the failing thread, so this touches
         widgets via a queued signal rather than directly."""
-        self.loggedError.emit(f"{message}", str(path) if path else "")  # None: no log file
+        self.loggedError.emit(f"{message}", str(path) if path else "", warning)  # None: no file
 
-    def _show_logged_error(self, message: str, path: str) -> None:
-        self._status_strip.notify(
-            i18n.t("logError" if path else "logErrorNoFile").format(error=message, path=path),
-            level="warn", sticky=True)  # stands until its ✕; later lines wait behind it (#173, I1)
+    def _show_logged_error(self, message: str, path: str, warning: bool = False) -> None:
+        self._status_strip.notify(  # a warning in its own words, not «Something went wrong» (#205)
+            message if warning else i18n.t("logError" if path else "logErrorNoFile").format(
+                error=message, path=path), level="warn", sticky=True)  # until its ✕ (#173, I1)
 
     def stop_workers(self) -> None:
         """Bring every background thread this window owns to a stop.
