@@ -3743,3 +3743,15 @@ this login is learned only when a session starts. Asked: the same check for the 
 **Weight.** Medium: a pick the login cannot use fails at the session's start, not when it is chosen.
 
 **Task.** The next wave's collection (the Arbiter: «запиши на наступну хвилю»).
+
+### 161. The menu: check it whole, and every line that opens a submenu in bold
+
+**What.** The Arbiter, 2026-10-14, the W-10 Windows pass on the VM, after using «Ask about ›» and «Language ›»:
+check the menu as a whole, and make every line that has a submenu bold, so it reads apart from the lines that act
+at once.
+
+**Where.** ☰ menu, every level (the VM showed «Ask about», «Language» beside plain lines like «Switch theme»).
+
+**Weight.** Low: reading speed in the menu.
+
+**Task.** The next wave's collection (the Arbiter: «запиши ще», with finding 160).
