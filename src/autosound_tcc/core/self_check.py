@@ -455,3 +455,9 @@ def use_translator(translate: Callable[[str], str]) -> None:
 
 def _t(key: str) -> str:
     return _translate(key)
+
+
+def translated(key: str) -> str:
+    """`key` in the window's language, through the translator the window set (`use_translator`):
+    for a sentence another `core` module tells the person (`method_features.say_if_older`)."""
+    return _translate(key)

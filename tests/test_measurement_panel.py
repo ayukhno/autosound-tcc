@@ -750,6 +750,77 @@ def test_a_rename_is_matched_to_the_round_s_take_by_its_series_key(tmp_path, mon
     assert asked == done == [("w-R_01 (sw)", "w-L_02 (sw)")], "found by its key"
 
 
+def test_a_new_sweep_typed_as_a_good_take_s_key_never_supersedes_it(tmp_path, monkeypatch):
+    """tcc#200's review, I1: the round took `w-R_1 (sw)` (its verdict pins uuid u1). The import
+    offers a new sweep, u2, typed `w-R_01 (sw)` — really the left driver — and the tuner renames it
+    `w-L_1 (sw)`. Found by key alone, the round's good `w-R_1` was asked to be superseded and the
+    method asked for it again. A row found by key is asked about only when it IS this capture: the
+    uuid its verdict pins, or with none, the spelling it was typed as."""
+    from autosound_tcc.core import config, process_writer, vendor_loader
+
+    from tests import _rounds
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    process = _rounds.write_round(tmp_path, version=1, expected=["w-R_1 (sw)", "w-L_1 (sw)"],
+                                  taken=["w-R_1 (sw)"], pad=False)
+    state = process.load()
+    state["capture"]["taken"]["w-R_1 (sw)"]["verified"] = {"ok": True, "uuid": "u1"}
+    process._write(state)
+    asked = []
+    monkeypatch.setattr(process_writer, "supersede_capture",
+                        lambda project_dir, wrong, right: asked.append((wrong, right)) or (0, "", ""))
+    panel = MeasurementPanel()
+    answer = {"1": {"title": "w-R_1 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:10:00"},
+              "2": {"title": "w-R_01 (sw)", "uuid": "u2", "date": "2026-Aug-25 20:12:00"}}
+    panel._taking = capture_import.candidates(answer, tmp_path)
+    new = [row for row in panel._taking if row.uuid == "u2"]
+
+    assert panel._supersede_renamed(new, {"u2": "w-L_1 (sw)"}) == ([], [], [])
+    assert asked == [], "the good w-R_1 is another capture: asked nothing"
+    good = [row for row in panel._taking if row.uuid == "u1"]
+    panel._supersede_renamed(good, {"u1": "w-L_1 (sw)"})
+    assert asked == [("w-R_1 (sw)", "w-L_1 (sw)")], "the round's own capture is asked about"
+
+
+def test_a_project_on_a_copy_before_v314_still_sends_a_same_key_rename(
+        tmp_path, tmp_path_factory, monkeypatch):
+    """tcc#200's review, I2(b): a bound copy before v3.1.4 matches raw titles, and for it a rename
+    `w-R_01 (sw)` → `w-R_1 (sw)` of a take is the only fix the round gets: sent as before v3.1.4."""
+    from autosound_tcc.core import config, process_writer, vendor_loader
+
+    from tests import _rounds
+    from tests._method_copies import copy_of_the_method, entry, linked
+    from tests.test_method_features import OLDER
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    process = _rounds.write_round(tmp_path, version=1, expected=["w-R_1 (sw)"],
+                                  taken=["w-R_01 (sw)"], pad=False)
+    state = process.load()  # as that copy wrote it: under the typed spelling
+    row = state["capture"]["taken"].pop("w-R_1 (sw)")
+    row.pop("as_in_rew", None)
+    state["capture"]["taken"]["w-R_01 (sw)"] = row
+    process._write(state)
+    if entry(tmp_path).is_symlink():
+        entry(tmp_path).unlink()
+    linked(tmp_path, copy_of_the_method(tmp_path_factory.mktemp("older"), changes=OLDER))
+    asked = []
+    monkeypatch.setattr(process_writer, "supersede_capture",
+                        lambda project_dir, wrong, right: asked.append((wrong, right)) or (0, "", ""))
+    panel = MeasurementPanel()
+    panel._taking = capture_import.candidates(
+        {"1": {"title": "w-R_01 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:10:00"}}, tmp_path)
+
+    panel._supersede_renamed(panel._taking, {"u1": "w-R_1 (sw)"})
+
+    assert asked == [("w-R_01 (sw)", "w-R_1 (sw)")]
+
+
 def test_method_channel_pairs_uses_meas_order_by_default():
     _app()
     panel = MeasurementPanel()

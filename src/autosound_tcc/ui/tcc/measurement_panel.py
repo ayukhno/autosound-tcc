@@ -253,6 +253,18 @@ def _origin_of(foreign: bool, project: str, their_n: str) -> str:
     return f"{name}:{theirs}" if foreign and (name or theirs) else ""
 
 
+def _is_this_capture(entry: dict, title: str, row) -> bool:
+    """Whether the round's row `title` (its `entry`) is the capture `row` the import window holds:
+    the same title as typed; else, found by key under the list's title, the uuid its verdict pins
+    when there is one, or the spelling it was typed as (`as_in_rew`, #153) when there is none."""
+    if title == row.title:
+        return True
+    pinned = str(((entry or {}).get("verified") or {}).get("uuid") or "")
+    if pinned:
+        return pinned == row.uuid
+    return str((entry or {}).get("as_in_rew") or "") == row.title
+
+
 def _arrows(pairs) -> str:
     """`old → new, old → new`: renames as the status names them, in the import's order."""
     return ", ".join(f"{wrong} → {right}" for wrong, right in pairs)
@@ -1481,19 +1493,29 @@ class MeasurementPanel(QWidget):
         `title_fixes` reads that refusal as «never took it» — done — so the status said «The round
         now has the new title» about a round nothing changed (MA1). It is asked nothing.
 
-        Taken is by the method's series key (#153, v3.1.4): the round holds `w-R_01 (sw)` under the
-        list's `w-R_1 (sw)`, so the take is found by its key. A rename within one key is a spelling
-        of the capture the round already holds there, and is asked nothing: the method refuses it
-        as «corrected to itself — nothing to supersede»."""
+        Taken is by the rule of the project's bound copy (`process_view.title_key`): from v3.1.4
+        the series key (#153) — the round holds `w-R_01 (sw)` under the list's `w-R_1 (sw)` — and
+        before it the raw title. A rename within one key is a spelling of the capture the round
+        already holds there, and is asked nothing: the method refuses it as «corrected to itself».
+        A row found by key under another title is asked about only when it IS this capture (the
+        review of tcc#200, I1): its verdict's uuid is this one's, or with none recorded, it was
+        typed as this one (`as_in_rew`). A new sweep typed `w-R_01` beside a good `w-R_1`, renamed
+        to `w-L_1`, would otherwise mark the good one wrong."""
+        project = config.project_dir()
         round_ = process_view.capture_round() or {}
         if round_.get("closed"):
             round_ = {}
-        key = process_view.title_key()
-        fixes = [(row.title, (titles or {}).get(row.uuid)) for row in rows]
-        fixes = [(wrong, right) for wrong, right in fixes
-                 if right and key(wrong) != key(right)
-                 and process_view.taken_as(round_, wrong, key) is not None]
-        return title_fixes.supersede_each(config.project_dir(), fixes)
+        key = process_view.title_key(project)
+        held = process_view.standing(round_)
+        fixes = []
+        for row in rows:
+            right = (titles or {}).get(row.uuid)
+            if not right or key(row.title) == key(right):
+                continue
+            found = process_view.taken_as(round_, row.title, key)
+            if found is not None and _is_this_capture(held[found], found, row):
+                fixes.append((row.title, right))
+        return title_fixes.supersede_each(project, fixes)
 
     def _write_ledger(self, rows: list, titles: dict) -> None:
         """Tell the ledger about the pass: open the round if there is none, record each capture

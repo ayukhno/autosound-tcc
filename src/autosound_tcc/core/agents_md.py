@@ -18,7 +18,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from autosound_tcc.core import app_log, method_cli
+import threading
+
+from autosound_tcc.core import app_log, method_cli, method_features
 
 #: The file Codex reads, at the project's root.
 FILE = "AGENTS.md"
@@ -26,6 +28,10 @@ FILE = "AGENTS.md"
 _SCRIPT = "project.py"
 #: A file written and a line printed: well inside this, even on a slow disk.
 _TIMEOUT_S = 30.0
+#: What a bound copy before v3.1.4 is told, once per project in this run (tcc#200's review, I3).
+OLDER = "this project's method is older than v3.1.4 — no agents-setup, so Codex gets no AGENTS.md"
+_TOLD: set[str] = set()
+_LOCK = threading.Lock()
 
 
 def ensure(project_dir: Path | str) -> str:
@@ -34,12 +40,26 @@ def ensure(project_dir: Path | str) -> str:
     Returns "" when there is nothing to say: the file (or anything under its name) is already
     there, so the method is not asked; the folder holds no `project.json`, so it is no project the
     method writes into; or the method wrote it. Otherwise one line saying why it was not written —
-    the method's refusal in its own words, or why the run did not come back. Never raises."""
+    the method's refusal in its own words, or why the run did not come back.
+
+    A bound copy before v3.1.4 has no `agents-setup` — read from its `project.py`'s text, never
+    started: its usage line would be said on every Codex start. That is said once per project in
+    this run (`OLDER`), "" after. Never raises: a folder that cannot be looked into is a sentence."""
     project = Path(project_dir)
-    if (project / FILE).exists() or (project / FILE).is_symlink():
-        return ""
-    if not (project / "project.json").is_file():
-        return ""
+    try:
+        if (project / FILE).exists() or (project / FILE).is_symlink():
+            return ""
+        if not (project / "project.json").is_file():
+            return ""
+    except OSError as exc:
+        return f"{FILE} was not written: {project} could not be read ({exc.strerror or exc})"
+    if not method_features.has(method_features.AGENTS_SETUP, project):
+        with _LOCK:
+            if str(project) in _TOLD:
+                return ""
+            _TOLD.add(str(project))
+        app_log.logger().warning("agents-setup on %s: %s", project, OLDER)
+        return OLDER
     try:
         code, out, err = method_cli.spawn(project, _SCRIPT, [str(project), "agents-setup"],
                                           timeout_s=_TIMEOUT_S, lock=False)

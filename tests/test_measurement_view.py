@@ -1184,6 +1184,78 @@ def test_a_padded_list_holding_the_unpadded_take_shows_one_row_done(project):
         assert _L in dict(rows), (which, rows)
 
 
+#: A closed round as a copy before v3.1.4 journalled it: the take under its typed spelling.
+_PAST_BEFORE_V314 = {"id": "cap_001", "version": "1", "phase": "0", "expected": [_R, _L],
+                     "taken": {_L: {"verified": {"ok": True}}, _R0: {"verified": {"ok": True}}},
+                     "skipped": {}, "closed": True}
+
+
+def _as_typed_before_v314(process) -> None:
+    """The open round as a copy before v3.1.4 wrote it: the take typed `w-R_01 (sw)` stored under
+    that spelling, not under the list's `w-R_1 (sw)` with `as_in_rew` (#153)."""
+    state = process.load()
+    taken = state["capture"]["taken"]
+    row = dict(taken.pop(_R))
+    row.pop("as_in_rew", None)
+    row["planned"] = False
+    taken[_R0] = row
+    process._write(state)
+
+
+def test_a_round_written_before_v314_reads_by_the_series_key_under_v314(project):
+    """tcc#200's review, M5: a round on disk from before v3.1.4 holds `w-R_01 (sw)` as typed. The
+    v3.1.4 method reads it by key — `w-R_1` is taken — and so do both cards: one row, done."""
+    process = _round(project, version=1, expected=[_R, _L], taken=[_L, _R0], pad=False)
+    _as_typed_before_v314(process)
+    assert process.capture_outstanding() == []
+
+    live = mv.build_session("0", 1, [], project, taken=[])
+    past = mv._session_for_round(_PAST_BEFORE_V314, None, project_dir=project)
+    for which, card in (("live", live), ("past", past)):
+        assert sorted((i.name, i.status) for g in card.groups for i in g.items) == sorted(
+            [(_R, _DONE), (_L, _DONE)]), which
+
+
+@pytest.fixture
+def older_copy(tmp_path_factory):
+    """A copy of the method as v3.1.3 shipped it, for the readers of its text: no `title_key`, no
+    `band_source`, no `agents-setup` (`tests/test_method_features.py`)."""
+    from tests._method_copies import copy_of_the_method
+    from tests.test_method_features import OLDER
+
+    return copy_of_the_method(tmp_path_factory.mktemp("older"), changes=OLDER)
+
+
+def test_a_project_bound_to_a_copy_before_v314_reads_raw_titles_on_both_cards(
+        project, older_copy, monkeypatch):
+    """tcc#200's review, I2 and M1: the project's bound copy matches raw titles — its close and its
+    gate wait for `w-R_1` while it holds `w-R_01` — so both cards do too: `w-R_1` waits and the take
+    is a row of its own, live as in history. Said once, on the strip."""
+    from autosound_tcc.core import app_log
+    from autosound_tcc.core import method_binding
+    from tests._method_copies import entry, linked, same_path
+
+    told = []
+    monkeypatch.setattr(app_log, "warn", told.append)
+    process = _round(project, version=1, expected=[_R, _L], taken=[_L, _R0], pad=False)
+    _as_typed_before_v314(process)
+    link = entry(project)
+    if link.is_symlink():
+        link.unlink()  # the seed links TCC's own copy; this project runs the older one
+    # This project is `Path.home()` here (conftest), so its entry is the personal install: `known`.
+    linked(project, older_copy)
+    assert same_path(method_binding.for_project(project).skill_dir, older_copy)
+    assert process_view.outstanding(process.load()["capture"], project) == [_R]
+
+    live = mv.build_session("0", 1, [], project, taken=[])
+    mv.build_session("0", 1, [], project, taken=[])
+    past = mv._session_for_round(_PAST_BEFORE_V314, None, project_dir=project)
+    rows = sorted([(_R, _WAIT), (_L, _DONE), (_R0, _DONE)])
+    for which, card in (("live", live), ("past", past)):
+        assert sorted((i.name, i.status) for g in card.groups for i in g.items) == rows, which
+    assert len(told) == 1, told
+
+
 def test_a_round_opened_with_no_list_shows_each_take_once(project):
     """The re-review of G6+G7 fix C, N1: a round opened with no list (a bare `capture-start N`;
     TCC's own import when `--plan` is refused) draws the phase's plan. A take under the plan's own
@@ -1522,6 +1594,22 @@ def test_a_capture_rew_holds_under_two_spellings_asks_for_a_rename_not_a_retake(
     # there, as any capture that did not pass (`process_view.capture_rounds`).
     process.start_capture(1, expected=["sw_1 (sw)"])  # closes cap_001: history now
     assert _item(_past(project, "cap_001"), _R).status == mv.STATUS_STALE
+
+
+def test_a_capture_rew_holds_twice_taken_as_it_is_stays_red_and_ambiguous(project):
+    """tcc#200's review, M3: «Take it as it is» answers for one capture; while REW holds it under
+    two spellings the method's gate counts it unusable, and the card keeps it red with both titles
+    named, never green."""
+    from autosound_tcc.core import capture_import
+
+    process = _round(project, version=1, expected=[_R], taken=[_R0], pad=False)
+    capture_import.record_imported([capture_import.Candidate(
+        ordinal="1", title=_R0, uuid="u-r", date="", when=None, imported=False, as_is=True)],
+        project_dir=project)
+    process.check_captures([_R], verifier=_TwoSpellings())
+
+    live = _item(mv.build_session("0", 1, [], project, taken=[]), _R)
+    assert (live.status, live.as_is, live.ambiguous) == (mv.STATUS_STALE, False, (_R0, _R))
 
 
 def test_an_expected_title_in_rew_that_nobody_took_is_not_checked(project):

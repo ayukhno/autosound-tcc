@@ -161,19 +161,31 @@ def standing(round_: Optional[dict]) -> dict[str, dict]:
             if isinstance(row, dict) and not row.get("superseded_by")}
 
 
-def title_key():
-    """`title -> its identity within a round`: the method's own `process.title_key` (#153, from
-    v3.1.4), so `w-R_01 (sw)` taken is the `w-R_1 (sw)` the round asked for, as every reader of the
-    method's now counts it. A copy before v3.1.4 has none and matched raw titles; so does this then,
-    each copy read by its own rule. Never raises."""
+def _raw(title) -> tuple[str, str]:
+    """A title as typed: how a copy before v3.1.4 matches a round's titles."""
+    return ("raw", str(title))
+
+
+def title_key(project_dir: Optional[Path] = None):
+    """`title -> its identity within a round`, by the rule of the copy the project is BOUND to
+    (`method_features`, tcc#200): from v3.1.4 the series key (`process.title_key`, #153), so
+    `w-R_01 (sw)` taken is the `w-R_1 (sw)` the round asked for; a bound copy before v3.1.4 has no
+    such rule and matches raw titles, and so does this then — its close, its gate and the cards
+    agree. The rule itself is read from TCC's own copy, which TCC imports; the bound copy is only
+    read as text. Never raises."""
+    from autosound_tcc.core import method_features
+
     try:
+        if not method_features.has(method_features.TITLE_KEY, project_dir):
+            return _raw
         key = getattr(vendor_loader.load_process(), "title_key", None)
     except Exception:  # noqa: BLE001 — no method on this machine: the raw title, as before #153
         key = None
-    return key if callable(key) else (lambda title: ("raw", str(title)))
+    return key if callable(key) else _raw
 
 
-def taken_as(round_: Optional[dict], title: str, key=None) -> Optional[str]:
+def taken_as(round_: Optional[dict], title: str, key=None,
+             project_dir: Optional[Path] = None) -> Optional[str]:
     """The row of the round's standing takes (`standing`) that answers for `title`, or None: the
     exact title first, else a row of its key (`title_key`) — the method's `_row_for` over the rows
     it stands by. A round written since v3.1.4 holds a take under the list's own title (the typed
@@ -181,22 +193,22 @@ def taken_as(round_: Optional[dict], title: str, key=None) -> Optional[str]:
     held = standing(round_)
     if title in held:
         return title
-    key = key or title_key()
+    key = key or title_key(project_dir)
     wanted = key(title)
     return next((row for row in held if key(row) == wanted), None)
 
 
-def outstanding(round_: Optional[dict]) -> list[str]:
+def outstanding(round_: Optional[dict], project_dir: Optional[Path] = None) -> list[str]:
     """What a round asked for and neither took nor skipped, in its own order: the method's
     `_outstanding` (`process.py`), its required and its optional titles alike — an optional one
     left untaken is no gap to the method, and no capture either (skill #80).
 
-    By the series key, as the method matches from v3.1.4 (#153, `title_key`): a capture taken or
-    skipped under another spelling of a title (`w-R_01 (sw)` for `w-R_1 (sw)`) answers for it, in
-    the method's record, the agent's words and the close alike. Both cards ask this, so «done» has
-    one source (the re-review of G6+G7 fix B)."""
+    By the rule of the project's bound copy (`title_key`): from v3.1.4 the series key (#153), so a
+    capture taken or skipped under another spelling of a title (`w-R_01 (sw)` for `w-R_1 (sw)`)
+    answers for it; before it the raw title. The method's record, the agent's words and the close
+    say the same. Both cards ask this, so «done» has one source (the re-review of G6+G7 fix B)."""
     round_ = round_ or {}
-    key = title_key()
+    key = title_key(project_dir)
     held = {key(str(title)) for title in standing(round_)}
     skipped = {key(str(title)) for title in round_.get("skipped") or {}}
     return [str(title) for title in round_.get("expected") or []

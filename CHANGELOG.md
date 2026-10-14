@@ -45,6 +45,31 @@ suite ran against the method's candidate before its release (hub #283). The guid
   project has none. A refusal is said, and Codex starts all the same.
 - **A review worked by hand on the clipboard is recorded against its package** (tcc#200): the journal's
   reviewer record names the package the method compiled, so the answer brought back completes that round.
+- **A rename in the import window never marks the round's good capture wrong** (tcc#200's review): a take
+  found by its series key is asked to be superseded only when it is the capture renamed — the uuid its
+  verdict pins, or the spelling it was typed as.
+
+### A project on a copy of the method older than v3.1.4
+
+A project may run another copy of the method (tcc#169), and v3.1.0 to v3.1.3 stay allowed. TCC reads
+such a project by that copy's rules, read from its text: its rounds match titles as typed, a rename of a
+take to another spelling is sent to the round as before, and Codex gets no `AGENTS.md` (said once). The
+strip says once per project that the copy is older than v3.1.4 — its capture rounds match titles as typed
+and it calls band-limited sweeps «truncated» — and the way out: update that copy, or link the project's
+`.claude/skills/autosound-tuning` to TCC's copy (⚙ Project diagnostics offers «Re-link to TCC's copy»
+for a copy TCC refuses).
+
+### What v3.1.4's Upgrading notes ask of TCC
+
+- **The installers' consistency check under TCC's tests** (`USERPROFILE` set to a bare folder): v3.1.4's
+  `module-path-pwsh` case accepts a profile with no Documents folder, so the test needs nothing; the
+  Windows CI run of this branch confirms it.
+- **Nothing to do** for the rest: `predict.py` (exits 69 and 70) and `rew_tool.py` (exit 70) are not run
+  by TCC; TCC does not read the install receipt, so its 12th field `codex_link` changes nothing; the
+  reviewer record's «already recorded … nothing added» comes back as its output and is logged; TCC reads
+  the glossary leniently and does not show `Glossary.shape_problem`; titles in the old letter-before-the-
+  series form are refused by the method's grammar and show on the card as «not parsed»; the seeded
+  `CLAUDE.md` feedback sentence is the method's; the reviewer CLIs' closed stdin needs nothing of TCC.
 
 ## [v1.1.3] — 2026-10-13 · one method per project, waits with a deadline, stores that never read broken as empty, the method's answers on screen, a delay bank that never writes over what it could not read, the method at v3.1.3
 

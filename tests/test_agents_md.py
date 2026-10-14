@@ -72,3 +72,33 @@ def test_it_runs_the_bound_copy_s_project_py_without_the_lock(tmp_path, monkeypa
 
     assert agents_md.ensure(project) == ""
     assert asked == [(project, "project.py", [str(project), "agents-setup"], False)]
+
+
+def test_a_copy_before_v314_is_told_once_and_never_started(tmp_path, tmp_path_factory, monkeypatch):
+    """tcc#200's review, I3: an older bound `project.py` has no `agents-setup`; started, it printed
+    its usage and that line was said on every Codex start. Read from its text: said once per
+    project in this run, and nothing started."""
+    from tests._method_copies import copy_of_the_method, linked_and_approved
+    from tests.test_method_features import OLDER
+
+    project = _project(tmp_path / "car")
+    linked_and_approved(project, copy_of_the_method(tmp_path_factory.mktemp("older"), changes=OLDER))
+    monkeypatch.setattr(method_cli, "spawn",
+                        lambda *a, **k: pytest.fail(f"the method was started: {a}"))
+
+    assert agents_md.ensure(project) == agents_md.OLDER
+    assert agents_md.ensure(project) == ""
+    assert not (project / "AGENTS.md").exists()
+
+
+def test_a_folder_that_cannot_be_looked_into_is_a_sentence(tmp_path, monkeypatch):
+    """tcc#200's review, M4: «never raises» — `exists()` raises on a folder this user may not read,
+    and in the terminal that was a traceback and no Codex."""
+    from pathlib import Path
+
+    def denied(self, *_a, **_k):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "exists", denied)
+    said = agents_md.ensure(tmp_path)
+    assert said.startswith("AGENTS.md was not written:") and "Permission denied" in said, said

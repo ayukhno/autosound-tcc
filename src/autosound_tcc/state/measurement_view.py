@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import config, vendor_loader
+from autosound_tcc.core import config, method_features, vendor_loader
 from autosound_tcc.state import process_view
 from autosound_tcc.state.models import MeasGroup, MeasItem, MeasSession
 
@@ -215,10 +215,12 @@ def _canonical(naming, glossary, title: str) -> str:
 def _round_groups(round_: dict, naming, glossary) -> list[dict]:
     """An open round's columns: the ones it carries (skill #83), else its list by method.
 
-    Each listed title in the derived spelling — except one whose derived spelling the round took
-    as a title of its own (#208): a list holding `w-R_01 (sw)` that took `w-R_1 (sw)` drew the take
-    as the listed row, waiting, where the method — raw titles — waits for `w-R_01` and holds
-    `w-R_1` unasked, as history shows them. That row keeps the spelling it was listed under."""
+    Each listed title in the derived spelling — except one whose derived spelling the round holds
+    as a title of its own (#208): a list holding `w-R_01 (sw)` and a take stored as `w-R_1 (sw)`
+    drew the take as the listed row. A bound copy before v3.1.4 stores a take as typed and waits
+    for `w-R_01` by its raw title, so that row keeps the spelling it was listed under, the take a
+    row of its own, as history shows them. From v3.1.4 the method stores the take under the list's
+    `w-R_01`, and nothing here is taken under another spelling."""
     listed = {str(t) for t in round_.get("expected") or []}
     taken = {str(t) for t in process_view.standing(round_)} - listed
 
@@ -345,8 +347,8 @@ def _answered_as_is(verdict: dict, title: str, marked: dict, keys: set, key) -> 
     uuid = str(verdict.get("uuid") or "")
     if uuid:
         return uuid in marked
-    if verdict.get("ambiguous"):
-        return False
+    if verdict.get("ambiguous") or verdict.get("ambiguous_titles"):
+        return False  # REW holds it more than once: unusable until renamed (tcc#200's review, M3)
     return title in marked.values() or (key is not None and key in keys)
 
 
@@ -409,7 +411,7 @@ def to_check(round_: dict, rew_titles, project_dir: Optional[Path] = None) -> li
     one on every scan of REW (hub #154 §1). An absent one is asked again: the curve may be there
     now. By the series key (#153, v3.1.4): the round holds `w-R_01 (sw)` taken under the list's
     `w-R_1 (sw)`, REW still under `w-R_01`, and the method's check finds it there by key."""
-    key = process_view.title_key()
+    key = process_view.title_key(project_dir)
     held = {key(str(title)) for title in rew_titles}
     taken = process_view.standing(round_)
     as_is = taken_as_is(project_dir)
@@ -473,7 +475,7 @@ class NotRun:
         taken = process_view.standing(round_)
 
         def recorded_since(title: str) -> bool:
-            row = process_view.taken_as(round_, title)
+            row = process_view.taken_as(round_, title, project_dir=project_dir)
             verdict = (taken.get(row) or {}).get("verified") or {} if row is not None else {}
             return bool(verdict) and str(verdict.get("at") or "")[:19] >= self.since[:19]
 
@@ -496,7 +498,7 @@ def unusable_lines(round_: dict, asked, project_dir: Optional[Path] = None,
     (`ambiguous_in_rew`), with `{titles}` in it: the line asks for a rename in REW, not a re-take."""
     taken = process_view.standing(round_)
     as_is = taken_as_is(project_dir)
-    key = process_view.title_key()
+    key = process_view.title_key(project_dir)
     lines = []
     for title in asked or ():
         row = process_view.taken_as(round_, str(title), key)
@@ -562,6 +564,10 @@ def build_session(
 
     glossary = naming.Glossary.for_project(str(project))
     live_round = process_view.capture_round(project) or {}
+    if live_round:
+        # A bound copy before v3.1.4 reads this project's rounds by raw titles and band-limited
+        # sweeps as «truncated»: said once per project, with the way out (tcc#200's review, I2).
+        method_features.say_if_older(project)
     round_open = bool(live_round) and not live_round.get("closed")
     # An OPEN round is the task, whatever the phase plan predicts (finding 64, tcc#60): round
     # `cap_016` was issued with six positions and the panel showed phase 2's 24, in five columns,
@@ -642,7 +648,7 @@ def build_session(
     # name answers for it, as the method, the agent and the close count it. The past card asks the
     # same, so «done» has one source (the re-review of G6+G7 fix B). The raw title too: a listed
     # row keeps its own spelling when the derived one is a take (`_round_groups`, #208).
-    waiting = ({spelling for t in process_view.outstanding(round_)
+    waiting = ({spelling for t in process_view.outstanding(round_, project)
                 for spelling in (_canonical(naming, glossary, t), str(t))}
                if round_open else set())
     # A skip and a verdict are keyed the same way "taken" is — BY KEY, not by the string. The
@@ -704,8 +710,9 @@ def build_session(
         return state == VERDICT_AS_IS or flagged_by_the_window(verdict, window, as_is_marked)
 
     def status_for(name: str, skip_by_key: bool = True) -> str:
-        """`skip_by_key=False` for a take the round did not ask for: its skip is read by its own
-        title (the end-of-branch review, tests I1)."""
+        """`skip_by_key=False` for a take the round did not ask for, or asked for under a spelling
+        the bound copy does not match it to: its skip is read by its own title (the end-of-branch
+        review, tests I1)."""
         entry = naming.parse_name(name, glossary)
         key = naming.name_key(entry) if entry else None
         if name in recorded_skipped or (skip_by_key and key is not None and key in skipped_keys):
@@ -789,11 +796,23 @@ def build_session(
                  additional=True, unread=True)
             for title in sorted(recorded_taken - listed) if _key(title) is None
         )
-        # A take under another spelling of a name the round asks for (`w-R_01` for `w-R_1`) is no
-        # row of its own (#153, v3.1.4): the method stores it under the list's title, the typed
-        # spelling beside it as `as_in_rew`, and a round written before is read by key the same
-        # way — that name's row answers for it (`process_view.outstanding`, `verdicts_by_key`).
-        asked_keys = {_key(str(t)) for t in round_.get("expected") or []} - {None}
+        # A take under another spelling of a name the round asks for, which the bound copy's rule
+        # (`process_view.title_key`) does not match to that name: raw titles before v3.1.4
+        # (`w-R_01` for `w-R_1`), or a channel renamed since the list was written (SCR-039: `m-L_2`
+        # for `w-L_2`, one glossary key, two series keys). The method holds it beside that name,
+        # unplanned, and history shows it as a row of its own; so does this card (the re-review of
+        # G6+G7 fix C; tcc#200's review, M1). One the rule matches is that name's row: from v3.1.4
+        # the method stores it under the list's title, its typed spelling as `as_in_rew`.
+        expected_raw = {str(t) for t in round_.get("expected") or []}
+        asked_keys = {_key(n) for n in expected_raw} - {None}
+        match = process_view.title_key(project)
+        answered = {match(n) for n in expected_raw}
+        extras += tuple(
+            _row(title, status_for(title, skip_by_key=False), issues_for(title),
+                 as_is_for(title), additional=True)
+            for title in sorted(recorded_taken - listed)
+            if _key(title) in asked_keys and match(title) not in answered
+        )
         # Taken in this round though nobody asked for it under any spelling (#208): history shows
         # it as «captured though nobody asked», and the live card had a row for it only while REW
         # still held the curve (`_extras`). Not a key a row or an extra above already answers.
@@ -855,14 +874,15 @@ def build_sessions(
         session
         for round_ in process_view.capture_rounds(project)
         if str(round_.get("id") or "") != live.id
-        for session in (_session_for_round(round_, state, marked, window),)
+        for session in (_session_for_round(round_, state, marked, window, project),)
         if session is not None
     ]
     return (live, *past)
 
 
 def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict] = None,
-                       checked: Optional[dict] = None) -> Optional[MeasSession]:
+                       checked: Optional[dict] = None,
+                       project_dir: Optional[Path] = None) -> Optional[MeasSession]:
     """One past round as a read-only session: what it asked for, and what became of each item.
 
     Statuses come from the round's own record and nothing else — REW is not consulted. A series
@@ -876,10 +896,10 @@ def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict
     expected = [str(t) for t in (round_.get("expected") or [])]
     taken = {str(k): v for k, v in process_view.standing(round_).items()}
     skips = round_.get("skipped") or {}
-    waiting = set(process_view.outstanding(round_))  # the live card's source too
+    waiting = set(process_view.outstanding(round_, project_dir))  # the live card's source too
     if not expected and not taken:
         return None
-    key = process_view.title_key()
+    key = process_view.title_key(project_dir)
     listed = {key(title) for title in expected}
     for title in taken:
         if title not in expected and key(title) not in listed:
