@@ -1341,9 +1341,8 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
     if name == "cipher":
         # `cipher /w:C:\` overwrites the free space of a whole volume; `/c`, `/e` only look or encrypt.
         return any(text.lower() == "/w" or text.lower().startswith("/w:") for text in texts)
-    if name in _STARTERS and any(_command_name(argument.text) in _DISK_TOOLS | _RUINOUS
-                                 for argument in arguments):
-        return True  # `Start-Process diskpart -Verb RunAs`
+    if name in _STARTERS and _start_is_dangerous(arguments, command, depth):
+        return True  # `Start-Process diskpart -Verb RunAs`, `Start-Process cmd '/c format D:'`
     if name in ("source", "."):
         # It runs a file the line names — unless the line does not name it: `. <(curl …)`, or
         # names stdin, where what runs is the heredoc or the pipe.
@@ -1398,6 +1397,67 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
         return _git_is_dangerous(arguments, tainted)
     if name in _FETCHERS and command.piped:
         return True
+    return False
+
+
+#: Start-Process's switches (no value); every other parameter takes the word after it.
+_START_SWITCHES = ("wait", "passthru", "nonewwindow", "usenewenvironment", "loaduserprofile",
+                   "whatif", "confirm", "verbose", "debug")
+#: The programs whose argument string is a shell line of their own.
+_SHELL_PROGRAMS = frozenset({"cmd", "powershell", "pwsh"})
+
+
+def _start_is_dangerous(arguments: list[_Word], command: _Command, depth: int) -> bool:
+    """`Start-Process`/`saps`/`start`: a disk tool started (`Start-Process diskpart`), or cmd or
+    PowerShell started with a line — by `-FilePath` or positionally, the line by `-ArgumentList`
+    (`-Args`, any prefix; a PowerShell array `'/c','format D:'`) or positionally — read as that
+    shell's own line, unwrapped as a direct `cmd /c …` / `powershell -Command …` is
+    (`-EncodedCommand` asks there). The re-review of the group fix, C."""
+    program: Optional[str] = None
+    lines: list[list[str]] = []
+    positional: list[str] = []
+    at = 0
+    while at < len(arguments):
+        word = arguments[at]
+        at += 1
+        text = word.text
+        if not (text.startswith("-") and len(text) > 1 and not word.quoted):
+            positional.append(text)
+            continue
+        key, inline, value = text[1:].partition(":")
+        key = key.lower()
+        if not inline and key and any(s.startswith(key) for s in _START_SWITCHES) and not (
+                "argumentlist".startswith(key) or "filepath".startswith(key)):
+            continue
+        values = [value] if inline else []
+        if not inline and at < len(arguments):
+            values.append(arguments[at].text)
+            at += 1
+            while values[-1].endswith(",") and at < len(arguments):  # `'a', 'b'`: one array
+                values.append(arguments[at].text)
+                at += 1
+        if key and ("argumentlist".startswith(key) or key == "args"):
+            lines.append(values)
+        elif key and ("filepath".startswith(key) or key in ("path", "pspath")):
+            program = " ".join(values)
+    if any(_command_name(text) in _DISK_TOOLS | _RUINOUS for text in [program or "", *positional]):
+        return True
+    if program is None:
+        shells = [i for i, text in enumerate(positional) if _command_name(text) in _SHELL_PROGRAMS]
+        if not shells:
+            return False
+        program, rest = positional[shells[0]], positional[shells[0] + 1:]
+    else:
+        rest = positional
+    if _command_name(program) not in _SHELL_PROGRAMS:
+        return False
+    for given in [*lines, rest] if rest else lines:
+        joined = " ".join(given)
+        # An element boundary and a comma in one quoted string read alike here: both readings.
+        for line in {joined.replace(",", " "), joined}:
+            if _powershell_line_is_dangerous(f"{_command_name(program)} {line}", depth + 1,
+                                             command.cwd):
+                return True
     return False
 
 

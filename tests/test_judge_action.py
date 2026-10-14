@@ -803,6 +803,20 @@ DANGER_TABLE = [
     ("format/wipe disk", P, 'powershell.exe -Command "Format-Volume -DriveLetter D"'),
     ("format/wipe disk", P, "pwsh -c 'Clear-Disk -Number 1 -RemoveData'"),
     ("format/wipe disk", P, "Invoke-Command { Remove-Partition -DriveLetter D }"),
+    # Start-Process handing a line to cmd or PowerShell (the re-review's C): read as that shell's.
+    ("format/wipe disk", P, "Start-Process cmd -ArgumentList '/c format D:'"),
+    ("format/wipe disk", P, "Start-Process cmd '/c format D: /q /y'"),
+    ("format/wipe disk", P, "Start-Process powershell -ArgumentList '-Command Format-Volume -DriveLetter D'"),
+    ("format/wipe disk", P, "Start-Process powershell 'Clear-Disk 1 -RemoveData'"),
+    ("format/wipe disk", P, "Start-Process -FilePath cmd.exe -ArgumentList '/c diskpart /s wipe.txt'"),
+    ("format/wipe disk", P, "saps -Verb RunAs -FilePath pwsh -Args '-c','Clear-Disk 1 -RemoveData'"),
+    ("format/wipe disk", P, "Start-Process cmd -ArgumentList '/c', 'format D: /q'"),
+    ("format/wipe disk", P, "start -Wait cmd '/c format D:'"),
+    ("format/wipe disk", P, "Start-Process pwsh -ArgumentList '-EncodedCommand AAAA'"),
+    ("format/wipe disk", P, "Start-Process powershell.exe -ArgumentList '-enc AAAA'"),
+    ("recursive delete", P, r"Start-Process cmd -ArgumentList '/c rd /s /q C:\Users'"),
+    ("recursive delete", P,
+     r"Start-Process powershell -ArgumentList '-c Remove-Item -Recurse -Force C:\Users'"),
     ("raw device overwrite", B, "dd if=/dev/zero of=/dev/disk2"),
     ("raw device overwrite", B, "echo x > /dev/disk2"),
     ("raw device overwrite", P, r"Set-Content -Path \\.\PhysicalDrive1 -Value 0"),
@@ -839,7 +853,9 @@ def test_the_danger_table_covers_each_class_in_both_shells():
 @pytest.mark.parametrize("line", [
     "Get-Disk", "Get-Volume", "Get-Partition -DiskNumber 1", "cipher /c secret.txt",
     "Format-Table -AutoSize", "Get-Content notes.txt | Format-List",
-    r"Get-Content \\?\C:\Users\me\notes.txt", "Start-Process notepad"])
+    r"Get-Content \\?\C:\Users\me\notes.txt", "Start-Process notepad", "start notepad",
+    "Start-Process notepad -ArgumentList 'readme.txt'", "Start-Process cmd -ArgumentList '/c dir'",
+    "Start-Process powershell -ArgumentList '-c Get-ChildItem' -Wait", "Start-Process cmd"])
 def test_the_disk_class_does_not_take_in_reads(line, tmp_path):
     """Looking at disks, and `Format-Table`, are not wiping one: they pass `auto` as before."""
     assert judge_action("Bash", line, gate=GATE_AUTO, read_roots=_read_roots_for(tmp_path),
