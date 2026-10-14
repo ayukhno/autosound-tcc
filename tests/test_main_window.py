@@ -2891,6 +2891,60 @@ def test_a_project_whose_model_retired_is_offered_a_replacement(tmp_path, monkey
     assert mc.resolve(window._model_choices, "sdk:claude-opus-4-1").ok
 
 
+def test_an_accepted_replacement_lands_in_the_selector_and_the_session(tmp_path, monkeypatch):
+    """Finding 157 (tcc#196): «Sonnet 5 is gone — take Opus 5.5?», accepted — and MAIN still read
+    the gone model: the alias was written, the project still named the old key, and the picker was
+    filled from that. What the Arbiter accepted is what the selector shows and what a session runs."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from autosound_tcc.core import config, model_choices as mc, project_settings
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(config, "project_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "cli_available", lambda harness: False)
+    project_settings.set_value(config.tcc_dir(tmp_path), "generator", "sdk:claude-opus-4-1")
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Ok)
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+
+    taken = "sdk:claude-opus-5-5"  # the first offer: same vendor first, the list's own order
+    assert window._ai_main_combo.currentData() == taken
+    assert window._generator_choice().key == taken
+    assert project_settings.get(config.tcc_dir(tmp_path), "generator") == taken
+
+
+def test_a_row_picked_by_name_runs_that_model_and_offers_the_restart(tmp_path, monkeypatch):
+    """Finding 156 (tcc#196): with a session running, picking Sonnet brought no restart; Fable did.
+    An alias left by an earlier «gone — take Opus 5.5?» sent Sonnet's key to the model already
+    running, so the pick changed nothing and said nothing. A row the Arbiter picks by name, and
+    that is on offer, runs itself; an alias is for a key nothing offers."""
+    from autosound_tcc.core import model_overrides
+
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    _catalogue(monkeypatch, [])
+    model_overrides.set_alias("sdk:claude-sonnet-5", "sdk:claude-opus-5-5")
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-opus-5-5"))
+    window._running_model = "sdk:claude-opus-5-5"
+
+    class _Worker:
+        def shutdown(self, *a, **kw):
+            return True
+
+    window._agent_worker = _Worker()
+    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
+
+    assert window._generator_choice().key == "sdk:claude-sonnet-5"
+    assert not window._session_btn.isHidden()
+    assert "sonnet" in window._session_btn.text().lower()
+
+
 def test_the_replacement_list_holds_its_models_whole(tmp_path, monkeypatch):
     """tcc#145's review, I1: every combo's list has `.mini-select`'s room for the check mark, and a
     plain box's list is only as wide as the box. The retired model's replacement list is read

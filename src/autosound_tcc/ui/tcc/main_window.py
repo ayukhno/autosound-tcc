@@ -4822,7 +4822,8 @@ class MainWindow(QMainWindow):
         if worker is not None:
             # Same model: nothing to do. A different one: the running conversation ends, because
             # neither harness can swap a model under a live session.
-            if self._running_model == self._ai_main_combo.currentData():
+            chosen = self._generator_choice()
+            if chosen is None or self._running_model == chosen.key:
                 return
             self._hand_off_then_restart(worker)
             return
@@ -5274,7 +5275,13 @@ class MainWindow(QMainWindow):
         self._critic_choices = model_choices.critic_choices(active)
         generator = self._project_setting(_GENERATOR_KEY)
         critic = self._project_setting(_CRITIC_KEY)
-        self._fill_combo(self._ai_main_combo, self._model_choices, generator)
+        # A Generator key nothing offers, mapped by an alias to one that is: the selector shows
+        # the model that runs, not a red row for the gone one (finding 157, tcc#196).
+        shown = generator
+        if generator and model_choices.find(self._model_choices, str(generator)) is None:
+            resolved = model_choices.resolve(self._model_choices, str(generator))
+            shown = resolved.choice.key if resolved.ok else generator
+        self._fill_combo(self._ai_main_combo, self._model_choices, shown)
         self._fill_combo(self._ai_critic_combo, self._critic_choices, critic, critic=True,
                          generator=self._generator_choice())
         # An unset project reads as the default rather than as an empty row: unlike the model,
@@ -5283,13 +5290,14 @@ class MainWindow(QMainWindow):
         blocked = self._ai_effort_combo.blockSignals(True)
         self._ai_effort_combo.setCurrentIndex(max(0, self._ai_effort_combo.findData(level)))
         self._ai_effort_combo.blockSignals(blocked)
-        for key, entries in ((generator, self._model_choices), (critic, self._critic_choices)):
+        for setting, key, entries in ((_GENERATOR_KEY, generator, self._model_choices),
+                                      (_CRITIC_KEY, critic, self._critic_choices)):
             if key and not model_choices.resolve(entries, str(key)).ok:
-                self._offer_replacement(str(key), entries)
+                self._offer_replacement(str(key), entries, setting)
         self._refresh_main_warning()
         self._refresh_critic_warning()
 
-    def _offer_replacement(self, key: str, entries: list) -> None:  # noqa: D401
+    def _offer_replacement(self, key: str, entries: list, setting: str = "") -> None:  # noqa: D401
         """A model this project uses is gone. Say so, and let the Arbiter map it to another.
 
         The mapping is stored as an ALIAS rather than by rewriting this project's setting, because
@@ -5322,6 +5330,10 @@ class MainWindow(QMainWindow):
             # deliberately later. Nothing is written, and the picker keeps saying nothing is chosen.
             return
         model_overrides.set_alias(key, str(combo.currentData()), why=i18n.t("modelGoneWhy"))
+        if setting:
+            # And this project names what was accepted: the picker is filled from the setting, so
+            # with the alias alone it went on showing the gone model (finding 157, tcc#196).
+            self._set_project_setting(setting, str(combo.currentData()))
         self._status_strip.notify(
             i18n.t("modelAliased").format(old=key, new=str(combo.currentData()))
         )
@@ -5422,8 +5434,11 @@ class MainWindow(QMainWindow):
         _mark_missing(combo, entries, reviewer=critic)
 
     def _generator_choice(self) -> Optional[model_choices.Choice]:
-        key = self._ai_main_combo.currentData()
-        return model_choices.resolve(self._model_choices, str(key)).choice
+        key = str(self._ai_main_combo.currentData() or "")
+        # A row picked by name runs itself; an alias is for a key nothing offers. An old alias
+        # sent Sonnet's row to the model already running — no restart, nothing said (finding 156).
+        return (model_choices.find(self._model_choices, key)
+                or model_choices.resolve(self._model_choices, key).choice)
 
     def _on_generator_model_changed(self, _index: int) -> None:
         # `_refresh_main_warning` marks the combo itself, so no separate `_mark_missing` here —
