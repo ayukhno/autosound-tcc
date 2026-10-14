@@ -92,9 +92,12 @@ suite ran against the method's candidate before its release. The guide's method 
   names the app and says to allow it in System Settings → Privacy & Security → Automation.
 - **A reload asks git twice, and choices that are not about git ask it nothing** (tcc#172): a reload started six
   to nine git children, and picking a reviewer, a generator, an effort or a gate, or switching the language,
-  paid the same. A reload starts two now, and those five none. The reviewer's log, the ledger's version files
-  and the stale-channel check are read again only when their files change, and a journal that could not be read
-  is said, not shown as nothing stale.
+  paid the same. A reload starts two now, and those five none at the pick itself. The reviewer's log, the
+  ledger's version files and the stale-channel check are read again only when their files change, and a journal
+  that could not be read is said, not shown as nothing stale. *Corrected 2026-10-14:* «none» is half of it — a
+  pick that is saved into the project's file (the reviewer's is) is seen by the folder watcher, and its reload
+  about a second later asks git twice, like any reload. Found by `main`'s whole-suite Windows run on the release
+  commit; tcc#202.
 - **The new-project dialog's seed note waits for the typing to stop** (tcc#172): every keystroke in the
   seed-source field, every tick and every seat or profile choice ran a whole seed on the window's thread — six
   to eight git children, and a question to GitHub where git has no identity. One runs 250 ms after the last
