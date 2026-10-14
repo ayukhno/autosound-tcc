@@ -799,8 +799,9 @@ class CaptureImportDialog(QDialog):
         self._dup_note.setText(i18n.t("capImportDupWarn").format(names=", ".join(self._dup_titles))
                                if self._dup_titles else "")
         self._dup_note.setHidden(not self._dup_titles)
-        # What `taken()` will hand over as `as_is`: ticked, and called unusable in this window.
-        as_is = [row.title for row in self.ticked_rows()
+        # What `taken()` will hand over as `as_is`: ticked, and called unusable in this window. Named
+        # as it will be stored: the New name given here, REW's title only where none is (W-7's m2).
+        as_is = [self._names.get(row.uuid) or row.title for row in self.ticked_rows()
                  if capture_import.unusable(self._verdict(row.uuid))]
         self._as_is_note.setText(i18n.t("capCheckAsIsWarn").format(names=", ".join(as_is))
                                  if as_is else "")

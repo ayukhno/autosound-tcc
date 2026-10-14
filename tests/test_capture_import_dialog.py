@@ -784,6 +784,24 @@ def test_a_hand_tick_on_a_red_row_says_it_takes_the_capture_as_it_is(tmp_path, m
     assert dialog._as_is_note.text() == warn, "the button's answer is said the same way"
 
 
+def test_the_as_is_line_names_a_capture_by_its_new_name_not_by_rews_title(tmp_path):
+    """W-7's final review m2 (tcc#207): the line that says a capture is taken «as it is» goes by
+    the name the capture will be stored under — the New name given in the window, REW's title only
+    where none is given. A red row is named, given a New name, then ticked by hand (typing a name on
+    a red row leaves it for a re-take), and the line must carry the New name, not REW's `m_3 (sw)`."""
+    check, _asked = _checker({"u3": _unusable("no clear arrival")})
+    dialog = _dialog(_rew(3), tmp_path, expected=["m_3 (sw)"], check=check)
+    _settle(dialog)
+
+    dialog._table.item(_row_of(dialog, "u3"), 4).setText("m-L_3 (sw)")
+    _app().processEvents()
+    dialog._table.item(_row_of(dialog, "u3"), 0).setCheckState(Qt.CheckState.Checked)
+    _app().processEvents()
+
+    assert _answer_buttons(dialog, "u3")[i18n.t("capCheckAsIs")].isChecked()
+    assert dialog._as_is_note.text() == i18n.t("capCheckAsIsWarn").format(names="m-L_3 (sw)")
+
+
 def test_a_capture_taken_as_it_is_is_not_asked_about_again_and_its_retake_is(tmp_path):
     """Remembered by the capture's uuid (SCR-040): not asked again — and a re-take under the same
     title is another capture, checked afresh."""
