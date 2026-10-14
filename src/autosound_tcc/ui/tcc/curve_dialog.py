@@ -1875,8 +1875,9 @@ class CurveDialog(QDialog):
         if [t.name for t in self._view._traces] != [t.name for t in traces]:
             # A new selection: the view puts every driver back at nothing, so what was drawn for
             # a driver the bank could not be read for, and what the person set on it since, is
-            # gone with it.
-            self._unread = {}
+            # gone with it — and what was said about the last selection's drivers: a restore that
+            # fails keeps it, and an emptied plot uncovered it (N-B1, #209).
+            self._unread, self._apf_unshown, self._kept_raw = {}, {}, {}
         self._view.set_traces(traces)
         self._render_note()
         # A curve already argued about comes back with its answer on it. `set_traces` clears the

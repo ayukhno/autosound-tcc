@@ -5427,6 +5427,35 @@ def test_a_kept_all_pass_this_machine_cannot_draw_is_said_in_the_quiet_colour(
     assert refused, "not kept is red"
 
 
+def test_an_all_pass_note_from_an_earlier_selection_does_not_surface_over_an_emptied_plot(
+        monkeypatch, app_log_told):
+    """N-B1 (the re-review of G10 fix B, #209): the note for a banked all-pass this machine cannot
+    draw was reset only by a restore that read. A new selection whose restore failed — the store
+    unreadable — kept the earlier selection's, hidden behind the unread drivers' note; a failed
+    read then emptied the plot and took that note away, and the old one came out, about a driver
+    no longer in the selection. A new selection takes it with it."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+    from autosound_tcc.core.allpass import Allpass
+
+    def no_maths(self, freqs):
+        raise RuntimeError("no skill")
+
+    first, second = ["w-L_01 (sw)", "w-R_01 (sw)"], ["tw-L_01 (sw)", "tw-R_01 (sw)"]
+    delay_bank.put(first[0], 0.0, allpass=Allpass(1, 80.0))
+    monkeypatch.setattr(Allpass, "response", no_maths)
+    dialog = _plotted(first)
+    assert "w-L_01" in dialog._status.text() and "no skill" in dialog._status.text()
+    restore = _a_folder_in_the_store_s_place(project_settings.path_for(config.tcc_dir()))
+    try:
+        dialog._on_curves([Trace(n, *_impulse(4.5 + 0.05 * i)) for i, n in enumerate(second)])
+        dialog._on_failed("KeyError: 'tw-L_01 (sw)'")
+        status = dialog._status.text()
+    finally:
+        restore()
+    c3 = i18n.t("curveApfUnshown").split("{names}")[0].strip()
+    assert "no skill" not in status and c3 not in status, status
+
+
 # ---- an entry on screen the bank cannot read is kept until moved (G10 M2 on screen, #208) -------
 
 
