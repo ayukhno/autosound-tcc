@@ -374,7 +374,14 @@ class AppServer:
                     continue
                 if not raw:
                     break
-                self._take_line(raw)
+                try:
+                    self._take_line(raw)
+                except Exception as exc:  # noqa: BLE001 — one bad frame must not end the reading
+                    # A frame of a shape nobody expected — `serverRequest/resolved` with list
+                    # params, an unhashable id — raised here and the reader died unlogged, with
+                    # every request after it left to its timeout (the group review, M1).
+                    self._note("a frame that could not be handled skipped (%r): %s", exc,
+                               self._log.redact(raw[:200].decode("utf-8", "replace")))
         except (OSError, asyncio.CancelledError):
             pass
         finally:
@@ -482,7 +489,9 @@ class AppServer:
             return self._lost
         code = self.returncode
         said = f"ended (exit {code})" if code is not None else "closed its output"
-        tail = self.stderr_tail
+        # Redacted here, where the message is made: it is raised to the session and logged there
+        # (`_send_interrupt`), and a user's `RUST_LOG=trace` prints the token's header (M2).
+        tail = self._log.redact(self.stderr_tail)
         last = "\n".join(tail.splitlines()[-5:])
         message = f"{said} {when}" + (f": {last}" if last else "")
         return ConnectionLost(message, returncode=code, stderr_tail=tail)

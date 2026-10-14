@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import codex_cli, codex_login
+from autosound_tcc.core import codex_cli, codex_login, codex_rpc
 from autosound_tcc.core.codex_cli import Found
 from autosound_tcc.core.codex_login import SignIn, SignInError
 
@@ -233,3 +233,19 @@ def test_a_success_keeps_the_versions_already_read(tmp_path, stand_in, monkeypat
 
     assert probes == [True]
     assert codex_cli.known_version(found_old) == (0, 150, 0)
+
+
+def test_a_success_stays_a_success_when_the_probe_after_it_fails(tmp_path, stand_in, monkeypatch):
+    """Group fix I2: the probe after a sign-in raised (an `RpcError` on `initialize`), and the
+    caller read that as «did not finish» over a sign-in that had succeeded."""
+    stand_in(_scenario(tmp_path, "success"))
+
+    def refused(force=False):
+        raise codex_rpc.RpcError(-32600, "refused")
+
+    monkeypatch.setattr(codex_cli, "probe", refused)
+    sign_in = SignIn()
+    sign_in.begin()
+
+    assert sign_in.wait(timeout=10) is True
+    assert sign_in.error == ""

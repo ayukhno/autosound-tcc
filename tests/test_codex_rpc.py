@@ -591,3 +591,113 @@ def test_a_frame_log_that_cannot_be_written_does_not_stop_anything(tmp_path):
         return result
 
     assert run(go())["platformOs"] == "macos"
+
+
+# ---- the group fix: a bad frame, the token in a lost connection, Windows' close --------------------
+
+
+def test_a_malformed_frame_is_logged_and_the_reader_reads_on(tmp_path, caplog):
+    """M1: `serverRequest/resolved` with list `params`, a server request with an unhashable id and
+    an answer with one each raised inside the reader, which died with no log line — every request
+    after it waited out its timeout. The docstring promises «never fatal»."""
+    argv = script(tmp_path, '''\
+        import json, sys
+        out = sys.stdout.buffer
+        for line in sys.stdin.buffer:
+            msg = json.loads(line)
+            if "id" in msg and "method" in msg:
+                if msg["method"] == "config/read":
+                    for bad in ({"method": "serverRequest/resolved", "params": [1, 2]},
+                                {"id": [1], "method": "item/commandExecution/requestApproval"},
+                                {"id": {"a": 1}, "result": {}}):
+                        out.write(json.dumps(bad).encode() + b"\\n")
+                    out.write(json.dumps({"method": "after/bad"}).encode() + b"\\n")
+                out.write(json.dumps({"id": msg["id"], "result": {"ok": msg["method"]}}).encode() + b"\\n")
+                out.flush()
+        ''')
+
+    async def go():
+        server = AppServer(argv, on_request=lambda msg: None)
+        await server.open()
+        result = await server.request("config/read", timeout=5)
+        seen = await until(server, lambda m: m.get("method") == "after/bad", seconds=5)
+        await server.close()
+        return result, seen
+
+    with caplog.at_level("WARNING"):
+        result, seen = run(go())
+
+    assert result == {"ok": "config/read"}
+    assert [m["method"] for m in seen][-1] == "after/bad"
+    assert sum("could not be handled" in r.getMessage() for r in caplog.records) >= 2
+
+
+def test_a_lost_connection_never_carries_the_token_from_stderr(tmp_path):
+    """M2: `ConnectionLost`'s message holds the stderr tail, and `_send_interrupt` logs it — a
+    user's `RUST_LOG=trace` prints request headers there. The tail is redacted where it is made."""
+    token = "tok-SECRET-in-stderr"
+    argv = script(tmp_path, f'''\
+        import json, sys
+        for line in sys.stdin.buffer:
+            msg = json.loads(line)
+            if msg.get("method") == "initialize":
+                sys.stdout.buffer.write(json.dumps({{"id": msg["id"], "result": {{}}}}).encode() + b"\\n")
+                sys.stdout.buffer.flush()
+            elif msg.get("method") == "turn/interrupt":
+                sys.stderr.write("trace: X-TCC-Token: {token}\\n")
+                sys.stderr.flush()
+                sys.exit(1)
+        ''')
+
+    async def go():
+        server = AppServer(argv, env={**os.environ, "TCC_MCP_TOKEN": token},
+                           secret_env=("TCC_MCP_TOKEN",))
+        await server.open()
+        with pytest.raises(ConnectionLost) as caught:
+            await server.request("turn/interrupt", {}, timeout=5)
+        await server.close()
+        return caught.value
+
+    lost = run(go())
+
+    assert "X-TCC-Token" in str(lost), "the tail is still there"
+    assert token not in str(lost) and token not in lost.stderr_tail
+    assert codex_rpc.REDACTED in str(lost)
+
+
+@posix_only
+def test_on_windows_close_goes_to_kill_tree_after_the_grace(tmp_path, monkeypatch):
+    """I5: there `terminate()` is TerminateProcess, so the tree walk comes first, while the parent
+    is alive. A server that ignores stdin's end is past its grace; `kill_tree` gets it."""
+    from types import SimpleNamespace
+
+    argv = script(tmp_path, '''\
+        import json, signal, sys, time
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        for line in sys.stdin.buffer:
+            msg = json.loads(line)
+            if msg.get("method") == "initialize":
+                sys.stdout.buffer.write(json.dumps({"id": msg["id"], "result": {}}).encode() + b"\\n")
+                sys.stdout.buffer.flush()
+        time.sleep(600)
+        ''')
+    killed: list[int] = []
+
+    def kill_tree(proc):
+        killed.append(proc.pid)
+        proc.kill()
+
+    monkeypatch.setattr(codex_rpc, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(codex_rpc.child, "kill_tree", kill_tree)
+
+    async def go():
+        server = AppServer(argv)
+        await server.open()
+        started = time.monotonic()
+        await server.close(grace=0.3)
+        return server, time.monotonic() - started
+
+    server, took = run(go())
+
+    assert killed == [server.pid], "the tree, once, and no terminate() first"
+    assert server.returncode is not None and took < 5

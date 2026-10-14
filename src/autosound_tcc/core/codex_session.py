@@ -38,8 +38,8 @@ from dataclasses import replace
 from typing import Any, AsyncIterator, Optional
 
 from autosound_tcc.core import (app_log, child, codex_cli, codex_rpc, config, critic,
-                                method_binding, model_choices, openers, signal_bus,
-                                vendor_loader)
+                                method_binding, model_choices, openers, process_writer,
+                                signal_bus, vendor_loader)
 from autosound_tcc.core.agent_events import (AgentEvent, Notice, TextDelta, ToolCall, ToolEnd,
                                              TurnEnd, Unasked)
 from autosound_tcc.core.mcp_server import (CONFIRM_TIMEOUT_S, ConfirmRequest, HeadlessBridge,
@@ -72,6 +72,8 @@ ELICITATION = "mcpServer/elicitation/request"
 #: Not a notification Codex sends: the gate's `Unasked`, put on the notifications queue so it reaches
 #: the turn's events in order with Codex's own.
 _UNASKED = "tcc/unasked"
+#: The same for a Notice of the gate's own (a gate that failed, the group review's I1).
+_NOTICE = "tcc/notice"
 #: The programs whose command line is PowerShell's, by the first word's basename.
 _POWERSHELL = frozenset({"powershell", "pwsh"})
 
@@ -155,6 +157,7 @@ class CodexSession:
         mcp_token: Optional[str] = None,
         *,
         binary: Optional[str] = None,
+        journal: bool = False,
     ) -> None:
         self.project_dir = Path(project_dir or config.project_dir())
         self.bridge: UiBridge = bridge or HeadlessBridge(self.project_dir)
@@ -170,8 +173,12 @@ class CodexSession:
         self.language = language
         self.mcp_url = mcp_url
         self.mcp_token = mcp_token
-        #: The `codex` to start; None = `codex_cli.find()` at start. The tests pass the stand-in.
+        #: The `codex` to start; None = `codex_cli.settled()` at start. The tests pass the stand-in.
         self.binary = binary
+        #: Journal `session-start` once the thread is open: a launch that means to resume learns
+        #: only from `thread/resume` whether it did (the window journals every other launch,
+        #: `session_routes.record_start`; the group review, M7).
+        self.journal = journal
         self.registry = SessionRegistry(config.tcc_dir(self.project_dir))
         #: Codex's thread id — what a later launch on the Codex route resumes.
         self.session_id: Optional[str] = None
@@ -240,7 +247,7 @@ class CodexSession:
             raise
         self._read_roots = _read_roots_for(self.project_dir, binding)
         vendor_loader.link_skill_into(self.project_dir)
-        binary = self._binary()
+        binary = await self._binary()
         env = self._env(binding)
         notices: list[AgentEvent] = []
         config_read = await self._probe(binary, env)
@@ -263,7 +270,21 @@ class CodexSession:
         await self._clamp_effort()
         notices += await self._open_thread()
         self._bind()
+        if self.journal:
+            notices += await self._journal_start()
         return notices
+
+    async def _journal_start(self) -> list[AgentEvent]:
+        """`session-start codex <model> [resumed]` as it went — `resumed` only when the thread
+        was continued. Off the loop: the method's writer is a process. A refusal is said, as the
+        window says it on the other routes, and the session goes on."""
+        try:
+            await asyncio.to_thread(process_writer.record_session, self.project_dir, "codex",
+                                    self.model, resumed=self.resumed)
+        except process_writer.ProcessWriterError as exc:
+            app_log.logger().warning("codex: session-start was not journalled: %s", exc)
+            return [Notice(f"journal: {exc}")]
+        return []
 
     def _redact(self, text: str) -> str:
         """`text` without TCC's token: a start's refusal carries Codex's stderr, and a user's own
@@ -273,14 +294,22 @@ class CodexSession:
     def _start_failed(self, said: str) -> CodexStartFailed:
         return CodexStartFailed(self._redact(said))
 
-    def _binary(self) -> str:
+    async def _binary(self) -> str:
+        """The Codex to start: `settled()`'s — an old Codex the probe read as too old is passed
+        over for the next, as the terminal and the probe pass it (the group review, M4). On a
+        thread: it may read a version (`codex --version`), never on the loop."""
         if self.binary:
             return str(self.binary)
-        found = codex_cli.find()
+        found, read = await asyncio.to_thread(codex_cli.settled)
         if found is None:
             raise CodexNotInstalled(
                 "Codex is not installed on this computer (or not where TCC looks for it), so the "
                 "session cannot start. Install Codex, then start the session again.")
+        if read is not None and read < codex_cli.MIN_VERSION:
+            raise CodexStartFailed(
+                f"Codex {codex_cli.version_text(read)} at {found.path} is older than "
+                f"{codex_cli.version_text(codex_cli.MIN_VERSION)}, the oldest TCC speaks to, so the "
+                "session did not start. ☰ → ⚙ Settings → Install Codex puts TCC's own copy beside it.")
         return found.path
 
     def _env(self, binding: method_binding.Binding) -> dict[str, str]:
@@ -304,10 +333,15 @@ class CodexSession:
                 "did not start.") from None
         except codex_rpc.ConnectionLost as exc:
             raise self._start_failed(f"Codex did not start: {exc}") from exc
+        except codex_rpc.RpcError as exc:
+            # `initialize` refused — the calls after it come back in place (the group review, I2).
+            raise self._start_failed(f"Codex refused to start: {exc.message or exc.code}") from exc
         if codex_cli._signed_in_from(account) is False:
+            # The pickers and the blocker read the same: the next launch is refused before a spawn.
+            codex_cli.mark_signed_out()
             raise CodexSignedOut(
-                "Codex is not signed in on this computer, so the session cannot start. Sign in to "
-                "Codex (`codex login` in a terminal), then start the session again.")
+                "Codex is not signed in on this computer, so the session cannot start. "
+                "☰ → ⚙ Settings → Sign in to Codex, then start the session again.")
         if isinstance(config_read, codex_rpc.RpcError):
             app_log.logger().warning("codex: config/read refused (%s); only TCC's own switches "
                                      "are set, the user's MCP servers stay as configured",
@@ -337,6 +371,8 @@ class CodexSession:
             raise self._start_failed(f"Codex did not start: {exc}") from exc
         except TimeoutError as exc:
             raise self._start_failed(f"Codex did not answer at start: {exc}") from exc
+        except codex_rpc.RpcError as exc:
+            raise self._start_failed(f"Codex refused to start: {exc.message or exc.code}") from exc
         # Codex starts a shell per command; on Windows they inherit this console, hidden, rather
         # than each opening a window of its own (`child.agent_console`). No-op elsewhere.
         child.hide_agent_console_later(self._server.pid or 0)
@@ -391,6 +427,9 @@ class CodexSession:
                 if not isinstance(skill, dict):
                     continue
                 path = str(skill.get("path") or "")
+                if skill.get("enabled") is False:
+                    # Off in Codex: not loaded — neither the bound copy nor a second one (M8).
+                    continue
                 if self._is_bound_copy(path, skill_dir, root):
                     found = True
                     continue
@@ -691,9 +730,14 @@ class CodexSession:
         gate that fails declines (task 7's review, I3) — a cancel stays a cancel."""
         try:
             allowed = await self._judge(method, params)
-        except Exception as exc:  # noqa: BLE001 — a broken gate is a closed one, said in the log
+        except Exception as exc:  # noqa: BLE001 — a broken gate is a closed one, said
             app_log.logger().warning("codex: the gate failed on %s %r, declined: %s: %s",
                                      method, rid, type(exc).__name__, exc)
+            # In the turn too, not only in tcc.log: a refusal nobody sees reads as Codex
+            # stalling (the group review, I1).
+            self._say(Notice(f"TCC's check of what Codex asked to run failed "
+                             f"({type(exc).__name__}: {exc}), so it was refused. Codex may try "
+                             "another way; the details are in tcc.log."))
             allowed = False
         server = self._server
         if server is not None:
@@ -726,6 +770,8 @@ class CodexSession:
         if server is not None and isinstance(event, Unasked):
             server.notifications.put_nowait({"method": _UNASKED,
                                              "params": {"command": event.command}})
+        elif server is not None and isinstance(event, Notice):
+            server.notifications.put_nowait({"method": _NOTICE, "params": {"text": event.text}})
 
     # ---- turns ----------------------------------------------------------------------------------
 
@@ -883,6 +929,8 @@ class CodexSession:
         of_turn = params.get("turnId") or turn.get("id")
         if method == _UNASKED:
             return [Unasked(str(params.get("command") or ""))], False
+        if method == _NOTICE:
+            return [Notice(str(params.get("text") or ""))], False
         if method == "turn/started":
             self._turn_id = self._turn_id or of_turn
             self._interrupt_if_wanted()

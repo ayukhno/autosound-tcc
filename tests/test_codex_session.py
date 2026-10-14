@@ -181,14 +181,21 @@ def make(project: Path, binary: str, **kw) -> CodexSession:
     return CodexSession(project_dir=project, mcp_url=URL, mcp_token=TOKEN, binary=binary, **kw)
 
 
-UNCHECKED = "unchecked"
+#: The one Notice `drain` leaves out — exactly this one: a broader match («unchecked» anywhere)
+#: would also swallow any other Notice that happened to use the word (the group review, M9).
+UNCHECKED = ("Codex did not list its skills, so which copy of the tuning method it loads is "
+             "unchecked: a second copy in Codex's own skills would not be noticed.")
+
+
+def is_unchecked(event) -> bool:
+    return isinstance(event, Notice) and event.text == UNCHECKED
 
 
 async def drain(gen, on_event=None, *, unchecked: bool = False) -> list:
     """The events, without the «method copy unchecked» Notice every recording earns (above)."""
     events = []
     async for event in gen:
-        if not unchecked and isinstance(event, Notice) and UNCHECKED in event.text:
+        if not unchecked and is_unchecked(event):
             continue
         events.append(event)
         if on_event is not None:
@@ -217,7 +224,7 @@ def test_a_streamed_turn_with_mcp_calls_maps_to_events_and_turn_end_comes_last(
         try:
             while not events or not isinstance(events[-1], TurnEnd):
                 event = await gen.__anext__()
-                if not (isinstance(event, Notice) and UNCHECKED in event.text):
+                if not is_unchecked(event):
                     events.append(event)
             with pytest.raises(StopAsyncIteration):
                 await gen.__anext__()
@@ -256,7 +263,7 @@ def test_the_registry_binds_the_thread_on_the_codex_route_at_once(project, stand
         try:
             gen = session.start()
             first = await gen.__anext__()
-            if isinstance(first, Notice) and UNCHECKED in first.text:
+            if is_unchecked(first):
                 first = await gen.__anext__()
             # Bound before the first event of the opening turn reached the window.
             bound = registry.load()["phases"]["2"]
@@ -774,7 +781,7 @@ def test_a_refused_config_read_and_a_refused_skills_list_are_said(project, tmp_p
 
     notices = [e.text for e in run(go()) if isinstance(e, Notice)]
     assert any("MCP servers" in text and "stay on" in text for text in notices), notices
-    assert any(UNCHECKED in text for text in notices), notices
+    assert UNCHECKED in notices, notices
 
 
 def test_a_refused_turn_start_ends_the_turn_with_why(project, tmp_path, stand_in):
@@ -1535,3 +1542,183 @@ def test_a_tool_left_open_at_stop_is_closed_before_turn_end(project, stand_in):
     tools = [e for e in events if isinstance(e, (ToolCall, ToolEnd))]
     assert tools == [ToolCall("Bash", {"command": "touch held.txt"}), ToolEnd("Bash")]
     assert events[-1] == TurnEnd(PENDING_THREAD) and isinstance(events[-2], ToolEnd)
+
+
+# ---- the group fix round ------------------------------------------------------------------------
+
+
+def test_a_gate_that_fails_says_so_in_the_turn(project, tmp_path, stand_in, monkeypatch):
+    """I1: the decline came with a WARNING in tcc.log only; the turn now says TCC's check failed
+    and the command was refused — before `TurnEnd`."""
+    def broken(tool, line, **kw):
+        raise OSError("the disk walk failed")
+
+    monkeypatch.setattr(codex_session, "judge_action", broken)
+    _, events = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command="/bin/zsh -lc 'touch a'"))
+
+    said = [e.text for e in events if isinstance(e, Notice)]
+    assert len(said) == 1 and "TCC's check" in said[0] and "refused" in said[0]
+    assert "the disk walk failed" in said[0]
+    kinds = [type(e).__name__ for e in events]
+    assert kinds.index("Notice") < kinds.index("TurnEnd")
+    assert decisions(stand_in) == ["decline"]
+
+
+def _refused_initialize(tmp_path, name):
+    return write(tmp_path, [out({"id": 1, "method": "initialize"}),
+                            inn({"id": 1, "error": {"code": -32600,
+                                                    "message": "this client is too old"}})], name)
+
+
+@pytest.mark.parametrize("where", ["probe", "session"])
+def test_an_initialize_codex_refuses_is_a_start_that_failed_with_its_words(
+        project, tmp_path, stand_in, where):
+    """I2: an `RpcError` on `initialize` reached the window raw («RpcError: …»); it is
+    `CodexStartFailed` now, the server's own sentence kept — on the probe and on the session's own
+    app-server alike."""
+    refused = _refused_initialize(tmp_path, "refused.jsonl")
+    binary = (stand_in.use("turn-mcp", probe=refused) if where == "probe"
+              else stand_in.use(refused))
+    session = make(project, binary)
+
+    async def go():
+        try:
+            await drain(session.start())
+        finally:
+            await session.close()
+
+    with pytest.raises(CodexStartFailed, match="this client is too old"):
+        run(go())
+
+
+def test_a_signed_out_start_names_the_menu_line_and_tells_the_pickers(project, stand_in,
+                                                                      monkeypatch):
+    """M5: «`codex login` in a terminal» was the only advice; the blocker's menu line is the one
+    TCC offers. And the cached login now reads signed out, so the next launch is refused by the
+    blocker before anything spawns."""
+    from autosound_tcc.core import codex_cli
+    monkeypatch.setattr(codex_cli, "_PROBE", codex_cli.Probe(signed_in=True, asked=True))
+    session = make(project, stand_in.use("signed-out", probe="signed-out"))
+
+    async def go():
+        try:
+            await drain(session.start())
+        finally:
+            await session.close()
+
+    with pytest.raises(CodexSignedOut) as caught:
+        run(go())
+    assert "☰ → ⚙ Settings → Sign in to Codex" in str(caught.value)
+    assert "codex login" not in str(caught.value)
+    assert codex_cli.signed_in() is False
+    assert codex_cli.last_probe().asked, "the rest of the probe kept"
+
+
+@pytest.mark.parametrize("read, refused", [((0, 162, 1), False), ((0, 100, 0), True)])
+def test_the_binary_is_the_settled_codex_never_one_known_too_old(project, monkeypatch, read,
+                                                                 refused):
+    """M4: `find()` could hand the session an old Codex the probe had already read as too old.
+    The session takes `settled()`'s answer (on a thread: it may read a version), and one still too
+    old refuses the start, said."""
+    from autosound_tcc.core import codex_cli
+    found = codex_cli.Found("/opt/codex", codex_cli.SOURCE_PATH)
+    calls: list = []
+    monkeypatch.setattr(codex_cli, "settled", lambda: calls.append(1) or (found, read))
+    monkeypatch.setattr(codex_cli, "find", lambda **_k: pytest.fail("find() alone: unsettled"))
+    session = CodexSession(project_dir=project)
+
+    if refused:
+        with pytest.raises(CodexStartFailed, match="0.100.0"):
+            run(session._binary())
+    else:
+        assert run(session._binary()) == "/opt/codex"
+    assert calls == [1]
+
+
+def test_no_codex_at_all_is_not_installed(project, monkeypatch):
+    from autosound_tcc.core import codex_cli
+    monkeypatch.setattr(codex_cli, "settled", lambda: (None, None))
+    with pytest.raises(codex_session.CodexNotInstalled):
+        run(CodexSession(project_dir=project)._binary())
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_the_journal_says_whether_the_resume_held(project, tmp_path, stand_in, monkeypatch, ok):
+    """M7: the window journalled `resumed` before the session knew; a refused `thread/resume`
+    starts afresh. A launch that means to resume lets the session journal it once it knows."""
+    recorded: list = []
+    monkeypatch.setattr(codex_session.process_writer, "record_session",
+                        lambda project_dir, harness, model, resumed=False:
+                        recorded.append((harness, model, resumed)))
+    if ok:
+        thread = "01a139c1-783b-75c0-afc6-38328bee7086"
+        resumable(project, thread)
+        rows = [*frames("resume-ok"), *turn(thread)]
+    else:
+        resumable(project, "00000000-0000-7000-8000-000000000000")
+        rows = [*frames("resume-error"), *thread_start("fresh-thread"), *turn("fresh-thread")]
+    session = make(project, stand_in.use(write(tmp_path, rows)), resume=True, journal=True)
+
+    async def go():
+        try:
+            return await drain(session.start())
+        finally:
+            await session.close()
+
+    run(go())
+    assert recorded == [("codex", MODEL, ok)]
+
+
+def test_a_session_not_asked_to_journal_writes_nothing(project, tmp_path, stand_in, monkeypatch):
+    monkeypatch.setattr(codex_session.process_writer, "record_session",
+                        lambda *a, **k: pytest.fail("the window journals this launch"))
+    session = make(project, stand_in.use("turn-mcp"))
+
+    async def go():
+        try:
+            return await drain(session.start())
+        finally:
+            await session.close()
+
+    run(go())
+
+
+def _skills_rows(project, skills):
+    return [*opening(), out({"id": 2, "method": "skills/extraRoots/set"}),
+            inn({"id": 2, "result": {}}), out({"id": 3, "method": "skills/list"}),
+            inn({"id": 3, "result": {"data": [{"cwd": str(project), "skills": skills}]}}),
+            *thread_start("th"), *turn("th")]
+
+
+def test_a_disabled_bound_copy_is_not_loaded(project, tmp_path, stand_in):
+    """M8: the bound copy listed but disabled is not one Codex loads — said, as none listed is."""
+    ours = str(project / ".claude" / "skills" / "autosound-tuning" / "SKILL.md")
+    session = make(project, stand_in.use(write(tmp_path, _skills_rows(project, [
+        {"name": "autosound-tuning", "path": ours, "scope": "repo", "enabled": False}]))))
+
+    async def go():
+        try:
+            return await drain(session.start())
+        finally:
+            await session.close()
+
+    events = run(go())
+    assert isinstance(events[0], Notice) and "did not load the tuning method" in events[0].text
+
+
+def test_a_disabled_stray_copy_does_not_refuse_the_start(project, tmp_path, stand_in):
+    """M8: a second copy the user switched off cannot be loaded, so it is not a second method."""
+    ours = str(project / ".claude" / "skills" / "autosound-tuning" / "SKILL.md")
+    session = make(project, stand_in.use(write(tmp_path, _skills_rows(project, [
+        {"name": "autosound-tuning", "path": ours, "scope": "repo", "enabled": True},
+        {"name": "autosound-tuning", "path": "/opt/other/autosound-tuning/SKILL.md",
+         "scope": "user", "enabled": False}]))))
+
+    async def go():
+        try:
+            return await drain(session.start())
+        finally:
+            await session.close()
+
+    assert run(go()) == [TurnEnd("th")]

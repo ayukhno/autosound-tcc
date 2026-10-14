@@ -197,7 +197,11 @@ class SignIn:
             # Found again and asked again; the versions already read are kept — a wipe made
             # `find()` answer an old Codex on PATH until the probe ended (task 9's review, M1).
             codex_cli.forget()
-            codex_cli.probe(force=True)
+            try:
+                codex_cli.probe(force=True)
+            except Exception as exc:  # noqa: BLE001 — the sign-in succeeded whatever the re-read says
+                app_log.logger().warning("codex sign-in: done, but the probe after it failed: %s: %s",
+                                         type(exc).__name__, exc)
         app_log.logger().info("codex sign-in: %s", "done" if success else
                               "cancelled" if self.cancelled else f"failed ({self.error})")
         return success

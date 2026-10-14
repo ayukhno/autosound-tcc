@@ -13,7 +13,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
-from autosound_tcc.core import child, codex_cli, codex_session, omp_session, terminal_launcher
+from autosound_tcc.core import (child, codex_cli, codex_session, omp_session, process_writer,
+                                terminal_launcher)
 from autosound_tcc.core.session_registry import CODEX_ROUTE, SDK_ROUTE
 from autosound_tcc.core.tuning_session import TuningSession
 
@@ -67,6 +68,7 @@ def factory(choice, *, project_dir: Path, bridge, mcp_url: Optional[str],
             language=language,
             mcp_url=mcp_url,
             mcp_token=mcp_token,
+            journal=resumed,  # `record_start` left this launch's journal line to the session
         )
     return lambda: TuningSession(
         project_dir=project_dir,
@@ -79,6 +81,16 @@ def factory(choice, *, project_dir: Path, bridge, mcp_url: Optional[str],
         effort=effort,
         language=language,
     )
+
+
+def record_start(project_dir: Path, choice, resumed: bool) -> None:
+    """The journal's `session-start` for a launch, before its first token — unless the session
+    says it itself. A Codex launch that means to resume learns only from `thread/resume` whether
+    it did (a refused one starts afresh), so `CodexSession` journals that one once it knows
+    (`factory` passes `journal=resumed`; the group review, M7). Raises `ProcessWriterError`."""
+    if choice.harness == "codex" and resumed:
+        return
+    process_writer.record_session(project_dir, choice.harness, choice.model, resumed=resumed)
 
 
 def resume_route(harness: str) -> Optional[str]:

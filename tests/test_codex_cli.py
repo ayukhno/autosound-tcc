@@ -461,3 +461,21 @@ def test_the_reviewer_finds_the_codex_tcc_found_by_its_folder_on_path(monkeypatc
 
     monkeypatch.setattr(codex_cli, "find", lambda **_kw: None)
     assert critic.critic_bin_override(harness="codex", environ={"PATH": "/usr/bin"}) == {}
+
+
+@POSIX_ONLY
+def test_an_initialize_codex_refuses_is_a_probe_that_says_why(tmp_path, monkeypatch):
+    """Group fix I2: an `RpcError` on `initialize` escaped the probe, so the start read skipped
+    Claude's list and «codex» stayed «not checked yet» all launch. Now it is a probe with the
+    server's own sentence."""
+    scenario = tmp_path / "refused.jsonl"
+    scenario.write_text("\n".join([
+        _frame("out", {"id": 1, "method": "initialize"}),
+        _frame("in", {"id": 1, "error": {"code": -32600, "message": "client too old for 9.9"}}),
+    ]) + "\n", encoding="utf-8")
+    _stand_in(tmp_path, monkeypatch, scenario)
+
+    said = codex_cli.probe()
+
+    assert said.asked and said.signed_in is None and said.models == ()
+    assert "client too old for 9.9" in said.why

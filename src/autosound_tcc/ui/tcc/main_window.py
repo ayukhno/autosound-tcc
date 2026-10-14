@@ -5006,9 +5006,7 @@ class MainWindow(QMainWindow):
         # looks exactly like one that never happened -- which is the case план-факт is for. Best
         # effort: a project whose skill is not vendored still gets to run a session.
         try:
-            process_writer.record_session(
-                server.project_dir, choice.harness, choice.model, resumed=resumed
-            )
+            session_routes.record_start(server.project_dir, choice, resumed)
             # Paired with `_record_session_stop`: what is opened here is what gets closed there,
             # and a session that never made it onto the record has no stop to write.
             self._session_open = True

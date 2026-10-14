@@ -25,7 +25,7 @@ import re
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -344,6 +344,14 @@ def signed_in() -> Optional[bool]:
         return _PROBE.signed_in
 
 
+def mark_signed_out() -> None:
+    """A session found Codex signed out: `signed_in()` says so from now on (the blocker and the
+    pickers read it), the rest of the last probe kept. Runs nothing."""
+    global _PROBE
+    with _lock:
+        _PROBE = replace(_PROBE, signed_in=False)
+
+
 def models() -> tuple:
     """The `model/list` entries the last probe read (hidden ones left out); () when none."""
     with _lock:
@@ -478,6 +486,10 @@ def _run_probe(found: Found) -> Probe:
         return Probe(asked=True, why=f"codex app-server gave no answer in {int(PROBE_TIMEOUT_S)} s")
     except (codex_rpc.ConnectionLost, OSError) as exc:
         return Probe(asked=True, why=f"codex app-server: {exc}")
+    except codex_rpc.RpcError as exc:
+        # `initialize` refused (the requests after it catch their own): an answer, not a crash —
+        # escaping, it skipped the rest of the start read (the group review, I2).
+        return Probe(asked=True, why=f"codex app-server: {exc.message or exc.code}")
     return Probe(signed_in=_signed_in_from(account), models=tuple(entries), why=why, asked=True)
 
 
@@ -578,7 +590,8 @@ def unknown_enabled_features(config_read: Mapping) -> list[str]:
 
 __all__ = [
     "Found", "Probe", "MIN_VERSION", "PIN", "SOURCE_PATH", "SOURCE_FOLDER", "SOURCE_TCC",
-    "find", "forget", "settled", "version", "known_version", "too_old", "usable", "probe", "signed_in", "models",
+    "find", "forget", "settled", "version", "known_version", "too_old", "usable", "probe", "signed_in",
+    "mark_signed_out", "models",
     "supported_efforts", "efforts_in", "tcc_copy_path", "dock_folders", "tcc_tool_args",
     "tcc_connection_args",
     "isolation_args",

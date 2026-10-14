@@ -279,8 +279,39 @@ def test_factory_builds_each_routes_session(tmp_path, built):
                           effort="max", language="de")),
         (CodexSession, dict(project_dir=tmp_path, bridge="the-bridge", model="gpt-a",
                             resume=True, gate="writes", always_allowed=frozenset({"Bash"}),
-                            effort="max", language="de", mcp_url="http://u", mcp_token="tok")),
+                            effort="max", language="de", mcp_url="http://u", mcp_token="tok",
+                            journal=True)),
     ]
+
+
+def test_the_factory_builds_a_real_codex_session(tmp_path, monkeypatch):
+    """I6: `built` stands in a `**kwargs` constructor, which takes any keyword — a name the factory
+    passes and `CodexSession.__init__` no longer has would pass there. This one is real; it starts
+    no process (that is `start()`)."""
+    session = _made(SimpleNamespace(harness="codex", model="gpt-a"), tmp_path, resumed=True)()
+
+    assert isinstance(session, CodexSession)
+    assert (session.project_dir, session.model, session.resume, session.journal) == (
+        tmp_path, "gpt-a", True, True)
+    assert (session.mcp_url, session.mcp_token, session.gate) == ("http://u", "tok", "writes")
+    assert session.always_allowed == frozenset({"Bash"}) and session._server is None
+
+
+@pytest.mark.parametrize("harness, resumed, written", [
+    ("sdk", True, True), ("omp", True, True), ("codex", False, True), ("codex", True, False)])
+def test_the_window_journals_every_launch_but_a_codex_resume(tmp_path, monkeypatch, harness,
+                                                             resumed, written):
+    """M7: a Codex launch that means to resume is journalled by the session, once `thread/resume`
+    has said whether it held (`CodexSession.journal`); every other launch by the window, at once."""
+    from autosound_tcc.core import process_writer
+    calls: list = []
+    monkeypatch.setattr(process_writer, "record_session",
+                        lambda project_dir, harness, model, resumed=False:
+                        calls.append((project_dir, harness, model, resumed)))
+
+    session_routes.record_start(tmp_path, SimpleNamespace(harness=harness, model="m"), resumed)
+
+    assert calls == ([(tmp_path, harness, "m", resumed)] if written else [])
 
 
 def test_factory_builds_nothing_until_called_and_asks_the_gate_then(tmp_path, built):
