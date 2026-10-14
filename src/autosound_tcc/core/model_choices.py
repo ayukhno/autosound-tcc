@@ -217,7 +217,13 @@ def sdk_choices() -> list[Choice]:
         # same failure as the aliases were: a picker that says a route exists when it does not
         # (2026-08-12). Nothing here is hidden from a Claude user — for them it is installed.
         return []
-    fetched = list(_CLI_CACHE.get("sdk", []))
+    live = list(_CLI_CACHE.get(_SDK_CLI_ROUTE, []))
+    fetched = live + [choice for choice in _CLI_CACHE.get("sdk", [])
+                      if choice.model not in {row.model for row in live}]
+    if live:
+        # The person's own `claude` said what it runs (tcc#196): that is the list, and a shipped
+        # row it does not offer is a model this login cannot run — no floor under it.
+        return fetched
     known = {choice.model for choice in fetched}
     for label, model in SDK_MODELS:
         if model not in known:
@@ -275,6 +281,76 @@ def _fetch_sdk_choices() -> list[Choice]:
             )
         )
     return out
+
+
+#: The cache route for the list the person's own `claude` gave (`_ask_claude_models`).
+_SDK_CLI_ROUTE = "sdk-cli"
+#: Asked once per launch (and again on ↻): the list changes with a CLI update, not by the minute,
+#: and on Windows a `claude` child may flash a console (see `claude_sdk.probe_signed_in`).
+_CLAUDE_ASKED = False
+
+#: What `claude` is asked: the SDK's own first control request, answered before any turn — so no
+#: model runs and nothing is billed. Its answer carries the CLI's /model list.
+_CLAUDE_INIT_REQUEST = json.dumps({"type": "control_request", "request_id": "tcc-models",
+                                   "request": {"subtype": "initialize", "hooks": None}})
+
+
+def _ask_claude_models() -> list[Choice]:
+    """The Claude models the person's own `claude` offers, as the Critic's list is read from its
+    CLI (tcc#196). [] when there is no `claude` or it did not answer — the shipped list stays then.
+
+    Finding 157: the list was TCC's own (`SDK_MODELS`, dated) and had no Sonnet 5.5 while the CLI
+    on the same machine served it. No settings and no MCP servers are loaded for the ask: it wants
+    the CLI's catalogue, not the person's session."""
+    binary = claude_sdk.cli_path()
+    if binary is None:
+        return []
+    kwargs = child.quiet()
+    kwargs.pop("stdin", None)  # the request goes in on stdin
+    try:
+        proc = child.run_bounded(
+            [binary, "--output-format", "stream-json", "--input-format", "stream-json",
+             "--verbose", "--setting-sources", "", "--strict-mcp-config"],
+            input=_CLAUDE_INIT_REQUEST + "\n", text=True, encoding="utf-8", errors="replace",
+            timeout=CLI_TIMEOUT_S, **kwargs)
+    except (subprocess.SubprocessError, OSError):
+        return []
+    models: list = []
+    for line in (proc.stdout or "").splitlines():
+        try:
+            frame = json.loads(line)
+        except ValueError:
+            continue
+        reply = frame.get("response") if isinstance(frame, dict) else None
+        if frame.get("type") == "control_response" and isinstance(reply, dict):
+            models = ((reply.get("response") or {}).get("models")) or []
+            break
+    out: list[Choice] = []
+    seen: set[str] = set()
+    for entry in models:
+        if not isinstance(entry, dict):
+            continue
+        # `resolvedModel` is the id behind an alias (`sonnet` → `claude-sonnet-5-5`); `[1m]` is
+        # the long-context flag, not a model.
+        model = str(entry.get("resolvedModel") or entry.get("value") or "").split("[", 1)[0]
+        if not model.startswith("claude-") or model in seen:
+            continue
+        seen.add(model)
+        name = str(entry.get("displayName") or "")
+        if not name or name.lower().startswith("default"):
+            name = str(entry.get("description") or "").split("·", 1)[0].strip() or model
+        label = name if name.lower().startswith("claude") else f"Claude {name}"
+        out.append(Choice(harness="sdk", model=model, label=label, provider="anthropic"))
+    return out
+
+
+def _fetch_sdk_cli_choices() -> list[Choice]:
+    """`_ask_claude_models`, once per launch."""
+    global _CLAUDE_ASKED
+    if _CLAUDE_ASKED:
+        return []
+    _CLAUDE_ASKED = True
+    return _ask_claude_models()
 
 
 def omp_available() -> bool:
@@ -455,8 +531,14 @@ def refresh_cli_catalogue(*, force: bool = False, now=None,
     """
     now = now or time.monotonic
     _load_cached_catalogue()
-    for route, fetch in (("agy", _fetch_agy_choices), ("sdk", _fetch_sdk_choices)):
+    global _CLAUDE_ASKED
+    if force:
+        _CLAUDE_ASKED = False  # ↻ asks `claude` again too
+    for route, fetch in (("agy", _fetch_agy_choices), ("sdk", _fetch_sdk_choices),
+                         (_SDK_CLI_ROUTE, _fetch_sdk_cli_choices)):
         if route == "agy" and not force and _skip_agy(now):
+            continue
+        if route == _SDK_CLI_ROUTE and _CLAUDE_ASKED:
             continue
         _LAST_ASKED[route] = now()
         fetched = fetch()

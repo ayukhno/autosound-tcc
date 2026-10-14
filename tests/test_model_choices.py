@@ -1180,3 +1180,68 @@ def test_critic_env_read_in_one_place_is_not_the_answer_for_another(monkeypatch,
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "another" / ".config"))
 
     assert critic_env.values() == {}
+
+
+# ---- the Claude list is read from the user's own `claude` (tcc#196) ---------------------------
+
+#: The real `claude` 2.1.296's answer to `initialize` (2026-10-14), trimmed to its `models`: what
+#: the CLI's own /model offers — Sonnet 5.5 among them, which TCC's shipped list did not have.
+_CLAUDE_INIT = (Path(__file__).parent / "fixtures" / "claude-2.1.296-initialize-models.jsonl").read_text(
+    encoding="utf-8")
+
+#: Bound at import, before the autouse fixture stands in for it in every test.
+_REAL_ASK_CLAUDE = mc._ask_claude_models
+
+
+def test_the_claude_list_is_what_the_users_own_claude_offers(monkeypatch):
+    """Finding 157 (tcc#196): the list was TCC's own, dated 2026-09-26, and had no Sonnet 5.5 —
+    the Critic's list, read from its CLI, was current in the same start. `initialize` is answered
+    before any turn, so asking costs no tokens."""
+    seen = {}
+
+    def run(args, **kwargs):
+        seen["args"], seen["input"] = args, kwargs.get("input")
+        return subprocess.CompletedProcess(args, 0, _CLAUDE_INIT, "")
+
+    monkeypatch.setattr(mc.claude_sdk, "cli_path", lambda: "/usr/local/bin/claude")
+    monkeypatch.setattr(mc.child, "run_bounded", run)
+
+    rows = _REAL_ASK_CLAUDE()
+
+    by_model = {c.model: c for c in rows}
+    assert by_model["claude-sonnet-5-5"].label == "Claude Sonnet 5.5"
+    assert by_model["claude-opus-5-5"].label == "Claude Opus 5.5"
+    assert all(c.harness == "sdk" and c.provider == "anthropic" for c in rows)
+    assert len(by_model) == len(rows)  # «default» and «opus» are one model, listed once
+    assert not any(c.model.endswith("]") for c in rows)  # `[1m]` is a context flag, not a model
+    assert '"initialize"' in seen["input"]
+
+
+def test_a_claude_that_cannot_be_asked_gives_no_rows(monkeypatch):
+    monkeypatch.setattr(mc.claude_sdk, "cli_path", lambda: None)
+    assert _REAL_ASK_CLAUDE() == []
+    monkeypatch.setattr(mc.claude_sdk, "cli_path", lambda: "/usr/local/bin/claude")
+    monkeypatch.setattr(mc.child, "run_bounded",
+                        lambda args, **k: subprocess.CompletedProcess(args, 1, "", "boom"))
+    assert _REAL_ASK_CLAUDE() == []
+
+
+def test_with_the_live_list_the_shipped_floor_stays_out(tmp_path, monkeypatch):
+    """The CLI's answer is the list: a shipped row it does not offer is a model this login cannot
+    run, and offering it is how «Sonnet 5 is gone» sat beside a list without Sonnet 5.5."""
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    monkeypatch.setattr(mc, "_LAST_ASKED", {}, raising=False)
+    monkeypatch.setattr(mc, "_fetch_agy_choices", lambda: [])
+    live = [Choice(harness="sdk", model="claude-opus-5-5", label="Claude Opus 5.5",
+                   provider="anthropic"),
+            Choice(harness="sdk", model="claude-sonnet-5-5", label="Claude Sonnet 5.5",
+                   provider="anthropic")]
+    monkeypatch.setattr(mc, "_ask_claude_models", lambda: list(live))
+    monkeypatch.setattr(mc, "_CLAUDE_ASKED", False)
+
+    mc.refresh_cli_catalogue()
+
+    assert [c.model for c in mc.sdk_choices()] == ["claude-opus-5-5", "claude-sonnet-5-5"]
+    assert mc.shipped_note(mc.sdk_choices()[1]) == ""

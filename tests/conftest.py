@@ -1165,3 +1165,12 @@ def ukrainian_parent(request, monkeypatch):
         monkeypatch.delenv("LANG", raising=False)
     else:
         monkeypatch.setenv("LC_CTYPE", request.param)
+
+
+@pytest.fixture(autouse=True)
+def _no_claude_asked_for_its_models(monkeypatch):
+    """tcc#196: the catalogue refresh asks the person's own `claude` for its model list. No test
+    runs the real CLI for it; tests of the asking bind the real function at import."""
+    from autosound_tcc.core import model_choices
+
+    monkeypatch.setattr(model_choices, "_ask_claude_models", lambda: [])
