@@ -582,14 +582,14 @@ def check_sweeps(rows: Iterable[Candidate], listing: Optional[Callable[[], dict]
         band = sweep_band(raw)
         asked = {"f_low": band[0], "f_high": band[1]} if band else {}
         try:
-            answer = dict(judge(str(raw.get("title") or ""), measurements={ordinal: raw},
+            judged = dict(judge(str(raw.get("title") or ""), measurements={ordinal: raw},
                                 **asked) or {})
         except Exception as exc:  # noqa: BLE001 — the verdict «never raises»; one that does is said
             app_log.logger().exception("capture check: the method's verdict raised on %r",
                                        raw.get("title"))
             found[row.uuid] = {_NOT_JUDGED: f"could not judge: {type(exc).__name__}: {exc}"}
             continue
-        found[row.uuid] = answer if band else _without_truncation(answer)
+        found[row.uuid] = judged if band else _without_truncation(judged)
     return found
 
 
