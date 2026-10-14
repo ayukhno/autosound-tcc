@@ -856,6 +856,25 @@ def test_hx_reads_where_each_curve_reaches_one_level():
     assert not any(line.isVisible() for line in view._markers), "no vertical line in Hx"
 
 
+def test_a_theme_switch_in_hx_keeps_the_person_s_level_and_its_dots():
+    """#209 (found in G10 fix A, predates it): in hx `apply_theme` drew the crossing dots, then
+    `set_markers` put the level line back at its default — a level of −0.5 read 1.0 after a theme
+    switch, the dots drawn for the old level. The person's level stays, and the dots are its."""
+    view = _view()
+    view.set_y_unit("dB")
+    view.set_markers([4.52, 4.78], tokens=["accent", "info"])
+    view.set_axes_mode("hx")
+    view._h_markers[0].setValue(-0.5)
+    before = view.crossings()
+    assert before, "the level is reached: the situation this is about"
+
+    view.apply_theme()
+
+    assert view._h_markers[0].value() == pytest.approx(-0.5)
+    assert view.crossings() == before
+    assert all(y == pytest.approx(-0.5) for _x, y in view.crossings())
+
+
 def test_a_level_no_curve_ever_reaches_reads_as_nothing_rather_than_a_wrong_number():
     view = _view()
     view.set_markers([4.52], tokens=["accent"])

@@ -2640,15 +2640,25 @@ class CurveView(QWidget):
         # draw themselves from the current theme, and two ways of doing it is one too many.
         traces, positions = list(self._traces), self.positions()
         names, tokens = list(self._marker_names), list(self._marker_tokens)
+        # The level lines are the person's too: rebuilt by `set_markers`, they went back to where
+        # a new pair starts — in hx a level of −0.5 read 1.0, the dots drawn for the old one (#209).
+        levels = [line.value() for line in self._h_markers]
         if traces:
             self.set_traces(traces)
+        if positions:
+            self.set_markers(positions, names, tokens)
+        if len(levels) == len(self._h_markers):
+            self._syncing = True  # put back, not moved: no move to report or to sync from
+            try:
+                for line, level in zip(self._h_markers, levels):
+                    line.setValue(level)
+            finally:
+                self._syncing = False
         self._render_crossings()
         self._render_sum()
         # The two note buttons carry their state as a colour written from the palette that was
         # current when it was written — the same reason the plot's pens are rebuilt above.
         self._render_readout()
-        if positions:
-            self.set_markers(positions, names, tokens)
 
     def set_log_x(self, on: bool) -> None:
         """Frequency is read on a log axis; time is not.
