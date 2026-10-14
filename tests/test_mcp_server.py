@@ -2085,6 +2085,33 @@ def test_a_server_that_dies_as_it_starts_is_a_failure_of_start(monkeypatch, tmp_
     assert server.serving is False
 
 
+def test_starting_the_server_leaves_uvicorn_s_access_logger_routed_into_tcc_s_log(monkeypatch,
+                                                                                  tmp_path):
+    """#206's group review: `access_log=False` makes uvicorn's `Config` clear `uvicorn.access`'s
+    handlers and set `propagate = False` — after `app_log.setup()` routed `uvicorn` into tcc.log,
+    so a line on it went to the last-resort stderr (none in a windowed build), and the state
+    leaked into every later test. Started, it propagates to `uvicorn` again, with none of its own."""
+    import logging
+
+    import uvicorn
+
+    class _DeadServer:
+        started = False
+
+        def __init__(self, config):
+            self.config = config
+
+        async def serve(self, sockets=None):
+            raise OSError("not serving in this test")
+
+    monkeypatch.setattr(uvicorn, "Server", _DeadServer)
+    with pytest.raises(RuntimeError):
+        mcp_server.TccMcpServer(project_dir=tmp_path).start(write_config=False)
+
+    access = logging.getLogger("uvicorn.access")
+    assert access.propagate is True and access.handlers == []
+
+
 def test_a_slow_start_is_not_treated_as_a_death(monkeypatch, tmp_path):
     """A timeout is not a failure: a slow machine's server is still a server, and killing a
     working one because it took four seconds would be the worse error."""

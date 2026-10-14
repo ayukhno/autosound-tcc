@@ -56,6 +56,7 @@ import dataclasses
 import functools
 import inspect
 import json
+import logging
 import os
 import secrets
 import socket
@@ -2039,6 +2040,11 @@ class TccMcpServer:
             # One less thing writing to a stream that may not exist.
             log_config=None,
         )
+        # `access_log=False` made that `Config` clear `uvicorn.access`'s handlers and stop it
+        # propagating — undoing `app_log`'s routing of `uvicorn` into tcc.log, so a line there fell
+        # to the last-resort stderr, which a windowed build has not (#206's group review). Back
+        # onto its parent; uvicorn still writes no access lines while `access_log` is False.
+        logging.getLogger("uvicorn.access").propagate = True
         self._server = uvicorn.Server(uvicorn_config)
 
         def _serve() -> None:
