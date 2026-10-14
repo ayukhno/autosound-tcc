@@ -262,10 +262,15 @@ def _filled(body: str) -> int:
 
 
 def read_at(root: Path, at: str, name: str) -> str | None:
-    """`name` as commit `at` carries it, or None when that commit has no such file."""
-    done = subprocess.run(["git", "show", f"{at}:{name}"], cwd=str(root), capture_output=True,
-                          text=True, encoding="utf-8", errors="replace")
-    return done.stdout if done.returncode == 0 else None
+    """`name` as commit `at` carries it; None only when git says that commit has no such path.
+
+    Asked in two steps so «absent» is git's own answer rather than a reading of its error text:
+    `ls-tree` lists nothing for a path the commit lacks. Any other failure — a commit that is not
+    here, a git that will not run — is a Stop with git's words, never a quiet «no file».
+    """
+    if not run(["git", "ls-tree", at, "--", name], root):
+        return None
+    return run(["git", "show", f"{at}:{name}"], root)
 
 
 def _read_changelog(root: Path, at: str = "") -> str:
@@ -478,7 +483,29 @@ def check_method_pin(pinned: str, checked_out: str) -> None:
         )
 
 
-def published_method_tags(root: Path, sha: str) -> list[str]:
+def method_url_at(root: Path, at: str) -> str:
+    """The method's remote as commit `at` records it in `.gitmodules` — not the working checkout's.
+
+    A clone without `--recurse-submodules` leaves the method's folder empty, and `git -C` there
+    runs in TCC's own repository: `ls-remote origin` then answers with TCC's tags (review of
+    tcc#201). The commit's own record names the method wherever the checkout stands.
+    """
+    blob = f"{at}:.gitmodules"
+    paths = run(["git", "config", "--blob", blob, "--get-regexp", r"^submodule\..*\.path$"],
+                root, check=False)
+    name = next((key[len("submodule."):-len(".path")] for key, _, value in
+                 (line.partition(" ") for line in paths.splitlines()) if value == METHOD_TREE),
+                "")
+    url = run(["git", "config", "--blob", blob, "--get", f"submodule.{name}.url"], root,
+              check=False) if name else ""
+    if not url or url.startswith("."):
+        raise Stop(f"the method's URL could not be read from .gitmodules in {at[:12]} "
+                   f"(submodule `{METHOD_TREE}`: {url or 'no url'}) — without it nothing can say "
+                   "whether the pin carries a published tag")
+    return url
+
+
+def published_method_tags(root: Path, sha: str, remote: str = "") -> list[str]:
     """Tag names the method's REMOTE has pointing at `sha` — published, not merely local.
 
     `ls-remote` rather than `for-each-ref --points-at`: the skill tree beside this one is
@@ -492,8 +519,13 @@ def published_method_tags(root: Path, sha: str) -> list[str]:
     Not `check=False`: a remote that cannot be asked returns the same empty output as a method
     with no tags at all, and those two must not read the same (hub `HUB-CONSTRAINTS.md` §1.4 —
     unknown is a refusal, never "no objections").
+
+    `remote`: the method's URL, asked from `root` — a check at a commit reads it from that
+    commit's `.gitmodules` (`method_url_at`); without it, the checkout's own `origin`.
     """
-    out = run(["git", "-C", str(root / METHOD_TREE), "ls-remote", "--tags", "origin"], root)
+    argv = (["git", "ls-remote", "--tags", remote] if remote
+            else ["git", "-C", str(root / METHOD_TREE), "ls-remote", "--tags", "origin"])
+    out = run(argv, root)
     names = set()
     for line in out.splitlines():
         parts = line.split()
@@ -640,7 +672,8 @@ def publish(root: Path, tag: str, say: Callable[[str], None]) -> None:
 
 def check_at(root: Path, plan: Plan, sha: str, say: Callable[[str], None],
              read_pinned_sha: Callable[..., str],
-             read_published_tags: Callable[[Path, str], list]) -> Plan:
+             read_published_tags: Callable[..., list],
+             read_method_url: Callable[[Path, str], str]) -> Plan:
     """TCC's own pre-tag checks against commit `sha` (full, resolved once) — read-only, no suite.
 
     Everything is read from the commit, not the working tree: the CHANGELOG entry, the version
@@ -657,7 +690,8 @@ def check_at(root: Path, plan: Plan, sha: str, say: Callable[[str], None],
         raise Stop(f"the method's pin in {sha[:12]} could not be read — a release cannot say "
                    "which method it was built against")
     check_paired_method(changelog, plan.method_sha, plan.tag)
-    plan.method_tags = list(read_published_tags(root, plan.method_sha))
+    plan.method_tags = list(read_published_tags(root, plan.method_sha,
+                                                remote=read_method_url(root, sha)))
     check_published_method(plan.method_sha, plan.method_tags)
     plan.commands = [" ".join(tag_command(plan.tag, sha)), "git push origin main",
                      f"git push origin {plan.tag}"]
@@ -673,7 +707,8 @@ def ship(root: Path, release: bool, test_command=None,
          channel: Callable[..., tuple] = channel_checks,
          read_method_sha: Callable[[Path], str] = method_sha,
          read_pinned_sha: Callable[[Path], str] = pinned_method_sha,
-         read_published_tags: Callable[[Path, str], list] = published_method_tags,
+         read_published_tags: Callable[..., list] = published_method_tags,
+         read_method_url: Callable[[Path, str], str] = method_url_at,
          relock_with: Callable[[Path], None] = relock,
          say: Callable[[str], None] = print,
          candidate: str = "", version: str = "", at: str = "") -> Plan:
@@ -702,7 +737,8 @@ def ship(root: Path, release: bool, test_command=None,
         if not sha:
             raise Stop(f"`{at}` does not resolve to a commit in {root}")
         plan.tag = version
-        return check_at(root, plan, sha, say, read_pinned_sha, read_published_tags)
+        return check_at(root, plan, sha, say, read_pinned_sha, read_published_tags,
+                        read_method_url)
 
     tag, checks = channel(root, candidate=candidate or None, version=version or None)
     say("  channel preflight — hub/scripts/release-preflight.py:")
@@ -720,7 +756,8 @@ def ship(root: Path, release: bool, test_command=None,
         raise Stop("the channel preflight worked out no tag and refused nothing — ask it "
                    "directly before shipping")
     plan.tag = tag
-    ci_green = any(check.name == CI_GREEN and check.verdict == CARRIER_OK for check in checks)
+    ci = next((check for check in checks if check.name == CI_GREEN), None)
+    ci_green = ci is not None and ci.verdict == CARRIER_OK
 
     if plan.mode == "candidate":
         check_candidate_changelog(root, candidate)
@@ -775,8 +812,10 @@ def ship(root: Path, release: bool, test_command=None,
             say(f"  {CI_GREEN} is ok on this commit — CI's run is the release's test run; "
                 "the suite is not run again here")
         else:
-            say(f"  {CI_GREEN} could not be read for this commit — running the whole suite "
-                "locally instead, the fallback (hub RELEASE-CHANNEL.md §9.9.1)…")
+            why = (f"{CI_GREEN} is missing from the hub's answer" if ci is None else
+                   f"{CI_GREEN} came back «{ci.verdict}» — CI could not be read for this commit")
+            say(f"  {why}: running the whole suite locally instead, the fallback "
+                "(hub RELEASE-CHANNEL.md §9.9.1)…")
             done = subprocess.run(test_command or TEST_COMMAND, cwd=str(root))
             if done.returncode != 0:
                 raise Stop(f"the suite failed ({done.returncode}) — nothing was written and "
@@ -842,6 +881,11 @@ def main(argv=None) -> int:
         # the first live run of this file (the carrier's own `main` carries the same line).
         sys.stdout.flush()
         print(f"\n  STOP: {stop}", file=sys.stderr)
+        said = [line.strip() for line in str(stop).splitlines() if line.strip()]
+        if len(said) > 1:
+            # The release train records a check's LAST line as its reason (hub release-train.py),
+            # so a refusal that runs to several lines ends with all of it on one.
+            print(f"  STOP: {' | '.join(said)}", file=sys.stderr)
         return 1
     return 0
 

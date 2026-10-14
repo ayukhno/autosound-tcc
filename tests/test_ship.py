@@ -94,6 +94,7 @@ README = (
 )
 
 METHOD_SHA = "a" * 40
+METHOD_URL = "https://example.invalid/method.git"
 
 #: The carrier's verdict words, copied here so the fixture can run without the hub — and pinned to
 #: the real ones by `test_the_stand_in_has_the_carriers_shape`.
@@ -212,7 +213,10 @@ def _run(repo, release=True, test_exit=0, ask=None, say=lambda _m: None, publish
                          # submodule, and the suite does not reach the network. The default
                          # stands for the state a release is allowed to happen in — the pin
                          # carries a published tag.
-                         read_published_tags=published or (lambda _root, _sha: ["v3.0.58"]),
+                         read_published_tags=published or (lambda _root, _sha, **_kw: ["v3.0.58"]),
+                         # A check at a commit asks the method's URL recorded in that commit's
+                         # `.gitmodules`; the fixture has none, so it is stood in for too.
+                         read_method_url=lambda _root, _sha: METHOD_URL,
                          # The fixture has no submodule at all, so the recorded pin is stood in
                          # for as well — agreeing with the checkout, which is the state a release
                          # is allowed to happen in. `test_a_release_refuses_when_the_checkout_is_
@@ -686,6 +690,12 @@ def test_the_stand_in_has_the_carriers_shape():
         "ship skips its suite only on the carrier's own `ok` for ci-green — that word has moved")
     names = {check.name for check in [carrier.ci_verdict(None, "github.com/o/r", "f" * 40)]}
     assert names == {ship_mod.CI_GREEN}, "ship reads the CI verdict by the carrier's check name"
+    # And from a GREEN run — the branch whose name and verdict decide that the suite is skipped.
+    green = carrier.ci_verdict([{"event": "push", "path": ".github/workflows/ci.yml",
+                                 "status": "completed", "conclusion": "success", "name": "checks",
+                                 "created_at": "2026-10-14T00:00:00Z"}], "github.com/o/r", "f" * 40)
+    assert (green.name, green.verdict, green.gates) == (ship_mod.CI_GREEN, ship_mod.CARRIER_OK,
+                                                        False), green
 
     real = carrier.Check(name="n", verdict=FAIL, line="l")
     stand_in = checks(("n", FAIL))[0]
@@ -1511,12 +1521,12 @@ def test_a_committed_version_with_ci_green_is_tagged_without_running_the_suite(r
     assert "ci-green" in said[0] and "not run" in said[0], said
 
 
-@pytest.mark.parametrize("answers", [
-    (("clean-tree", OK), ("ci-green", UNKNOWN), ("rule", OK)),
-    (("clean-tree", OK), ("rule", OK)),
+@pytest.mark.parametrize("answers, why", [
+    ((("clean-tree", OK), ("ci-green", UNKNOWN), ("rule", OK)), f"came back «{UNKNOWN}»"),
+    ((("clean-tree", OK), ("rule", OK)), "missing from the hub's answer"),
 ], ids=["ci-green-unchecked", "ci-green-not-asked"])
 def test_a_committed_version_whose_ci_could_not_be_read_runs_the_suite_here(repo, tmp_path,
-                                                                             answers):
+                                                                             answers, why):
     """Unknown is never green: a CI verdict the carrier could not make — and did not refuse —
     sends ship back to the local serial suite, and the line names it as the fallback."""
     _commit_the_version(repo)
@@ -1531,7 +1541,7 @@ def test_a_committed_version_whose_ci_could_not_be_read_runs_the_suite_here(repo
     assert git(repo, "tag", "--list", "v0.1.25") == ""
     said = [line for line in lines if "suite" in line]
     assert len(said) == 1, f"one line says what happened to the suite: {lines}"
-    assert "could not be read" in said[0] and "locally" in said[0], said
+    assert why in said[0] and "locally" in said[0], said
 
 
 def test_ci_that_refused_stops_the_release_before_any_suite(repo, tmp_path):
@@ -1637,7 +1647,7 @@ def test_a_check_at_a_commit_pairs_the_changelog_with_the_pin_recorded_THERE(rep
     with pytest.raises(ship_mod.Stop) as stop:
         ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25", at=commit,
                       read_method_sha=lambda _root: METHOD_SHA, read_pinned_sha=pinned,
-                      read_published_tags=lambda _root, _sha: ["v3.0.58"], say=lambda _m: None)
+                      read_published_tags=lambda _root, _sha, **_kw: ["v3.0.58"], say=lambda _m: None)
 
     assert asked == [commit], "the pin is read from the commit being checked"
     assert "b" * 12 in str(stop.value), "the CHANGELOG is held to that pin, not the checkout"
@@ -1687,8 +1697,9 @@ def test_a_moving_ref_is_resolved_once_and_that_commit_is_read_throughout(repo):
 
     plan = ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25",
                          at="origin/main", read_method_sha=lambda _root: METHOD_SHA,
-                         read_pinned_sha=pinned,
-                         read_published_tags=lambda _root, _sha: ["v3.0.58"], say=lambda _m: None)
+                         read_pinned_sha=pinned, read_method_url=lambda _root, _sha: METHOD_URL,
+                         read_published_tags=lambda _root, _sha, **_kw: ["v3.0.58"],
+                         say=lambda _m: None)
 
     assert read == [commit], "the ref is resolved to one full sha before anything is read"
     assert plan.commands[0].endswith(commit)
@@ -1715,3 +1726,129 @@ def test_make_ship_passes_the_commit_from_the_command_line_only():
     done = _make_n("ship", "VERSION=v0.2.0", env={**os.environ, "AT": "abc1234"})
     assert done.returncode == 0, done.stderr
     assert "--at" not in done.stdout, "an AT in the environment must not move the check"
+
+
+# --- review of the Release tooling group (tcc#201): the AT seams, read for real ---------------
+
+
+def _method_remote(tmp_path):
+    """A bare «method» repository with one commit tagged `v3.0.58` (annotated) — its sha."""
+    src, bare = tmp_path / "method-src", tmp_path / "method.git"
+    subprocess.run(["git", "init", "--quiet", "-b", "main", str(src)], check=True)
+    git(src, "config", "user.email", "t@t")
+    git(src, "config", "user.name", "t")
+    git(src, "commit", "--quiet", "--allow-empty", "-m", "method")
+    git(src, "tag", "-a", "v3.0.58", "-m", "v3.0.58")
+    subprocess.run(["git", "clone", "--quiet", "--bare", str(src), str(bare)], check=True)
+    return git(src, "rev-parse", "HEAD"), bare
+
+
+def _pinned_release(repo, pin, url):
+    """v0.1.25 committed with the method pinned at `pin` and `.gitmodules` naming `url` — the
+    submodule never initialised, its folder left empty as a plain clone leaves it."""
+    (repo / ".gitmodules").write_text(
+        f'[submodule "{ship_mod.METHOD_TREE}"]\n\tpath = {ship_mod.METHOD_TREE}\n'
+        f"\turl = {url}\n", encoding="utf-8")
+    (repo / "CHANGELOG.md").write_text(CHANGELOG.format(tag="v0.1.25", sha=pin), encoding="utf-8")
+    (repo / "pyproject.toml").write_text(PYPROJECT.format(version="0.1.25"), encoding="utf-8")
+    git(repo, "add", ".gitmodules", "CHANGELOG.md", "pyproject.toml")
+    commit = _record_pin(repo, pin)
+    (repo / ship_mod.METHOD_TREE).mkdir(parents=True, exist_ok=True)
+    return commit
+
+
+def test_a_check_at_a_commit_asks_the_methods_own_remote_not_tccs(repo, tmp_path):
+    """An uninitialised submodule is an empty folder, and `git -C` there runs in TCC's own
+    repository — `ls-remote origin` then listed TCC's tags and said the pin carried none. The URL
+    comes from the commit's `.gitmodules`, and that remote is asked."""
+    pin, bare = _method_remote(tmp_path)
+    commit = _pinned_release(repo, pin, str(bare))
+
+    plan = ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25", at=commit,
+                         say=lambda _m: None)
+
+    assert plan.method_tags == ["v3.0.58"], plan.method_tags
+
+
+def test_a_check_at_a_commit_refuses_a_method_url_it_cannot_read(repo):
+    commit = _commit_the_version(repo)          # no .gitmodules in this commit at all
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25", at=commit,
+                      read_pinned_sha=lambda _root, _at="HEAD": METHOD_SHA, say=lambda _m: None)
+
+    assert ".gitmodules" in str(stop.value) and commit[:12] in str(stop.value)
+
+
+def test_a_check_at_a_commit_asks_about_the_COMMITS_pin_and_refuses_one_with_no_tag(repo):
+    commit = _pinned_release(repo, METHOD_SHA, METHOD_URL)
+    _record_pin(repo, "b" * 40)                  # HEAD pins something else
+    asked = []
+
+    def published(_root, sha, **kw):
+        asked.append((sha, kw.get("remote")))
+        return []
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25", at=commit,
+                      read_published_tags=published, say=lambda _m: None)
+
+    assert asked == [(METHOD_SHA, METHOD_URL)], "the commit's pin, on the commit's method URL"
+    assert METHOD_SHA[:12] in str(stop.value) and "no published tag" in str(stop.value)
+
+
+def test_a_check_at_a_commit_takes_a_candidate_tag_on_the_pin(repo):
+    commit = _pinned_release(repo, METHOD_SHA, METHOD_URL)
+    lines = []
+
+    plan = ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25", at=commit,
+                         read_published_tags=lambda _root, _sha, **_kw: ["beta-v3.1.0-rc2"],
+                         say=lines.append)
+
+    assert plan.method_tags == ["beta-v3.1.0-rc2"]
+    assert any("READY" in line for line in lines), lines
+
+
+def test_a_check_at_a_commit_that_is_not_here_stops_before_any_read(repo):
+    absent = "0123456789abcdef" * 2 + "01234567"
+    read = []
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25", at=absent,
+                      read_pinned_sha=lambda *a: read.append(a) or METHOD_SHA,
+                      say=lambda _m: None)
+
+    assert absent in str(stop.value) and read == []
+
+
+def test_a_check_at_a_commit_without_the_gitlink_says_the_pin_could_not_be_read(repo):
+    commit = _commit_the_version(repo)          # the fixture records no gitlink at all
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25", at=commit,
+                      read_method_url=lambda _root, _sha: METHOD_URL, say=lambda _m: None)
+
+    assert "could not be read" in str(stop.value)
+
+
+def test_a_file_absent_from_a_commit_is_none_and_any_other_failure_is_a_stop(repo):
+    head = git(repo, "rev-parse", "HEAD")
+    assert ship_mod.read_at(repo, head, "no-such-file") is None
+    assert ship_mod.read_at(repo, head, "CHANGELOG.md").startswith("# Changelog")
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        ship_mod.read_at(repo, "f" * 40, "CHANGELOG.md")
+    assert "f" * 40 in str(stop.value), "git's own words travel with the refusal"
+
+
+def test_the_refusal_is_the_last_line_ship_prints(monkeypatch, tmp_path, capsys):
+    """The release train records a check's LAST output line as its reason (release-train.py)."""
+    def refuse(_root, **_kw):
+        raise ship_mod.Stop("git ls-remote -> 128\nfatal: could not read from remote")
+    monkeypatch.setattr(ship_mod, "ship", refuse)
+
+    assert ship_mod.main(["--root", str(tmp_path), "--tag", "v0.2.0", "--at", "abc1234"]) == 1
+
+    out = capsys.readouterr()
+    last = (out.out + out.err).strip().splitlines()[-1]
+    assert "STOP" in last and "git ls-remote -> 128" in last and "fatal" in last, last
