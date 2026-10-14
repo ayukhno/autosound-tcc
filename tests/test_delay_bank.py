@@ -345,6 +345,20 @@ def test_the_entries_the_bank_cannot_read_are_named_with_why(tmp_path):
     assert odd["sub_01 (sw)"][0] == "apf" and "APF3" in odd["sub_01 (sw)"][1]
 
 
+def test_a_bare_entry_that_is_not_a_number_is_named_as_the_dict_form_is(tmp_path):
+    """#208's group review: the first version wrote a bare number; a bare `"1,25"` (a decimal
+    comma typed by hand) was skipped silently by `unread_entries`, so the curve window did not
+    keep it and the next step wrote over it. Named as the dict form's delay is; a bare number
+    that reads is no such entry."""
+    project_settings.set_value(tmp_path, delay_bank.KEY, {
+        "w-L_01 (sw)": "1,25", "w-R_01 (sw)": 0.4, "c_01 (sw)": "0.3"})
+
+    odd = delay_bank.unread_entries(tmp_path, session="S1")
+
+    assert set(odd) == {"w-L_01 (sw)"}, odd
+    assert odd["w-L_01 (sw)"][0] == "ms" and "'1,25'" in odd["w-L_01 (sw)"][1]
+
+
 def test_a_reading_that_keeps_the_filter_keeps_one_of_a_kind_it_cannot_read(tmp_path):
     """#208: a step that moves a driver's delay and leaves its filter (`allpass` not given) wrote
     the entry anew from what `_parsed` read, and a filter of a kind it does not know read as none

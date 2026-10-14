@@ -1996,6 +1996,10 @@ class CurveDialog(QDialog):
             self._view.set_delay_target(target)
         finally:
             self._restoring = False
+        if came_back and touched & {trace.name for trace in self._view._traces}:
+            # What the person set while unread stays on screen, and nothing banked it: closing
+            # the window lost it (#209's group review). The step's own retry banks right after.
+            self._bank_current_delay()
 
     def _frame(self, traces: list, positions: list) -> None:
         """Open on the part being argued about rather than on everything REW recorded."""

@@ -163,7 +163,14 @@ def unread_entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None
     out: dict[str, tuple[str, str]] = {}
     for title, value in (raw if isinstance(raw, dict) else {}).items():
         if not isinstance(value, dict):
-            continue  # a bare number is read, or not a number and not an entry anyone could keep
+            # The first version's bare form, which carries no series: one that is a number is
+            # read; one that is not (`"1,25"`) is named as the object's is, and kept until moved —
+            # skipped silently, the next step wrote over it (#208's group review).
+            try:
+                float(value)
+            except (TypeError, ValueError):
+                out[str(title)] = ("ms", f"delay {value!r} is not a number")
+            continue
         series = value.get("set")
         if session is not None and series is not None and str(series) != session:
             continue

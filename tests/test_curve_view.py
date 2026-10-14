@@ -5208,6 +5208,33 @@ def test_curves_read_again_under_another_series_get_what_each_series_holds(app_l
     assert delay_bank.load(session="S2") == {names[0]: 0.05, names[1]: 0.300}
 
 
+def test_a_touch_kept_through_a_later_good_restore_is_banked_at_once(app_log_told):
+    """#209's group review: a value the person set while the store could not be read stays on
+    screen when a later read of the curves restores the bank — it is theirs — but nothing banked
+    it, and closing the window lost it. A restore that kept a touched value banks right after."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    names = _SIDE[:2]
+    delay_bank.put(names[0], 0.198, session="S1")
+    delay_bank.put(names[1], 0.300, session="S1")
+    dialog = _dialog(list(names), bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog.set_session_provider(lambda: "S1")
+    restore = _a_folder_in_the_store_s_place(project_settings.path_for(config.tcc_dir()))
+    try:
+        _curves_back(dialog, names)  # not read
+        dialog._view.set_delay_target(0)
+        dialog._view.set_delay(0.04)  # the person's, refused while the store cannot be read
+    finally:
+        restore()
+    assert delay_bank.load(session="S1") == {names[0]: 0.198, names[1]: 0.300}
+
+    _curves_back(dialog, names)  # read again, and the store reads now
+
+    assert dialog._view.delays()[:2] == pytest.approx([0.04, 0.300]), "the touch stays on screen"
+    assert delay_bank.load(session="S1") == {names[0]: 0.04, names[1]: 0.300}, "and is banked"
+
+
 def test_curves_read_again_under_another_series_while_still_unread_are_put_back_from_both(
         app_log_told):
     """The re-review of G10 fix A round 2, R1: the store could not be read while S1's curves came
@@ -5571,6 +5598,29 @@ def test_an_entry_on_screen_whose_delay_cannot_be_read_is_kept_until_it_is_moved
     dialog._view.set_delay(0.1)  # the person moves w-R: theirs now
     assert _bank_raw()[wr]["ms"] == 0.1
     assert "0,3" not in dialog._status.text(), "nothing kept to say any more"
+
+
+def test_a_bare_entry_on_screen_that_is_not_a_number_is_kept_until_it_is_moved():
+    """The same for the first version's bare form (#208's group review): `"1,25"` with no object
+    around it was skipped silently, drawn at 0, and the next step on another driver wrote over it."""
+    from autosound_tcc.core import delay_bank
+
+    wl, wr = _SIDE[0], _SIDE[1]
+    delay_bank.put(wl, 0.198)
+    delay_bank.put(wr, 0.3)
+    _bank_edit(wr, "1,25")
+    dialog = _plotted([wl, wr])
+
+    dialog._view.set_delay_target(0)
+    dialog._view.set_delay(0.25)  # a step on w-L only
+
+    assert _bank_raw()[wr] == "1,25", "w-R's bare entry is kept as it was read"
+    status = dialog._status.text()
+    assert "w-R_01" in status and "1,25" in status, status
+
+    dialog._view.set_delay_target(1)
+    dialog._view.set_delay(0.1)  # the person moves w-R: theirs now
+    assert _bank_raw()[wr]["ms"] == 0.1
 
 
 def test_an_entry_on_screen_with_a_filter_of_an_unknown_kind_keeps_its_filter():
