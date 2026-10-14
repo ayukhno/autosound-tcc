@@ -2,8 +2,9 @@
 
     make ship              # dry run — reads everything, writes nothing
     make ship REAL=1       # the real thing
-    make ship VERSION=vY AT=<commit>   # TCC's own pre-tag checks at a commit: dry, no suite;
-                                       # exit 0 = ready, 1 = not, with the reason
+    make ship VERSION=vY AT=<commit>   # TCC's OWN pre-tag checks at a commit, not the hub's
+                                       # preflight: dry, no suite, writes nothing; exit 0 = ready,
+                                       # 1 = not, with the reason
 
 **Dry run is the default, and that is not politeness.** The last step publishes a tag, and a
 published tag can never be moved or deleted by anyone — including the `release` role
@@ -87,12 +88,19 @@ VM paused. So where the tag goes on a commit CI saw (the version committed on th
 carrier's `ci-green` for that commit decides: `ok` — no local run; anything that did not refuse and
 is not `ok` (the check missing, or `не перевірено`) — CI could not be read, and the whole suite runs
 here as the fallback. One line says which. Unknown is never green, and a refusal stays a refusal:
-whether CI that could not be read refuses is the carrier's call (`Check.gates`, today it does), not
-one ship overrides. A bump makes a new commit CI never saw, so the suite runs there as before.
+whether CI that could not be read refuses is the carrier's call (`Check.gates`), not one ship
+overrides. Today it refuses (`ci-green` and `windows-ran` both), so **the local fallback cannot run
+until the hub reports unreadable CI as `не перевірено`** — and whether a release may go out anyway
+with CI unread is the user's decision, not ship's. A bump makes a new commit CI never saw, so the
+suite runs there as before.
 
-`VERSION=vY AT=<commit>` is the same checks against a commit instead of HEAD — the carrier's
-(`preflight(at=…)`) and the inventory read from that commit (`git show`, `git ls-tree`) — with no
-suite and no writes, so the release train can ask TCC «ready?» about its candidate (hub #246).
+`VERSION=vY AT=<commit>` runs **TCC's own** pre-tag checks against that commit, read from it
+(`git show`, `git ls-tree`): the CHANGELOG entry, the version, the recorded pin against `Paired with
+method`, and that pin's published tag. Not the hub's preflight: the release train runs that itself,
+with the tags it promises (`promised`), and asked here without them `minor-pair` would refuse every
+paired release, whose pin carries only the skill's candidate tag until the train cuts it (review of
+tcc#201). The ref is resolved to one full sha once, and every read is of that commit. No suite, and
+nothing written — it reads git objects and asks the method's remote for its tags (`ls-remote`).
 
 ## The tag is signed, and checked before it leaves (tcc#102, hub #83 HUB-032)
 
@@ -206,13 +214,12 @@ def load_carrier(path: Path = CARRIER):
 
 
 def channel_checks(root: Path, path: Path = CARRIER, *, candidate: str | None = None,
-                   version: str | None = None, at: str | None = None):
+                   version: str | None = None):
     """Every channel precondition, asked of the carrier. Returns `(tag, checks)`, writes nothing.
 
     One question per mode: the next patch, the next candidate for `candidate`, or the named
     `version`. The carrier names the tag in the first two and judges it in all three — including
     whether `candidate` or `version` looks like a version at all; ship keeps no copy of that pattern.
-    `at` asks it about that commit instead of HEAD (`make ship VERSION=… AT=…`).
 
     The role is the session's (`HUB_ROLE`), and `tcc` when there is none. It decides which
     repository and line the carrier reports on and which tags the hook lets this session cut: a
@@ -222,8 +229,6 @@ def channel_checks(root: Path, path: Path = CARRIER, *, candidate: str | None = 
     carrier = load_carrier(path)
     if candidate:
         return carrier.preflight(root, role=role, candidate=candidate)
-    if version and at:
-        return carrier.preflight(root, role=role, tag=version, at=at)
     if version:
         return carrier.preflight(root, role=role, tag=version)
     return carrier.preflight(root, role=role, want_next=True)
@@ -633,19 +638,17 @@ def publish(root: Path, tag: str, say: Callable[[str], None]) -> None:
     say(f"  pushed {tag}")
 
 
-def check_at(root: Path, plan: Plan, at: str, say: Callable[[str], None],
+def check_at(root: Path, plan: Plan, sha: str, say: Callable[[str], None],
              read_pinned_sha: Callable[..., str],
              read_published_tags: Callable[[Path, str], list]) -> Plan:
-    """TCC's own pre-tag inventory against commit `at`, after the carrier's — read-only, no suite.
+    """TCC's own pre-tag checks against commit `sha` (full, resolved once) — read-only, no suite.
 
     Everything is read from the commit, not the working tree: the CHANGELOG entry, the version
     (a commit tagged where it stands is not bumped), and the pin the `Paired with method` line is
     held to — CI tested the recorded pin, and no local checkout is in question because nothing
-    runs here. The commit's tests are CI's run on it, which the carrier's `ci-green` judged.
+    runs here. The channel half — CI on the commit, the tag's rule, the pairing with the skill's
+    promised tag — is the hub's preflight, which the release train runs itself.
     """
-    sha = run(["git", "rev-parse", "--verify", "--quiet", f"{at}^{{commit}}"], root, check=False)
-    if not sha:
-        raise Stop(f"`{at}` does not resolve to a commit in {root}")
     plan.version = plan.tag.lstrip("v")
     changelog = check_changelog(root, plan.tag, at=sha)
     check_version_at(root, sha, plan.version)
@@ -661,8 +664,8 @@ def check_at(root: Path, plan: Plan, at: str, say: Callable[[str], None],
     say(f"  version          : {plan.tag} at {sha[:12]}")
     say(f"  method           : {plan.method_sha[:12]}  published as "
         f"{', '.join(plan.method_tags)}")
-    say(f"\n  READY — {plan.tag} at {sha[:12]}: TCC's own checks pass. Dry: nothing was written, "
-        "and no suite ran here — CI's run on that commit is its test run.")
+    say(f"\n  READY — {plan.tag} at {sha[:12]}: TCC's own checks pass (the hub's preflight is the "
+        "train's). Dry: nothing was written, and no suite ran here.")
     return plan
 
 
@@ -678,8 +681,9 @@ def ship(root: Path, release: bool, test_command=None,
 
     Three modes, the skill's model (hub RELEASE-CHANNEL.md §11): the next patch; a candidate for
     `candidate`, which writes nothing and tags HEAD `beta-vX.Y.Z-rcN`; a named `version`, released
-    the way a patch is. With `at`, the named `version` is only checked against that commit: dry,
-    no suite, nothing written (tcc#201, hub #246).
+    the way a patch is. With `at`, the named `version` is only checked against that commit by TCC's
+    own checks — not the hub's preflight, which is the train's: dry, no suite, nothing written
+    (tcc#201, hub #246).
     """
     if candidate and version:
         raise Stop("CANDIDATE and VERSION exclude each other — one run cuts one tag")
@@ -690,9 +694,17 @@ def ship(root: Path, release: bool, test_command=None,
         raise Stop("AT is a dry check and never cuts anything — drop REAL=1; the release itself "
                    "goes through `make ship VERSION=… REAL=1` on that commit, or the release train")
     plan = Plan(root=root, mode="candidate" if candidate else "version" if version else "patch")
+    if at:
+        # Once, to a full sha: a moving ref (`origin/main`) must not name one commit to one read
+        # and another to the next.
+        sha = run(["git", "rev-parse", "--verify", "--quiet", f"{at}^{{commit}}"], root,
+                  check=False)
+        if not sha:
+            raise Stop(f"`{at}` does not resolve to a commit in {root}")
+        plan.tag = version
+        return check_at(root, plan, sha, say, read_pinned_sha, read_published_tags)
 
-    asked = {"at": at} if at else {}
-    tag, checks = channel(root, candidate=candidate or None, version=version or None, **asked)
+    tag, checks = channel(root, candidate=candidate or None, version=version or None)
     say("  channel preflight — hub/scripts/release-preflight.py:")
     for check in checks:
         # The carrier's own verdicts and sentences, not a translation of them: rewording somebody
@@ -709,9 +721,6 @@ def ship(root: Path, release: bool, test_command=None,
                    "directly before shipping")
     plan.tag = tag
     ci_green = any(check.name == CI_GREEN and check.verdict == CARRIER_OK for check in checks)
-
-    if at:
-        return check_at(root, plan, at, say, read_pinned_sha, read_published_tags)
 
     if plan.mode == "candidate":
         check_candidate_changelog(root, candidate)
@@ -817,8 +826,9 @@ def main(argv=None) -> int:
                       help="release this version instead of the next patch; the hub decides "
                            "whether this role may")
     parser.add_argument("--at", metavar="COMMIT", default="",
-                        help="with --tag: only check that release against this commit — dry, no "
-                             "suite; exit 0 = ready (the release train's `check`, hub #246)")
+                        help="with --tag: TCC's own pre-tag checks of that release at this commit, "
+                             "not the hub's preflight — dry, no suite; exit 0 = ready (the release "
+                             "train's `check`, hub #246)")
     args = parser.parse_args(argv)
 
     root = Path(args.root)

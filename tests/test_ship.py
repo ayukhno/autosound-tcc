@@ -682,7 +682,6 @@ def test_the_stand_in_has_the_carriers_shape():
     asks = inspect.signature(carrier.preflight).parameters
     assert {"tag", "want_next", "candidate"} <= set(asks), (
         "ship asks the carrier for a patch, a candidate or a named tag; one of those questions is gone")
-    assert "at" in asks, "`make ship VERSION=… AT=…` asks the carrier about a commit, not HEAD"
     assert carrier.OK == ship_mod.CARRIER_OK, (
         "ship skips its suite only on the carrier's own `ok` for ci-green — that word has moved")
     names = {check.name for check in [carrier.ci_verdict(None, "github.com/o/r", "f" * 40)]}
@@ -1582,17 +1581,18 @@ def test_a_check_at_a_commit_reads_that_commit_and_writes_nothing(repo, tmp_path
     commit = _at_commit(repo)
     head = git(repo, "rev-parse", "HEAD")
     ran = tmp_path / "suite-ran"
-    seen, lines = {}, []
+    asked, lines = [], []
 
-    def ask(_root, **asked):
-        seen.update(asked)
-        return "v0.1.25", checks(("clean-tree", OK), ("ci-green", OK), ("rule", OK))
+    def ask(_root, **question):
+        asked.append(question)
+        return "v0.1.25", checks(("clean-tree", OK))
 
     plan = _run(repo, release=False, test_exit=1, ran=ran, ask=ask, say=lines.append,
-                version="v0.1.25", at=commit)
+                version="v0.1.25", at=commit[:9])
 
-    assert seen == {"candidate": None, "version": "v0.1.25", "at": commit}, \
-        "the carrier is asked about the commit, not HEAD"
+    # The train runs the hub's preflight itself, with the tags it promises (`promised`); asked
+    # here without them, `minor-pair` refuses every paired release (review of tcc#201).
+    assert asked == [], "AT runs TCC's own checks only — the hub's preflight is the train's"
     assert (plan.mode, plan.tag, plan.version) == ("version", "v0.1.25", "0.1.25")
     assert plan.commands[0] == f"git tag -s v0.1.25 -m v0.1.25 {commit}"
     assert not ran.exists(), "a check at a commit never runs the local suite"
@@ -1656,16 +1656,42 @@ def test_a_check_at_a_commit_is_dry_and_names_its_version(repo, mode, expect):
     assert git(repo, "tag", "--list") == "v0.1.24", "nothing was tagged"
 
 
-def test_the_recorded_pin_is_read_at_a_given_commit_for_real():
-    root = Path(__file__).resolve().parents[1]
-    if not (root / "vendor" / "autosound-tuning-skill").exists():
-        pytest.skip("submodule not checked out")
-    first = subprocess.run(["git", "rev-list", "--max-count=1", "HEAD~1"], cwd=str(root),
-                           capture_output=True, text=True).stdout.strip()
+def _record_pin(repo, sha):
+    """Commit a gitlink for the method at `sha` — what a pin move records, without a submodule."""
+    git(repo, "update-index", "--add", "--cacheinfo", f"160000,{sha},{ship_mod.METHOD_TREE}")
+    git(repo, "commit", "--quiet", "-m", f"pin {sha[:7]}")
+    return git(repo, "rev-parse", "HEAD")
 
-    said = subprocess.run(["git", "ls-tree", first, "vendor/autosound-tuning-skill"],
-                          cwd=str(root), capture_output=True, text=True).stdout.split()
-    assert ship_mod.pinned_method_sha(root, first) == said[2]
+
+def test_the_recorded_pin_is_read_at_the_given_commit_not_at_head(repo):
+    first = _record_pin(repo, "a" * 40)
+    _record_pin(repo, "b" * 40)
+
+    assert ship_mod.pinned_method_sha(repo, first) == "a" * 40
+    assert ship_mod.pinned_method_sha(repo) == "b" * 40
+
+
+def test_a_moving_ref_is_resolved_once_and_that_commit_is_read_throughout(repo):
+    """`AT=origin/main` must not name one commit to one check and another to the next."""
+    commit = _commit_the_version(repo)
+    read = []
+
+    def pinned(_root, at="HEAD"):
+        read.append(at)
+        # main moves while the check runs: a second read of the ref would see the new commit
+        (repo / "CHANGELOG.md").write_text(UNRELEASED.format(sha=METHOD_SHA), encoding="utf-8")
+        git(repo, "commit", "--quiet", "-am", "moved on")
+        git(repo, "push", "--quiet", "origin", "main")
+        git(repo, "fetch", "--quiet", "origin")
+        return METHOD_SHA
+
+    plan = ship_mod.ship(repo, release=False, channel=channel(), version="v0.1.25",
+                         at="origin/main", read_method_sha=lambda _root: METHOD_SHA,
+                         read_pinned_sha=pinned,
+                         read_published_tags=lambda _root, _sha: ["v3.0.58"], say=lambda _m: None)
+
+    assert read == [commit], "the ref is resolved to one full sha before anything is read"
+    assert plan.commands[0].endswith(commit)
 
 
 def test_the_command_line_takes_a_commit_and_answers_ready_by_its_exit(monkeypatch, tmp_path):
