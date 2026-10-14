@@ -106,6 +106,8 @@ def test_every_line_does_what_the_old_menu_did(monkeypatch):
         (t("gateForeign"), ("_set_gate_mode", ("foreign",), {})),
         (t("gateAuto"), ("_set_gate_mode", ("auto",), {})),
         (t("gateNever"), ("_set_gate_mode", ("never",), {})),
+        # Nothing ticked on the recorder: it asks, and stops there.
+        (t("gateAskAgain"), ("_always_allowed", (), {})),
         ("◐ " + t("menuTheme"), ("_toggle_theme", (), {})),
         *[(t(key), ("_on_language_selected", (code,), {})) for code, key, _badge in i18n.LANGS],
         (t("menuZoomIn"), ("_zoom_in", (), {})),
@@ -141,6 +143,10 @@ def test_every_entry_calls_a_method_the_window_has():
 
 class _Host:
     _agent_worker = None
+    ticks: frozenset = frozenset()
+
+    def _always_allowed(self):
+        return self.ticks
 
     def _effective_gate(self):
         return "foreign"
@@ -164,8 +170,9 @@ def test_the_ticks_and_the_greyed_lines_follow_the_window(monkeypatch):
     finally:
         i18n.set_language("en")
     greyed = [e.id for e in entries if e.enabled and not e.enabled(host)]
-    assert greyed == ["save_state", "fresh_session"]
+    assert greyed == ["save_state", "fresh_session", "gate_ask_again"]
     host._agent_worker = object()
+    host.ticks = frozenset({"Bash"})
     assert all(e.enabled(host) for e in entries if e.enabled)
 
 
@@ -292,3 +299,46 @@ def test_the_registry_imports_no_qt():
         for place, _key in menu_registry.SECTIONS:
             menu_registry.ordered(entries, place)
     """) == "[]"
+
+
+class _Ticked:
+    """A window with ticks in its project's settings, as `MainWindow` keeps them."""
+
+    def __init__(self, ticks: str):
+        self.store = {"always_allowed": ticks}
+        self.said: list = []
+        self.pushed: list = []
+        self._dialog = types.SimpleNamespace(
+            _add_system_message=lambda text, *a, **k: self.said.append(text))
+
+    def _always_allowed(self):
+        return frozenset(part for part in self.store["always_allowed"].split(",") if part)
+
+    def _set_project_setting(self, key, value):
+        self.store[key] = value
+        return True
+
+    def _push_gate_to_session(self):
+        self.pushed.append(self._always_allowed())
+
+
+def test_ask_again_is_offered_only_with_ticks_and_its_tip_names_them():
+    """A «don't ask again» tick could not be taken back but by editing `.tcc/tcc-project.json`
+    (the Arbiter's VM, W-10)."""
+    entry = _entry("gate_ask_again")
+    assert entry.place == "gate" and entry.after == "gate_never"
+    assert not entry.enabled(_Ticked(""))
+    ticked = _Ticked("Bash,copy_helix_eq")
+    assert entry.enabled(ticked)
+    assert entry.tip_of(ticked) == i18n.t("gateAskAgainTicked").format(
+        tools="Bash, copy_helix_eq")
+    assert entry.tip_of(_Ticked("")) == ""
+
+
+def test_ask_again_clears_the_ticks_pushes_the_gate_and_says_it_once():
+    host = _Ticked("Bash,copy_helix_eq")
+    _entry("gate_ask_again").on(host)
+
+    assert host.store[menu_registry.ALWAYS_KEY] == ""
+    assert host.pushed == [frozenset()]
+    assert host.said == [i18n.t("askAgainSaid").format(tools="Bash, copy_helix_eq")]

@@ -61,6 +61,7 @@ def pinned_rows() -> list[tuple]:
         line(2, t("gateForeign"), "gateModeTip", checkable=True),
         line(2, t("gateAuto"), "gateAutoTip", checkable=True),
         line(2, t("gateNever"), "gateNeverTip", checkable=True),
+        line(2, t("gateAskAgain"), "gateAskAgainTip"),
         line(1, "◐ " + t("menuTheme")),
         menu(1, t("menuLanguage")),
         *[line(2, t(key), checkable=True) for _code, key, _badge in i18n.LANGS],

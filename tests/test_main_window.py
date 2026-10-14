@@ -1482,6 +1482,9 @@ class _MenuHost:
     def _eq_order_pref(self):
         return "auto"
 
+    def _always_allowed(self):
+        return frozenset()
+
     def __getattr__(self, name):
         if name.startswith("__"):
             raise AttributeError(name)
@@ -2280,6 +2283,48 @@ def test_the_line_goes_away_once_the_record_exists(tmp_path, monkeypatch):
     window._notify_missing_records({"active_phase": "0", "targets": {"FULL": "EPY"}})
 
     assert cleared == [True]
+
+
+def test_ask_again_clears_the_ticks_and_the_running_session_asks_again(tmp_path, monkeypatch):
+    """A tick could not be taken back but by hand in `.tcc/tcc-project.json` (W-10). The line is
+    off with no ticks, on with one, and pressing it reaches the session already running."""
+    from autosound_tcc.core import config, omp_session, project_settings
+    from autosound_tcc.core.shell_gate import judge_action
+    from autosound_tcc.ui.tcc import window_folder
+
+    _app()
+    window = MainWindow()
+
+    class Session:
+        gate = omp_session.GATE_WRITES
+        always_allowed = frozenset({"Bash"})
+
+    class Worker:
+        session = Session()
+
+    window._agent_worker = Worker()
+    monkeypatch.setattr(config, "tcc_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(window_folder, "tcc_dir", lambda *_a, **_k: tmp_path)
+    line = window._main_menu.action("gate_ask_again")
+    window._main_menu.sync()
+    assert not line.isEnabled()
+
+    project_settings.set_value(tmp_path, "always_allowed", "Bash")
+    window._main_menu.sync()
+    assert line.isEnabled() and "Bash" in line.toolTip()
+    assert judge_action("Bash", "rm a.txt", gate=omp_session.GATE_WRITES,
+                        always_allowed=Worker.session.always_allowed,
+                        read_roots=(tmp_path,)).allowed  # the tick, before it is taken back
+
+    line.trigger()
+
+    assert project_settings.get(tmp_path, "always_allowed", "") == ""
+    assert Worker.session.always_allowed == frozenset()
+    assert not judge_action("Bash", "rm a.txt", gate=omp_session.GATE_WRITES,
+                            always_allowed=Worker.session.always_allowed,
+                            read_roots=(tmp_path,)).allowed
+    window._main_menu.sync()
+    assert not line.isEnabled()
 
 
 def test_changing_the_permission_mode_reaches_the_running_session(tmp_path, monkeypatch):

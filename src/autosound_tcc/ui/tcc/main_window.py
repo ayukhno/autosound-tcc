@@ -212,7 +212,7 @@ _MACHINE_GATE_KEY = "gate/machine"
 _TERMINAL_ASKED_KEY = "gate/default-terminal-asked"
 _EFFORT_KEY = "effort"                # per project: how hard the Generator is asked to think
 _LAYOUT_KEY = "layout"                # per project: "control" (session in a terminal) or "gui"
-_ALWAYS_KEY = "always_allowed"        # per project: tools the Arbiter stopped being asked about
+_ALWAYS_KEY = menu_registry.ALWAYS_KEY  # per project: tools the Arbiter stopped being asked about
 _ACTIVE_OMP_KEY = "ai/active_omp"     # per user: selectors marked usable on this machine
 
 # What the outgoing model is asked to do before its session ends. Written as instructions to a

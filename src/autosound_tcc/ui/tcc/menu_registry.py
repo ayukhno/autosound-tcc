@@ -50,6 +50,7 @@ class MenuEntry:
     after: str = ""
     alias: str = ""  # the window attribute the tests drive this line by
     alias_key: str = ""  # set → that attribute is a dict, and this line its entry
+    tip_of: Optional[Callable[[Any], str]] = None  # the tip asked of the window; "" → `tip_key`'s
 
     def text(self) -> str:
         """What the line says, in the current language."""
@@ -109,6 +110,34 @@ def _gates() -> list[MenuEntry]:
                                    (GATE_FOREIGN, "gateForeign", "gateModeTip"),
                                    (GATE_AUTO, "gateAuto", "gateAutoTip"),
                                    (GATE_NEVER, "gateNever", "gateNeverTip"))]
+
+
+#: Per project: the tools the Arbiter ticked «don't ask again» on (the window's `_ALWAYS_KEY`).
+ALWAYS_KEY = "always_allowed"
+
+
+def _ticked(host) -> str:
+    return ", ".join(sorted(host._always_allowed() or ()))
+
+
+def _ask_again(host) -> None:
+    """Every «don't ask again» tick of this project taken back, at once in the running session
+    too: before this line a tick could be undone only by editing `.tcc/tcc-project.json` (the
+    Arbiter's VM, W-10). Said once in the chat, as a tick is."""
+    tools = _ticked(host)
+    if not tools:
+        return
+    if host._set_project_setting(ALWAYS_KEY, ""):  # else: the writer said why
+        host._dialog._add_system_message(i18n.t("askAgainSaid").format(tools=tools))
+    host._push_gate_to_session()
+
+
+def _ask_again_entry() -> MenuEntry:
+    return MenuEntry("gate_ask_again", "gate", label_key="gateAskAgain",
+                     tip_key="gateAskAgainTip", on=_ask_again, after="gate_never",
+                     enabled=lambda w: bool(_ticked(w)),
+                     tip_of=lambda w: (i18n.t("gateAskAgainTicked").format(tools=_ticked(w))
+                                       if _ticked(w) else ""))
 
 
 def _languages() -> list[MenuEntry]:
@@ -194,6 +223,7 @@ def window_entries() -> list[MenuEntry]:
                   tip_key="menuReviewerKeyTip", on=lambda w: w._open_reviewer_key()),
         MenuEntry("gate", "settings", label_key="gateMode", submenu=True),
         *_gates(),
+        _ask_again_entry(),
         MenuEntry("theme", "settings", label_key="menuTheme", prefix="◐ ",
                   on=lambda w: w._toggle_theme()),
         MenuEntry("language", "settings", label_key="menuLanguage", submenu=True),

@@ -127,6 +127,8 @@ class MainMenu:
                 action.setEnabled(bool(entry.enabled(self._host)) if entry.enabled else True)
                 if entry.checked is not None:
                     action.setChecked(bool(entry.checked(self._host)))
+                if entry.tip_of is not None:  # a tip that names the window's state (W-10)
+                    action.setToolTip(entry.tip_of(self._host) or entry.tip())
             except Exception:  # noqa: BLE001 — one line must not stop the menu's state
                 app_log.logger().warning("main menu: the line %r could not say its state",
                                          entry.id, exc_info=True)
