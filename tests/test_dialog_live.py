@@ -24,6 +24,8 @@ from autosound_tcc.core.agent_events import (  # noqa: E402
     QuestionWithdrawn,
     TextDelta,
     ToolCall,
+    ToolEnd,
+    TurnEnd,
 )
 from autosound_tcc.core.mcp_server import ConfirmRequest  # noqa: E402
 from autosound_tcc.core.signal_bus import SignalBus  # noqa: E402
@@ -1527,3 +1529,134 @@ def test_a_turn_ends_even_when_its_last_words_cannot_be_drawn(tmp_path, monkeypa
 
     assert panel._busy is False and panel._live_bubble is None
     assert "could not be drawn" in caplog.text
+
+
+# ---- Stop, then the next message (W-10's Windows pass, Codex route) ------------------------------
+
+
+class _InterruptibleSession:
+    """Each sent turn streams, runs a tool and waits; `interrupt` ends it the way Codex does — late
+    (`LATE_S` after the Stop, as `turn/completed` interrupted arrives), with the open tool closed
+    and `TurnEnd` last (F2). `finish` ends the running turn normally."""
+
+    LATE_S = 0.3
+
+    def __init__(self):
+        self.started: list[str] = []
+        self.ended: list[str] = []
+        self._end = None
+
+    async def start(self, prompt=None):
+        yield TurnEnd("t")
+
+    async def send(self, text):
+        import asyncio
+
+        self.started.append(text)
+        self._end = asyncio.Event()
+        yield TextDelta(f"answer to {text}")
+        yield ToolCall("Bash", {})
+        await self._end.wait()
+        yield ToolEnd("Bash")
+        yield TurnEnd("t")
+        self.ended.append(text)
+
+    async def interrupt(self):
+        import asyncio
+
+        end = self._end
+        if end is not None:
+            asyncio.get_running_loop().call_later(self.LATE_S, end.set)
+
+    def finish(self, worker):
+        worker._loop.call_soon_threadsafe(self._end.set)
+
+    async def close(self):
+        pass
+
+
+def _pump_until(condition, timeout=5.0):
+    app = QApplication.instance()
+    deadline = time.monotonic() + timeout
+    while not condition() and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.005)
+    app.processEvents()
+    return condition()
+
+
+@pytest.fixture
+def _live(tmp_path):
+    session = _InterruptibleSession()
+    worker = AgentWorker(session_factory=lambda: session)
+    panel = DialogPanel()
+    panel.attach_agent(worker, SignalBus(tmp_path))
+    worker.start()
+    assert _pump_until(lambda: not panel._busy)  # the opening turn is over
+    yield panel, worker, session
+    worker.shutdown(timeout_ms=4000)
+
+
+def _say(panel, text):
+    panel._input.setText(text)
+    panel._on_send()
+
+
+def _working(panel):
+    return (panel._busy and not panel._stop_btn.isHidden()
+            and panel._sub_label.text().startswith(i18n.t("agentThinking")))
+
+
+def test_stop_then_idle_switches_the_indicator_off_and_takes_the_next_message(_live):
+    panel, worker, session = _live
+    _say(panel, "one")
+    assert _pump_until(lambda: session.started == ["one"]) and _working(panel)
+
+    panel._on_stop()
+
+    assert _working(panel)  # until the interrupted turn has actually ended
+    assert _pump_until(lambda: not panel._busy)
+    assert panel._stop_btn.isHidden() and panel._sub_label.text() == i18n.t("dialogSub")
+    _say(panel, "two")
+    assert _pump_until(lambda: session.started == ["one", "two"]) and _working(panel)
+
+
+def test_a_message_sent_before_the_stopped_turn_ends_keeps_the_indicator_on(_live):
+    """Stop, then a message before the interrupted turn's own end has come back: that late end
+    belongs to the old turn, and the indicator stays on through the new one to ITS end."""
+    panel, worker, session = _live
+    _say(panel, "one")
+    assert _pump_until(lambda: session.started == ["one"])
+
+    panel._on_stop()
+    _say(panel, "two")  # the old turn's end is still LATE_S away
+
+    assert _pump_until(lambda: session.ended == ["one"])
+    assert _pump_until(lambda: session.started == ["one", "two"])
+    assert _working(panel)
+    time.sleep(_InterruptibleSession.LATE_S)  # anything late from the old turn has had its chance
+    QApplication.instance().processEvents()
+    assert _working(panel)
+    session.finish(worker)
+    assert _pump_until(lambda: not panel._busy)
+    assert session.ended == ["one", "two"] and panel._stop_btn.isHidden()
+
+
+def test_send_now_interrupts_and_the_new_turn_shows_working_to_its_end(_live):
+    """The frame log's 587 s: a message sent mid-turn, «send now», `turn/interrupt`, and the new
+    `turn/start` 10 ms after the old turn's end."""
+    panel, worker, session = _live
+    _say(panel, "one")
+    assert _pump_until(lambda: session.started == ["one"])
+    _say(panel, "what to do")
+    assert panel._queued == ["what to do"]
+
+    panel._on_send_queued_now()
+
+    assert _pump_until(lambda: session.started == ["one", "what to do"])
+    assert _working(panel) and not panel._queued
+    time.sleep(_InterruptibleSession.LATE_S)
+    QApplication.instance().processEvents()
+    assert _working(panel)
+    session.finish(worker)
+    assert _pump_until(lambda: not panel._busy)
