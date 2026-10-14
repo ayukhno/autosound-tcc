@@ -132,6 +132,21 @@ def test_the_command_line_prints_one_shard_and_nothing_else():
     assert printed == ci_shard.split(ci_shard.test_files(ROOT), ci_shard.load_weights(), 4)[1]
 
 
+def test_the_shard_note_is_utf8_whatever_the_console_encoding():
+    """tcc#202: on Windows a pipe gets the console's code page, so the note's «—» went out as
+    cp1252's 0x97 and the reader expecting UTF-8 died in its thread — the warning in main's run on
+    8dc1087. `PYTHONIOENCODING=cp1252` is that console on any machine."""
+    import os
+
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    done = subprocess.run([sys.executable, str(ROOT / "scripts" / "ci_shard.py"),
+                           "--splits", "4", "--group", "2"],
+                          capture_output=True, env=env)
+
+    assert done.returncode == 0, done.stderr
+    assert "—" in done.stderr.decode("utf-8"), done.stderr
+
+
 def test_a_group_outside_the_split_is_refused_rather_than_silently_empty():
     for argv in (["--splits", "4", "--group", "0"], ["--splits", "4", "--group", "5"]):
         done = subprocess.run([sys.executable, str(ROOT / "scripts" / "ci_shard.py"), *argv],

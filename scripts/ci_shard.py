@@ -116,4 +116,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # UTF-8 whatever the console: on Windows a pipe gets the code page, and the note's «—» went out
+    # as cp1252's 0x97 to a reader expecting UTF-8 (tcc#202).
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8")
     raise SystemExit(main())
