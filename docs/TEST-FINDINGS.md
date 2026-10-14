@@ -3725,4 +3725,8 @@ but the person never sees its answer.
 **Weight.** Medium: a security check the user cannot see is one he cannot trust or report on. The method's half
 runs the skill's own `upkeep.py`; whose line it is there — the review decides.
 
+**Proposal** (the Arbiter, 2026-10-14, the same day): a «security checked» mark beside each version on the
+Updates tab of Project diagnostics — `TCC 1.1.3 — up to date` and `The method 3.1.3 — up to date` — saying the
+installed tag's signature was checked and good.
+
 **Task.** W-10's pool (collection).
