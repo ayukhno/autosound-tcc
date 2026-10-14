@@ -471,16 +471,24 @@ def _toml_string(text: str) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def tcc_tool_args(url: str, *, timeout_sec: int) -> list[str]:
-    """TCC's MCP server for a Codex session: its url, the token by name from the environment
-    (`TCC_MCP_TOKEN` — never in argv), tools approved by TCC's own gate, and a tool timeout above
-    a confirmation's and a review's (Codex's ~60 s default would cut one)."""
+def tcc_connection_args(url: str, *, timeout_sec: int) -> list[str]:
+    """How Codex reaches TCC's MCP server, and nothing more: its url, the token by name from the
+    environment (`TCC_MCP_TOKEN` — never in argv), and a tool timeout above a confirmation's and a
+    review's (Codex's ~60 s default would cut one). The terminal's whole share (`codex_terminal`,
+    task 8): there the user's own Codex config rules approvals and extras (the Arbiter,
+    2026-10-14)."""
     return [
         *_c("mcp_servers.tcc.url", _toml_string(url)),
         *_c("mcp_servers.tcc.env_http_headers", '{"X-TCC-Token"="' + TOKEN_ENV + '"}'),
-        *_c("mcp_servers.tcc.default_tools_approval_mode", '"approve"'),
         *_c("mcp_servers.tcc.tool_timeout_sec", str(int(timeout_sec))),
     ]
+
+
+def tcc_tool_args(url: str, *, timeout_sec: int) -> list[str]:
+    """TCC's MCP server for a Codex session: the connection (`tcc_connection_args`), its tools
+    approved by TCC's own gate."""
+    return [*tcc_connection_args(url, timeout_sec=timeout_sec),
+            *_c("mcp_servers.tcc.default_tools_approval_mode", '"approve"')]
 
 
 def _config(config_read: Mapping) -> Mapping:
@@ -533,6 +541,7 @@ __all__ = [
     "Found", "Probe", "MIN_VERSION", "PIN", "SOURCE_PATH", "SOURCE_FOLDER", "SOURCE_TCC",
     "find", "forget", "version", "too_old", "usable", "probe", "signed_in", "models",
     "supported_efforts", "efforts_in", "tcc_copy_path", "dock_folders", "tcc_tool_args",
+    "tcc_connection_args",
     "isolation_args",
     "unsafe_server_names", "unknown_enabled_features", "OFF_FEATURES", "HARMLESS_FEATURES",
 ]

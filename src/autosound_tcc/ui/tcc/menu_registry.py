@@ -25,7 +25,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from autosound_tcc.core import app_log, guide
+from autosound_tcc.core import app_log, guide, terminal_launcher
 from autosound_tcc.core.shell_gate import GATE_AUTO, GATE_FOREIGN, GATE_NEVER, GATE_WRITES
 from autosound_tcc.ui.tcc import i18n
 
@@ -127,6 +127,17 @@ def _guides() -> list[MenuEntry]:
                 ("curve", "menuGuideCurve", "menuGuideCurveTip", guide.HOUSE_CURVE))]
 
 
+def _terminal_clients() -> list[MenuEntry]:
+    """«Open terminal in this project…»: a plain shell, then each client by its own name (tcc
+    #180). Greyed when not installed — asked when the submenu opens (`MainMenu.sync`), stat only."""
+    plain = terminal_launcher.TERMINAL
+    return [MenuEntry(f"terminal_{client}", "terminal",
+                      label_key="terminalPlain" if client == plain else "", label=name,
+                      on=lambda w, c=client: w._open_terminal(c),
+                      enabled=lambda _w, c=client: terminal_launcher.client_available(c))
+            for client, name in ((plain, ""), *terminal_launcher.MENU_CLIENTS)]
+
+
 def window_entries() -> list[MenuEntry]:
     """Everything the window can do, line by line, in the order the menu shows it."""
     return [
@@ -150,7 +161,8 @@ def window_entries() -> list[MenuEntry]:
         # things you can SEE, sized to a footer. A menu line has room to say what it does.
         MenuEntry("start_session", "session", label_key="menuStartSession",
                   on=lambda w: w._start_tuning_session()),
-        MenuEntry("terminal", "session", label_key="menuTerminal", on=lambda w: w._open_terminal()),
+        MenuEntry("terminal", "session", label_key="menuTerminal", submenu=True),
+        *_terminal_clients(),
         MenuEntry("save_state", "session", label_key="projectSaveState",
                   tip_key="projectSaveStateTip", on=lambda w: w._save_project_state(),
                   enabled=_session_running),

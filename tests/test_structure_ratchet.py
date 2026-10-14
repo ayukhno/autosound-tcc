@@ -35,8 +35,9 @@ BUILD = "Main" + "Window("
 #: 6201 after the plan's guard did, into `process_state_line.Unread`, #176; 6190 after the compare
 #: offer did, into `ledger_line.compare_offer`, #179; W-10: 6138 after the model pickers'
 #: decisions moved into `model_picks` — the plan, the reviewer's notes, the stand-ins, #196;
-#: 6095 after the routing did, into `session_routes` — factory, refusals, resume, terminal, #181).
-MAIN_WINDOW_MAX_LINES = 6095
+#: 6095 after the routing did, into `session_routes` — factory, refusals, resume, terminal, #181;
+#: 6080 after «Open terminal» moved into `terminal_menu` — the submenu and its launch, #180).
+MAIN_WINDOW_MAX_LINES = 6080
 #: Full-window builds in the tests, outside comments (W-8: 223 on 2026-10-06, 218 after the menu
 #: tests became renderer tests, #161; W-9: 212 after the «settled» tests became plain tests over a
 #: recorded round, #175; 208 after the capture series' tests did, #175; 207 after the compare

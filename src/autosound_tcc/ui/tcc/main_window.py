@@ -101,7 +101,7 @@ from autosound_tcc.state import (
 from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, VersionRefused, load_project_view, rig_view
 from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, mcp_view, sizing
-from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line
+from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line, terminal_menu
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc import qt_shutdown
@@ -115,7 +115,7 @@ from autosound_tcc.ui.tcc import dsp_tree
 from autosound_tcc.ui.tcc.dsp_tree import DspTreeWidget
 from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel, TrafficLight
 from autosound_tcc.ui.tcc.model_config_dialog import ModelConfigDialog
-from autosound_tcc.ui.tcc import control_layout, listening_dialog, protective_dialog
+from autosound_tcc.ui.tcc import listening_dialog, protective_dialog
 from autosound_tcc.ui.tcc.control_layout import ControlLayout
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.resonalyze_import_dialog import ResonalyzeImportDialog
@@ -1294,7 +1294,7 @@ class MainWindow(QMainWindow):
         self._terminal_btn = QPushButton(i18n.t("openTerminal"))
         self._terminal_btn.setProperty("class", "reason-btn")
         self._terminal_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._terminal_btn.clicked.connect(self._open_terminal)
+        terminal_menu.attach(self._terminal_btn, self)  # the menu's clients (#180)
         # Front-end B is real and tested, but it is not in the workflow being built right now:
         # showing a second way in before the first one is finished only splits attention.
         self._terminal_btn.setHidden(True)
@@ -5723,25 +5723,10 @@ class MainWindow(QMainWindow):
         if worker is not None:
             self._hand_off(worker, "fresh")
 
-    def _open_terminal(self) -> None:
-        """Front-end B: the project in the user's own CLI — the one that carries the pick
-        (`session_routes.terminal_invocation`) — in their own terminal."""
-        project_dir = self._mcp_server.project_dir if self._mcp_server else config.project_dir()
-        choice = self._generator_choice()
-        cli, model, extra = session_routes.terminal_invocation(choice, project_dir)
-        try:
-            launched = terminal_launcher.launch(
-                project_dir, cli=cli, model=model, extra=extra,
-                env=critic.session_env(project_dir),  # the reviewer's route, as in-app (hub #236)
-            )
-        except terminal_launcher.TerminalLaunchError as exc:
-            self._status_strip.notify(str(exc), level="warn")
-            return
-        self._status_strip.notify(i18n.t("terminalOpened").format(cli=launched))
-        if self._control_layout.active:
-            # The terminal takes the left half (F-069, A12) — once its window exists.
-            screen = self.screen().availableGeometry()
-            QTimer.singleShot(1500, lambda: control_layout.place_terminal_left(screen))
+    def _open_terminal(self, client: Optional[str] = None) -> None:
+        """Front-end B: the project in the user's own terminal — `client`, or the CLI that carries
+        the pick when none is named (`terminal_menu.open_in`, #180)."""
+        terminal_menu.open_in(self, client)
 
     def _on_logged_error(self, message: str, path) -> None:
         """Called from `app_log` when something was written to the log. Never from a worker

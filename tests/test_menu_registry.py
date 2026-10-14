@@ -87,7 +87,11 @@ def test_every_line_does_what_the_old_menu_did(monkeypatch):
         (t("menuIntake"), ("_open_intake_form", (), {})),
         (t("menuReload"), ("_on_reload_pressed", (), {})),
         (t("menuStartSession"), ("_start_tuning_session", (), {})),
-        (t("menuTerminal"), ("_open_terminal", (), {})),
+        (t("terminalPlain"), ("_open_terminal", ("terminal",), {})),
+        ("Claude", ("_open_terminal", ("claude",), {})),
+        ("Codex", ("_open_terminal", ("codex",), {})),
+        ("Antigravity", ("_open_terminal", ("agy",), {})),
+        ("OMP", ("_open_terminal", ("omp",), {})),
         (t("projectSaveState"), ("_save_project_state", (), {})),
         (t("projectFreshSession"), ("_start_fresh_session", (), {})),
         (t("menuDiagnostics"), ("_open_diagnostics", (), {})),
@@ -145,9 +149,12 @@ class _Host:
         return "q_first"
 
 
-def test_the_ticks_and_the_greyed_lines_follow_the_window():
+def test_the_ticks_and_the_greyed_lines_follow_the_window(monkeypatch):
     """What `_sync_menu_state` sets today: the project's gate, this machine's EQ order and the
-    language ticked; saving and a fresh session only with a session running."""
+    language ticked; saving and a fresh session only with a session running. «Open terminal»'s
+    clients follow the machine, not the window (`test_terminal_menu`): all installed here."""
+    from autosound_tcc.core import terminal_launcher
+    monkeypatch.setattr(terminal_launcher, "client_available", lambda client: True)
     entries = menu_registry.window_entries()
     host = _Host()
     i18n.set_language("uk")

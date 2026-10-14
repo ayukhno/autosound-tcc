@@ -141,6 +141,8 @@ class MainMenu:
             if entry.submenu:
                 sub = tip_menu(menu)
                 sub.setTitle(entry.text())
+                # Its lines asked again as it opens: «Open terminal»'s clients come and go (#180).
+                sub.aboutToShow.connect(self.sync)
                 self._fill(sub, entries, entry.id)
                 action = menu.addMenu(sub)
             else:

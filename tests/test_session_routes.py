@@ -9,6 +9,7 @@ The second half tests `session_routes` as plain functions.
 from __future__ import annotations
 
 import os
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -323,10 +324,57 @@ def test_omp_without_config_names_the_file_it_could_not_read_or_move(tmp_path):
     assert mcp_view.say(Refusal("ompMissing")) == i18n.t("ompMissing")
 
 
-@pytest.mark.parametrize("harness, cli", [("sdk", "claude"), ("omp", "omp"), ("codex", "claude")])
-def test_terminal_invocation_per_harness(tmp_path, harness, cli):
-    """A Codex pick still opens `claude`: today's gap, closed by task 8, pinned until then."""
+def _codex_found(monkeypatch, found=True):
+    from autosound_tcc.core import codex_cli
+    monkeypatch.setattr(codex_cli, "find", lambda **_kw: (
+        codex_cli.Found("/opt/codex", codex_cli.SOURCE_PATH) if found else None))
+
+
+def _codex_line(project_dir):
+    return ("-m", "autosound_tcc.core.codex_terminal", str(project_dir))
+
+
+@pytest.mark.parametrize("harness, cli", [("sdk", "claude"), ("omp", "omp"), ("codex", "codex")])
+def test_terminal_invocation_per_harness(tmp_path, monkeypatch, harness, cli):
+    """A Codex pick opens Codex with TCC's tools (`codex_terminal`, task 8) — no longer `claude`."""
+    _codex_found(monkeypatch)
     got = session_routes.terminal_invocation(SimpleNamespace(harness=harness, model="m"), tmp_path)
 
-    extra = ("--config", str(omp_session.overlay_path(tmp_path))) if harness == "omp" else ()
-    assert got == (cli, "m", extra)
+    if harness == "codex":
+        assert got == (sys.executable, "m", _codex_line(tmp_path))
+    else:
+        extra = ("--config", str(omp_session.overlay_path(tmp_path))) if harness == "omp" else ()
+        assert got == (cli, "m", extra)
+
+
+@pytest.mark.parametrize("client", session_routes.TERMINAL_CLIENTS[1:])
+@pytest.mark.parametrize("harness", ["sdk", "omp", "codex"])
+def test_the_model_rides_only_to_the_client_that_carries_the_pick(tmp_path, monkeypatch, client,
+                                                                    harness):
+    """tcc #180: an SDK pick's model goes to Claude, omp's to OMP, Codex's to Codex; any other
+    client keeps its own model."""
+    _codex_found(monkeypatch)
+    carries = {"sdk": "claude", "omp": "omp", "codex": "codex"}[harness]
+
+    _cli, model, _extra = session_routes.client_invocation(
+        client, SimpleNamespace(harness=harness, model="the-model"), tmp_path)
+
+    assert model == ("the-model" if client == carries else None)
+
+
+def test_omp_always_gets_its_overlay_and_agy_runs_bare(tmp_path, monkeypatch):
+    pick = SimpleNamespace(harness="sdk", model="m")
+
+    assert session_routes.client_invocation("omp", pick, tmp_path) == (
+        "omp", None, ("--config", str(omp_session.overlay_path(tmp_path))))
+    assert session_routes.client_invocation("agy", pick, tmp_path) == ("agy", None, ())
+    assert session_routes.client_invocation("claude", pick, tmp_path) == ("claude", "m", ())
+
+
+def test_codex_gone_at_click_time_is_the_launcher_s_error_not_another_client(tmp_path,
+                                                                            monkeypatch):
+    _codex_found(monkeypatch, found=False)
+
+    with pytest.raises(terminal_launcher.TerminalLaunchError, match="Codex"):
+        session_routes.client_invocation("codex", SimpleNamespace(harness="codex", model="m"),
+                                         tmp_path)

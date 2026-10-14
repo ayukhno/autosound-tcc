@@ -367,8 +367,8 @@ def test_tccs_tools_go_in_by_url_with_the_token_named_never_written():
     assert pairs == [
         'mcp_servers.tcc.url="http://127.0.0.1:8765/mcp"',
         'mcp_servers.tcc.env_http_headers={"X-TCC-Token"="TCC_MCP_TOKEN"}',
-        'mcp_servers.tcc.default_tools_approval_mode="approve"',
         "mcp_servers.tcc.tool_timeout_sec=1900",
+        'mcp_servers.tcc.default_tools_approval_mode="approve"',
     ]
 
 

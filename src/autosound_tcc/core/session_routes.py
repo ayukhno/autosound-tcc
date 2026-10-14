@@ -10,10 +10,11 @@ change. Qt-free: the window translates a refusal (`Refusal` carries an i18n key,
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
-from autosound_tcc.core import codex_session, omp_session
+from autosound_tcc.core import codex_session, omp_session, terminal_launcher
 from autosound_tcc.core.session_registry import CODEX_ROUTE, SDK_ROUTE
 from autosound_tcc.core.tuning_session import TuningSession
 
@@ -128,19 +129,51 @@ def omp_without_config(server) -> Refusal:
     return Refusal("mcpNoConfigOmp", {"error": server.config_error})
 
 
-def terminal_invocation(choice, project_dir: Path) -> tuple[str, str, tuple[str, ...]]:
-    """`(cli, model, extra)` for «Open terminal»: the CLI that carries the pick.
+#: «Open terminal in this project…»'s lines, in order (tcc #180): a plain shell, then the clients.
+TERMINAL_CLIENTS: tuple[str, ...] = (terminal_launcher.TERMINAL,
+                                     *(exe for exe, _label in terminal_launcher.MENU_CLIENTS))
+
+#: The client that carries each harness; any other harness is carried by the SDK, i.e. `claude`.
+_CLIENT_OF_HARNESS = {"omp": "omp", "codex": "codex"}
+
+#: The module the Codex line runs (`codex_terminal`): it hands Codex TCC's url and token.
+CODEX_TERMINAL = "autosound_tcc.core.codex_terminal"
+
+
+def client_of(choice) -> str:
+    """The terminal client that carries `choice`'s harness."""
+    return _CLIENT_OF_HARNESS.get(choice.harness, "claude")
+
+
+def client_invocation(client: str, choice, project_dir: Path
+                      ) -> tuple[str, Optional[str], tuple[str, ...]]:
+    """`(cli, model, extra)` that opens `client` — the one named, never another (tcc #180).
+
+    The pick's model rides only to the client that carries the pick (an SDK pick → Claude, omp →
+    OMP, Codex → Codex); any other client keeps its own model. omp gets its overlay always: without
+    it TCC's tools stay behind xd:// and never reach the model. Codex runs through
+    `codex_terminal`, which hands it TCC's url and token — the token never in the line; a Codex
+    that is gone is `TerminalLaunchError`, said like any client the launcher cannot find.
+    """
+    model = choice.model if client_of(choice) == client else None
+    if client == "omp":
+        return "omp", model, ("--config", str(omp_session.overlay_path(project_dir)))
+    if client == "codex":
+        if not terminal_launcher.client_available("codex"):
+            raise terminal_launcher.TerminalLaunchError(
+                "Codex is not installed on this computer, so no terminal was opened for it")
+        return sys.executable, model, ("-m", CODEX_TERMINAL, str(project_dir))
+    return client, model, ()
+
+
+def terminal_invocation(choice, project_dir: Path) -> tuple[str, Optional[str], tuple[str, ...]]:
+    """`(cli, model, extra)` for «Open terminal» with no client named: the CLI that carries the
+    pick (`client_of`) — the handoff's «start in a terminal» path.
 
     Same choice as the in-app session, same reasoning: the model picker decides the harness, so
     the terminal opens on the CLI that carries it — `claude` for an SDK choice, `omp` for an omp
-    one — rather than on whatever happens to be first on PATH. Two front-ends that disagree about
-    which model is running would make the picker a lie in one of them.
-
-    Every other harness opens `claude` today, a Codex pick included — the gap task 8 of the Codex
-    build closes here, with a `codex` branch (`codex_terminal`).
+    one, Codex for a Codex one (W-10 Codex task 8 closed «a Codex pick opens Claude») — rather
+    than on whatever happens to be first on PATH. Two front-ends that disagree about which model
+    is running would make the picker a lie in one of them.
     """
-    if choice.harness == "omp":
-        # Without the overlay TCC's own tools stay behind xd:// and never reach the model --
-        # the terminal would be quietly weaker than the in-app session for no visible reason.
-        return "omp", choice.model, ("--config", str(omp_session.overlay_path(project_dir)))
-    return "claude", choice.model, ()
+    return client_invocation(client_of(choice), choice, project_dir)

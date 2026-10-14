@@ -14,6 +14,7 @@ Nothing here imports Qt.
 
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess
@@ -21,7 +22,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import app_log, child, method_binding
+from autosound_tcc.core import app_log, child, codex_cli, method_binding
 
 # Agent CLIs we know how to launch, in the order we'd suggest them. The value is the executable
 # name to look for on PATH; `agy` is Antigravity's Gemini CLI, which the tuning skill's own critic
@@ -40,9 +41,44 @@ class TerminalLaunchError(RuntimeError):
     one TCC will not run (#169). The text is what the person reads."""
 
 
+#: «Open terminal in this project…», in its order (tcc #180): a plain shell first, then each
+#: client by the name it is known by. `terminal` starts no client (`open_shell`).
+TERMINAL = "terminal"
+MENU_CLIENTS: tuple[tuple[str, str], ...] = (
+    ("claude", "Claude"), ("codex", "Codex"), ("agy", "Antigravity"), ("omp", "OMP"))
+
+
+def find_cli(exe: str) -> Optional[str]:
+    """Where `exe` is: PATH, then the folders an app started from the Dock (or the Start menu) does
+    not have on its PATH — the same list Codex is looked for in (`codex_cli.dock_folders`), one
+    list, not two. Stat calls only: nothing is run, no sign-in opens."""
+    hit = shutil.which(exe)
+    if hit:
+        return hit
+    windows = sys.platform.startswith("win")
+    names = [exe + ext for ext in (".exe", ".cmd", ".bat")] if windows else [exe]
+    for folder in codex_cli.dock_folders():
+        for name in names:
+            path = Path(folder) / name
+            if path.is_file() and (windows or os.access(path, os.X_OK)):
+                return str(path)
+    return None
+
+
+def client_available(client: str) -> bool:
+    """Whether the submenu's line for `client` can open it: the plain terminal always; Codex
+    through `codex_cli.find` — looked up afresh, stat only, so a Codex installed or removed since
+    shows at once; the others through `find_cli`."""
+    if client == TERMINAL:
+        return True
+    if client == "codex":
+        return codex_cli.find(environ=os.environ) is not None
+    return find_cli(client) is not None
+
+
 def available_clis() -> list[tuple[str, str]]:
     """The known agent CLIs actually installed, as (executable, label) pairs."""
-    return [(exe, label) for exe, label in KNOWN_CLIS if shutil.which(exe)]
+    return [(exe, label) for exe, label in KNOWN_CLIS if find_cli(exe)]
 
 
 def default_cli() -> Optional[str]:
@@ -103,6 +139,32 @@ def _posix_command(
         f"cd {shlex.quote(str(project_dir))} && "
         f"exec {'env ' + setting if setting else ''}{_posix_cli_invocation(cli, hint, model, extra)}"
     )
+
+
+def _posix_shell_line(project_dir: Path, env: Optional[dict], note: str = "") -> str:
+    """The plain terminal's line: enter the project, export the session's variables, print the
+    one hint — and leave the person's own shell running. No client starts, so nothing wipes the
+    hint (a TUI's alternate screen did, `_posix_command`)."""
+    exports = " ".join(f"{key}={shlex.quote(str(value))}" for key, value in (env or {}).items())
+    line = f"cd {shlex.quote(str(project_dir))}"
+    if exports:
+        line += f" && export {exports}"
+    if note:
+        line += f" && printf '%s\\n' {shlex.quote(note)}"
+    return line
+
+
+def _cmd_echo(text: str) -> str:
+    """`echo <text>` for cmd: `^ & | < > ( )` carry a caret outside quotes, where cmd would act on
+    them; inside a quoted stretch (a path) they are literal already, and a caret would print."""
+    out, quoted = [], False
+    for char in text:
+        if char == '"':
+            quoted = not quoted
+        elif not quoted and char in "^&|<>()":
+            out.append("^")
+        out.append(char)
+    return "echo " + "".join(out) if text else "cd ."
 
 
 def _win_setting(env: Optional[dict]) -> str:
@@ -349,7 +411,10 @@ def _launch_macos(
     extra: tuple[str, ...] = (),
     env: Optional[dict] = None,
 ) -> None:
-    command = _posix_command(project_dir, cli, hint, model, extra, env)
+    _mac_terminal(_posix_command(project_dir, cli, hint, model, extra, env))
+
+
+def _mac_terminal(command: str) -> None:
     app = "iTerm" if Path("/Applications/iTerm.app").exists() else "Terminal"
     _yield_focus_to(app)
     _osascript(_mac_script(app, command), app)
@@ -402,7 +467,10 @@ def _launch_linux(
     extra: tuple[str, ...] = (),
     env: Optional[dict] = None,
 ) -> None:
-    command = _posix_command(project_dir, cli, hint, model, extra, env)
+    _linux_terminal(project_dir, _posix_command(project_dir, cli, hint, model, extra, env))
+
+
+def _linux_terminal(project_dir: Path, command: str) -> None:
     candidates = (
         (["x-terminal-emulator", "-e"], True),
         (["gnome-terminal", "--working-directory", str(project_dir), "--"], False),
@@ -465,20 +533,13 @@ def launch(
             + ", ".join(exe for exe, _ in KNOWN_CLIS)
             + ")"
         )
-    if not shutil.which(cli):
+    if not find_cli(cli):
         raise TerminalLaunchError(f"{cli!r} is not on PATH")
     project_dir = Path(project_dir)
     if not project_dir.is_dir():
         raise TerminalLaunchError(f"{project_dir} is not a directory")
     if method:
-        binding = method_binding.for_project(project_dir)
-        try:
-            binding.require()
-        except method_binding.MethodRefused as exc:
-            # Into the log too (#169 review m6): the strip line that says it does not stay.
-            app_log.logger().warning("refused: no terminal session on %s: %s", project_dir, exc)
-            raise TerminalLaunchError(str(exc)) from exc
-        env = {**(env or {}), **binding.session_env()}
+        env = _method_env(project_dir, env)
 
     # Dispatch on `sys.platform` alone. `os.name` would work too, but two seams means a test can
     # patch one and not the other -- and patching `os.name` silently switches `pathlib` to Windows
@@ -493,3 +554,45 @@ def launch(
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise TerminalLaunchError(f"could not open a terminal: {exc}") from exc
     return cli
+
+
+def _method_env(project_dir: Path, env: Optional[dict]) -> dict:
+    """`env` and the copy of the method the project is bound to (`AUTOSOUND_SKILL_ROOT`, #169), or
+    `TerminalLaunchError` with the binding's own sentence for a copy TCC will not run."""
+    binding = method_binding.for_project(project_dir)
+    try:
+        binding.require()
+    except method_binding.MethodRefused as exc:
+        # Into the log too (#169 review m6): the strip line that says it does not stay.
+        app_log.logger().warning("refused: no terminal session on %s: %s", project_dir, exc)
+        raise TerminalLaunchError(str(exc)) from exc
+    return {**(env or {}), **binding.session_env()}
+
+
+def open_shell(project_dir: Path, env: Optional[dict] = None, note: str = "") -> None:
+    """«Open terminal → Terminal» (tcc #180): a plain shell in `project_dir` with the session's
+    variables — the reviewer's route (`env`) and the bound copy of the method — and no client
+    started. `note`, one line printed before the prompt, says how to start one with TCC's tools.
+    No token is in the line: a client started later finds TCC its own way (`.mcp.json`, or
+    `codex_terminal`, which reads it). Raises `TerminalLaunchError` as `launch` does."""
+    project_dir = Path(project_dir)
+    if not project_dir.is_dir():
+        raise TerminalLaunchError(f"{project_dir} is not a directory")
+    env = _method_env(project_dir, env)
+    try:
+        if sys.platform == "darwin":
+            _mac_terminal(_posix_shell_line(project_dir, env, note))
+        elif sys.platform.startswith("win"):
+            # The folder as `wt -d` / `cwd`, never in the line (HUB-053); `/k` keeps the window.
+            inner = _win_setting(env) + _cmd_echo(note)
+            if shutil.which("wt"):
+                subprocess.Popen(_wt_command(inner, str(project_dir)), close_fds=True)
+            else:
+                subprocess.Popen(_cmd_command(inner), close_fds=True, cwd=str(project_dir),
+                                 **child.wants_a_console())
+        else:
+            # `bash -lc` ends with its line: the person's own shell takes over, with the exports.
+            _linux_terminal(project_dir, _posix_shell_line(project_dir, env, note)
+                            + ' && exec "${SHELL:-/bin/sh}"')
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise TerminalLaunchError(f"could not open a terminal: {exc}") from exc

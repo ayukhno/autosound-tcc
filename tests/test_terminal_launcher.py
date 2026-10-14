@@ -19,6 +19,14 @@ from autosound_tcc.core.terminal_launcher import TerminalLaunchError, launch
 from tests._method_copies import entry as _entry, linked_and_approved as _linked_and_approved
 
 
+@pytest.fixture(autouse=True)
+def _no_dock_folders(monkeypatch):
+    """`/opt/homebrew/bin` is this developer's: a CLI «not installed» here is not installed there
+    either (`find_cli` looks in `codex_cli.dock_folders` after PATH, tcc #180)."""
+    from autosound_tcc.core import codex_cli
+    monkeypatch.setattr(codex_cli, "dock_folders", lambda **_kw: [])
+
+
 @pytest.fixture
 def recorded(monkeypatch):
     class _Calls(list):
@@ -847,3 +855,127 @@ def test_a_cli_that_runs_no_session_is_not_held_to_the_projects_copy(recorded, m
 
     assert shlex.split(recorded[0][-1])[-2:] == ["omp", "setup"]
     assert method_binding.SKILL_ROOT_ENV not in recorded[0][-1]
+
+
+# --- the plain terminal and the Codex line (tcc #180, W-10 Codex task 8) --------------------------
+
+
+_NOTE = "To start Codex with TCC's tools: python -m autosound_tcc.core.codex_terminal ."
+
+
+@pytest.mark.skipif(os.name == "nt", reason="AppleScript: the command this builds exists only on macOS")
+def test_macos_plain_terminal_enters_the_project_sets_the_env_and_starts_no_client(
+        recorded, monkeypatch, tmp_path):
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "darwin")
+    project = tmp_path / "Golf R project"
+    project.mkdir()
+
+    terminal_launcher.open_shell(project, env=_PICK_ENV, note=_NOTE)
+
+    script = recorded[0][2]
+    line = terminal_launcher._posix_shell_line(project, {**_PICK_ENV, **_root_env()}, _NOTE)
+    assert _in_applescript(line) in script
+    words = shlex.split(line)
+    assert words[:2] == ["cd", str(project)], "a path with spaces stays one word"
+    assert "exec" not in words, "the person's own shell stays: nothing replaces it"
+    for exe, _label in terminal_launcher.KNOWN_CLIS:
+        assert exe not in words
+    assert "export" in words and "AUTOSOUND_CRITIC_VIA=cli" in words
+
+
+def test_linux_plain_terminal_keeps_a_shell_open(recorded, monkeypatch, tmp_path):
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "linux")
+    project = tmp_path / "Golf R project"
+    project.mkdir()
+
+    terminal_launcher.open_shell(project, env=_PICK_ENV, note=_NOTE)
+
+    line = recorded[0][-1]
+    assert line.startswith(f"cd {shlex.quote(str(project))} && export ")
+    assert line.endswith('exec "${SHELL:-/bin/sh}"')
+    for exe, _label in terminal_launcher.KNOWN_CLIS:
+        assert exe not in shlex.split(line)
+
+
+@pytest.mark.parametrize("wt", [True, False])
+def test_windows_plain_terminal_sets_the_env_in_the_project_and_starts_no_client(
+        recorded, monkeypatch, tmp_path, wt):
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "win32")
+    monkeypatch.setattr(terminal_launcher.shutil, "which",
+                        lambda name: f"C:/{name}" if (wt or name != "wt") else None)
+    project = tmp_path / "Golf R & Passat"
+    project.mkdir()
+    note = 'To start Codex with TCC\'s tools: "C:\\Program Files\\py\\python.exe" -m x .'
+
+    terminal_launcher.open_shell(project, env=_PICK_ENV, note=note)
+
+    if wt:
+        folder, tab = _as_wt_starts_it(recorded[0])
+        assert folder == str(project)
+        ran = _as_cmd_runs_it(tab)
+    else:
+        ran = _as_cmd_runs_it(recorded[0])
+        assert recorded.kwargs["cwd"] == str(project)
+        assert str(project) not in recorded[0]
+    assert ran.startswith('set "AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-high" && '
+                          'set "AUTOSOUND_CRITIC_VIA=cli" && ' + _win_root())
+    assert ran.endswith('echo To start Codex with TCC\'s tools: '
+                        '"C:\\Program Files\\py\\python.exe" -m x .')
+    for exe in ("claude", "codex", "agy", "omp"):
+        assert f'"{exe}"' not in ran
+
+
+def test_a_plain_terminal_is_held_to_the_project_s_copy_too(recorded, monkeypatch, tmp_path):
+    """The shell runs the method's scripts by hand: `AUTOSOUND_SKILL_ROOT` names the bound copy."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "linux")
+
+    terminal_launcher.open_shell(tmp_path)
+
+    assert method_binding.SKILL_ROOT_ENV in recorded[0][-1]
+
+
+def test_the_codex_line_carries_no_token(recorded, monkeypatch, tmp_path):
+    """The Codex line reads the token itself from `.mcp.json`: the terminal's line never holds it."""
+    monkeypatch.setattr(terminal_launcher.sys, "platform", "linux")
+    token = "s3cret-token-0123456789"
+    (tmp_path / ".mcp.json").write_text(
+        '{"mcpServers": {"tcc": {"url": "u", "headers": {"X-TCC-Token": "%s"}}}}' % token)
+
+    launch(tmp_path, sys.executable, model="gpt-5.6-luna",
+           extra=("-m", "autosound_tcc.core.codex_terminal", str(tmp_path)), env=_PICK_ENV)
+
+    line = recorded[0][-1]
+    assert token not in line
+    assert "autosound_tcc.core.codex_terminal" in line and "--model gpt-5.6-luna" in line
+
+
+def test_a_cli_a_dock_started_app_misses_is_found_in_the_same_places_codex_is(monkeypatch,
+                                                                            tmp_path):
+    """One list of extra folders (`codex_cli.dock_folders`), not two."""
+    from autosound_tcc.core import codex_cli
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    agy = folder / ("agy.exe" if os.name == "nt" else "agy")
+    agy.write_text("#!/bin/sh\n")
+    agy.chmod(0o755)
+    monkeypatch.setattr(terminal_launcher.shutil, "which", lambda name: None)
+    monkeypatch.setattr(codex_cli, "dock_folders", lambda **_kw: [folder])
+
+    assert terminal_launcher.find_cli("agy") == str(agy)
+    assert terminal_launcher.find_cli("omp") is None
+
+
+def test_codex_is_available_through_codex_cli_and_terminal_always_is(monkeypatch):
+    from autosound_tcc.core import codex_cli
+    monkeypatch.setattr(codex_cli, "find", lambda **_kw: None)
+    monkeypatch.setattr(terminal_launcher.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    assert terminal_launcher.client_available("terminal")
+    assert not terminal_launcher.client_available("codex"), "on PATH is not enough: codex_cli says"
+    monkeypatch.setattr(codex_cli, "find",
+                        lambda **_kw: codex_cli.Found("/x/codex", codex_cli.SOURCE_PATH))
+    assert terminal_launcher.client_available("codex")
+
+
+def _root_env() -> dict:
+    return {method_binding.SKILL_ROOT_ENV: str(method_binding.own_copy())}

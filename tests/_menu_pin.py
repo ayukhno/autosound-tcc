@@ -35,7 +35,13 @@ def pinned_rows() -> list[tuple]:
         SEP,
         heading("menuSession"),
         line(0, t("menuStartSession")),
-        line(0, t("menuTerminal")),
+        # tcc #180: a submenu — a plain shell, then each client, in this order.
+        menu(0, t("menuTerminal")),
+        line(1, t("terminalPlain")),
+        line(1, "Claude"),
+        line(1, "Codex"),
+        line(1, "Antigravity"),
+        line(1, "OMP"),
         line(0, t("projectSaveState"), "projectSaveStateTip"),
         line(0, t("projectFreshSession"), "projectFreshSessionTip"),
         SEP,
@@ -86,7 +92,9 @@ def rows_of(menu, depth: int = 0) -> list[tuple]:
             rows.append((depth, "menu", text, tip, False, action.font().bold()))
             rows.extend(rows_of(action.menu(), depth + 1))
             continue
-        heading = not action.isEnabled() and not action.isCheckable() and text == text.upper()
+        # Headings sit in the top menu only: a disabled «OMP» in a submenu is a client that is
+        # not installed (tcc #180), not a heading.
+        heading = depth == 0 and not action.isEnabled() and not action.isCheckable() and text == text.upper()
         rows.append((depth, "heading" if heading else "line", text, tip, action.isCheckable(),
                      action.font().bold()))
     return rows
