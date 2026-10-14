@@ -209,6 +209,8 @@ def _seal_text(seal) -> str:
     look, with git's words after it."""
     if seal.state == "good":
         text = i18n.t("updSealGood").format(tag=seal.tag, principal=seal.principal)
+        if seal.changed is None:
+            return f"{text}\n{i18n.t('updSealChangedUnknown')}"
         return f"{text}\n{i18n.t('updSealChanged')}" if seal.changed else text
     if seal.state == "predates":
         return i18n.t("updSealPredates").format(tag=seal.tag)
@@ -933,6 +935,8 @@ class DiagnosticsDialog(QDialog):
         then, self._skill_job, self._skill_then = self._skill_then, None, None
         if job.error or job.result is None:
             label, button = self._update_rows["skill"]
+            if then == self._after_skill_update:  # an apply step that broke may have moved it
+                self._clear_seal("skill")
             label.setText(i18n.t("updFailed").format(why=job.error or "?"))
             button.setEnabled(True)
             return
@@ -997,6 +1001,9 @@ class DiagnosticsDialog(QDialog):
         """The receipt: where the skill landed, and each thing that happened on the way — the
         kept patch and the send's answer above all, since a reset clone no longer shows them."""
         label, button = self._update_rows["skill"]
+        # The mark was about the clone as it was; landed or refused, a step may have moved it
+        # (a kept patch resets it). The receipt says the new release's signature.
+        self._clear_seal("skill")
         if done.ok:
             lines = [i18n.t("updSkillDone").format(version=done.version.lstrip("v"))]
             if done.signature:
@@ -1024,8 +1031,6 @@ class DiagnosticsDialog(QDialog):
             # The report must show the new version — but the row keeps what it just said until the
             # next Re-check, because that sentence is the receipt for the press.
             self._install_changed()
-            # The mark was about the release the clone left; the receipt says the new one's.
-            self._clear_seal("skill")
             # And the receipt is an answer: the method is now the release it was offered (VM-3).
             version = done.version.lstrip("v")
             self.updateLearned.emit(updates.Status("skill", version, version, False))
@@ -1057,7 +1062,7 @@ class DiagnosticsDialog(QDialog):
         words = {"wait": i18n.t("updTermWait"), "updating": i18n.t("updTermUpdating"),
                  "done": i18n.t("updTermDone"), "failed": i18n.t("updTermFailed"),
                  "moved": i18n.t("updTermMoved"), "unpinned": i18n.t("updTermUnpinned"),
-                 "signed": i18n.t("updTermSigned")}
+                 "signed": i18n.t("updTermSigned"), "differs": i18n.t("updTermDiffers")}
         self._tcc_job = _UpdateStep(lambda: updates.prepare_tcc_update(channel, words=words))
         self._tcc_timer.start()
 
@@ -1595,7 +1600,7 @@ class DiagnosticsDialog(QDialog):
                 continue
             del self._seal_jobs[name]
             self._show_seal(name, job.result if job.result is not None else updates.Seal(
-                "unknown", reason="not_checked", detail=job.error or "?"))
+                "unknown", reason="seal_failed", detail=job.error or "?"))
         if not self._seal_jobs:
             self._seal_timer.stop()
 

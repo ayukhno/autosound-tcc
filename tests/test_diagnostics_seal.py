@@ -115,7 +115,8 @@ def test_a_check_that_raised_is_unknown_not_silent(monkeypatch):
     _finish_seals(dialog)
 
     text = dialog._seal_labels["skill"].text()
-    assert text.startswith(i18n.t("updSealUnknown").split("{")[0]) and "ZeroDivisionError" in text
+    assert text == i18n.t("updSealUnknown").format(
+        why=f"{i18n.t('updSealWhy_seal_failed')}: ZeroDivisionError: division by zero"), text
 
 
 def test_re_check_asks_again_and_says_checking_meanwhile(monkeypatch):
@@ -159,6 +160,7 @@ def test_the_update_window_gets_the_signature_line_in_the_reader_s_language(monk
     dialog._poll_tcc_job()
 
     assert seen["words"]["signed"] == i18n.t("updTermSigned")
+    assert seen["words"]["differs"] == i18n.t("updTermDiffers")
 
 
 def test_a_method_update_that_lands_takes_the_old_release_s_mark_away(monkeypatch):
@@ -167,6 +169,27 @@ def test_a_method_update_that_lands_takes_the_old_release_s_mark_away(monkeypatc
     from tests.test_diagnostics_panel import _skill_offered, _update_cleanly
 
     dialog, _asked = _skill_offered(monkeypatch)
+    dialog._show_seal("skill", updates.Seal("good", "v3.0.6", principal="ayukhno"))
+
+    _update_cleanly(dialog, monkeypatch)
+
+    assert dialog._seal_labels["skill"].isHidden() and "skill" not in dialog._seals
+
+
+def test_local_changes_git_could_not_read_are_said_as_unknown(monkeypatch):
+    dialog, _ = _opened(monkeypatch, updates.Seal("unknown", reason="source_checkout"),
+                        updates.Seal("good", "v3.1.3", principal="ayukhno", changed=None))
+
+    text = dialog._seal_labels["skill"].text()
+    assert i18n.t("updSealChangedUnknown") in text and i18n.t("updSealChanged") not in text
+
+
+def test_a_method_update_that_fails_takes_the_mark_away_too(monkeypatch):
+    """A refused step may have kept and reset the clone already: the old mark is not trusted."""
+    from tests.test_diagnostics_panel import _skill_offered, _update_cleanly
+
+    dialog, _asked = _skill_offered(monkeypatch, done=updates.SkillUpdate(
+        False, "bad_signature", "v3.0.7: no"))
     dialog._show_seal("skill", updates.Seal("good", "v3.0.6", principal="ayukhno"))
 
     _update_cleanly(dialog, monkeypatch)

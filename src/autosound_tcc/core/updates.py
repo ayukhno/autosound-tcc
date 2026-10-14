@@ -42,6 +42,7 @@ import shlex
 import shutil
 import sys
 import tempfile
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -148,7 +149,22 @@ TCC_WINDOW_WORDS = {
                 "newer) — installing without them, so uv chooses the versions. This uv:",
     # Said only when the tag's signature WAS verified — the script has a `sha` (#195).
     "signed": "The signature of {tag} was checked before this update: good ({principal}).",
+    # After uv, when the version it installed is not the commit that was checked (#195).
+    "differs": "The version installed is not the commit whose signature was checked, so the "
+               "check above does not cover it — tell the author. Installed:",
 }
+
+#: Beside the script when the update was verified: run by the INSTALLED TCC's own Python, it prints
+#: the commit uv put there (`direct_url.json`, `install_report.install_source`'s source), or
+#: nothing it cannot read (#195 review, 2).
+_INSTALLED_HELPER = "tcc-installed.py"
+_INSTALLED_HELPER_TEXT = (
+    "import importlib.metadata as m, json\n"
+    "try:\n"
+    "    d = json.loads(m.distribution('autosound-tcc').read_text('direct_url.json') or '{}')\n"
+    "    print((d.get('vcs_info') or {}).get('commit_id') or '')\n"
+    "except Exception:\n"
+    "    print('')\n")
 
 #: How long the install script waits for the server to name the tag's commit (tcc#123). The person
 #: pressed «Update» and is watching, so it is more patient than a background check (`_ASK_TIMEOUT`);
@@ -180,7 +196,7 @@ def _cmd_echo(text: str) -> str:
 def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                        words: Optional[dict] = None, platform: Optional[str] = None,
                        sha: str = "", folder: Optional[Path] = None,
-                       constraints: bool = False) -> str:
+                       constraints: bool = False, check_installed: bool = False) -> str:
     """The update as the text of a script: the person's lines, the wait, the install, the result.
 
     **A script run by name, and its first act is to clear the window** (hub #221 ask 3, skill
@@ -254,6 +270,13 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     verified and before uv runs** (#195, finding 159): the `signed` line. Only with a `sha` —
     the one thing `check_tcc_tag` hands back after a real verification; a release from before
     signing and the developer's switch reach here without one, and get no such line.
+
+    **`check_installed`: after uv, the commit it installed is read back** (`_INSTALLED_HELPER`
+    beside the script, run by the installed TCC's own Python under `uv tool dir`) and, when it is
+    not the verified `sha`, the `differs` line and that commit stand where «done» would — so
+    «checked: good» is not left over a build it did not cover. Nothing read (an older uv, a
+    different tool folder) says nothing either way: the line before uv was about the check, and
+    stays true. Only with a `sha`.
     """
     if folder is not None and not (Path(folder).is_absolute()
                                    and Path(folder).name.startswith(_UPDATE_FOLDER_PREFIX)):
@@ -267,6 +290,7 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     # `replace`, not `format`: a stray brace in a translation must not cost the update.
     signed = (said["signed"].replace("{tag}", tag).replace("{principal}", TCC_SIGNING_PRINCIPAL)
               if sha else "")
+    readback = bool(sha and check_installed)
     if windows:
         # UTF-8 with `chcp 65001`, so the Arbiter's language arrives whole (the file is written
         # UTF-8, and cmd decodes each line it reads with the code page current at that moment).
@@ -315,9 +339,20 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             f"call {command}",
             *([":ran"] if constraints else []),
             "if errorlevel 1 goto failed",
+            # What uv installed, read back by its own Python; `set /p` from a file, not `for /f`
+            # over a quoted command line. An empty answer compares as nothing read.
+            *(['set "tcc_got="', 'set "tcc_tools="',
+               "for /f \"delims=\" %%d in ('uv tool dir 2^>nul') do set \"tcc_tools=%%d\"",
+               f'"%tcc_tools%\\autosound-tcc\\Scripts\\python.exe" "%~dp0{_INSTALLED_HELPER}" '
+               f'> "%~dp0tcc-installed.txt" 2>nul',
+               'set /p tcc_got=<"%~dp0tcc-installed.txt"',
+               f'if not "%tcc_got%"=="" if not "%tcc_got%"=="{sha}" goto differs']
+              if readback else []),
             "echo.",
             _cmd_echo(said["done"]),
             "goto end",
+            *([":differs", "echo.", _cmd_echo(said["differs"]), "echo %tcc_got%", "goto end"]
+              if readback else []),
             *([":moved", "echo.", _cmd_echo(said["moved"]), "goto end"] if sha else []),
             ":failed",
             "echo.",
@@ -376,7 +411,16 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                 "}",
                 "if tcc_install; then",
             ] if constraints else [f"if {command}; then"]),
-            "  echo; " + say(shlex.quote(said["done"])),
+            *([
+                '  tcc_got=$("$(uv tool dir 2>/dev/null)/autosound-tcc/bin/python" '
+                f'"$(dirname -- "$0")/{_INSTALLED_HELPER}" 2>/dev/null)',
+                f'  if [ -n "$tcc_got" ] && [ "$tcc_got" != {shlex.quote(sha)} ]; then',
+                "    echo; " + say(shlex.quote(said["differs"])),
+                "    " + say('"$tcc_got"'),
+                "  else",
+                "    echo; " + say(shlex.quote(said["done"])),
+                "  fi",
+            ] if readback else ["  echo; " + say(shlex.quote(said["done"]))]),
             "else",
             "  echo; " + say(shlex.quote(said["failed"])),
             "fi",
@@ -404,8 +448,11 @@ def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     path = folder / ("tcc-update.cmd" if windows else "tcc-update.sh")
     if constraints is not None:
         (folder / TCC_CONSTRAINTS).write_bytes(constraints)
+    if sha:
+        (folder / _INSTALLED_HELPER).write_text(_INSTALLED_HELPER_TEXT, encoding="utf-8")
     path.write_text(tcc_install_script(pid, tag, words=words, platform=platform, sha=sha,
-                                       folder=made, constraints=constraints is not None),
+                                       folder=made, constraints=constraints is not None,
+                                       check_installed=bool(sha)),
                     encoding="utf-8", newline="\r\n" if windows else "\n")
     return path
 
@@ -977,6 +1024,14 @@ def _verify_tag(repo: Path, tag: str, *, signed_from: str = SKILL_SIGNED_FROM,
                         *VERIFY_PROGRAM, "verify-tag", tag, cwd=repo,
                         base_env=verify_env(os.environ))
     if ok and 'Good "git" signature' in said:
+        # The signature covers the tag OBJECT, and the object names its own tag: an old signed
+        # release served under a new ref name is still the old release (#195 review, 7).
+        named, inner = _git("for-each-ref", "--format=%(tag)", f"refs/tags/{tag}", cwd=repo)
+        if not named:
+            return False, f"{tag}: {inner or 'git named no tag'}", "not_checked"
+        if inner != tag:
+            return (False, f"{tag}: the signed tag inside is {inner or 'unnamed'}, not {tag}",
+                    "bad_signature")
         return True, f"{tag}: signature good ({principal})", ""
     if isinstance(said, _DidNotRun):
         # Nothing was checked — an antivirus scanning ssh-keygen on its first run on Windows can
@@ -1534,7 +1589,31 @@ def _tag_constraints(repo: Path, tag: str) -> Optional[bytes]:
     return pins
 
 
-def check_tcc_tag(tag: str) -> tuple[bool, str, str, str, Optional[bytes]]:
+#: The seal's fetch (`tcc_seal`) is a background answer on a tab, not a press somebody waits on: a
+#: network that has not delivered one tag object in this long is said as such.
+_SEAL_FETCH_TIMEOUT = 60.0
+
+
+def _fetch_tcc_tag(repo: Path, tag: str, light: bool) -> tuple[bool, str]:
+    """`tag` from TCC's repository into `repo`. `light`: without trees or files
+    (`--filter=tree:0`, git 2.20 or newer, a server that allows filters — GitHub does), which is
+    all verifying needs: the tag object and the commit it names. A git that refuses the option
+    gets the whole tag as the update fetches it; a server that ignores it sends the whole tag
+    anyway (git warns). A fetch that did not run is not tried twice — that doubles the wait."""
+    refspec = f"+refs/tags/{tag}:refs/tags/{tag}"
+    fetch = ("fetch", "--quiet", "--no-tags", "--depth", "1")
+    timeout = _SEAL_FETCH_TIMEOUT if light else _FETCH_TIMEOUT
+    if light:
+        ok, said = _git(*fetch, "--filter=tree:0", TCC_REPO, refspec, cwd=repo, timeout=timeout)
+        if ok or isinstance(said, _DidNotRun):
+            return ok, said
+        _log.info("tcc tag %s: a fetch without the files was refused (%s) — fetching it whole",
+                  tag, said)
+    return _git(*fetch, TCC_REPO, refspec, cwd=repo, timeout=timeout)
+
+
+def check_tcc_tag(tag: str, *, light: bool = False
+                  ) -> tuple[bool, str, str, str, Optional[bytes]]:
     """`_verify_tag`'s answer for one of TCC's own tags — `(ok, the line to show, reason key,
     the commit the verified tag names, the tag's constraints)`, that commit "" when nothing was
     verified.
@@ -1557,6 +1636,9 @@ def check_tcc_tag(tag: str) -> tuple[bool, str, str, str, Optional[bytes]]:
     The constraints are the verified tag's `TCC_CONSTRAINTS`, read from the same fetched tree
     (`_tag_constraints`, tcc#194): the file of the release being installed, not of the running
     one. None when nothing was fetched or verified, or the tag has none.
+
+    `light` (the seal of the installed TCC, #195): the tag without its files
+    (`_fetch_tcc_tag`), and no constraints read — None.
     """
     early = _verdict_by_name(tag, TCC_SIGNED_FROM, channel_key)
     if early is not None:
@@ -1565,8 +1647,7 @@ def check_tcc_tag(tag: str) -> tuple[bool, str, str, str, Optional[bytes]]:
         repo = Path(tmp)
         ok, said = _git("init", "--quiet", "--bare", str(repo))
         if ok:
-            ok, said = _git("fetch", "--quiet", "--no-tags", "--depth", "1", TCC_REPO,
-                            f"+refs/tags/{tag}:refs/tags/{tag}", cwd=repo, timeout=_FETCH_TIMEOUT)
+            ok, said = _fetch_tcc_tag(repo, tag, light)
         if not ok:
             return False, said, "fetch_failed", "", None
         ok, line, why = _verify_tag(repo, tag, signed_from=TCC_SIGNED_FROM,
@@ -1576,7 +1657,7 @@ def check_tcc_tag(tag: str) -> tuple[bool, str, str, str, Optional[bytes]]:
             return False, line, why, "", None
         named, sha = _git("rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}", cwd=repo)
         valid = named and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha)
-        pins = _tag_constraints(repo, tag) if valid else None
+        pins = _tag_constraints(repo, tag) if valid and not light else None
     if isinstance(sha, _DidNotRun):
         # A good signature, and git did not run to name its commit: nothing to pin the install
         # to, and nothing wrong with the release — not `bad_signature` (the re-review, O1).
@@ -1665,13 +1746,65 @@ class Seal:
     reason: str = ""
     detail: str = ""
     principal: str = ""
-    #: The method's clone carries local changes, which no signature covers (good only).
-    changed: bool = False
+    #: The method's clone carries local changes, which no signature covers (good only); None
+    #: when git could not say.
+    changed: Optional[bool] = False
 
 
-#: TCC's answers that cannot change while this process runs — the installed commit and a signed
-#: tag are both fixed — by `(tag, commit)`. Only verdicts: "could not look" is asked again.
-_TCC_SEALS: dict[tuple[str, str], Seal] = {}
+#: TCC's answers that cannot change — the installed commit, a signed tag and the key are all
+#: fixed — by `_seal_key`, in this process; and on disk (`_seal_store`), so the next start fetches
+#: nothing (#195 review, 1). Only verdicts: «could not look» is asked again.
+_TCC_SEALS: dict[str, Seal] = {}
+#: One check per key at a time, process-wide: two diagnostics windows share it.
+_SEAL_LOCK = threading.Lock()
+_SEAL_FLIGHTS: dict[str, "_Flight"] = {}
+
+
+class _Flight:
+    """A seal being checked, for whoever asks for the same one meanwhile."""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.seal: Optional[Seal] = None
+
+
+def _seal_store() -> Path:
+    """Where the verdicts are kept between starts: beside TCC's other machine settings."""
+    from autosound_tcc.core import model_overrides
+
+    return model_overrides.config_dir() / "signatures.json"
+
+
+def _seal_key(tag: str, commit: str) -> str:
+    return "\n".join((TCC_REPO, tag, commit, TCC_SIGNING_KEY))
+
+
+def _stored_seal(key: str) -> Optional[Seal]:
+    """The verdict kept for `key`, or None — a file that cannot be read costs one fetch more."""
+    try:
+        data = json.loads(_seal_store().read_text(encoding="utf-8")).get(key)
+        return Seal(**{name: str(data[name]) for name in ("state", "tag", "reason", "detail",
+                                                          "principal")})
+    except Exception:  # noqa: BLE001 — no file, another shape: not known
+        return None
+
+
+def _store_seal(key: str, seal: Seal) -> None:
+    path = _seal_store()
+    try:
+        try:
+            kept = json.loads(path.read_text(encoding="utf-8"))
+            kept = kept if isinstance(kept, dict) else {}
+        except (OSError, ValueError):
+            kept = {}
+        kept[key] = {"state": seal.state, "tag": seal.tag, "reason": seal.reason,
+                     "detail": seal.detail, "principal": seal.principal}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fresh = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        fresh.write_text(json.dumps(kept, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(fresh, path)
+    except OSError as exc:
+        _log.warning("the signature verdict was not kept in %s: %s", path, exc)
 
 
 def _seal_refused(tag: str, line: str, why: str) -> Seal:
@@ -1695,37 +1828,58 @@ def _seal_by_name(tag: str, signed_from: str, order) -> Optional[Seal]:
 
 def tcc_seal() -> Seal:
     """The signature of the TCC that is running: the release tag uv installed it from
-    (`install_report.requested_revision`), fetched and verified as the update verifies one
-    (`check_tcc_tag`), and good only when that tag names the commit uv installed
-    (`install_report.install_source`). A fetch: off the GUI thread.
+    (`install_report.requested_revision`), fetched without its files and verified as the update
+    verifies one (`check_tcc_tag(light=True)`), and good only when that tag names the commit uv
+    installed (`install_report.install_source`). A fetch: off the GUI thread.
 
     A source checkout, or a build uv installed from no tag, has nothing signed to check, and says
-    so — not «checked». What it found is remembered for this process (`_TCC_SEALS`), so a
-    Re-check does not fetch again; a fetch that failed is asked again."""
+    so — not «checked». A verdict is kept for good (`_TCC_SEALS`, `_seal_store`): the pair and the
+    key cannot change, so it is fetched once per installed build. A fetch that failed is asked
+    again. Two callers at once share one check (`_SEAL_FLIGHTS`)."""
     _url, commit = install_report.install_source()
     if not commit:
         return Seal("unknown", reason="source_checkout")
     tag = install_report.requested_revision()
     if not tag or channel_key(tag) is None:
         return Seal("unknown", tag, "no_tag", tag)
-    known = _TCC_SEALS.get((tag, commit))
-    if known is not None:
-        return known
     early = _seal_by_name(tag, TCC_SIGNED_FROM, channel_key)
     if early is not None:
         return early
-    ok, line, why, sha, _pins = check_tcc_tag(tag)
+    key = _seal_key(tag, commit)
+    with _SEAL_LOCK:
+        known = _TCC_SEALS.get(key) or _stored_seal(key)
+        if known is not None:
+            _TCC_SEALS[key] = known
+            return known
+        flight = _SEAL_FLIGHTS.get(key)
+        mine = flight is None
+        if mine:
+            flight = _SEAL_FLIGHTS[key] = _Flight()
+    if not mine:
+        flight.done.wait()
+        return flight.seal or Seal("unknown", tag, "seal_failed")
+    try:
+        seal = _check_installed_tcc(tag, commit)
+    except Exception as exc:  # noqa: BLE001 — an answer for both callers, not a dead thread
+        seal = Seal("unknown", tag, "seal_failed", f"{type(exc).__name__}: {exc}")
+    with _SEAL_LOCK:
+        if seal.state != "unknown":
+            _TCC_SEALS[key] = seal
+            _store_seal(key, seal)
+        _SEAL_FLIGHTS.pop(key, None)
+    flight.seal = seal
+    flight.done.set()
+    return seal
+
+
+def _check_installed_tcc(tag: str, commit: str) -> Seal:
+    ok, line, why, sha, _pins = check_tcc_tag(tag, light=True)
     _log.info("installed tcc %s at %s: %s", tag, commit[:12], line)
     if not ok:
-        seal = _seal_refused(tag, line, why)
-    elif sha != commit:
-        seal = Seal("bad", tag, "commit_differs",
-                    f"{tag} → {sha[:12]}, installed {commit[:12]}")
-    else:
-        seal = Seal("good", tag, principal=TCC_SIGNING_PRINCIPAL)
-    if seal.state != "unknown":
-        _TCC_SEALS[(tag, commit)] = seal
-    return seal
+        return _seal_refused(tag, line, why)
+    if sha != commit:
+        return Seal("bad", tag, "commit_differs", f"{tag} → {sha[:12]}, installed {commit[:12]}")
+    return Seal("good", tag, principal=TCC_SIGNING_PRINCIPAL)
 
 
 def skill_seal() -> Seal:
@@ -1757,6 +1911,9 @@ def skill_seal() -> Seal:
     _log.info("installed method %s: %s", tag, line)
     if not good:
         return _seal_refused(tag, line, why)
-    clean, changes = _git("status", "--porcelain", "--untracked-files=all", cwd=repo)
+    # No optional locks: the seal must never hold `index.lock` against an «Update the method»
+    # press. Not answered → None, «unknown», never «no changes».
+    clean, changes = _git("--no-optional-locks", "status", "--porcelain",
+                          "--untracked-files=all", cwd=repo)
     return Seal("good", tag, principal=SKILL_SIGNING_PRINCIPAL,
-                changed=bool(clean and changes.strip()))
+                changed=bool(changes.strip()) if clean else None)

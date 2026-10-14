@@ -912,7 +912,8 @@ def test_the_signature_is_checked_by_ssh_keygen_whatever_program_git_is_set_to(m
     monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
     asked = []
     monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, base_env=None: (
-        asked.append(args) or (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x')))
+        asked.append(args) or ((True, "v3.0.64") if "for-each-ref" in args else
+                               (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x'))))
 
     ok, line, _why = updates._verify_tag(tmp_path, "v3.0.64")
 
@@ -935,6 +936,7 @@ def test_verify_tag_asks_git_for_english_messages_and_nothing_else_of_the_locale
     def child_spy(argv, **kw):
         seen.append((argv, kw.get("env") or {}))
         return subprocess.CompletedProcess(argv, 0, stderr="", stdout=(
+            "v3.0.64" if "for-each-ref" in argv else  # the signed object's own name (#195)
             'Good "git" signature for ayukhno with ED25519 key SHA256:x'))
 
     monkeypatch.setattr(updates.child, "run_bounded", child_spy)
@@ -1890,6 +1892,7 @@ def test_a_beta_candidate_of_tcc_is_ordered_on_its_channel_not_refused_as_no_rel
     fetched = []
     monkeypatch.setattr(updates, "_git", lambda *args, cwd=None, timeout=None, base_env=None: (
         fetched.append(args) or ((True, "c" * 40) if "rev-parse" in args else
+                                 (True, "beta-v0.2.0-rc1") if "for-each-ref" in args else
                                  (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x'))))
 
     ok, line, why, sha, _pins = updates.check_tcc_tag("beta-v0.2.0-rc1")
@@ -2167,7 +2170,8 @@ def test_the_windows_update_removes_its_folder_after_its_last_line(monkeypatch, 
     assert lines[-1] == "", "the file ends with its line break"
     assert lines[-3:-1] == [":end", f'(goto) 2>nul & cd /d "%TEMP%" & rmdir /s /q "{path.parent}"']
     assert "goto :eof" not in lines, "no exit around the last line"
-    assert [line for line in lines if line.startswith("goto ")] == ["goto end", "goto end"]
+    # done, the tag moved, and the installed commit read back as another (#195): each to `:end`.
+    assert [line for line in lines if line.startswith("goto ")] == ["goto end"] * 3
 
     given = tmp_path / "given"
     given.mkdir()
@@ -2487,7 +2491,7 @@ def test_a_rev_parse_that_did_not_run_after_a_good_signature_is_not_a_bad_signat
         if "rev-parse" in argv:
             raise failure
         said = 'Good "git" signature for ayukhno with ED25519 key SHA256:x' \
-            if "verify-tag" in argv else ""
+            if "verify-tag" in argv else "v0.1.46" if "for-each-ref" in argv else ""
         return subprocess.CompletedProcess(argv, 0, stdout=said, stderr="")
 
     monkeypatch.setattr(updates.child, "run_bounded", runs)

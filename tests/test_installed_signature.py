@@ -23,9 +23,11 @@ _NEEDS_KEYGEN = pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="n
 
 
 @pytest.fixture(autouse=True)
-def _no_seal_remembered(monkeypatch):
-    """What an earlier test learned about a TCC tag is not this test's answer."""
+def _no_seal_remembered(monkeypatch, tmp_path):
+    """What an earlier test learned about a TCC tag is not this test's answer — in memory or on
+    disk."""
     monkeypatch.setattr(updates, "_TCC_SEALS", {})
+    monkeypatch.setattr(updates, "_seal_store", lambda: tmp_path / "machine" / "signatures.json")
 
 
 def _tcc_installed(monkeypatch, tag: str, commit: str) -> None:
@@ -120,7 +122,7 @@ def test_a_tag_that_could_not_be_fetched_is_unknown_and_asked_again(monkeypatch)
     """No network is not a verdict on the release, and it is not remembered either."""
     _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
     asked = []
-    monkeypatch.setattr(updates, "check_tcc_tag", lambda tag: asked.append(tag) or (
+    monkeypatch.setattr(updates, "check_tcc_tag", lambda tag, **kw: asked.append(tag) or (
         False, "fatal: unable to access", "fetch_failed", "", None))
 
     first, second = updates.tcc_seal(), updates.tcc_seal()
@@ -135,7 +137,7 @@ def test_a_tag_that_could_not_be_fetched_is_unknown_and_asked_again(monkeypatch)
 def test_a_machine_that_cannot_check_is_unknown_not_bad(monkeypatch, why):
     _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
     monkeypatch.setattr(updates, "check_tcc_tag",
-                        lambda tag: (False, "git version 2.30: no", why, "", None))
+                        lambda tag, **kw: (False, "git version 2.30: no", why, "", None))
 
     seal = updates.tcc_seal()
 
@@ -147,7 +149,7 @@ def test_a_good_answer_is_remembered_for_the_build_it_was_about(monkeypatch):
     process runs: the installed commit and the signed tag are both fixed."""
     _tcc_installed(monkeypatch, "v1.1.3", "c" * 40)
     asked = []
-    monkeypatch.setattr(updates, "check_tcc_tag", lambda tag: asked.append(tag) or (
+    monkeypatch.setattr(updates, "check_tcc_tag", lambda tag, **kw: asked.append(tag) or (
         True, "v1.1.3: signature good (ayukhno)", "", "c" * 40, None))
 
     first, second = updates.tcc_seal(), updates.tcc_seal()
@@ -279,3 +281,244 @@ def test_the_window_s_line_comes_in_the_words_given(monkeypatch):
                                         words=words)
 
     assert f"Підпис v1.1.4 перевірено: сходиться ({updates.TCC_SIGNING_PRINCIPAL})." in script
+
+
+# ---- fix round: the cost of the check, the tag's own name, what git could not say -------------
+
+def _answers(asked, sha):
+    return lambda tag, **kw: asked.append((tag, kw.get("light"))) or (
+        True, f"{tag}: signature good (ayukhno)", "", sha, None)
+
+
+def test_a_good_answer_for_one_build_is_never_the_answer_for_another(monkeypatch):
+    """Same tag, another installed commit: asked again, and not good — the tag names A."""
+    asked = []
+    monkeypatch.setattr(updates, "check_tcc_tag", _answers(asked, "a" * 40))
+    _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
+    assert updates.tcc_seal().state == "good"
+
+    _tcc_installed(monkeypatch, "v1.1.3", "b" * 40)
+    other = updates.tcc_seal()
+    updates._TCC_SEALS.clear()  # a new process: only the disk remembers
+    again = updates.tcc_seal()
+
+    assert (other.state, other.reason) == ("bad", "commit_differs"), other
+    assert again == other
+    assert len(asked) == 2
+
+
+def test_a_verdict_is_kept_on_disk_so_the_next_start_fetches_nothing(monkeypatch):
+    asked = []
+    monkeypatch.setattr(updates, "check_tcc_tag", _answers(asked, "a" * 40))
+    _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
+    first = updates.tcc_seal()
+
+    updates._TCC_SEALS.clear()  # the next start of TCC
+    second = updates.tcc_seal()
+
+    assert first.state == "good" and second == first
+    assert asked == [("v1.1.3", True)], "one fetch, a light one"
+    assert updates._seal_store().is_file()
+
+
+def test_a_failed_fetch_is_not_kept_on_disk(monkeypatch):
+    asked = []
+    monkeypatch.setattr(updates, "check_tcc_tag", lambda tag, **kw: asked.append(tag) or (
+        False, "fatal: unable to access", "fetch_failed", "", None))
+    _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
+    updates.tcc_seal()
+    updates._TCC_SEALS.clear()
+
+    assert updates.tcc_seal().reason == "fetch_failed"
+    assert asked == ["v1.1.3", "v1.1.3"]
+
+
+def test_a_store_that_cannot_be_read_is_only_a_fetch_more(monkeypatch):
+    store = updates._seal_store()
+    store.parent.mkdir(parents=True)
+    store.write_text("{ cut off", encoding="utf-8")
+    asked = []
+    monkeypatch.setattr(updates, "check_tcc_tag", _answers(asked, "a" * 40))
+    _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
+
+    assert updates.tcc_seal().state == "good" and len(asked) == 1
+
+
+def test_two_windows_asking_at_once_share_one_check(monkeypatch):
+    import threading
+
+    release, asked = threading.Event(), []
+
+    def slow(tag, **kw):
+        asked.append(tag)
+        release.wait(5)
+        return True, f"{tag}: signature good (ayukhno)", "", "a" * 40, None
+
+    monkeypatch.setattr(updates, "check_tcc_tag", slow)
+    _tcc_installed(monkeypatch, "v1.1.3", "a" * 40)
+    got = []
+    threads = [threading.Thread(target=lambda: got.append(updates.tcc_seal())) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for _ in range(100):
+        if asked:
+            break
+        threading.Event().wait(0.02)
+    release.set()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert asked == ["v1.1.3"] and len(got) == 2 and got[0] == got[1] and got[0].state == "good"
+
+
+@_NEEDS_KEYGEN
+def test_the_seal_fetches_the_tag_without_its_tree(monkeypatch, tmp_path):
+    """Verifying needs the tag object and the commit it names, not ~13 MB of files: `tree:0`.
+    The origin here allows filters, as GitHub does."""
+    _tcc_origin(monkeypatch, tmp_path)
+    origin = tmp_path / "tcc-origin"
+    _git_in("config", "uploadpack.allowFilter", "true", cwd=origin)
+    commit = _git_in("rev-parse", "v0.1.45^{commit}", cwd=origin)
+    _tcc_installed(monkeypatch, "v0.1.45", commit)
+    kinds = []
+    real = updates._verify_tag
+
+    def look(repo, tag, **kw):
+        listed = _git_in("cat-file", "--batch-all-objects", "--batch-check", cwd=repo)
+        kinds.extend(line.split()[1] for line in listed.splitlines())
+        return real(repo, tag, **kw)
+
+    monkeypatch.setattr(updates, "_verify_tag", look)
+
+    seal = updates.tcc_seal()
+
+    assert seal.state == "good", seal
+    assert "blob" not in kinds and "tree" not in kinds and "tag" in kinds, kinds
+
+
+def test_a_git_that_refuses_the_light_fetch_gets_the_whole_tag(monkeypatch, tmp_path):
+    fetches = []
+
+    def fake(*args, cwd=None, timeout=None, base_env=None):
+        if "fetch" in args:
+            fetches.append(args)
+            return ("--filter=tree:0" not in args), "error: unknown option `filter=tree:0'"
+        if "rev-parse" in args:
+            return True, "a" * 40
+        if "for-each-ref" in args:
+            return True, "v1.1.3"
+        return True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x'
+
+    monkeypatch.setattr(updates, "_git", fake)
+    monkeypatch.delenv(updates.SKIP_VERIFY_VAR, raising=False)
+
+    ok, _line, _why, sha, pins = updates.check_tcc_tag("v1.1.3", light=True)
+
+    assert ok and sha == "a" * 40 and pins is None
+    assert ["--filter=tree:0" in args for args in fetches] == [True, False]
+
+
+@_NEEDS_KEYGEN
+def test_an_old_signed_tag_served_under_a_new_name_is_not_good(monkeypatch, tmp_path):
+    """The signature covers the tag object, and the object names its tag: v0.1.45's signed
+    object under `refs/tags/v0.1.49` is still v0.1.45 — not a signed v0.1.49."""
+    _tcc_origin(monkeypatch, tmp_path)
+    origin = tmp_path / "tcc-origin"
+    signed = _git_in("rev-parse", "refs/tags/v0.1.45", cwd=origin)
+    _git_in("update-ref", "refs/tags/v0.1.49", signed, cwd=origin)
+
+    ok, line, why, sha, _pins = updates.check_tcc_tag("v0.1.49")
+
+    assert (ok, why, sha) == (False, "bad_signature", ""), line
+    assert "v0.1.45" in line
+
+
+@_NEEDS_KEYGEN
+def test_a_method_clone_whose_head_moved_off_its_tag_is_not_called_good(monkeypatch, tmp_path):
+    """The tag is still in the clone, but HEAD is a commit no signed tag names."""
+    clone = _method_clone(monkeypatch, tmp_path, "v3.1.3")
+    (clone / "a.txt").write_text("moved on\n")
+    _git_in("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "on top", cwd=clone)
+
+    seal = updates.skill_seal()
+
+    assert (seal.state, seal.reason) == ("unknown", "clone_no_tag"), seal
+
+
+@_NEEDS_KEYGEN
+def test_local_changes_that_could_not_be_read_are_unknown_not_none(monkeypatch, tmp_path):
+    _method_clone(monkeypatch, tmp_path, "v3.1.3")
+    real, asked = updates._git, []
+
+    def status_fails(*args, **kw):
+        if "status" in args:
+            asked.append(args)
+            return False, updates._DidNotRun("TimeoutExpired: git status")
+        return real(*args, **kw)
+
+    monkeypatch.setattr(updates, "_git", status_fails)
+
+    seal = updates.skill_seal()
+
+    assert (seal.state, seal.changed) == ("good", None), seal
+    assert asked and asked[0][0] == "--no-optional-locks", "the seal never holds index.lock"
+
+
+# ---- the update window: what uv installed is the commit that was checked ----------------------
+
+def _tool_python(tmp_path, commit: str):
+    """A `uv` whose `tool dir` holds an autosound-tcc whose python says it was installed at
+    `commit`; every other call records itself and succeeds."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    tools = tmp_path / "tools"
+    (tools / "autosound-tcc" / "bin").mkdir(parents=True)
+    python = tools / "autosound-tcc" / "bin" / "python"
+    python.write_text(f"#!/bin/sh\necho {commit}\n")
+    python.chmod(0o755)
+    (bindir / "uv").write_text(f'#!/bin/sh\nif [ "$1 $2" = "tool dir" ]; then echo \'{tools}\'; '
+                               "exit 0; fi\nexit 0\n")
+    (bindir / "uv").chmod(0o755)
+    (bindir / "git").write_text(f"#!/bin/sh\nprintf '%s\\trefs/tags/v1.1.4^{{}}\\n' {'c' * 40}\n")
+    (bindir / "git").chmod(0o755)
+    return bindir
+
+
+def _gone_pid() -> int:
+    import subprocess
+
+    gone = subprocess.Popen(["true"])
+    gone.wait()
+    return gone.pid
+
+
+@pytest.mark.skipif(os.name == "nt", reason="runs the macOS script with sh")
+@pytest.mark.parametrize("installed", ["c" * 40, "e" * 40])
+def test_the_window_says_when_uv_installed_another_commit_than_the_checked_one(tmp_path,
+                                                                               installed):
+    import subprocess
+
+    bindir = _tool_python(tmp_path, installed)
+    folder = tmp_path / "update"
+    folder.mkdir()
+    path = updates.write_tcc_install_script(pid=_gone_pid(), tag="v1.1.4", folder=folder,
+                                            platform="darwin", sha="c" * 40)
+
+    out = subprocess.run(["/bin/sh", str(path)], capture_output=True, text=True,
+                         env={**os.environ, "PATH": f"{bindir}:/usr/bin:/bin"}, timeout=30).stdout
+
+    words = updates.TCC_WINDOW_WORDS
+    if installed == "c" * 40:
+        assert out.rstrip().endswith(words["done"]) and words["differs"] not in out, out
+    else:
+        assert words["differs"] in out and words["done"] not in out, out
+        assert out.rstrip().endswith("e" * 40), out
+
+
+def test_the_windows_window_reads_what_uv_installed_too():
+    script = updates.tcc_install_script(4242, "v1.1.4", platform="win32", sha="c" * 40,
+                                        folder=None, check_installed=True)
+
+    assert "uv tool dir" in script and "tcc-installed.py" in script
+    assert script.index("if errorlevel 1 goto failed") < script.index("tcc-installed.py")
+    assert updates.TCC_WINDOW_WORDS["differs"] in script
