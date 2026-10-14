@@ -7,6 +7,7 @@ comparison decides "newer", and what stops the button touching somebody's own ch
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 
@@ -2556,6 +2557,8 @@ def test_no_folder_goes_through_cmd_s_call_so_a_percent_or_a_caret_in_it_survive
                                        constraints=True).splitlines()
     held = next(line for line in lines if "--constraints" in line and "--python" in line)
 
+    probe = next(line for line in lines if "tool install --help" in line)
+    assert probe == 'uv tool install --help 2>nul | findstr /l /c:" --constraints " >nul', probe
     assert lines[lines.index(held) - 1] == 'cd /d "%~dp0"'
     assert held.startswith("call uv tool install --python 3.12 --upgrade "
                            "--constraints constraints.txt "), held
@@ -2641,8 +2644,9 @@ def _recording_uv(bindir, seen, old=False, fails=False):
             "@echo off\r\n"
             f'if "%~1"=="--version" (echo {_OLD_UV}& exit /b 0)\r\n'
             'if not "%~3"=="--help" goto install\r\n'
-            "echo   -b, --build-constraints <BUILD_CONSTRAINTS>\r\n"
-            + (f"echo {option}\r\n" if option else "") +
+            # `^<`/`^>`: bare, cmd reads them as redirects and prints nothing.
+            "echo   -b, --build-constraints ^<BUILD_CONSTRAINTS^>\r\n"
+            + (f"echo {option.replace('<', '^<').replace('>', '^>')}\r\n" if option else "") +
             "exit /b 0\r\n"
             ":install\r\n"
             f'echo %*>> "{seen}.args"\r\n'
@@ -2667,6 +2671,21 @@ def _recording_uv(bindir, seen, old=False, fails=False):
         "done\n"
         f"exit {1 if fails else 0}\n", encoding="utf-8")
     (bindir / "uv").chmod(0o755)
+
+
+def test_the_windows_recording_uv_prints_its_help_lines_not_redirects_them(monkeypatch, tmp_path):
+    """The stub's `--help` lines hold `<CONSTRAINTS>`. Bare in a cmd `echo` that is a redirect
+    (`<` from a file, `>` to nothing): the line printed nothing, the script's probe found no
+    `--constraints` and took the unpinned branch, and PR #215's Windows CI read the stub's silence
+    as the update's. Escaped with `^`, cmd prints them as uv does."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    for old in (False, True):
+        _recording_uv(tmp_path, tmp_path / "seen.txt", old=old)
+        echoes = [line for line in (tmp_path / "uv.cmd").read_text(encoding="utf-8").splitlines()
+                  if line.startswith("echo ") and "constraints" in line]
+        assert echoes, "no help line"
+        for line in echoes:
+            assert re.search(r"(?<!\^)[<>]", line) is None, line
 
 
 def _run_mac_update(tmp_path, **uv):
@@ -2753,6 +2772,7 @@ def test_uv_reads_the_constraints_from_a_windows_folder_with_a_percent_and_a_car
         assert not seen.exists() and "--constraints" not in calls[0], calls
         assert updates.TCC_WINDOW_WORDS["unpinned"] in out and _OLD_UV in out, out
     else:
+        assert updates.TCC_WINDOW_WORDS["unpinned"] not in out, (calls, out)
         assert seen.is_file(), f"uv was not handed the file; uv got {calls[0]!r}; err={err!r}"
         assert seen.read_bytes() == _PINS
         assert updates.TCC_WINDOW_WORDS["unpinned"] not in out, out
