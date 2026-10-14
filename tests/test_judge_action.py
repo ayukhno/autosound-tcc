@@ -844,3 +844,59 @@ def test_the_disk_class_does_not_take_in_reads(line, tmp_path):
     """Looking at disks, and `Format-Table`, are not wiping one: they pass `auto` as before."""
     assert judge_action("Bash", line, gate=GATE_AUTO, read_roots=_read_roots_for(tmp_path),
                         shell=SHELL_POWERSHELL).allowed
+
+
+# ---- the tick rule, one table across the three routes (group fix I4) ---------------------------
+
+#: The tick rows of `OMP_TABLE` — omp and Codex answer them from `judge_action` (`test_the_table`,
+#: `test_omp_answers_the_table`); the SDK route answers them from `TuningSession._can_use_tool`.
+TICK_ROWS = [row for row in OMP_TABLE if row[0] in (
+    "a Codex tick, a home wipe", "always-allowed dangerous bash", "always-allowed ordinary bash")]
+#: A PowerShell spelling a bash shell cannot run as written (bash eats `\\`, and `ri` is no bash
+#: command): the SDK route's Bash tool never runs it, and its reader is bash's alone.
+BASH_CANNOT_RUN = {r"ri -r C:\Users", r"Storage\Clear-Disk -Number 1"}
+
+
+def _sdk_cell(line: str, gate: str, ticked: tuple, tmp_path) -> str:
+    """The SDK route's answer in the table's cells: what `_ask` was asked with, or what passed."""
+    from autosound_tcc.core.tuning_session import TuningSession
+
+    sdk = TuningSession(project_dir=tmp_path, gate=gate,
+                        always_allowed=frozenset("Bash" for _ in ticked))
+    asked: list[str] = []
+
+    async def ask(tool, detail, payload, deny_reason, reason=""):
+        asked.append(reason)
+        return "asked"
+
+    sdk._ask = ask
+    result = asyncio.run(sdk._can_use_tool("Bash", {"command": line}, None))
+    if asked:
+        assert result == "asked"
+        return "ask!" if asked == ["gateIrreversible"] else "ask"
+    return "pass!" if sdk._unasked == [line] else "pass"
+
+
+def test_the_tick_rows_cover_the_three_rows():
+    assert len(TICK_ROWS) == 3
+
+
+@pytest.mark.parametrize("tool, detail, ticked, gate, cell", list(_rows(TICK_ROWS)))
+def test_the_sdk_route_answers_the_tick_rows_as_omp_and_codex_do(tool, detail, ticked, gate, cell,
+                                                                  tmp_path):
+    """A tick removes the question for an ordinary command and never for one that cannot be undone
+    — on the SDK route too, under every gate; `never` passes and says it (the Arbiter,
+    2026-10-14). `foreign` and `never` pinned here as well as `writes` and `auto`."""
+    assert _sdk_cell(_command(detail), gate, ticked, tmp_path) == cell
+
+
+@pytest.mark.parametrize("cls, shell, line",
+                         [row for row in DANGER_TABLE if row[2] not in BASH_CANNOT_RUN],
+                         ids=[_danger_id(r) for r in DANGER_TABLE if r[2] not in BASH_CANNOT_RUN])
+def test_the_sdk_route_asks_about_each_danger_class(cls, shell, line, tmp_path):
+    """C2's rows through the SDK route: asked under `auto`, and with a tick under every gate that
+    asks; under `never` let through and said."""
+    assert _sdk_cell(line, GATE_AUTO, (), tmp_path) == "ask!"
+    for gate in (GATE_WRITES, GATE_FOREIGN, GATE_AUTO):
+        assert _sdk_cell(line, gate, ("Bash",), tmp_path) == "ask!", gate
+    assert _sdk_cell(line, GATE_NEVER, ("Bash",), tmp_path) == "pass!"

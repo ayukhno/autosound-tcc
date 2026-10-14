@@ -1722,3 +1722,26 @@ def test_a_disabled_stray_copy_does_not_refuse_the_start(project, tmp_path, stan
             await session.close()
 
     assert run(go()) == [TurnEnd("th")]
+
+
+@pytest.mark.parametrize("gate", ["writes", "foreign", "auto"])
+def test_an_edit_tick_never_lets_a_file_delete_through(project, tmp_path, stand_in, gate):
+    """I4: a «don't ask again» tick on `Edit` removes the question for an ordinary edit, never for
+    a delete — the gate's tick is read first and the delete's «cannot be undone» after it, so the
+    order in `_judge` cannot be swapped without this failing."""
+    rows = approval_turn("th", changes=[{"path": str(project / "a.txt"),
+                                         "kind": {"type": "delete"}}])
+    bridge, _ = run_gate(project, tmp_path, stand_in, rows, gate=gate,
+                         always_allowed=frozenset({"Edit"}))
+
+    (request,) = bridge.requests
+    assert request.reason == "gateIrreversible" and decisions(stand_in) == ["decline"]
+
+
+def test_an_edit_tick_lets_an_ordinary_edit_through(project, tmp_path, stand_in):
+    rows = approval_turn("th", changes=[{"path": str(project / "a.txt"),
+                                         "kind": {"type": "update"}}])
+    bridge, _ = run_gate(project, tmp_path, stand_in, rows, gate="writes",
+                         always_allowed=frozenset({"Edit"}))
+
+    assert bridge.requests == [] and decisions(stand_in) == ["accept"]
