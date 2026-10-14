@@ -199,6 +199,7 @@ resumes anyway.
   per request; file-change paths in `self._paths[itemId]` (cleared in the turn's `finally`); `inner_command()` for the
   gate's detail; no `turn/completed` sweep of leftover requests yet; `serverRequest/resolved` handled only by
   `codex_rpc`; a refused `turn/start` → Notice + `TurnEnd`. The `codexNotYet` i18n key is now unused (drop it).
+- **A «don't ask again» tick never outranks «cannot be undone»** (the Arbiter, 2026-10-14) — a dangerous line, a Codex `cwd` outside the project, a `writeStdin`/empty command ask with the tick or without; only `never` lets them through, with `Unasked`. omp, the SDK route and Codex alike.
 - **The gate is synchronous and now touches the disk** (realpath, globs, a walk of up to 5000 entries for a recursive PowerShell delete — task 5's third round): task 7 calls `judge_action` through `asyncio.to_thread` so a network or iCloud drive does not hold the session's loop.
 - **Task 6 turned `CODEX_ROUTE` on** in `session_routes.resume_route` together with `factory`'s Codex branch (e89f0ca: until then a Codex pick reads the SDK's route — one without the other told the chat «fresh» over a resumed session).
 - The method's `session-start` takes any harness string (`rew_tool/state/process.py:9259-9261`): `codex` journals as
