@@ -43,8 +43,8 @@ result goes to the ledger below and one line to the hub's H-019.
 - Tree `~/dev/autosound/tcc`, branch `wave-10`. Read the issue (`gh issue view N -R ayukhno/autosound-tcc`) — it is
   the brief — and `CLAUDE.md`.
 - A red test first for a defect; then the fix; then green.
-- **Tests: only the changed files' tests** (`uv run pytest tests/<file> -q`, at most `-n 4`). No `make check`, no
-  whole suite: it runs on the PR's CI, and a local one loads the Mac beside the VM. `uv run ruff check` on the
+- **Tests: only the changed files' tests** (`uv run python -m pytest tests/<file> -q`, at most `-n 4`; plain `uv run pytest` fails to spawn on this Mac). No `make check`, no
+  whole suite: it runs on the PR's CI, and a local one loads the Mac beside the VM. `uvx ruff@0.12.0 check` on the
   changed files.
 - Commit only your own files, by path (never `git add -A` / `commit -a`); the subject in English,
   `<group>: <what> (#N)`, with the session's attribution lines. No push.
@@ -54,5 +54,6 @@ result goes to the ledger below and one line to the hub's H-019.
 
 | issue | state | implementer | commits | review | note |
 |---|---|---|---|---|---|
-| #201 | building | opus · high | | | |
+| #201 | built — task review running | opus · high | 0a01d66, 5e24c74 | opus · high | ship skips the local suite on `ci-green` ok; `make ship VERSION= AT=` dry check; CHANGELOG v1.1.3 corrected; fallback cannot run today (the hub fails ci-green and windows-ran on unreadable CI) |
+| #202 | building | opus · medium | | — (ordinary) | |
 | #181 | done — the study, `docs/STUDY-W-10-codex-primary.md` | opus · high | (this commit) | — | feasible, L (2–4 days); next: a ≤1-day spike on six points; five questions for the Arbiter (§5) |
