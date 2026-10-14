@@ -88,7 +88,8 @@ version = "{version}"
 #: fixture carries one too, and every path through ship meets it the way the real tree would.
 README = (
     "# fixture\n\n```sh\n"
-    "uv tool install --python 3.12 "
+    "uv tool install --python 3.12 --constraints "
+    "https://raw.githubusercontent.com/ayukhno/autosound-tcc/{tag}/constraints.txt "
     "'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc@{tag}'\n"
     "```\n"
 )
@@ -849,10 +850,24 @@ def test_the_readme_install_line_moves_with_the_version_and_lands_in_the_release
     bump that left README behind failed its own suite there and rolled every such release back."""
     _run(repo)
 
-    assert "autosound-tcc@v0.1.25'" in (repo / "README.md").read_text(encoding="utf-8")
+    assert (repo / "README.md").read_text(encoding="utf-8") == README.format(tag="v0.1.25"), (
+        "both tags on the line moved: the install's and its constraints file's (#194)")
     assert git(repo, "status", "--porcelain") == "", "nothing left over for the next run to trip on"
     changed = git(repo, "show", "--name-only", "--format=", "v0.1.25").split()
     assert "README.md" in changed, f"README did not travel with the release commit: {changed}"
+
+
+def test_the_bump_moves_every_tag_on_the_install_line_and_nothing_else(tmp_path):
+    """#194: the install line names its release twice — the package and the `--constraints` file
+    it is held to — and the two move together. A tag on another line is not the install's."""
+    other = "See https://raw.githubusercontent.com/ayukhno/autosound-tcc/v0.0.9/CHANGELOG.md\n"
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "1.1.3"\n', encoding="utf-8")
+    (tmp_path / "README.md").write_text(other + README.format(tag="v1.1.3"), encoding="utf-8")
+
+    assert ship_mod.bump(tmp_path, "1.1.4") == "1.1.3"
+
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == (
+        other + README.format(tag="v1.1.4"))
 
 
 def test_a_red_suite_puts_the_lock_back_too(repo):

@@ -180,10 +180,11 @@ python3 -m pip install --user -r ~/autosound-src/skills/autosound-tuning/require
 ```
 
 Install the app. Name the Python version explicitly: without it, `uv` may pick one older than TCC
-needs, and the error message will look as if the package is broken.
+needs, and the error message will look as if the package is broken. `--constraints` holds `uv` to
+the dependency versions this release was tested with (it needs `uv` 0.5.6 or newer).
 
 ```sh
-uv tool install --python 3.12 'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc@v1.1.3'
+uv tool install --python 3.12 --constraints https://raw.githubusercontent.com/ayukhno/autosound-tcc/v1.1.3/constraints.txt 'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc@v1.1.3'
 ```
 
 Install Claude Code, if you do not have it:

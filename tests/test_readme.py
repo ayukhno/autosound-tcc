@@ -31,3 +31,19 @@ def test_the_readmes_install_line_names_this_versions_tag():
     assert named.group(1) == f"v{version}", (
         f"README.md's install line installs {named.group(1)} and pyproject.toml says {version} — "
         f"the version commit moves both")
+
+
+def test_the_readmes_install_is_held_to_the_same_release_s_constraints():
+    """#194: a hand install resolved afresh gets versions CI never ran, so the line passes
+    `--constraints` with the file of the release it installs — the same tag, moved by the same
+    bump (`scripts/ship.py`, `README_LINE_TAG`)."""
+    version = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    line = next(line for line in (ROOT / "README.md").read_text(encoding="utf-8").splitlines()
+                if line.startswith("uv tool install") and "autosound-tcc[" in line)
+
+    held = re.search(r"--constraints (\S+) ", line)
+    assert held, f"README.md's install line is not held to the lock: {line}"
+    assert held.group(1) == ("https://raw.githubusercontent.com/ayukhno/autosound-tcc/"
+                             f"v{version}/{updates.TCC_CONSTRAINTS}"), line
+    assert line.index("--constraints") < line.index("'autosound-tcc["), line

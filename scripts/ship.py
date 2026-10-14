@@ -386,6 +386,11 @@ def check_version_at(root: Path, at: str, version: str) -> None:
 #: `tests/test_readme.py` holds it to pyproject's version.
 README_TAG = re.compile(r"(git\+https://github\.com/ayukhno/autosound-tcc@v)([^'\"\s]+)")
 
+#: Every tag on that line, the install's and the one its `--constraints` URL names
+#: (`…/autosound-tcc/v1.1.2/constraints.txt`, tcc#194): the bump moves them together, or the
+#: install would be held to another release's versions.
+README_LINE_TAG = re.compile(r"(ayukhno/autosound-tcc[@/]v)([^'\"\s/]+)")
+
 
 def bump(root: Path, version: str) -> str:
     """`pyproject.toml`'s version and the tag README's install line names, and the old version so
@@ -394,7 +399,8 @@ def bump(root: Path, version: str) -> str:
     README moves with the version because the suite checks the two agree: a bump that left it
     behind failed its own suite and rolled every release outside the wave path back (tcc#174). A
     tree with no README has nothing to move. One that has a README but not exactly one tagged
-    install line is a refusal, said before anything is written.
+    install line is a refusal, said before anything is written. Every tag on that line moves —
+    the `--constraints` URL's with the package's (tcc#194) — and no tag on any other line.
     """
     path = root / "pyproject.toml"
     text = path.read_text(encoding="utf-8")
@@ -404,10 +410,14 @@ def bump(root: Path, version: str) -> str:
     readme = root / "README.md"
     words = readme.read_text(encoding="utf-8") if readme.is_file() else None
     if words is not None:
-        words, named = README_TAG.subn(lambda tag: tag.group(1) + version, words)
+        named = len(README_TAG.findall(words))
         if named != 1:
             raise Stop(f"README.md should carry one install line naming a tag "
                        f"(`…/autosound-tcc@vX.Y.Z`) for the bump to move, and carries {named}")
+        lines = words.splitlines(keepends=True)
+        at = next(at for at, line in enumerate(lines) if README_TAG.search(line))
+        lines[at] = README_LINE_TAG.sub(lambda tag: tag.group(1) + version, lines[at])
+        words = "".join(lines)
     was = found.group(1)
     path.write_text(text[:found.start(1)] + version + text[found.end(1):], encoding="utf-8")
     if words is not None:
