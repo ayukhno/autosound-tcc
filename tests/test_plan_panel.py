@@ -468,3 +468,71 @@ def test_a_covered_fact_still_open_is_marked_apart_from_one_already_answered():
     done_line = [ln for ln in text.splitlines() if "project.json:b" in ln][0]
     assert i18n.t("planCoversOpen") in open_line
     assert i18n.t("planCoversOpen") not in done_line
+
+
+_LONG_STEP = (
+    "2a: зчитати поточні фільтри кожного каналу (не припускати, що сирий) + матриця відхилень "
+    "_51 (rta) від цілей 1.8 і надлишкова фаза з _50 (sw) — що взагалі підлягає EQ"
+)
+
+
+def test_short_title_cuts_a_step_name_before_its_first_bracket():
+    """The method writes its rationale after the step's name: the title is the name, and the
+    rest is one hover away (tcc#167)."""
+    from autosound_tcc.ui.tcc.plan_panel import short_title
+
+    assert short_title(_LONG_STEP) == ("2a: зчитати поточні фільтри кожного каналу", _LONG_STEP)
+
+
+def test_short_title_cuts_at_an_em_dash():
+    from autosound_tcc.ui.tcc.plan_panel import short_title
+
+    text = "Sweep the fronts — check the mic placement first"
+    assert short_title(text) == ("Sweep the fronts", text)
+
+
+def test_a_separator_too_early_is_not_a_cut():
+    """"Go" is under 12 characters, so the dash after it is not where the title ends; the first
+    separator that leaves a long enough head is the cut."""
+    from autosound_tcc.ui.tcc.plan_panel import short_title
+
+    text = "Go — sweep the fronts (rta) before the rest"
+    assert short_title(text) == ("Go — sweep the fronts", text)
+
+
+def test_a_long_name_with_no_separator_is_cut_at_a_word():
+    from autosound_tcc.ui.tcc.plan_panel import short_title
+
+    text = " ".join(["alpha"] * 20)  # 119 characters, no separator anywhere
+    # The last space at or before 70 characters is after the eleventh word (index 65).
+    assert short_title(text) == (" ".join(["alpha"] * 11) + "…", text)
+
+
+def test_a_short_name_has_no_rest():
+    from autosound_tcc.ui.tcc.plan_panel import short_title
+
+    assert short_title("Sweep the fronts") == ("Sweep the fronts", "")
+
+
+def test_a_long_step_shows_its_short_title_and_a_hint_with_the_full_name():
+    from PySide6.QtWidgets import QLabel
+
+    _app()
+    step = PlanStep(id="x.7", name={"en": _LONG_STEP, "uk": _LONG_STEP})
+    row = _PhaseStepRow(step, _PlanProgress(), lambda *_: None, lambda _sid: None)
+
+    name = row.findChildren(QLabel)[0]
+    hint = next(w for w in row.findChildren(QLabel) if w.property("class") == "step-title-hint")
+    assert name.text() == "2a: зчитати поточні фільтри кожного каналу"
+    assert hint.text() == "?"
+    assert _LONG_STEP in hint.toolTip()
+
+
+def test_a_short_step_has_no_hint():
+    from PySide6.QtWidgets import QLabel
+
+    _app()
+    step = PlanStep(id="x.8", name={"en": "Sweep the fronts", "uk": "Sweep the fronts"})
+    row = _PhaseStepRow(step, _PlanProgress(), lambda *_: None, lambda _sid: None)
+
+    assert not [w for w in row.findChildren(QLabel) if w.property("class") == "step-title-hint"]

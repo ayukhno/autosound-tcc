@@ -1484,6 +1484,10 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     Arbiter compares character by character against a form, not prose. */
     QLabel[class~="step-covers-chip"] {{ color: {t.muted}; }}
     QLabel[class~="step-covers-chip"]:hover {{ color: {t.info}; }}
+    /* .step-title-hint — the «?» after a step's shortened title (tcc#167): the same small muted
+    mark as the covers chip, so the rest of the name reads as one more of the step's own icons. */
+    QLabel[class~="step-title-hint"] {{ color: {t.muted}; font-size: 12px; }}
+    QLabel[class~="step-title-hint"]:hover {{ color: {t.info}; }}
     QLabel[class~="step-covers-list"] {{
         color: {t.muted};
         font-family: "SF Mono", Menlo, monospace;

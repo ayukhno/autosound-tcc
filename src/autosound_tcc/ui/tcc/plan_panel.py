@@ -13,6 +13,7 @@ completion UI is dogfoodable now even though the base structure itself is still 
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from dataclasses import replace
@@ -106,6 +107,37 @@ _TAG_HINTS = {
 
 _RUN_PREFIX = re.compile(r"^([^:]{4,}?):\s")
 
+#: Where a step name may be cut for its title (tcc#167): the method writes its rationale after the
+#: name, behind one of these. The earliest one that leaves a head of at least `_TITLE_MIN`
+#: characters is the cut; an earlier one that leaves less is just a dash in the name.
+_TITLE_SEPARATORS = ("\u2014", "\u2013", " (", " + ", "; ")
+_TITLE_MIN = 12
+_TITLE_MAX = 70
+
+
+def short_title(text: str) -> tuple[str, str]:
+    """`(shown, rest)`: the title a step row shows, and the whole name when there is more to it.
+
+    `rest` is empty when `shown` is the whole name. Otherwise the name is cut at its first
+    qualifying separator, or, with none, at the last space within `_TITLE_MAX` characters and
+    marked with an ellipsis. The row keeps the full name one hover away.
+    """
+    cut = None
+    for sep in _TITLE_SEPARATORS:
+        at = text.find(sep)
+        while at != -1 and len(text[:at].strip()) < _TITLE_MIN:
+            at = text.find(sep, at + 1)
+        if at != -1 and (cut is None or at < cut):
+            cut = at
+    if cut is not None:
+        return text[:cut].strip(), text
+    if len(text) > _TITLE_MAX:
+        space = text.rfind(" ", 0, _TITLE_MAX + 1)
+        if space <= 0:  # one token with no space in it: cut it where the title ends
+            space = _TITLE_MAX
+        return text[:space].rstrip() + "\u2026", text
+    return text, ""
+
 
 def _collapse_runs(steps: "tuple[PlanStep, ...]") -> "list[PlanStep]":
     """Fold consecutive steps sharing a "Prefix: " into one row that counts them.
@@ -187,7 +219,9 @@ class _PhaseStepRow(QWidget):
         check.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout.addWidget(check)
 
-        name = QLabel(i18n.tx(step.name))
+        full_name = i18n.tx(step.name)
+        shown, rest = short_title(full_name)
+        name = QLabel(shown)
         # Wrapped, not elided: a step name is a sentence the skill wrote ("Bonus baseline solo:
         # c_1 (sw) + c_1 (rta) (captured early, out of order)") and the panel has vertical room
         # but only about 190 px of width. Unwrapped, the longest step decided the panel's width,
@@ -208,6 +242,13 @@ class _PhaseStepRow(QWidget):
         else:
             name.setProperty("class", "substep-name")
         layout.addWidget(name, 1)
+        if rest:
+            # The rest of the name, one hover away, right after the title (tcc#167). Plain text,
+            # escaped and wrapped in a paragraph so Qt breaks the tooltip into lines.
+            hint = QLabel("?")
+            hint.setProperty("class", "step-title-hint")
+            hint.setToolTip(f"<p>{html.escape(rest)}</p>")
+            layout.addWidget(hint, 0, Qt.AlignmentFlag.AlignTop)
 
         has_chip = False
         if step.attempt > 1:
