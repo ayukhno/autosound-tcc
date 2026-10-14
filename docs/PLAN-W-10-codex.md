@@ -96,7 +96,7 @@ EOF (`turn_done` stays honest). No `turn/steer` in this build — window signals
 | Codex asks | TCC does | reply |
 |---|---|---|
 | `item/commandExecution/requestApproval` | `judge_action("Bash", inner command)` (the `/bin/zsh -lc '…'` wrapper stripped; PowerShell lines whole; `commandActions` only as a display hint) → else `await_confirmation`; under `never` a dangerous command passes with `Unasked` | `{"decision":"accept"\|"decline"}` — never `acceptForSession` (TCC's ticks are the only memory, read per request) |
-| `item/fileChange/requestApproval` | `"Edit"`, always asks; paths + reason | same |
+| `item/fileChange/requestApproval` | `"Edit"` as omp's `edit` (asks under `writes`/`foreign`, passes under `auto`/`never`) — **except a change that deletes a file asks under `auto` too** (irreversible; decided 2026-10-14 after task 5's review, I1); paths + reason | same |
 | `mcpServer/elicitation/request` | `tcc` → accept `{}`; any other server → decline | |
 | `permissions`, `requestUserInput`, anything unknown | JSON-RPC error, answered once, logged | |
 | `serverRequest/resolved {requestId}` | `rpc.resolved(id)`, cancel that gate task → the future is cancelled and `ConfirmBar._on_gave_up` takes the bar down (no new UI) | nothing sent |
@@ -180,6 +180,20 @@ resumes anyway.
   the reader: return an awaitable and it runs as its own task; a raise answers the request with an error; no handler
   → -32601. On Windows `close()` goes to `child.kill_tree` after the grace (holds the loop up to 5 s). Pass
   `secret_env=("TCC_MCP_TOKEN",)` with `env` to keep the token out of the frame log.
+- **`codex_cli` as built (1475e33, task 4)** — `find()` (stat-only; PATH → Homebrew/`~/.local/bin`/`~/.npm-global/bin`
+  /`%APPDATA%\npm` → TCC's copy; shims resolve to the native binary under `node_modules/@openai/codex*/**`),
+  `tcc_copy_path()`, `version()`/`too_old()`/`usable()`, `probe(force) -> Probe(signed_in, models, why, asked)` on ONE
+  app-server (`account/read`, then `model/list` paging) — not `ask_blocking`; `supported_efforts(model)`;
+  `tcc_tool_args`, `isolation_args`, `unsafe_server_names` (→ a Notice in task 6), `unknown_enabled_features`.
+  For task 6: spawn `find().path` (never a shim; the npm shim's `CODEX_MANAGED_*` env is skipped — unverified);
+  `codex_effort(level, codex_cli.supported_efforts(model))`; remove the `codexNotYet` refusal in `blocker` (its test
+  `test_a_codex_pick_is_refused_until_codex_has_its_session`) together with `factory`'s Codex branch and `CODEX_ROUTE`.
+  For tasks 8/9: Codex's blockers (not found, too old, signed out) in `blocker` — `too_old()` is known after
+  `version()` ran on a worker (`probe()` runs it); task 9 unpacks to exactly `tcc_copy_path()`, then `forget()`.
+- **The shared gate (54e6b96, task 5) — for task 7:** pass the inner command as `detail` (strip `/bin/zsh -lc '…'`),
+  `command=None`; on Windows `shell="powershell"`; tool names `"Bash"`/`"Edit"` (`TOOL_NAMES`). Task 5's fix round
+  (the Arbiter, 2026-10-14: «виправити повністю») closes the `foreign` hole — danger first, owned paths anchored
+  (relative, an owned prefix, no `..`) — and makes an unknown tool name ask under `auto`.
 - **Task 6 turns `CODEX_ROUTE` on** in `session_routes.resume_route` together with `factory`'s Codex branch (e89f0ca: until then a Codex pick reads the SDK's route — one without the other told the chat «fresh» over a resumed session).
 - The method's `session-start` takes any harness string (`rew_tool/state/process.py:9259-9261`): `codex` journals as
   `"harness": "codex"`.
