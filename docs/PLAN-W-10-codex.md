@@ -174,6 +174,7 @@ resumes anyway.
 - **Command approvals** list `accept`, `acceptWithExecpolicyAmendment`, `cancel` as decisions; `decline` works too —
   TCC sends `accept` / `decline`.
 - **Sign-in** uses a fixed callback port, `127.0.0.1:1455` (Windows: Defender/firewall on the VM pass).
+- **Task 6 turns `CODEX_ROUTE` on** in `session_routes.resume_route` together with `factory`'s Codex branch (e89f0ca: until then a Codex pick reads the SDK's route — one without the other told the chat «fresh» over a resumed session).
 - The method's `session-start` takes any harness string (`rew_tool/state/process.py:9259-9261`): `codex` journals as
   `"harness": "codex"`.
 - The stand-in: `tests/fakes/fake_codex_app_server.py` (`--scenario` / `FAKE_CODEX_*`; exit 3 with `ASSERT` on an
