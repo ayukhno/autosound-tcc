@@ -238,3 +238,35 @@ def test_an_old_codex_on_path_gives_way_to_tccs_installed_copy(tmp_path, monkeyp
 
     assert calls and calls[0][0] == str(own)
     codex_cli.forget()
+
+
+def test_two_old_codexes_both_give_way_to_tccs_installed_copy(tmp_path, monkeypatch):
+    """The re-review's I1: one more look skipped the first old Codex and landed on a second (a
+    Homebrew one and an npm one, say), read it too old and stopped there. Each look marks one
+    more Codex as known-old, so looking until the answer stops changing ends."""
+    import sys
+
+    def script(path: Path, says: str) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"#!{sys.executable}\nprint('codex-cli {says}')\n")
+        path.chmod(0o755)
+        return path
+
+    _write_config(tmp_path)
+    old = script(tmp_path / "old-bin" / "codex", "0.100.0")
+    older = script(tmp_path / "home" / ".local" / "bin" / "codex", "0.90.0")
+    home = tmp_path / "home"
+    own = script(codex_cli.tcc_copy_path(home=home, environ={}, windows=False), codex_cli.PIN)
+    monkeypatch.setattr(codex_cli, "find", _REAL_FIND)
+    monkeypatch.setattr(codex_cli, "SYSTEM_FOLDERS", ())
+    monkeypatch.setattr(codex_cli, "dock_folders", lambda **_kw: [older.parent])
+    monkeypatch.setattr(codex_cli.Path, "home", lambda: home)
+    monkeypatch.setenv("PATH", str(old.parent))
+    codex_cli.forget()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(codex_terminal, "_start", lambda argv, env, cwd: calls.append(argv) or 0)
+
+    assert codex_terminal.main([str(tmp_path)]) == 0
+
+    assert calls and calls[0][0] == str(own)
+    codex_cli.forget()

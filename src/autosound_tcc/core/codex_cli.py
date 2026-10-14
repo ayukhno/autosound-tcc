@@ -429,19 +429,24 @@ async def _ask(binary: str, timeout: float) -> tuple[Any, list, str]:
 
 
 def settled() -> tuple[Optional[Found], Optional[tuple]]:
-    """`find()` with its version read — and, when that reading is too old, `find()` again, which
-    now passes it over for TCC's own copy. `(found, version)`; the found one is still the old Codex
-    when there is no other. **Worker thread only** (or a process of its own: the terminal, whose
-    cache starts empty, task 9's review I1)."""
+    """`find()` with its version read — and, while that reading is too old, `find()` again, which
+    now passes it over for the next Codex and, last, TCC's own copy. `(found, version)`; the found
+    one is still an old Codex when there is no other. **Worker thread only** (or a process of its
+    own: the terminal, whose cache starts empty, task 9's review I1). It ends: each look marks one
+    more Codex as known-old, and an answer that does not change stops it (two old ones — a Homebrew
+    and an npm one — took two looks, the re-review's I1)."""
     found = find()
     if found is None:
         return None, None
     read = version(found)
-    if read is not None and read < MIN_VERSION:
+    seen = {found}
+    while read is not None and read < MIN_VERSION:
         forget()
         other = find()
-        if other is not None and other != found:
-            found, read = other, version(other)
+        if other is None or other in seen:
+            break
+        seen.add(other)
+        found, read = other, version(other)
     return found, read
 
 
