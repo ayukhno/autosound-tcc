@@ -2524,7 +2524,7 @@ def test_the_install_command_carries_the_constraints_it_is_given():
 
 @pytest.mark.parametrize(("platform", "held"), [
     ("darwin", '--constraints "$(dirname -- "$0")/constraints.txt" '),
-    ("win32", '--constraints "%~dp0constraints.txt" '),
+    ("win32", '--constraints "%%tcc_pins%%" '),
 ])
 def test_the_update_script_holds_uv_to_the_constraints_beside_it(platform, held):
     """Named from the script's own place, not written into it: a folder with a space or a
@@ -2536,6 +2536,43 @@ def test_the_update_script_holds_uv_to_the_constraints_beside_it(platform, held)
 
     plain = updates.tcc_install_script(pid=4242, tag="v1.1.4", platform=platform)
     assert "--constraints" not in plain
+
+
+def test_cmd_takes_the_folder_once_so_a_percent_or_a_caret_in_it_survives_call():
+    """The review of #194: `call` expands `%` a second time and doubles `^`, so `%~dp0` on the
+    `call` line turned a folder like `50%off` into a file uv could not find, and failed an update
+    that used to work. `set` takes the folder once; `%%tcc_pins%%` is expanded by `call` itself,
+    and a value is not read again."""
+    lines = updates.tcc_install_script(pid=4242, tag="v1.1.4", platform="win32",
+                                       constraints=True).splitlines()
+    held = next(line for line in lines if "--constraints" in line)
+
+    assert lines[lines.index(held) - 1] == 'set "tcc_pins=%~dp0constraints.txt"'
+    assert held.startswith("call uv tool install ") and "%~dp0" not in held, held
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_a_refused_pinned_install_is_tried_once_more_without_the_file(platform):
+    """A uv older than 0.5.6 does not know `uv tool install --constraints` (uv #9547): the update
+    must not fail for the file, so a refused pinned install is followed by the plain one, once,
+    with a line saying uv chooses the versions this time. Without the file nothing changes."""
+    script = updates.tcc_install_script(pid=4242, tag="v1.1.4", words=_WORDS, platform=platform,
+                                        constraints=True)
+    installs = [line for line in script.splitlines() if "uv tool install" in line]
+    if platform == "win32":
+        assert len(installs) == 2 and "--constraints" in installs[0], installs
+        assert "--constraints" not in installs[1]
+        assert script.index("goto installed") < script.index(installs[1])
+    else:
+        assert len(installs) == 1 and installs[0].count("uv tool install") == 2, installs
+        held, _sep, plain = installs[0].partition(" || ")
+        assert "--constraints" in held and "--constraints" not in plain, installs
+    assert script.count(updates.TCC_WINDOW_WORDS["unpinned"]) == 1
+    assert script.count(_WORDS["done"]) == 1 and script.count(_WORDS["failed"]) == 1
+
+    plain = updates.tcc_install_script(pid=4242, tag="v1.1.4", words=_WORDS, platform=platform)
+    assert plain.count("uv tool install") == 1
+    assert updates.TCC_WINDOW_WORDS["unpinned"] not in plain
 
 
 @pytest.mark.parametrize("platform", ["darwin", "win32"])
@@ -2554,70 +2591,122 @@ def test_the_update_folder_keeps_the_tag_s_constraints_beside_the_script(tmp_pat
     assert "--constraints" not in plain.read_text(encoding="utf-8")
 
 
-def _recording_uv(bindir, seen):
-    """A `uv` that keeps its arguments and a copy of the file `--constraints` named."""
+def _recording_uv(bindir, seen, refuse=False):
+    """A `uv` that keeps its arguments, one call after another, and a copy of the file
+    `--constraints` named — or, `refuse`, one that does not know the option, as before 0.5.6."""
+    held = "exit /b 2" if refuse else f'copy /y "%~2" "{seen}" >nul'
     if sys.platform.startswith("win"):
         (bindir / "uv.cmd").write_text(
             "@echo off\r\n"
-            f'echo %* > "{seen}.args"\r\n'
+            f'echo %*>> "{seen}.args"\r\n'
             ":next\r\n"
             'if "%~1"=="" exit /b 0\r\n'
-            f'if "%~1"=="--constraints" copy /y "%~2" "{seen}" >nul\r\n'
+            'if "%~1"=="--constraints" goto held\r\n'
             "shift\r\n"
-            "goto next\r\n", encoding="utf-8")
+            "goto next\r\n"
+            ":held\r\n"
+            f"{held}\r\n"
+            "exit /b 0\r\n", encoding="utf-8")
         return
+    held = "exit 2" if refuse else f"cp \"$2\" '{seen}'"
     (bindir / "uv").write_text(
         "#!/bin/sh\n"
-        f"printf '%s\\n' \"$@\" > '{seen}.args'\n"
+        f"printf '%s\\n' \"$@\" >> '{seen}.args'\n"
         'while [ $# -gt 0 ]; do\n'
-        f'  if [ "$1" = --constraints ]; then cp "$2" \'{seen}\'; fi\n'
+        f'  if [ "$1" = --constraints ]; then {held}; fi\n'
         "  shift\n"
         "done\n", encoding="utf-8")
     (bindir / "uv").chmod(0o755)
 
 
-@pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
-def test_uv_reads_the_constraints_from_a_folder_with_a_space_and_cyrillic(tmp_path):
-    """Run for real, with a fake `uv`: the path the script names reaches uv as ONE argument, and
-    it is the file the tag carried."""
+def _run_mac_update(tmp_path, uv_body=None, refuse=False):
+    """The macOS script for v1.1.4 with the tag's constraints, run by sh in a folder with a
+    space, an apostrophe and Cyrillic in its name; what it printed, and the fake uv's record."""
     import os
 
     bindir = tmp_path / "bin"
     bindir.mkdir()
     seen = tmp_path / "seen.txt"
-    _recording_uv(bindir, seen)
+    if uv_body is None:
+        _recording_uv(bindir, seen, refuse=refuse)
+    else:
+        (bindir / "uv").write_text(uv_body.format(args=f"{seen}.args"), encoding="utf-8")
+        (bindir / "uv").chmod(0o755)
     folder = tmp_path / "Олег Ю's update"
     folder.mkdir()
     path = updates.write_tcc_install_script(pid=_gone_pid(), tag="v1.1.4", words=_WORDS,
                                             folder=folder, platform="darwin", constraints=_PINS)
-
     out = subprocess.run(["/bin/sh", str(path)], capture_output=True, text=True, encoding="utf-8",
                          env={**os.environ, "PATH": f"{bindir}:/usr/bin:/bin"}, timeout=30).stdout
+    args = (tmp_path / "seen.txt.args").read_text(encoding="utf-8").splitlines()
+    return out, args, seen, folder
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
+def test_uv_reads_the_constraints_from_a_folder_with_a_space_and_cyrillic(tmp_path):
+    """Run for real, with a fake `uv`: the path the script names reaches uv as ONE argument, and
+    it is the file the tag carried. One install: nothing to try again."""
+    out, args, seen, folder = _run_mac_update(tmp_path)
 
     assert out.rstrip().endswith(_WORDS["done"]), out
     assert seen.read_bytes() == _PINS
-    args = (tmp_path / "seen.txt.args").read_text(encoding="utf-8").splitlines()
     assert args[args.index("--constraints") + 1] == str(folder / "constraints.txt"), args
+    assert args.count("install") == 1 and updates.TCC_WINDOW_WORDS["unpinned"] not in out
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
+def test_an_old_uv_that_refuses_constraints_still_updates_and_says_how(tmp_path):
+    out, args, seen, _folder = _run_mac_update(tmp_path, refuse=True)
+
+    assert not seen.exists()
+    assert args.count("install") == 2 and args.count("--constraints") == 1, args
+    assert updates.TCC_WINDOW_WORDS["unpinned"] in out, out
+    assert out.rstrip().endswith(_WORDS["done"]), out
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
+def test_a_retry_that_fails_too_is_the_update_s_failure(tmp_path):
+    """Only one more try, and its failure is reported as every failure was."""
+    out, args, _seen, _folder = _run_mac_update(
+        tmp_path, uv_body="#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{args}'\nexit 1\n")
+
+    assert args.count("install") == 2, args
+    assert out.rstrip().endswith(_WORDS["failed"]) and _WORDS["done"] not in out, out
 
 
 @pytest.mark.skipif(not sys.platform.startswith("win"), reason="runs the Windows script with cmd")
-def test_uv_reads_the_constraints_from_a_windows_folder_with_a_space_and_cyrillic(tmp_path):
-    """The same through cmd: `%~dp0` is the batch file's own folder, expanded by cmd."""
+@pytest.mark.parametrize("refuse", [False, True])
+def test_uv_reads_the_constraints_from_a_windows_folder_with_a_percent_and_a_caret(tmp_path,
+                                                                                   refuse):
+    """The same through cmd, in a folder with a space, Cyrillic, `%` and `^` in its name — the two
+    characters `call` would have read again. `refuse`: a uv that does not know the option gets
+    the plain install next, once."""
     import os
 
     bindir = tmp_path / "bin"
     bindir.mkdir()
     seen = tmp_path / "seen.txt"
-    _recording_uv(bindir, seen)
-    folder = tmp_path / "Олег Ю update"
+    _recording_uv(bindir, seen, refuse=refuse)
+    folder = tmp_path / "Олег Ю 50%off ^x"
     folder.mkdir()
-    path = updates.write_tcc_install_script(pid=_gone_pid(), tag="v1.1.4", words=_WORDS,
+    gone = subprocess.Popen([sys.executable, "-c", ""])
+    gone.wait()
+    path = updates.write_tcc_install_script(pid=gone.pid, tag="v1.1.4", words=_WORDS,
                                             folder=folder, platform="win32", constraints=_PINS)
 
-    subprocess.run(["cmd", "/c", str(path)], capture_output=True, timeout=60,
-                   env={**os.environ, "PATH": f"{bindir};{os.environ['PATH']}"})
+    out = subprocess.run(["cmd", "/c", str(path)], capture_output=True, timeout=120,
+                         env={**os.environ, "PATH": f"{bindir};{os.environ['PATH']}"},
+                         ).stdout.decode("utf-8", errors="replace")
 
-    assert seen.read_bytes() == _PINS
+    calls = (tmp_path / "seen.txt.args").read_text(encoding="utf-8",
+                                                   errors="replace").splitlines()
+    if refuse:
+        assert not seen.exists() and len(calls) == 2, calls
+        assert updates.TCC_WINDOW_WORDS["unpinned"] in out, out
+    else:
+        assert seen.read_bytes() == _PINS
+        assert len(calls) == 1, calls
+    assert _WORDS["done"] in out and _WORDS["failed"] not in out, out
 
 
 def _tcc_tag_with_constraints(tmp_path, tag="v0.1.49", pins=_PINS):
@@ -2688,3 +2777,30 @@ def test_a_constraints_file_git_could_not_read_does_not_stop_the_update(monkeypa
     assert ready.script is not None and ready.signature.endswith("signature good (author)"), ready
     assert "--constraints" not in ready.script.read_text(encoding="utf-8")
     assert "fatal: bad object" in caplog.text
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="a symbolic link in git, made on POSIX")
+def test_a_constraints_entry_that_is_not_a_file_is_not_handed_to_uv(monkeypatch, tmp_path, caplog):
+    """The review of #194: only a file is read, as `_tag_contract` reads one. A symbolic link
+    would hand uv its target's NAME as the text; the update goes ahead unconstrained and the log
+    names what the entry was."""
+    import logging
+    import os
+
+    _tcc_origin(monkeypatch, tmp_path)
+    origin = tmp_path / "tcc-origin"
+    os.symlink("pyproject.toml", origin / "constraints.txt")
+    _git_in("add", "constraints.txt", cwd=origin)
+    _git_in("commit", "-q", "-m", "a link", cwd=origin)
+    _git_in("-c", "gpg.format=ssh", "-c", f"user.signingkey={tmp_path / 'author'}.pub",
+            "tag", "-s", "v0.1.49", "-m", "v0.1.49", cwd=origin)
+    _offering(monkeypatch, "v0.1.49")
+
+    with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
+        ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None, ready
+    assert "--constraints" not in ready.script.read_text(encoding="utf-8")
+    assert not (ready.script.parent / "constraints.txt").exists()
+    assert "a symbolic link" in caplog.text and "120000" in caplog.text, caplog.text

@@ -17,6 +17,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parent.parent
 CONSTRAINTS = ROOT / "constraints.txt"
@@ -26,24 +27,25 @@ LOCK = ROOT / "uv.lock"
 EXPORT = ["uv", "export", "--frozen", "--extra", "gui", "--extra", "claude", "--no-dev",
           "--no-emit-project", "--no-hashes", "--no-annotate"]
 
-_PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;]+)\s*(?:;.*)?$")
-
-
 def _name(text: str) -> str:
     return re.sub(r"[-_.]+", "-", text).lower()
 
 
-def _pins(text: str) -> set[tuple[str, str]]:
-    """Every `name==version` line, as (normalised name, version). Anything else that is not a
-    comment fails: a constraint that is not an exact pin holds uv to nothing."""
+def _pins(text: str) -> set[tuple[str, str, str]]:
+    """Every line as (normalised name, version, normalised marker). The marker counts: numpy and
+    scipy are pinned twice, by Python version, and two `numpy==` lines without theirs would
+    conflict and fail every constrained update (the review of #194). Anything that is not a
+    comment or an exact pin fails: a constraint that is not one holds uv to nothing."""
     pins = set()
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        match = _PIN.match(line)
-        assert match, f"not an exact pin: {line!r}"
-        pins.add((_name(match.group(1)), match.group(2)))
+        pin = Requirement(line)
+        specs = list(pin.specifier)
+        assert len(specs) == 1 and specs[0].operator == "==" and not pin.extras and not pin.url, (
+            f"not an exact pin: {line!r}")
+        pins.add((_name(pin.name), specs[0].version, str(pin.marker or "")))
     return pins
 
 
@@ -53,7 +55,8 @@ def test_every_pin_is_the_version_the_lock_holds():
     lock = tomllib.loads(LOCK.read_text(encoding="utf-8"))
     locked = {(_name(package["name"]), package["version"]) for package in lock["package"]
               if "version" in package}
-    pins = _pins(CONSTRAINTS.read_text(encoding="utf-8"))
+    pins = {(name, version) for name, version, _marker in
+            _pins(CONSTRAINTS.read_text(encoding="utf-8"))}
 
     assert pins, "constraints.txt pins nothing"
     assert pins <= locked, f"pinned, but not what uv.lock holds: {sorted(pins - locked)}"
@@ -65,8 +68,9 @@ def test_every_pin_is_the_version_the_lock_holds():
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv, which CI and `make` both run")
 def test_the_file_is_the_lock_s_export():
     """And the whole set: what `make constraints` would write now — a dependency added to the lock
-    and missing here would install unpinned. Compared as pins, not as text, so a uv that words a
-    marker differently is not a failure."""
+    and missing here would install unpinned, and a marker lost here would make two pins of one
+    package conflict. Compared as parsed pins, not as text, so a uv that words a marker
+    differently is not a failure."""
     exported = subprocess.run(EXPORT, cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
                               timeout=60, check=True).stdout
 

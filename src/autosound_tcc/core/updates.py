@@ -144,6 +144,8 @@ TCC_WINDOW_WORDS = {
     "failed": "The update did not finish — the lines above say why.",
     "moved": "The new version changed after it was checked, or the server did not answer — "
              "nothing was installed. Start TCC and press «Update TCC» again.",
+    "unpinned": "uv did not install the tested versions (constraints.txt) — trying once more "
+                "without them, so uv chooses the versions this time.",
 }
 
 #: How long the install script waits for the server to name the tag's commit (tcc#123). The person
@@ -231,7 +233,14 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     **`constraints`: a `TCC_CONSTRAINTS` lies beside the script, and uv is held to it** (tcc#194).
     The script names it from its own place — `%~dp0` in cmd, `$0`'s folder in sh — rather than
     carrying the path: the shell expands the folder itself, a space or a Cyrillic user name in it
-    included, inside double quotes.
+    included, inside double quotes. In cmd it goes through a variable: `call` expands `%` a second
+    time and doubles `^`, so `%~dp0` on the `call` line breaks a folder like `50%off`; `set` takes
+    it once, and `%%tcc_pins%%` is expanded by `call` itself, where the value is not read again.
+
+    **A refused pinned install is tried once more without the file**, saying so (`unpinned`): a uv
+    older than 0.5.6 does not know `uv tool install --constraints` (uv #9547), and the file must
+    never fail an update that would have gone through without it. The second try's own failure is
+    the update's failure, as before.
     """
     if folder is not None and not (Path(folder).is_absolute()
                                    and Path(folder).name.startswith(_UPDATE_FOLDER_PREFIX)):
@@ -240,9 +249,9 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
         pid = os.getpid()
     said = {**TCC_WINDOW_WORDS, **(words or {})}
     windows = _is_windows(platform)
-    beside = (f'"%~dp0{TCC_CONSTRAINTS}"' if windows
-              else f'"$(dirname -- "$0")/{TCC_CONSTRAINTS}"')
-    command = tcc_install_command(tag, beside if constraints else "")
+    command = tcc_install_command(tag)
+    held = tcc_install_command(tag, '"%%tcc_pins%%"' if windows
+                               else f'"$(dirname -- "$0")/{TCC_CONSTRAINTS}"')
     if windows:
         # UTF-8 with `chcp 65001`, so the Arbiter's language arrives whole (the file is written
         # UTF-8, and cmd decodes each line it reads with the code page current at that moment).
@@ -277,8 +286,14 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             f'powershell -NoProfile -Command "Wait-Process -Id {pid} -ErrorAction SilentlyContinue"',
             *guard,
             _cmd_echo(said["updating"]),
+            *([f'set "tcc_pins=%~dp0{TCC_CONSTRAINTS}"',
+               f"call {held}",
+               "if not errorlevel 1 goto installed",
+               "echo.",
+               _cmd_echo(said["unpinned"])] if constraints else []),
             f"call {command}",
             "if errorlevel 1 goto failed",
+            *([":installed"] if constraints else []),
             "echo.",
             _cmd_echo(said["done"]),
             "goto end",
@@ -325,7 +340,8 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             f"while kill -0 {pid} 2>/dev/null; do sleep 1; done",
             *guard,
             say(shlex.quote(said["updating"])),
-            f"if {command}; then",
+            (f"if {held} || {{ echo; {say(shlex.quote(said['unpinned']))}; {command}; }}; then"
+             if constraints else f"if {command}; then"),
             "  echo; " + say(shlex.quote(said["done"])),
             "else",
             "  echo; " + say(shlex.quote(said["failed"])),
@@ -1462,12 +1478,23 @@ def _tag_constraints(repo: Path, tag: str) -> Optional[bytes]:
     """The verified tag's `TCC_CONSTRAINTS` as it is, or None: a release from before tcc#194
     has none, and one git could not read is logged with git's words. Never a refusal — the
     signature decides whether the update goes ahead; this only decides how closely uv is held."""
-    lacks, why = _tag_lacks(repo, tag, TCC_CONSTRAINTS)
-    if lacks:
+    listed, said = _git("ls-tree", "--full-tree", f"refs/tags/{tag}", "--", TCC_CONSTRAINTS,
+                        cwd=repo)
+    if not listed:
+        _log.warning("tcc tag %s: %s not read: %s", tag, TCC_CONSTRAINTS,
+                     said or "git ls-tree failed")
         return None
-    pins = None
-    if lacks is False:
-        pins, why = _git_show(repo, f"refs/tags/{tag}:{TCC_CONSTRAINTS}")
+    entries = [line for line in said.splitlines() if line.partition("\t")[2] == TCC_CONSTRAINTS]
+    if not entries:
+        return None
+    # Only a file, as `_tag_contract` reads one: a symbolic link would hand uv its target's NAME
+    # as the text, and a folder or a gitlink no text at all.
+    mode = entries[0].split(None, 1)[0]
+    if mode not in _FILE_MODES:
+        _log.warning("tcc tag %s: %s is %s in the tag, not a file (git mode %s) — not used", tag,
+                     TCC_CONSTRAINTS, _NOT_A_FILE.get(mode, "an entry"), mode)
+        return None
+    pins, why = _git_show(repo, f"refs/tags/{tag}:{TCC_CONSTRAINTS}")
     if pins is None:
         _log.warning("tcc tag %s: %s not read: %s", tag, TCC_CONSTRAINTS, why)
     return pins
