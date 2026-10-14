@@ -149,13 +149,38 @@ class CodexSession:
         self._retry_said = False
         self._last_error = ""
         self._getter: Optional[asyncio.Future] = None
+        # Stop (task 6's review, I2). `_turn_open`: a turn is wanted — from `start` on, through each
+        # `_turn` — so a Stop between turns cancels nothing. `_interrupt_wanted`: a Stop came
+        # before the turn had an id; it is carried out the moment the id is known (the reply or
+        # `turn/started`), or, before the message went out, by not sending it.
+        self._turn_open = False
+        self._interrupt_wanted = False
+        self._tasks: set[asyncio.Task] = set()
 
     # ---- start --------------------------------------------------------------------------------
 
     async def start(self, prompt: Optional[str] = None) -> AsyncIterator[AgentEvent]:
         """Start Codex and run the opening turn. A refusal before the process exists raises
         (`MethodRefused`, `CodexNotInstalled`, `CodexSignedOut`, `CodexStartFailed`) — the worker
-        shows a failed start as a failed bubble, as it does for omp."""
+        shows a failed start as a failed bubble, as it does for omp.
+
+        A Stop while Codex is still starting skips the opening turn: no message is sent, the
+        opening ends at once and says so (`_turn`)."""
+        self._turn_open = True
+        try:
+            notices = await self._open(prompt)
+        except BaseException:
+            self._turn_open = False
+            self._interrupt_wanted = False
+            raise
+        for notice in notices:
+            yield notice
+        opening = openers.opening_prompt(resumed=self.resumed, typed=prompt or "")
+        async for event in self._turn(opening):
+            yield event
+
+    async def _open(self, prompt: Optional[str]) -> list[AgentEvent]:
+        """Everything before the opening turn; the Notices it has to say."""
         binding = method_binding.for_project(self.project_dir)
         try:
             skill_dir = binding.require()
@@ -169,8 +194,12 @@ class CodexSession:
         env = self._env(binding)
         notices: list[AgentEvent] = []
         config_read = await self._probe(binary, env)
-        unsafe = codex_cli.unsafe_server_names(config_read)
-        if unsafe:
+        if config_read is None:
+            config_read = {}
+            notices.append(Notice(
+                "Codex did not show TCC its config, so the MCP servers in it stay on in this "
+                "session — TCC could not name them to switch them off."))
+        if unsafe := codex_cli.unsafe_server_names(config_read):
             notices.append(Notice(
                 "Codex's own config has MCP servers TCC cannot switch off for this session — "
                 f"their names cannot be passed to Codex as a setting: {', '.join(unsafe)}. They "
@@ -184,11 +213,15 @@ class CodexSession:
         await self._clamp_effort()
         notices += await self._open_thread()
         self._bind()
-        for notice in notices:
-            yield notice
-        opening = openers.opening_prompt(resumed=self.resumed, typed=prompt or "")
-        async for event in self._turn(opening):
-            yield event
+        return notices
+
+    def _redact(self, text: str) -> str:
+        """`text` without TCC's token: a start's refusal carries Codex's stderr, and a user's own
+        `RUST_LOG=trace` prints request headers there (task 6's review, M5)."""
+        return text.replace(self.mcp_token, codex_rpc.REDACTED) if self.mcp_token else text
+
+    def _start_failed(self, said: str) -> CodexStartFailed:
+        return CodexStartFailed(self._redact(said))
 
     def _binary(self) -> str:
         if self.binary:
@@ -206,10 +239,11 @@ class CodexSession:
         return vendor_loader.child_env(**{**critic.session_env(self.project_dir),
                                           **binding.session_env()})
 
-    async def _probe(self, binary: str, env: dict[str, str]) -> dict:
+    async def _probe(self, binary: str, env: dict[str, str]) -> Optional[dict]:
         """One short app-server before the session's own: the login (signed out refuses the
         start here, before a turn fails on it) and the user's config, which decides the isolation
-        list — it has to be known before the session's process is started with it."""
+        list — it has to be known before the session's process is started with it. None when
+        Codex would not show its config."""
         try:
             account, config_read = await codex_rpc.ask(
                 binary, [("account/read", {}), ("config/read", {"cwd": str(self.project_dir)})],
@@ -219,7 +253,7 @@ class CodexSession:
                 f"Codex gave no answer in {int(codex_cli.PROBE_TIMEOUT_S)} s, so the session "
                 "did not start.") from None
         except codex_rpc.ConnectionLost as exc:
-            raise CodexStartFailed(f"Codex did not start: {exc}") from exc
+            raise self._start_failed(f"Codex did not start: {exc}") from exc
         if codex_cli._signed_in_from(account) is False:
             raise CodexSignedOut(
                 "Codex is not signed in on this computer, so the session cannot start. Sign in to "
@@ -228,7 +262,7 @@ class CodexSession:
             app_log.logger().warning("codex: config/read refused (%s); only TCC's own switches "
                                      "are set, the user's MCP servers stay as configured",
                                      config_read.message)
-            return {}
+            return None
         return config_read
 
     async def _spawn(self, binary: str, env: dict[str, str], config_read: dict) -> None:
@@ -244,14 +278,14 @@ class CodexSession:
             secrets = (codex_cli.TOKEN_ENV,)
         self._server = codex_rpc.AppServer(
             argv, cwd=self.project_dir, env=env, spawn_kwargs=self._spawn_kwargs(),
-            log=self._fresh_log(), on_request=self._on_request, secret_env=secrets,
+            log=self._frame_log(), on_request=self._on_request, secret_env=secrets,
             log_cap=FRAME_LOG_MAX_BYTES)
         try:
             await self._server.open()
         except codex_rpc.ConnectionLost as exc:
-            raise CodexStartFailed(f"Codex did not start: {exc}") from exc
+            raise self._start_failed(f"Codex did not start: {exc}") from exc
         except TimeoutError as exc:
-            raise CodexStartFailed(f"Codex did not answer at start: {exc}") from exc
+            raise self._start_failed(f"Codex did not answer at start: {exc}") from exc
         # Codex starts a shell per command; on Windows they inherit this console, hidden, rather
         # than each opening a window of its own (`child.agent_console`). No-op elsewhere.
         child.hide_agent_console_later(self._server.pid or 0)
@@ -262,21 +296,23 @@ class CodexSession:
         `claude` gets, `child.hide_console_windows`), else no window at all."""
         return child.agent_console() or child.flags()
 
-    def _fresh_log(self) -> Path:
-        """The frame log, emptied past omp's cap — `AppServer` stops writing at the cap per
-        process, so without this the file would grow by a cap per session."""
+    def _frame_log(self) -> Path:
+        """The frame log's path, its folder made. `AppServer` rotates it to `.1` at the cap
+        (omp's cap) and goes on writing, counting from the size it already has."""
         path = self._log_path
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            if path.exists() and path.stat().st_size > FRAME_LOG_MAX_BYTES:
-                path.unlink()
         except OSError as exc:
-            app_log.logger().warning("codex: the frame log %s could not be reset: %s", path, exc)
+            app_log.logger().warning("codex: no folder for the frame log %s: %s", path, exc)
         return path
 
     async def _request(self, method: str, params: dict) -> dict:
+        """A start-time request. Codex ending meanwhile is the start failing, said with why."""
         assert self._server is not None
-        return await self._server.request(method, params, timeout=REQUEST_TIMEOUT_S)
+        try:
+            return await self._server.request(method, params, timeout=REQUEST_TIMEOUT_S)
+        except codex_rpc.ConnectionLost as exc:
+            raise self._start_failed(f"Codex stopped while starting ({method}): {exc}") from exc
 
     async def _load_skill(self, skill_dir: Path) -> list[AgentEvent]:
         """The method as Codex's one extra skill root: the project's own `.claude/skills`, where
@@ -295,7 +331,9 @@ class CodexSession:
         except (codex_rpc.RpcError, TimeoutError) as exc:
             app_log.logger().warning("codex: skills/list refused, the method's skill unchecked: %s",
                                      exc)
-            return []
+            return [Notice(
+                "Codex did not list its skills, so which copy of the tuning method it loads is "
+                "unchecked: a second copy in Codex's own skills would not be noticed.")]
         ours = {os.path.normcase(os.path.realpath(skill_dir / "SKILL.md")),
                 os.path.normcase(os.path.realpath(root / SKILL_NAME / "SKILL.md")),
                 os.path.normcase(str(root / SKILL_NAME / "SKILL.md"))}
@@ -383,9 +421,7 @@ class CodexSession:
             if reply is None:
                 reply = await self._request("thread/start", params)
         except codex_rpc.RpcError as exc:
-            raise CodexStartFailed(f"Codex did not open a conversation: {exc.message}") from exc
-        except codex_rpc.ConnectionLost as exc:
-            raise CodexStartFailed(f"Codex stopped while opening a conversation: {exc}") from exc
+            raise self._start_failed(f"Codex did not open a conversation: {exc.message}") from exc
         except TimeoutError as exc:
             raise CodexStartFailed(f"Codex did not open a conversation: {exc}") from exc
         thread_id = ((reply or {}).get("thread") or {}).get("id")
@@ -447,12 +483,23 @@ class CodexSession:
             yield event
 
     async def _turn(self, text: str) -> AsyncIterator[AgentEvent]:
+        """One turn. `turn/start` is not awaited on its own: its reply is read together with the
+        notifications (task 6's review, I1 — the reply kept alive while reading), so a reply that
+        never comes cannot leave the turn waiting for a `turn/completed` nothing will send — no
+        turn id by `REQUEST_TIMEOUT_S` ends the turn, said."""
         server = self._server
         self._retry_said = False
         self._last_error = ""
+        self._turn_open = True
+        reply: Optional[asyncio.Future] = None
         try:
             if server is None or server.ended:
                 yield self._ended_notice()
+                return
+            if self._interrupt_wanted:
+                # Stop came while Codex was still starting: the message is not sent at all.
+                yield Notice("Stopped before Codex got the message; nothing was sent.")
+                yield TurnEnd(self.session_id)
                 return
             params: dict[str, Any] = {
                 "threadId": self.session_id,
@@ -463,28 +510,21 @@ class CodexSession:
             }
             if self.model:
                 params["model"] = self.model
-            try:
-                reply = await server.request("turn/start", params, timeout=REQUEST_TIMEOUT_S)
-            except codex_rpc.RpcError as exc:
-                # No turn started, so none will complete: the turn ends here, said.
-                yield Notice(f"Codex refused the message: {exc.message}")
-                yield TurnEnd(self.session_id)
-                return
-            except codex_rpc.ConnectionLost:
-                yield self._ended_notice()
-                return
-            except TimeoutError:
-                # Codex may still have started it: its `turn/started` names the turn.
-                app_log.logger().warning("codex: turn/start not confirmed in %g s",
-                                         REQUEST_TIMEOUT_S)
-                reply = {}
-            self._turn_id = ((reply.get("turn") or {}).get("id")) or None
-            async for event in self._read_turn(server):
+            reply = asyncio.ensure_future(
+                server.request("turn/start", params, timeout=REQUEST_TIMEOUT_S))
+            async for event in self._read_turn(server, reply):
                 yield event
         finally:
             # The turn is over — completed, or Codex died mid-turn, or the worker cancelled it.
             # Signals the turn read but never acknowledged go back to pending, so the next turn's
             # brief raises them again (F-009, as on the other routes).
+            self._turn_open = False
+            self._interrupt_wanted = False
+            if reply is not None:
+                if not reply.done():
+                    reply.cancel()
+                elif not reply.cancelled():
+                    reply.exception()  # read, so a refusal handled here is not «never retrieved»
             self._turn_id = None
             self._streamed.clear()
             self._running.clear()
@@ -494,12 +534,21 @@ class CodexSession:
             if self.bus is not None:
                 self.bus.restore_delivered()
 
-    async def _read_turn(self, server: codex_rpc.AppServer) -> AsyncIterator[AgentEvent]:
-        """The turn's notifications as `agent_events`, until `turn/completed` or the end."""
+    async def _read_turn(self, server: codex_rpc.AppServer,
+                         reply: Optional[asyncio.Future]) -> AsyncIterator[AgentEvent]:
+        """The turn's reply and notifications as `agent_events`, until `turn/completed`, the end
+        of the process, a refused `turn/start`, or no turn at all."""
         warned = False
         while True:
-            got, msg = await self._next(server, SILENCE_WARN_S)
-            if not got:
+            if self._getter is None:
+                # One getter outlives a silence, so a notification arriving at that moment is
+                # never lost.
+                self._getter = asyncio.ensure_future(server.notifications.get())
+            getter = self._getter
+            waiting = {getter} if reply is None else {getter, reply}
+            done, _ = await asyncio.wait(waiting, timeout=SILENCE_WARN_S,
+                                         return_when=asyncio.FIRST_COMPLETED)
+            if not done:
                 if not warned:
                     # Not a timeout — nothing is cancelled — but two silent minutes are a fact the
                     # Arbiter can act on, and which item is running is the useful half of it.
@@ -508,26 +557,54 @@ class CodexSession:
                              else "Codex has said nothing.")
                     yield Notice(f"{int(SILENCE_WARN_S)}s with no output. {where}")
                 continue
-            warned = False
-            if msg is None:
-                yield self._ended_notice()
-                return
-            events, done = self._map(msg)
-            for event in events:
-                yield event
-            if done:
-                return
+            if reply is not None and reply in done:
+                answered, reply = reply, None
+                events, over = self._on_reply(answered)
+                for event in events:
+                    yield event
+                if over:
+                    return
+            if getter in done:
+                self._getter = None
+                warned = False
+                msg = getter.result()
+                if msg is None:
+                    yield self._ended_notice()
+                    return
+                events, over = self._map(msg)
+                for event in events:
+                    yield event
+                if over:
+                    return
 
-    async def _next(self, server: codex_rpc.AppServer, timeout: float) -> tuple[bool, Any]:
-        """`(True, notification)`, or `(False, None)` after `timeout`. One getter outlives a
-        timeout, so a notification arriving at the moment of the timeout is never lost."""
-        if self._getter is None:
-            self._getter = asyncio.ensure_future(server.notifications.get())
-        done, _ = await asyncio.wait({self._getter}, timeout=timeout)
-        if not done:
-            return False, None
-        getter, self._getter = self._getter, None
-        return True, getter.result()
+    def _on_reply(self, reply: asyncio.Future) -> tuple[list[AgentEvent], bool]:
+        """`turn/start`'s reply → the turn's id, or why there is no turn."""
+        try:
+            result = reply.result()
+        except codex_rpc.RpcError as exc:
+            # No turn started, so none will complete: the turn ends here, said.
+            return [Notice(f"Codex refused the message: {exc.message}"),
+                    TurnEnd(self.session_id)], True
+        except codex_rpc.ConnectionLost:
+            return [], False  # the notifications end too, and that end says why
+        except TimeoutError:
+            if self._turn_id:
+                return [], False  # `turn/started` named it; the turn goes on
+            app_log.logger().warning("codex: turn/start not confirmed in %g s and no turn/started",
+                                     REQUEST_TIMEOUT_S)
+            return [Notice(f"Codex did not start the turn in {int(REQUEST_TIMEOUT_S)} s, so it "
+                           "ended here. Send the message again."), TurnEnd(self.session_id)], True
+        self._turn_id = self._turn_id or ((result.get("turn") or {}).get("id")) or None
+        self._interrupt_if_wanted()
+        return [], False
+
+    def _interrupt_if_wanted(self) -> None:
+        """A Stop that came before the turn had an id, carried out now that it has one."""
+        if self._interrupt_wanted and self._turn_id:
+            self._interrupt_wanted = False
+            task = asyncio.ensure_future(self._send_interrupt())
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
 
     def _drop_getter(self) -> None:
         getter, self._getter = self._getter, None
@@ -542,6 +619,7 @@ class CodexSession:
         of_turn = params.get("turnId") or turn.get("id")
         if method == "turn/started":
             self._turn_id = self._turn_id or of_turn
+            self._interrupt_if_wanted()
             return [], False
         if self._turn_id and of_turn and of_turn != self._turn_id:
             return [], False  # another turn's: nothing of this one
@@ -637,8 +715,18 @@ class CodexSession:
         """No question channel on this route."""
 
     async def interrupt(self) -> None:
-        """`turn/interrupt` for the turn in flight. The turn still ends through its own
-        `turn/completed` (status `interrupted`), so `TurnEnd` stays the turn's last event."""
+        """Stop: `turn/interrupt` for the turn in flight. The turn still ends through its own
+        `turn/completed` (status `interrupted`), so `TurnEnd` stays the turn's last event. Before
+        the turn has an id — Codex still starting, or `turn/start` not answered yet — the Stop is
+        kept and carried out when the id is known; between turns it does nothing."""
+        if not self._turn_open:
+            return
+        if not (self._server is not None and self.session_id and self._turn_id):
+            self._interrupt_wanted = True
+            return
+        await self._send_interrupt()
+
+    async def _send_interrupt(self) -> None:
         server, thread_id, turn_id = self._server, self.session_id, self._turn_id
         if server is None or server.ended or not (thread_id and turn_id):
             return
@@ -654,6 +742,8 @@ class CodexSession:
         A short grace: app-server leaves at its stdin's end, and the worker's shutdown gives the
         whole close 2.5 s before it cancels — past the grace it is terminated, then its tree."""
         self._drop_getter()
+        for task in list(self._tasks):
+            task.cancel()
         server = self._server
         if server is not None:
             await server.close(grace=child.REAP_TIMEOUT_S)

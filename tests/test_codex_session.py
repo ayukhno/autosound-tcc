@@ -7,9 +7,11 @@ short ones written here. No real Codex runs and no model turn is paid for. The s
 own half: every request it sends is answered exactly once (exit 3 otherwise) — read here from its
 log's verdicts and the session process's exit code.
 
-The session asks first a short probe (`account/read`, `config/read`) and then its own app-server,
-so every scenario is replayed twice: the probe's requests are not in the recordings and the
-stand-in answers them with an error, which the session reads as «could not tell».
+The session asks first a short probe (`account/read`, `config/read`) and then its own app-server.
+The wrapper tells them apart by argv (only the session's own carries `-c`) and replays a probe
+scenario to the probe — by default a signed-in Codex with an empty config — and the test's scenario
+to the session. The recordings have no `skills/list` answer, so a session over one says the
+method's copy is unchecked; `drain` leaves that Notice out unless a test asks for it.
 """
 
 from __future__ import annotations
@@ -79,17 +81,13 @@ def item(event: str, thread: str, turn_id: str, body: dict) -> dict:
                 "params": {"item": body, "threadId": thread, "turnId": turn_id}})
 
 
-def without_second_initialized(rows: list[dict]) -> list[dict]:
-    """resume-ok / resume-error were recorded with `initialized` sent twice; the session sends it
-    once, as `codex_rpc` does."""
-    kept, seen = [], False
-    for row in rows:
-        if row["dir"] == "out" and (row.get("msg") or {}).get("method") == "initialized":
-            if seen:
-                continue
-            seen = True
-        kept.append(row)
-    return kept
+def probe_rows(config: dict | None = None, account: dict | None = None) -> list[dict]:
+    """The probe's exchange: `account/read`, then `config/read`."""
+    return [*opening(), out({"id": 2, "method": "account/read"}),
+            inn({"id": 2, "result": account or {"account": {"type": "chatgpt"},
+                                                "requiresOpenaiAuth": True}}),
+            out({"id": 3, "method": "config/read"}),
+            inn({"id": 3, "result": config if config is not None else {"config": {}}})]
 
 
 def write(tmp_path: Path, rows: list[dict], name: str = "scenario.jsonl") -> Path:
@@ -106,27 +104,39 @@ def stand_in(tmp_path, monkeypatch):
     """`use(scenario)` → the `codex` to pass as `binary`; `log()` → the stand-in's own log rows."""
     wrapper = tmp_path / "fake-bin" / "codex"
     wrapper.parent.mkdir()
-    wrapper.write_text(f"#!{sys.executable}\nimport os, sys\n"
-                       f"os.execv(sys.executable, [sys.executable, {str(FAKE)!r}, *sys.argv[1:]])\n",
-                       encoding="utf-8")
+    wrapper.write_text(
+        f"#!{sys.executable}\nimport os, sys\nargs = sys.argv[1:]\n"
+        "probe = os.environ.get('FAKE_PROBE_SCENARIO')\n"
+        "scenario = os.environ['FAKE_CODEX_SCENARIO'] if '-c' in args or not probe else probe\n"
+        f"os.execv(sys.executable, [sys.executable, {str(FAKE)!r}, '--scenario', scenario, *args])\n",
+        encoding="utf-8")
     wrapper.chmod(0o755)
     log = tmp_path / "fake-log.jsonl"
     monkeypatch.setenv("FAKE_CODEX_LOG", str(log))
     monkeypatch.setenv("FAKE_CODEX_TIMEOUT", "5")
     monkeypatch.setenv("FAKE_CODEX_WORK", str(tmp_path / "project"))
+    signed_in = write(tmp_path, probe_rows(), "probe.jsonl")
 
     class StandIn:
         binary = str(wrapper)
 
         @staticmethod
-        def use(scenario) -> str:
+        def use(scenario, probe=None) -> str:
+            """`scenario` for the session's app-server, `probe` (default: signed in, an empty
+            config) for the probe before it."""
             monkeypatch.setenv("FAKE_CODEX_SCENARIO", str(scenario))
+            monkeypatch.setenv("FAKE_PROBE_SCENARIO", str(probe or signed_in))
             return str(wrapper)
 
         @staticmethod
         def log() -> list[dict]:
-            return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()
-                    if line.strip()]
+            """Whole lines only: a test may read while the stand-in still writes."""
+            try:
+                text = log.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                return []
+            return [json.loads(line) for line in text.splitlines()[:None if text.endswith("\n")
+                                                                  else -1] if line.strip()]
 
         @classmethod
         def sent(cls, method: str) -> list[dict]:
@@ -170,9 +180,15 @@ def make(project: Path, binary: str, **kw) -> CodexSession:
     return CodexSession(project_dir=project, mcp_url=URL, mcp_token=TOKEN, binary=binary, **kw)
 
 
-async def drain(gen, on_event=None) -> list:
+UNCHECKED = "unchecked"
+
+
+async def drain(gen, on_event=None, *, unchecked: bool = False) -> list:
+    """The events, without the «method copy unchecked» Notice every recording earns (above)."""
     events = []
     async for event in gen:
+        if not unchecked and isinstance(event, Notice) and UNCHECKED in event.text:
+            continue
         events.append(event)
         if on_event is not None:
             await on_event(event)
@@ -199,7 +215,9 @@ def test_a_streamed_turn_with_mcp_calls_maps_to_events_and_turn_end_comes_last(
         events = []
         try:
             while not events or not isinstance(events[-1], TurnEnd):
-                events.append(await gen.__anext__())
+                event = await gen.__anext__()
+                if not (isinstance(event, Notice) and UNCHECKED in event.text):
+                    events.append(event)
             with pytest.raises(StopAsyncIteration):
                 await gen.__anext__()
         finally:
@@ -237,6 +255,8 @@ def test_the_registry_binds_the_thread_on_the_codex_route_at_once(project, stand
         try:
             gen = session.start()
             first = await gen.__anext__()
+            if isinstance(first, Notice) and UNCHECKED in first.text:
+                first = await gen.__anext__()
             # Bound before the first event of the opening turn reached the window.
             bound = registry.load()["phases"]["2"]
             await gen.aclose()
@@ -482,7 +502,7 @@ def test_interrupt_with_no_turn_open_sends_nothing(project, stand_in):
 def test_a_resume_continues_the_phases_codex_thread_without_its_turns(project, tmp_path, stand_in):
     thread = "01a139c1-783b-75c0-afc6-38328bee7086"
     resumable(project, thread)
-    rows = [*without_second_initialized(frames("resume-ok")), *turn(thread)]
+    rows = [*frames("resume-ok"), *turn(thread)]
     session = make(project, stand_in.use(write(tmp_path, rows)), resume=True)
 
     async def go():
@@ -503,7 +523,7 @@ def test_a_resume_continues_the_phases_codex_thread_without_its_turns(project, t
 
 def test_a_resume_that_fails_says_so_and_starts_a_fresh_thread(project, tmp_path, stand_in):
     registry = resumable(project, "00000000-0000-7000-8000-000000000000")
-    rows = [*without_second_initialized(frames("resume-error")), *thread_start("fresh-thread"),
+    rows = [*frames("resume-error"), *thread_start("fresh-thread"),
             *turn("fresh-thread")]
     session = make(project, stand_in.use(write(tmp_path, rows)), resume=True)
 
@@ -525,7 +545,7 @@ def test_a_resume_that_fails_says_so_and_starts_a_fresh_thread(project, tmp_path
 
 
 def test_a_signed_out_codex_refuses_the_start_before_the_session_process(project, stand_in):
-    session = make(project, stand_in.use("signed-out"))
+    session = make(project, stand_in.use("signed-out", probe="signed-out"))
 
     async def go():
         try:
@@ -540,7 +560,7 @@ def test_a_signed_out_codex_refuses_the_start_before_the_session_process(project
 
 
 def test_a_codex_that_dies_at_start_says_why(project, stand_in):
-    session = make(project, stand_in.use("startup-bad-mcp"))
+    session = make(project, stand_in.use("startup-bad-mcp", probe="startup-bad-mcp"))
 
     async def go():
         try:
@@ -614,7 +634,7 @@ def test_the_token_is_in_the_environment_never_in_argv_or_the_frame_log(project,
     assert f'mcp_servers.tcc.url="{URL}"' in main["argv"]
     assert 'mcp_servers.tcc.env_http_headers={"X-TCC-Token"="TCC_MCP_TOKEN"}' in main["argv"]
     assert "features.plugins=false" in main["argv"] and "project_doc_max_bytes=0" in main["argv"]
-    assert main["argv"][0] == "app-server"
+    assert "app-server" in main["argv"]
 
     frame_log = (project / ".tcc" / "codex-frames.jsonl").read_text(encoding="utf-8")
     assert TOKEN not in frame_log
@@ -697,3 +717,262 @@ def test_the_effort_is_clamped_to_what_the_model_takes(project, tmp_path, stand_
 ])
 def test_inner_command_unwraps_only_one_wrapped_argument(command, inner):
     assert inner_command(command) == inner
+
+
+# ---- the fix round (task 6's review) ------------------------------------------------------------
+
+
+def recorded_config() -> dict:
+    """config-skills' `config/read` reply: three of the user's MCP servers, all named plainly."""
+    return next(f["msg"]["result"] for f in frames("config-skills")
+                if f["dir"] == "in" and (f["msg"].get("result") or {}).get("config"))
+
+
+def test_the_users_mcp_servers_from_config_read_are_switched_off_by_name(project, tmp_path,
+                                                                           stand_in):
+    config = json.loads(json.dumps(recorded_config()))
+    config["config"]["mcp_servers"]["my server"] = {"enabled": True}
+    probe = write(tmp_path, probe_rows(config), "probe-config.jsonl")
+    session = make(project, stand_in.use("turn-mcp", probe=probe))
+
+    async def go():
+        try:
+            return await drain(session.start())
+        finally:
+            await session.close()
+
+    events = run(go())
+    said = events[0]
+    assert isinstance(said, Notice) and "my server" in said.text, "a name -c cannot carry"
+    main = [row for row in stand_in.log() if "argv" in row][-1]["argv"]
+    off = sorted(a for a in main if a.startswith("mcp_servers.") and a.endswith(".enabled=false"))
+    assert off == ["mcp_servers.computer-use.enabled=false",
+                   "mcp_servers.home-assistant.enabled=false",
+                   "mcp_servers.node_repl.enabled=false"]
+    assert isinstance(events[-1], TurnEnd)
+
+
+def test_a_refused_config_read_and_a_refused_skills_list_are_said(project, tmp_path, stand_in):
+    probe = write(tmp_path, [*opening(), out({"id": 2, "method": "account/read"}),
+                             inn({"id": 2, "result": {"account": {"type": "chatgpt"}}})],
+                  "probe-noconfig.jsonl")
+    session = make(project, stand_in.use("turn-mcp", probe=probe))
+
+    async def go():
+        try:
+            return await drain(session.start(), unchecked=True)
+        finally:
+            await session.close()
+
+    notices = [e.text for e in run(go()) if isinstance(e, Notice)]
+    assert any("MCP servers" in text and "stay on" in text for text in notices), notices
+    assert any(UNCHECKED in text for text in notices), notices
+
+
+def test_a_refused_turn_start_ends_the_turn_with_why(project, tmp_path, stand_in):
+    rows = [*opening(), *thread_start("th"), out({"id": 90, "method": "turn/start"}),
+            inn({"id": 90, "error": {"code": -32600, "message": "thread is busy"}})]
+    session = make(project, stand_in.use(write(tmp_path, rows)))
+
+    async def go():
+        try:
+            return await drain(session.start())
+        finally:
+            await session.close()
+
+    assert run(go()) == [Notice("Codex refused the message: thread is busy"), TurnEnd("th")]
+
+
+def test_a_turn_start_with_no_reply_and_no_turn_ends_instead_of_hanging(
+        project, tmp_path, stand_in, monkeypatch):
+    """Review I1: no reply to `turn/start` and no `turn/started` — the turn ends, said, so the
+    window's `turn_done` comes; it does not wait for a `turn/completed` nothing will send."""
+    monkeypatch.setattr(codex_session, "REQUEST_TIMEOUT_S", 1.0)
+    monkeypatch.setenv("FAKE_CODEX_TIMEOUT", "15")
+    rows = [*opening(), *thread_start("th"), out({"id": 90, "method": "turn/start"}),
+            out({"method": "never/sent"})]
+    session = make(project, stand_in.use(write(tmp_path, rows)))
+
+    async def go():
+        try:
+            return await drain(session.start())
+        finally:
+            await session.close()
+
+    events = run(go(), 20)
+    assert len(events) == 2 and isinstance(events[0], Notice) and "did not start" in events[0].text
+    assert events[1] == TurnEnd("th")
+
+
+def test_a_start_cancelled_during_the_probe_winds_down(project, tmp_path, stand_in):
+    """The worker cancels a start on shutdown; mid-probe that must end, not hang the loop."""
+    probe = write(tmp_path, [*opening(), out({"id": 2, "method": "account/read"}),
+                             out({"method": "never/sent"})], "probe-slow.jsonl")
+    session = make(project, stand_in.use("turn-mcp", probe=probe))
+
+    async def go():
+        task = asyncio.ensure_future(drain(session.start()))
+        await until_sent(stand_in, "account/read")
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await session.close()
+
+    run(go(), 15)
+
+
+async def until_sent(stand_in, method: str, seconds: float = 10.0) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + seconds
+    while not stand_in.sent(method):
+        assert loop.time() < deadline, f"{method} never sent"
+        await asyncio.sleep(0.02)
+
+
+def test_stop_while_turn_start_is_in_flight_interrupts_once_the_turn_is_known(
+        project, tmp_path, stand_in, monkeypatch):
+    """Review I2: Stop before the turn id is not dropped — `turn/interrupt` goes as soon as the
+    reply names the turn, and the turn ends through its own `turn/completed`."""
+    monkeypatch.setenv("FAKE_CODEX_PACE", "1")
+    rows = [*opening(), *thread_start("th"), out({"id": 90, "method": "turn/start"}),
+            {**inn({"id": 90, "result": {"turn": {"id": "t1", "status": "inProgress"}}}), "t": 1.0},
+            {**out({"id": 95, "method": "turn/interrupt"}), "t": 1.0},
+            {**inn({"id": 95, "result": {}}), "t": 1.0},
+            {**inn({"method": "turn/completed", "params": {"threadId": "th", "turn": {
+                "id": "t1", "status": "interrupted", "error": None}}}), "t": 1.0}]
+    session = make(project, stand_in.use(write(tmp_path, rows)))
+
+    async def go():
+        try:
+            task = asyncio.ensure_future(drain(session.start()))
+            await until_sent(stand_in, "turn/start")
+            await session.interrupt()
+            return await task
+        finally:
+            await session.close()
+
+    assert run(go()) == [TurnEnd("th")]
+    (sent,) = stand_in.sent("turn/interrupt")
+    assert sent["params"] == {"threadId": "th", "turnId": "t1"}
+    assert stand_in.breaches() == []
+
+
+def test_stop_during_the_opening_skips_the_opening_turn(project, tmp_path, stand_in, monkeypatch):
+    """Review I2, the choice: Stop while Codex is still starting sends no opening message — the
+    opening ends at once, said; nothing ran. The next message goes as usual."""
+    monkeypatch.setenv("FAKE_CODEX_PACE", "1")
+    rows = [*opening(), out({"id": 80, "method": "thread/start"}),
+            {**inn({"id": 80, "result": {"thread": {"id": "th"}}}), "t": 1.0},
+            *[{**row, "t": 1.0} for row in turn("th")]]
+    session = make(project, stand_in.use(write(tmp_path, rows)))
+
+    async def go():
+        try:
+            task = asyncio.ensure_future(drain(session.start()))
+            await until_sent(stand_in, "thread/start")
+            await session.interrupt()
+            opening_events = await task
+            assert stand_in.sent("turn/start") == [], "no opening message went out"
+            return opening_events, await drain(session.send("go on"))
+        finally:
+            await session.close()
+
+    opening_events, after = run(go())
+    assert len(opening_events) == 2 and isinstance(opening_events[0], Notice)
+    assert "Stopped" in opening_events[0].text and opening_events[1] == TurnEnd("th")
+    assert after == [TurnEnd("th")], "the flag went with the opening"
+    assert stand_in.sent("turn/interrupt") == []
+
+
+def test_a_stop_between_turns_does_not_cancel_the_next_message(project, stand_in):
+    session = make(project, stand_in.use("file-approval"))
+
+    async def go():
+        try:
+            await drain(session.start())
+            await session.interrupt()
+            return await drain(session.send("Create ws.txt"))
+        finally:
+            await session.close()
+
+    assert isinstance(run(go())[-1], TurnEnd)
+    assert len(stand_in.sent("turn/start")) == 2 and stand_in.sent("turn/interrupt") == []
+
+
+def test_the_thread_is_bound_again_when_the_phase_moved_during_the_turn(project, stand_in):
+    registry = SessionRegistry(project / ".tcc")
+    registry.sync_phase("1")
+    session = make(project, stand_in.use("turn-mcp"))
+
+    async def on(event):
+        if isinstance(event, ToolEnd) and registry.current_phase() == "1":
+            registry.sync_phase("2")
+
+    async def go():
+        try:
+            return await drain(session.start(), on)
+        finally:
+            await session.close()
+
+    run(go())
+    entry = registry.load()["phases"]["2"]
+    assert entry["session_id"] == session.session_id and entry["route"] == "codex"
+
+
+def test_the_sessions_frame_log_rotates_and_keeps_the_end(project, stand_in, monkeypatch):
+    monkeypatch.setattr(codex_session, "FRAME_LOG_MAX_BYTES", 3000)
+    log = project / ".tcc" / "codex-frames.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("old\n" * 700, encoding="utf-8")
+    session = make(project, stand_in.use("turn-mcp"))
+
+    async def go():
+        try:
+            return await drain(session.start())
+        finally:
+            await session.close()
+
+    run(go())
+    assert log.with_name(log.name + ".1").exists()
+    last = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
+    assert last["dir"] == "note" and "ended" in json.dumps(last["msg"])
+
+
+def test_a_probe_that_times_out_refuses_the_start(project, tmp_path, stand_in, monkeypatch):
+    monkeypatch.setattr(codex_session.codex_cli, "PROBE_TIMEOUT_S", 1.0)
+    probe = write(tmp_path, [*opening(), out({"id": 2, "method": "account/read"}),
+                             out({"method": "never/sent"})], "probe-slow.jsonl")
+    session = make(project, stand_in.use("turn-mcp", probe=probe))
+
+    async def go():
+        try:
+            await drain(session.start())
+        finally:
+            await session.close()
+
+    with pytest.raises(CodexStartFailed, match="no answer"):
+        run(go())
+    assert session._server is None
+
+
+def test_a_lost_connection_at_start_is_said_without_the_token(project, tmp_path, stand_in):
+    """Review M5: the stderr tail goes into the start's refusal — never the token in it."""
+    dies = [*opening(), {"dir": "eof", "t": 0.0, "exit": 1,
+                         "stderr": f"trace: X-TCC-Token: {TOKEN}\nError: lost"}]
+    probe = write(tmp_path, dies, "probe-dies.jsonl")
+
+    async def start(s):
+        try:
+            await drain(s.start())
+        finally:
+            await s.close()
+
+    with pytest.raises(CodexStartFailed) as probe_failed:
+        run(start(make(project, stand_in.use("turn-mcp", probe=probe))))
+    assert TOKEN not in str(probe_failed.value) and "lost" in str(probe_failed.value)
+
+    mid_start = write(tmp_path, [*opening(), out({"id": 2, "method": "skills/extraRoots/set"}),
+                                 dies[-1]], "main-dies.jsonl")
+    with pytest.raises(CodexStartFailed) as main_failed:
+        run(start(make(project, stand_in.use(mid_start))))
+    assert TOKEN not in str(main_failed.value) and "lost" in str(main_failed.value)

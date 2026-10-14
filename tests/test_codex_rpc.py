@@ -504,8 +504,11 @@ def test_the_frame_log_never_holds_the_mcp_token(tmp_path):
     assert "in" in dirs and "out" in dirs
 
 
-def test_the_frame_log_stops_at_its_cap(tmp_path):
+def test_the_frame_log_rotates_at_its_cap_and_keeps_the_late_frames(tmp_path):
+    """At the cap the log moves to `.1` and writing goes on (omp's rule): the late frames are the
+    ones a stuck turn needs (task 6's review, I3). A log already there counts toward the cap."""
     ours = tmp_path / "frames.jsonl"
+    ours.write_text("x" * 350 + "\n", encoding="utf-8")
 
     async def go():
         server = AppServer(fake("signed-out", tmp_path / "fake.jsonl"), log=ours, log_cap=400)
@@ -514,9 +517,12 @@ def test_the_frame_log_stops_at_its_cap(tmp_path):
 
     run(go())
 
-    lines = ours.read_text(encoding="utf-8").splitlines()
-    assert "log cap" in lines[-1]
-    assert ours.stat().st_size < 400 + 200
+    rotated = ours.with_name(ours.name + ".1")
+    assert rotated.exists(), "the file there already plus this session's frames passed the cap"
+    assert ours.stat().st_size <= 400 and rotated.stat().st_size <= 400 + 400
+    last = json.loads(ours.read_text(encoding="utf-8").splitlines()[-1])
+    assert last["dir"] == "note" and "ended" in json.dumps(last["msg"]), \
+        "the very last frame (the end) is still written"
 
 
 def test_a_frame_log_that_cannot_be_written_does_not_stop_anything(tmp_path):

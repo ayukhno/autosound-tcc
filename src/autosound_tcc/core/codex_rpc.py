@@ -38,7 +38,7 @@ from autosound_tcc.core import app_log, child
 FRAME_LIMIT_BYTES = 64 * 1024 * 1024
 #: How many stderr lines are kept for a failure's reason.
 STDERR_LINES = 20
-#: The frame log stops growing here (one closing line says so).
+#: The frame log moves to `<name>.1` when it reaches this, and writing goes on in a new one.
 LOG_CAP_BYTES = 8 * 1024 * 1024
 #: How long `open()` waits for `initialize` by default.
 OPEN_TIMEOUT_S = 30.0
@@ -88,7 +88,12 @@ OnRequest = Callable[[dict], Any]
 
 
 class _FrameLog:
-    """JSONL of every frame both ways, capped, secrets replaced. Never raises."""
+    """JSONL of every frame both ways, secrets replaced, rotated at the cap. Never raises.
+
+    Rotated, not stopped: the frames a stuck turn needs are the last ones, and a log that stopped
+    at its cap lost exactly those (task 6's review, I3). omp's rule — at most the cap here and one
+    older file beside it. A file already there counts toward the cap, so sessions do not each add
+    a cap's worth."""
 
     def __init__(self, path: Union[str, Path, None], secrets: Sequence[str], cap: int) -> None:
         self.path = Path(path) if path else None
@@ -102,7 +107,11 @@ class _FrameLog:
         self.secrets = sorted(forms, key=len, reverse=True)
         self.cap = cap
         self.written = 0
-        self.full = False
+        if self.path is not None:
+            try:
+                self.written = self.path.stat().st_size
+            except OSError:
+                pass
 
     def redact(self, text: str) -> str:
         for s in self.secrets:
@@ -110,16 +119,15 @@ class _FrameLog:
         return text
 
     def write(self, direction: str, payload: Any) -> None:
-        if self.path is None or self.full:
+        if self.path is None:
             return
         try:
             line = self.redact(json.dumps({"t": round(time.time(), 3), "dir": direction,
                                            "msg": payload}, ensure_ascii=False)) + "\n"
             data = line.encode("utf-8")
-            if self.written + len(data) > self.cap:
-                self.full = True
-                data = (json.dumps({"dir": "note", "msg": f"log cap of {self.cap} bytes reached; "
-                                                          f"no more frames written"}) + "\n").encode()
+            if self.written and self.written + len(data) > self.cap:
+                os.replace(self.path, self.path.with_name(self.path.name + ".1"))
+                self.written = 0
             with self.path.open("ab") as fh:
                 fh.write(data)
             self.written += len(data)
