@@ -4,18 +4,33 @@ Asked by the Arbiter on 2026-10-14: every task **outside the audit** (`docs/PLAN
 **left by earlier waves**, ranked and assessed. Collection is still open, and this list is the input to the
 milestone review. Nothing here is built without `ok`.
 
-**The standing order.** The Arbiter, 2026-10-06 (`PLAN-AUDIT` §3): *all of the audit's tasks build first, then
-everything else.* That order keeps W-10 for the audit's joint wave 1. The reason it was set: the pool's fixes would
-land on modules that the audit redesigns. **What has changed since then:** on 2026-10-13 the repo got user reports
-from a live tuning session. Two of them lose or block measurements (rank 1–2). Only the Arbiter's word moves any of
-these ahead of the audit. The ranking below only says which ones would earn it.
+**The order, as it stands (2026-10-14).** The Arbiter's order of 2026-10-06 (`PLAN-AUDIT` §3, *all of the audit's
+tasks build first*) is superseded: hub #273's amendment (2026-10-13) closes the audit at its minimum (TCC's G8 phase 1
+and G7) a wave later and sends the rest to the pool, TCC's call; the Arbiter, 2026-10-14: W-10 takes everything outside
+the audit from real use, plus what earlier waves left. So finding 158 (G4 2a) and the curve window's minors (G10 M) are
+this pool's now.
+
+**On the milestone `W-10 · v1.1.4`** (opened 2026-10-14, review mode, no `ok` yet), by group:
+
+| group | issues (rank) |
+|---|---|
+| Capture after update | #184 (1), #192, #183 (2) — each starts with «retest on v1.1.3» |
+| Install and update | #194 (158), #195 (7) |
+| AI picks | #165 (3), #196 (5: 157, 156, hub #262), #182 (5) |
+| Rounds and the bank | #197 (4), #198 (10, hub #268), #199 (11, hub #260), #200 (the re-pin to the skill's W-10 tag) |
+| Release tooling | #201 (8: hub #277 ask 1, hub #246), #202 (9) |
+| Window polish | #203 (12, hub #257), #166, #167 (14), #204 (15), #180 (19) |
+| Leftovers | #205 (6), #206 (16), #207 (17), #208 (18), #209 (the curve window's minors, F-100) |
+
+**Not on it yet** — the Arbiter's word first: #13 hub #264, #20 tcc #181, #21 F-096. **Dropped:** F-098's
+`write_mcp_config` on `OSError` — closed in W-9 (#173, Task 19: `own_store`, the aside copy).
 
 **Scale.**
 - Size: **S** ≤ 2 h · **M** ≤ 1 day · **L** > 1 day.
 - Risk: **high** = data writes, locks, signatures, installers, the method/TCC seam; anything else is **ordinary**.
 - Model: from `hub-seam` «Models by role».
 
-## Already covered by the audit — not ranked
+## Covered by the audit on 2026-10-06 — where each went is in «On the milestone» above
 
 | item | the audit's place |
 |---|---|

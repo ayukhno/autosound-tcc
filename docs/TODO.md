@@ -2082,7 +2082,7 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 
 ### F-102 — W-10: real use and earlier waves' leftovers, without superpowers — open the milestone
 
-**Статус**: open · written 2026-10-14 at «добраніч» · next session: `hub/bin/role tcc --no-SP` (a new conversation,
+**Статус**: open · **the milestone is open** (2026-10-14, the Arbiter's «відкривай»): `W-10 · v1.1.4` (#10), 24 issues in seven groups, all assessed, none `ok` yet — new #194–#209, and this repo's #165, #166, #167, #180, #182, #183, #184, #192; the map is in `docs/W-10-POOL-RANKED.md`; hub #246, #257, #260, #262, #268, #277 taken · held for the Arbiter's word: hub #264, #181, F-096 · was: open · written 2026-10-14 at «добраніч» · next session: `hub/bin/role tcc --no-SP` (a new conversation,
 the engine off for the whole wave); this one continues with `hub/bin/role tcc --resume b9350366-d017-4e9a-be26-e092e6bfff29`
 
 The Arbiter's decisions, 2026-10-14:
@@ -2124,7 +2124,7 @@ Next, in order:
 
 ### F-100 — W-9's review findings left for the next wave
 
-**Статус**: чекає · the next wave's collection takes them in · from W-9's group reviews, the two Fable seats and
+**Статус**: чекає · on `W-10 · v1.1.4`: #197 (O4), #202 (the flaky Windows test), #201 (ship.py), #205 (the method note), #208 (W-9's small leftovers), #209 (the curve window's minors), #192 (M3); the lock/`process/` item and «Locks and rounds» stay with the audit's minimum (G8 phase 1) · the next wave's collection takes them in · from W-9's group reviews, the two Fable seats and
 the end-of-branch review (2026-10-13), each judged shippable for v1.1.3; the reports are in W-9's ledger folder
 (`.superpowers/sdd/PLAN-W-9/`, local), ruling R-cm in its `progress.md`.
 
@@ -2169,7 +2169,7 @@ the end-of-branch review (2026-10-13), each judged shippable for v1.1.3; the rep
 
 ### F-098 — W-8's review findings left for W-9
 
-**Статус**: чекає · the next wave's collection takes them in · from W-8's group reviews and its end-of-branch
+**Статус**: чекає · on `W-10 · v1.1.4`: #206; `write_mcp_config` closed in W-9 (#173); the agent contract is a ticket to the skill first · the next wave's collection takes them in · from W-8's group reviews and its end-of-branch
 review (2026-10-07), each judged not this wave's: a contract change, a window line the ratchet would have to
 pay for, or a test shape · the reports are in W-8's ledger folder (`.superpowers/sdd/PLAN-W-8/review-*.md`, local) · with them, the Arbiter's TEST-FINDINGS 156 from the release look (Sonnet shows no
 restart button) · and N2 (#164, `ok`): TCC's suite on each skill candidate before its tag, for W-9's milestone
@@ -2195,7 +2195,7 @@ restart button) · and N2 (#164, `ok`): TCC's suite on each skill candidate befo
 
 ### F-096 — the car package: bring it into the product, reviewed first (W-8)
 
-**Статус**: open · recorded 2026-10-06 in W-8's collection; **the Arbiter, 2026-10-06: W-8's findings collection waits until after the audit's changes**, so this is built last, on the structure those changes leave · the Arbiter tested the package of 2026-09-18 (`passat-b8-2026-car-2026-09-18.zip`) and says it belongs in the product; this replaces F-064's "closed on his command", which lives only on the local branch `car-package`
+**Статус**: open · W-10: held off the milestone until the Arbiter's word (a large task) · recorded 2026-10-06 in W-8's collection; **the Arbiter, 2026-10-06: W-8's findings collection waits until after the audit's changes**, so this is built last, on the structure those changes leave · the Arbiter tested the package of 2026-09-18 (`passat-b8-2026-car-2026-09-18.zip`) and says it belongs in the product; this replaces F-064's "closed on his command", which lives only on the local branch `car-package`
 
 - When the package source lands (W-8's end-of-branch review, M5): the picker remembers a source that raised for the same path, so a package fixed and typed again is refused without being asked again — re-ask a failed path on Browse and on Create, or forget a failure after a while.
 
@@ -2229,7 +2229,7 @@ restart button) · and N2 (#164, `ok`): TCC's suite on each skill candidate befo
 
 ### F-094 — the next wave's pool: what W-7 left on purpose
 
-**Статус**: open · recorded 2026-10-03 during W-7; waits for the next wave's collection
+**Статус**: open · on `W-10 · v1.1.4`: #204 (151, 152, 154, 155), #207 (W-7's m1, m2, M1, M2), #200 (the card patch at the re-pin); 153 is the skill's (hub #259, #261) · recorded 2026-10-03 during W-7; waits for the next wave's collection
 
 - finding 152 — the import table's current-cell frame stands beside the TAKE tick, like a second box;
 - finding 151's limit — at the app's zoom 1.3–1.5 the import table's row (30 px) is too short for the NEW NAME field and

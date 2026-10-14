@@ -3682,7 +3682,7 @@ picked model; picking Fable does.
 
 **Weight.** Medium: the switch to Sonnet cannot be made from the window the way the switch to Fable is.
 
-**Task.** W-9's pool.
+**Task.** W-10 · v1.1.4, #196.
 
 ### 157. «Sonnet 5 is gone — take Opus 5.5?» accepted, and the selector still says Sonnet 5; no Sonnet 5.5 in the list
 
@@ -3696,7 +3696,7 @@ was checked and turned green: the critic's check works where the main model's sw
 
 **Weight.** High: the agreed switch did not happen, and the window keeps showing a model TCC itself called gone.
 
-**Task.** W-10's pool (collection).
+**Task.** W-10 · v1.1.4, #196.
 
 ### 158. The update installs dependencies newer than the ones CI tested: PySide6 6.12.0 against the lock's 6.11.2
 
@@ -3710,7 +3710,7 @@ Arbiter's machine is one CI never ran; `pyproject.toml` allows `PySide6-Essentia
 
 **Weight.** High: a new Qt minor reaches users untested; the update itself finished clean.
 
-**Task.** W-10's pool (collection).
+**Task.** W-10 · v1.1.4, #194.
 
 ### 159. Neither update says the tag's signature was checked
 
@@ -3729,4 +3729,4 @@ runs the skill's own `upkeep.py`; whose line it is there — the review decides.
 Updates tab of Project diagnostics — `TCC 1.1.3 — up to date` and `The method 3.1.3 — up to date` — saying the
 installed tag's signature was checked and good.
 
-**Task.** W-10's pool (collection).
+**Task.** W-10 · v1.1.4, #195.
