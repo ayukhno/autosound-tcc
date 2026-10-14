@@ -1171,6 +1171,7 @@ offered on the impulse: that plot's axis is time.",
         "curveBankNotRead": "the delay bank could not be read — nothing set here is kept until it reads:",
         "curveBankOff": "Off: the delay bank could not be read — {why}",
         "curveApfUnshown": "A banked all-pass this machine cannot draw stays banked as it is: {names} — {why}",
+        "curveBankKeptUnread": "Banked in a form this TCC cannot read, so drawn without it and kept as it is until you move the driver: {names} — {why}",
         "curveBankUnread": "The delay bank could not be read, so these are drawn without what is banked for them, and nothing is banked until it reads: {names}",
         "curveBankUnreadNames": "Drawn without what is banked for them: {names}",
         # Fable m1: a bank set aside as broken read as «nothing banked». The line, and the tip's head.
@@ -2480,6 +2481,7 @@ Choose sweeps (sw) above to read this.",
         "curveBankNotRead": "банк затримок не прочитано — нічого з виставленого тут не зберігається, доки він не прочитається:",
         "curveBankOff": "Вимкнено: банк затримок не прочитано — {why}",
         "curveApfUnshown": "Збережений all-pass, який на цій машині не намалювати, лишається в банку як є: {names} — {why}",
+        "curveBankKeptUnread": "У банку записано так, що цей TCC не прочитає, тож показано без нього й лишено як є, доки не зрушиш драйвер: {names} — {why}",
         "curveBankUnread": "Банк затримок не прочитано, тож ці драйвери показано без збереженого для них, і нічого не зберігається, доки банк не прочитається: {names}",
         "curveBankUnreadNames": "Показано без збереженого для них: {names}",
         "curveBankAside": "Збережене в банку тут не показано: {why}",
@@ -3851,6 +3853,7 @@ Choose sweeps (sw) above to read this.",
         "curveBankOff": "Off: the delay bank could not be read — {why}",
         # #170: the English until the Advisor.
         "curveApfUnshown": "A banked all-pass this machine cannot draw stays banked as it is: {names} — {why}",
+        "curveBankKeptUnread": "Zapisano w banku w formacie, którego to TCC nie może odczytać, więc narysowano bez tego wpisu i zachowano bez zmian, dopóki nie przesuniesz głośnika: {names} — {why}",
         # #170: the English until the Advisor.
         "curveBankUnread": "The delay bank could not be read, so these are drawn without what is banked for them, and nothing is banked until it reads: {names}",
         # #170: the English until the Advisor.
@@ -5242,6 +5245,7 @@ Choose sweeps (sw) above to read this.",
         "curveBankOff": "Off: the delay bank could not be read — {why}",
         # #170: the English until the Advisor.
         "curveApfUnshown": "A banked all-pass this machine cannot draw stays banked as it is: {names} — {why}",
+        "curveBankKeptUnread": "In der Bank in einem Format gespeichert, das dieses TCC nicht lesen kann, daher ohne den Eintrag gezeichnet und unverändert belassen, bis du den Lautsprecher verschiebst: {names} — {why}",
         # #170: the English until the Advisor.
         "curveBankUnread": "The delay bank could not be read, so these are drawn without what is banked for them, and nothing is banked until it reads: {names}",
         # #170: the English until the Advisor.

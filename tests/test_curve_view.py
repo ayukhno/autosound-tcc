@@ -7,6 +7,7 @@ back, and the reason a disagreement about an impulse onset had nowhere to be set
 from __future__ import annotations
 
 import errno
+import json
 import math
 import os
 import pathlib
@@ -5424,6 +5425,77 @@ def test_a_kept_all_pass_this_machine_cannot_draw_is_said_in_the_quiet_colour(
         restore()
     assert app_log_told[0] in status and "no skill" in status, status
     assert refused, "not kept is red"
+
+
+# ---- an entry on screen the bank cannot read is kept until moved (G10 M2 on screen, #208) -------
+
+
+def _bank_raw() -> dict:
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    store = project_settings.path_for(config.tcc_dir())
+    return json.loads(store.read_text(encoding="utf-8"))[delay_bank.KEY]
+
+
+def _bank_edit(title: str, entry: dict) -> None:
+    """A hand edit of one entry, or a newer TCC's write, straight into the store."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    store = project_settings.path_for(config.tcc_dir())
+    data = json.loads(store.read_text(encoding="utf-8"))
+    data[delay_bank.KEY][title] = entry
+    store.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_an_entry_on_screen_whose_delay_cannot_be_read_is_kept_until_it_is_moved():
+    """G10 M2 on screen (#208): off screen an entry the bank cannot read is carried, but a driver
+    ON SCREEN whose delay could not be read — «0,3», typed with a decimal comma — was drawn at 0
+    and banked as 0 by one step on ANOTHER driver: the hand-typed value and its valid all-pass
+    gone, nothing said. Kept as it is now, and said, until the person moves that driver."""
+    from autosound_tcc.core import delay_bank
+
+    wl, wr = _SIDE[0], _SIDE[1]
+    delay_bank.put(wl, 0.198)
+    delay_bank.put(wr, 0.3)
+    odd = {"ms": "0,3", "at": None, "set": None, "apf": {"type": "APF1", "f": 80.0}}
+    _bank_edit(wr, odd)
+    dialog = _plotted([wl, wr])
+
+    dialog._view.set_delay_target(0)
+    dialog._view.set_delay(0.25)  # a step on w-L only
+
+    assert _bank_raw()[wr] == odd, "w-R's entry is kept as it was read"
+    assert _bank_raw()[wl]["ms"] == 0.25
+    status = dialog._status.text()
+    assert not dialog._status.isHidden() and "w-R_01" in status and "0,3" in status, status
+
+    dialog._view.set_delay_target(1)
+    dialog._view.set_delay(0.1)  # the person moves w-R: theirs now
+    assert _bank_raw()[wr]["ms"] == 0.1
+    assert "0,3" not in dialog._status.text(), "nothing kept to say any more"
+
+
+def test_an_entry_on_screen_with_a_filter_of_an_unknown_kind_keeps_its_filter():
+    """The same for a filter this TCC does not know (a newer version's kind): the delay is read
+    and drawn, the filter is not, and a step — on another driver or on this one — banked the
+    entry without it. The filter is kept, and said as one this machine cannot draw."""
+    from autosound_tcc.core import delay_bank
+
+    wl, wr = _SIDE[0], _SIDE[1]
+    delay_bank.put(wl, 0.198)
+    delay_bank.put(wr, 0.3)
+    _bank_edit(wr, {"ms": 0.3, "at": None, "set": None, "apf": {"type": "APF3", "f": 80.0}})
+    dialog = _plotted([wl, wr])
+
+    dialog._view.set_delay_target(0)
+    dialog._view.set_delay(0.25)
+    assert _bank_raw()[wr]["apf"] == {"type": "APF3", "f": 80.0} and _bank_raw()[wr]["ms"] == 0.3
+
+    dialog._view.set_delay_target(1)
+    dialog._view.set_delay(0.35)  # its delay moved, its filter not touched
+    assert _bank_raw()[wr]["ms"] == 0.35 and _bank_raw()[wr]["apf"] == {"type": "APF3", "f": 80.0}
+    status = dialog._status.text()
+    assert "w-R_01" in status and "APF3" in status, status
 
 
 # ---- a bank that cannot be read is not an empty one (G10 I1, #177) -------------------------------

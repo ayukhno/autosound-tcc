@@ -92,9 +92,12 @@ def _parsed(raw: Any, session: Optional[str] = None) -> dict[str, dict]:
         return {}
     out: dict[str, dict] = {}
     for title, value in raw.items():
+        apf_raw = None
         if isinstance(value, dict):
             ms, at, series = value.get("ms"), value.get("at"), value.get("set")
             apf = Allpass.from_dict(value.get("apf"))
+            if apf is None and value.get("apf") is not None:
+                apf_raw = value["apf"]  # a kind this TCC does not read: kept as read (#208)
         else:
             ms, at, series, apf = value, None, None, None
         if session is not None and series is not None and str(series) != session:
@@ -109,7 +112,36 @@ def _parsed(raw: Any, session: Optional[str] = None) -> dict[str, dict]:
             at = None
         out[str(title)] = {
             "ms": ms, "at": at, "set": None if series is None else str(series), "apf": apf,
+            "apf_raw": apf_raw,
         }
+    return out
+
+
+def unread_entries(tcc_dir: Optional[Path] = None, session: Optional[str] = None
+                   ) -> dict[str, tuple[str, str]]:
+    """`{title: (what, why)}` for this series' entries the bank holds and cannot read — `what` is
+    `"ms"` for a delay that is not a number (the entry is skipped by every read), `"apf"` for a
+    filter of a kind this TCC does not know (read as none). Read strictly: `StoreUnreadable` for
+    a store that is there and cannot be read.
+
+    For the curve window (G10 M2 on screen, #208): such a driver on screen is drawn without what
+    is banked for it, and a step banked what was drawn over the entry — so it keeps the entry as
+    it is until the person moves that driver, and says why."""
+    raw = project_settings.load(tcc_dir or config.tcc_dir(), strict=True).get(KEY)
+    out: dict[str, tuple[str, str]] = {}
+    for title, value in (raw if isinstance(raw, dict) else {}).items():
+        if not isinstance(value, dict):
+            continue  # a bare number is read, or not a number and not an entry anyone could keep
+        series = value.get("set")
+        if session is not None and series is not None and str(series) != session:
+            continue
+        try:
+            float(value.get("ms"))
+        except (TypeError, ValueError):
+            out[str(title)] = ("ms", f"delay {value.get('ms')!r} is not a number")
+            continue
+        if value.get("apf") is not None and Allpass.from_dict(value.get("apf")) is None:
+            out[str(title)] = ("apf", f"an all-pass this TCC does not read: {value['apf']}")
     return out
 
 
@@ -270,6 +302,8 @@ def _entry(was: dict, reading: Reading, session: Optional[str]) -> dict:
         "at": None if at is None else round(float(at), 4),
         "set": session if session is not None else was.get("set"),
         "apf": apf,
+        # Kept means kept: a filter of a kind this TCC cannot read goes on as it was read (#208).
+        "apf_raw": was.get("apf_raw") if reading.allpass is _KEEP else None,
     }
 
 
@@ -280,6 +314,8 @@ def _serialised(entries: dict[str, dict]) -> dict[str, dict]:
         row = {"ms": entry["ms"], "at": entry["at"], "set": entry["set"]}
         if entry.get("apf") is not None:
             row["apf"] = entry["apf"].as_dict()
+        elif entry.get("apf_raw") is not None:
+            row["apf"] = entry["apf_raw"]
         out[title] = row
     return out
 

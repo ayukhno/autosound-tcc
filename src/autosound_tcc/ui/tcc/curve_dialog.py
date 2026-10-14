@@ -579,6 +579,11 @@ class CurveDialog(QDialog):
         #: machine — `{title: why}` (G10 C3). The view holds no filter for them, so they are banked
         #: with their filter kept, never taken off.
         self._apf_unshown: dict[str, str] = {}
+        #: The drivers on screen whose banked entry this TCC cannot read — a delay that is not a
+        #: number — `{title: (ms, Allpass | None, why)}`, what was drawn for them then (G10 M2 on
+        #: screen, #208). Drawn without it, so not banked from the view: the entry is carried as
+        #: read until the person moves that driver.
+        self._kept_raw: dict[str, tuple] = {}
         #: What the status line says about the bank (`_render_bank`), beside the notes above, and
         #: whether it says that what is set here is not being kept — the part of it that is red.
         self._bank_note = ""
@@ -1461,6 +1466,11 @@ class CurveDialog(QDialog):
         # this runs on every step of the box (#177).
         readings = []
         for index, trace in enumerate(self._view._traces):
+            kept = self._kept_raw.get(trace.name)
+            if kept is not None:
+                if (self._view.delay_ms(index), self._view.allpass(index)) == kept[:2]:
+                    continue  # not moved: its entry is carried as it was read (#208)
+                del self._kept_raw[trace.name]  # moved: the person's now
             reading = delay_bank.Reading(
                 trace.name, self._view.delay_ms(index),
                 arrival_ms=_peak_x(trace) if self._kind == "impulse" else None,
@@ -1561,6 +1571,10 @@ class CurveDialog(QDialog):
             notes.append(i18n.t("curveApfUnshown").format(
                 names=", ".join(title.split(" ")[0] for title in self._apf_unshown),
                 why=next(iter(self._apf_unshown.values()))))
+        if self._kept_raw and not self._unread:
+            notes.append(i18n.t("curveBankKeptUnread").format(
+                names=", ".join(title.split(" ")[0] for title in self._kept_raw),
+                why=next(iter(self._kept_raw.values()))[2]))
         note = " ".join(_sentence(part) for part in notes)
         # Red only while what is set here is not being kept, or what was banked is out of reach
         # (set aside). A filter kept in the bank that this machine cannot draw is information,
@@ -1655,7 +1669,7 @@ class CurveDialog(QDialog):
         finally:
             self._restoring = False
         # Nothing banked for this series now: what is drawn is the bank.
-        self._unread, self._apf_unshown = {}, {}
+        self._unread, self._apf_unshown, self._kept_raw = {}, {}, {}
         self._render_bank()
 
     def _processing_rate_hz(self):
@@ -1921,17 +1935,19 @@ class CurveDialog(QDialog):
             self._unread_series.append(series)
         bank: dict = {}
         apfs: dict = {}
+        odd: dict = {}
         try:
             for source in self._unread_series:
                 bank.update(delay_bank.load(session=source, strict=True))
                 apfs.update(delay_bank.allpasses(session=source, strict=True))
+                odd.update(delay_bank.unread_entries(session=source))
         except own_store.StoreUnreadable:
             for index, trace in enumerate(self._view._traces):
                 self._unread.setdefault(
                     trace.name, (self._view.delay_ms(index), self._view.allpass(index)))
             return  # said by `own_store` when it was read, once for this state of the file
         unread, self._unread = self._unread, {}
-        self._apf_unshown = {}
+        self._apf_unshown, self._kept_raw = {}, {}
         self._restoring = True
         try:
             target = self._view.delay_target()
@@ -1951,6 +1967,14 @@ class CurveDialog(QDialog):
                         # the filter, and it should not pretend to — nor bank its absence: the
                         # step was taking the filter off the store (G10 C3). Kept, and said.
                         self._apf_unshown[trace.name] = str(exc)
+                # An entry the bank holds and cannot read (G10 M2 on screen, #208): drawn without
+                # it, so kept as read — unless the person moved the driver while it was unread.
+                what, why = odd.get(trace.name, ("", ""))
+                now = (self._view.delay_ms(index), self._view.allpass(index))
+                if what == "ms" and (drawn is None or now == tuple(drawn)):
+                    self._kept_raw[trace.name] = (*now, why)
+                elif what == "apf":
+                    self._apf_unshown[trace.name] = why  # banked with its filter kept (C3's way)
             self._view.set_delay_target(target)
         finally:
             self._restoring = False
@@ -2138,7 +2162,7 @@ class CurveDialog(QDialog):
         `_render_note` while nothing is drawn. What the store says stands — it is about the store.
         """
         self._view.set_traces([])
-        self._unread = {}
+        self._unread, self._kept_raw = {}, {}
         self._render_bank()
         self._render_note()
 

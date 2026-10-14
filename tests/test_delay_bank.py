@@ -330,6 +330,33 @@ def test_a_step_carries_what_the_bank_cannot_read_through_unchanged(tmp_path):
     assert stored["w-L_01 (sw)"] == {"ms": 0.2, "at": None, "set": "S1"}
 
 
+def test_the_entries_the_bank_cannot_read_are_named_with_why(tmp_path):
+    """#208: the curve window keeps an on-screen driver whose entry it cannot read as it is, and
+    says why — a delay that is not a number, a filter of a kind this TCC does not know — for the
+    series asked, and for no other."""
+    project_settings.set_value(tmp_path, delay_bank.KEY, {
+        **_UNREAD, "w-L_01 (sw)": {"ms": 0.2, "at": None, "set": "S1"},
+        "tw-L_01 (sw)": {"ms": "late", "set": "S2"}})
+
+    odd = delay_bank.unread_entries(tmp_path, session="S1")
+
+    assert set(odd) == {"c_01 (sw)", "sub_01 (sw)"}, odd
+    assert odd["c_01 (sw)"][0] == "ms" and "0.4 ms" in odd["c_01 (sw)"][1]
+    assert odd["sub_01 (sw)"][0] == "apf" and "APF3" in odd["sub_01 (sw)"][1]
+
+
+def test_a_reading_that_keeps_the_filter_keeps_one_of_a_kind_it_cannot_read(tmp_path):
+    """#208: a step that moves a driver's delay and leaves its filter (`allpass` not given) wrote
+    the entry anew from what `_parsed` read, and a filter of a kind it does not know read as none
+    went with it. Kept as it was read."""
+    project_settings.set_value(tmp_path, delay_bank.KEY, _UNREAD)
+
+    delay_bank.put_many([delay_bank.Reading("sub_01 (sw)", 1.7)], tmp_path, session="S1")
+
+    stored = _stored(tmp_path)["sub_01 (sw)"]
+    assert stored["ms"] == 1.7 and stored["apf"] == {"type": "APF3", "f": 60.0}, stored
+
+
 def test_a_clear_of_one_series_carries_another_s_entries_it_cannot_read(tmp_path):
     """The same for Clear of one series: the other series' entries are kept as they were read, not
     as `_parsed` read them. This series' own go with it, read or not."""
