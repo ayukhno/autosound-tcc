@@ -676,7 +676,8 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         outline: none;
         padding: 3px;
     }}
-    /* The left padding is room for the current row's check mark (`.mini-select`'s «E / U»). */
+    /* The left padding is room for the current row's check mark, so labels are not clipped down to
+    their first letter (`.mini-select`'s «E / U» language-picker bug). */
     QComboBox QAbstractItemView::item {{
         padding: 5px 14px 5px 28px;
         min-height: 22px;
@@ -691,7 +692,6 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         background: {t.panel3};
         color: {t.text};
         border: 1px solid {t.border2};
-        border-radius: 5px;
         /* right padding reserves room for the 18px ::drop-down arrow zone below -- symmetric
         padding here squeezed the closed box's own text against the arrow */
         padding: 4px 22px 4px 9px;
@@ -974,25 +974,6 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     }}
     QPushButton[class~="warn-mark-soft"]:hover {{
         background: {t.mix('yellow', 30, 'panel')};
-    }}
-    QComboBox[class~="mini-select"]::drop-down {{
-        border: none;
-        width: 18px;
-    }}
-    QComboBox[class~="mini-select"] QAbstractItemView {{
-        background: {t.panel};
-        color: {t.text};
-        border: 1px solid {t.border2};
-        selection-background-color: {t.mix('accent', 22)};
-        selection-color: {t.text};
-        outline: none;
-        padding: 3px;
-    }}
-    QComboBox[class~="mini-select"] QAbstractItemView::item {{
-        /* left padding reserves room for the current-item check mark so labels aren't clipped
-        down to their first letter (the "E / U" language-picker bug) */
-        padding: 5px 14px 5px 28px;
-        min-height: 22px;
     }}
     /* .mini-select on a SPIN BOX — the curve window's delay field, which wears the same class as
     the combos it stands between and rendered white with light text on it in the dark theme (user,
