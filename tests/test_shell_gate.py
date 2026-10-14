@@ -798,8 +798,8 @@ def test_a_store_set_aside_runs_the_strictest_gate_after_a_restart_until_a_gate_
 def test_the_copy_beside_the_store_is_looked_for_once_not_at_every_permission(
         tmp_path, monkeypatch, app_log_told):
     """The gate is read at every permission judged. Looking beside the store for a copy set aside
-    is done once — not a folder read per permission, with a copy there or without — and again only
-    when the store changed, where a copy seen before a pick stays history. The copy here is one an
+    is done once — one listing of names per permission is the memo's key (#208), not a look — and
+    again only when the store or the copies beside it changed, where a copy seen before a pick stays history. The copy here is one an
     earlier run left: this process never saw the store."""
     from autosound_tcc.core import own_store, project_settings, shell_gate
 
@@ -877,8 +877,8 @@ def test_a_store_absent_when_last_looked_then_written_and_set_aside_elsewhere_is
     memoised on the store's own `stat`, and an absent store reads the same before and after. With
     no settings file at all when this process last looked, another TCC writes one, it breaks and
     is set aside — absent again, a copy beside it — and this process answered from the memo: the
-    machine's gate, nothing said. The folder's own `st_mtime_ns` is in the memo's key: an entry
-    made, removed or renamed in `.tcc/` moves it."""
+    machine's gate, nothing said. What is beside the store — the copies' names and sizes — is the
+    memo's key, so a copy made there moves it."""
     from autosound_tcc.core import project_settings, shell_gate
 
     store = project_settings.path_for(tmp_path)
@@ -891,6 +891,50 @@ def test_a_store_absent_when_last_looked_then_written_and_set_aside_elsewhere_is
 
     assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
     assert app_log_told == [shell_gate.STRICTEST_COPY_SAID.format(path=store, copy=copy)]
+
+
+def test_a_copy_set_aside_inside_one_clock_tick_of_the_last_look_is_seen(tmp_path, app_log_told):
+    """#208, the group review's C1: the memo was keyed on the folder's `st_mtime_ns`, which ext4 and
+    tmpfs step per kernel tick (~4 ms) and NTFS per clock tick (1-15.6 ms). A copy set aside within
+    one tick of the last look left the folder's time where it was, and the memo answered the
+    machine's gate. The folder's time is put back here, as the coarse clock leaves it: what is
+    beside the store is the key, not when the folder last changed."""
+    from autosound_tcc.core import project_settings, shell_gate
+
+    store = project_settings.path_for(tmp_path)
+    folder = store.parent
+    folder.mkdir(parents=True, exist_ok=True)
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_AUTO
+    before = os.stat(folder)
+
+    store.write_text('{"effort": "high"}', encoding="utf-8")
+    copy = _another_process_sets_it_aside(store)
+    os.utime(folder, ns=(before.st_atime_ns, before.st_mtime_ns))  # the same tick
+
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
+    assert app_log_told == [shell_gate.STRICTEST_COPY_SAID.format(path=store, copy=copy)]
+
+
+def test_a_copy_rewritten_under_the_same_name_is_looked_at_again(tmp_path, monkeypatch,
+                                                                  app_log_told):
+    """The key is the copies' names and sizes: a copy replaced by another of the same name but a
+    different size is a new thing beside the store, looked at again."""
+    from autosound_tcc.core import own_store, project_settings, shell_gate
+
+    looked: list = []
+    real = own_store.set_aside_copies
+    monkeypatch.setattr(own_store, "set_aside_copies",
+                        lambda path: looked.append(1) or real(path))
+    folder = project_settings.path_for(tmp_path).parent
+    folder.mkdir(parents=True, exist_ok=True)
+    name = "tcc-project.json.corrupt-20261012-221500"
+    (folder / name).write_text(_CUT, encoding="utf-8")
+    for _ in range(2):
+        assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
+    assert looked == [1]
+    (folder / name).write_text(_CUT + "  ", encoding="utf-8")
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
+    assert looked == [1, 1]
 
 
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,

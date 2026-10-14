@@ -134,8 +134,8 @@ def project_gate(tcc_dir: Path, machine_choice: str = "",
     lands a fresh file with none in it — it is the strictest until a gate is picked
     (`STRICTEST_ASIDE_SAID`). `own_store`'s count is the process's; what outlives it is the copy
     set aside beside the store, so a store with no gate and such a copy beside it is the same in
-    a later run (`STRICTEST_COPY_SAID`, Fable's re-review of the branch fix, I1) — looked for once
-    a run, not at every permission. A folder that cannot be looked in leaves it unknown: the
+    a later run (`STRICTEST_COPY_SAID`, Fable's re-review of the branch fix, I1) — looked at again
+    only when the store or the copies' names and sizes beside it change (#208). A folder that cannot be looked in leaves it unknown: the
     strictest too (`STRICTEST_UNLISTED_SAID`).
 
     `on_strictest` hears that same first answer: the window pushes the strictest to a session
@@ -160,7 +160,7 @@ def project_gate(tcc_dir: Path, machine_choice: str = "",
         history = _copy_history.get(store, frozenset())
     copy = ""
     if not chosen and not gone:
-        state = (own_store.file_state(path), _folder_mtime(path))
+        state = (own_store.file_state(path), own_store.set_aside_state(path))
         if seen is not None and seen[0] == state:
             copy = seen[1]
         else:
@@ -174,17 +174,6 @@ def project_gate(tcc_dir: Path, machine_choice: str = "",
     with _strictest_lock:
         _strictest_said.pop(store, None)
     return effective_gate(chosen, machine_choice)
-
-
-def _folder_mtime(path: Path) -> Optional[int]:
-    """The store's folder's `st_mtime_ns`, or None: it moves on every entry made, removed or
-    renamed in it (POSIX and NTFS alike), so a copy set aside there by another process changes the
-    memo's key even when the store was absent both times this process looked (Fable's re-review of
-    the branch fix, round 3, m1; #208)."""
-    try:
-        return os.stat(path.parent).st_mtime_ns
-    except OSError:
-        return None
 
 
 def _look_for_copy(path: Path, history: frozenset) -> tuple[str, frozenset]:

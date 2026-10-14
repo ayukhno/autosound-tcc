@@ -254,6 +254,30 @@ def set_aside_copies(path: Path) -> list[str]:
         return []
 
 
+def set_aside_state(path: Path) -> tuple:
+    """What is beside the store, as a memo's key: the names and sizes of its set-aside copies, from
+    one `os.scandir`. Not the folder's time — ext4/tmpfs step it per kernel tick, NTFS per clock
+    tick, so a copy made inside one tick of the last look left it where it was (#208, the group
+    review's C1). `()` when the folder is not there; the error's name when it cannot be listed."""
+    path = Path(path)
+    prefix = _aside_prefix(path)
+    try:
+        with os.scandir(path.parent) as entries:
+            found = []
+            for entry in entries:
+                if entry.name.startswith(prefix):
+                    try:
+                        size = entry.stat().st_size
+                    except OSError:
+                        size = -1
+                    found.append((entry.name, size))
+            return tuple(sorted(found))
+    except FileNotFoundError:
+        return ()
+    except OSError as exc:
+        return (type(exc).__name__, exc.errno)
+
+
 def _forget_aside(path: Path) -> None:
     """A fresh file written, or a file read whole: the store is no longer the one set aside."""
     if _aside_said:
