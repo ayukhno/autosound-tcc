@@ -17,6 +17,7 @@ session builds or briefs an Agent; the seats from «Process weight»; `Engine: n
 | 2 | Install and update | #194, #195 | #195 may need a skill ticket for the method's half |
 | 3 | AI picks + what step 0 leaves | #196, #182, #165; #184, #192, #183 | |
 | 4 | Rounds and the bank | #197, #198, #199, #200 | the skill's halves of #198/#199 ticketed first; #200 waits for the skill's W-10 tag |
+| 6 | Codex (#181, the Arbiter: «в цій») | #181 | `feature-dev`: code map → questions → architects → his choice → build; after the AI picks group (shared files) |
 | 5 | Window polish, Leftovers | #203, #166, #167, #204, #180; #205–#209 | the Haiku trial |
 
 Code implementers run **one at a time** in the tree (no parallel edits, no tests over a changing file); the study
@@ -59,5 +60,5 @@ result goes to the ledger below and one line to the hub's H-019.
 | Release tooling group | seats done: Important 2 (AT reads TCC's tags when the submodule is not initialised; AT's published-tag seam untested), Minor/gaps 11 — done — fixed in 6c02aed, 07522b4 (all 10); re-review: one Minor (a `-` URL reached ls-remote as an option) fixed by the session in this round's last commit | — | — | opus · high | not now: the self-triggered reload (pool), suite-wide `filterwarnings`, the «READY» wording |
 | #194 | task review: Important 2 (`%`/`^` in a Windows temp path breaks the update; fresh installs unconstrained → hub #280 TCC-058 to the skill), Minor 3 — fixed in f008582; re-review: no regression, Important — the plain retry fired on any failure → narrowed to an old uv (< 0.5.6) decided before the install; the line in four languages (pl/de by the Advisor); the README line with `--constraints` — last round running | opus · high | 14b02a3, fc6cfe1, f008582 | opus · high | `uv tool install --constraints` from the verified tag's `constraints.txt`; no effect until a TCC with this code updates to a tag that carries the file; fresh installs (README line) still unconstrained |
 | AI picks group (#165, #196, #182) | building | opus · medium | | — (ordinary; the group seats) | omp 18.10.3 on this Mac: #165 reproduced here, not on the VM |
-| #181 spike | done — all six PASS (`spike/codex-app-server/RESULT.md`) | opus · high | 464159d | — | build L: 3–4 days macOS + ~1 day Windows; risks: app-server experimental (pin the version), the user's `~/.codex` servers/plugins/hooks switched off per process; the build waits for the Arbiter's word |
+| #181 spike | done — all six PASS (`spike/codex-app-server/RESULT.md`) | opus · high | 464159d | — | build L: 3–4 days macOS + ~1 day Windows; risks: app-server experimental (pin the version), the user's `~/.codex` servers/plugins/hooks switched off per process; the build: in W-10 (the Arbiter, 2026-10-14) — code map running |
 | #181 | done — the study, `docs/STUDY-W-10-codex-primary.md` | opus · high | (this commit) | — | feasible, L (2–4 days); next: a ≤1-day spike on six points; five questions for the Arbiter (§5) |
