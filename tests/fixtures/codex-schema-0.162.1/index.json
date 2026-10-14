@@ -1,0 +1,77 @@
+{
+ "codex": "codex-cli 0.162.1",
+ "generated_with": "codex app-server generate-json-schema --experimental",
+ "methods": {
+  "client": [
+   "account/login/cancel",
+   "account/login/start",
+   "account/read",
+   "config/read",
+   "initialize",
+   "mcpServerStatus/list",
+   "model/list",
+   "skills/extraRoots/set",
+   "skills/list",
+   "thread/read",
+   "thread/resume",
+   "thread/start",
+   "turn/interrupt",
+   "turn/start",
+   "turn/steer"
+  ],
+  "server_request": [
+   "item/commandExecution/requestApproval",
+   "item/fileChange/requestApproval",
+   "item/permissions/requestApproval",
+   "item/tool/requestUserInput",
+   "mcpServer/elicitation/request"
+  ],
+  "notification": [
+   "account/login/completed",
+   "account/rateLimits/updated",
+   "account/updated",
+   "configWarning",
+   "deprecationNotice",
+   "error",
+   "item/agentMessage/delta",
+   "item/completed",
+   "item/started",
+   "mcpServer/startupStatus/updated",
+   "remoteControl/status/changed",
+   "serverRequest/resolved",
+   "skills/changed",
+   "thread/settings/updated",
+   "thread/started",
+   "thread/status/changed",
+   "thread/tokenUsage/updated",
+   "turn/completed",
+   "turn/diff/updated",
+   "turn/started"
+  ],
+  "client_notification": [
+   "initialized"
+  ]
+ },
+ "responses": {
+  "account/login/cancel": "CancelLoginAccountResponse.json",
+  "account/login/start": "LoginAccountResponse.json",
+  "account/read": "GetAccountResponse.json",
+  "config/read": "ConfigReadResponse.json",
+  "initialize": "InitializeResponse.json",
+  "item/commandExecution/requestApproval": "CommandExecutionRequestApprovalResponse.json",
+  "item/fileChange/requestApproval": "FileChangeRequestApprovalResponse.json",
+  "item/permissions/requestApproval": "PermissionsRequestApprovalResponse.json",
+  "item/tool/requestUserInput": "ToolRequestUserInputResponse.json",
+  "mcpServer/elicitation/request": "McpServerElicitationRequestResponse.json",
+  "mcpServerStatus/list": "ListMcpServerStatusResponse.json",
+  "model/list": "ModelListResponse.json",
+  "skills/extraRoots/set": "SkillsExtraRootsSetResponse.json",
+  "skills/list": "SkillsListResponse.json",
+  "thread/read": "ThreadReadResponse.json",
+  "thread/resume": "ThreadResumeResponse.json",
+  "thread/start": "ThreadStartResponse.json",
+  "turn/interrupt": "TurnInterruptResponse.json",
+  "turn/start": "TurnStartResponse.json",
+  "turn/steer": "TurnSteerResponse.json"
+ }
+}

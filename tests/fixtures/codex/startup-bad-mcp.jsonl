@@ -1,0 +1,2 @@
+{"dir": "out", "t": 0.0, "msg": {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"clientInfo": {"name": "tcc-spike", "title": "TCC spike", "version": "0.0.1"}, "capabilities": {"experimentalApi": true}}}}
+{"dir": "eof", "t": 0.2, "exit": 1, "stderr": "Error: invalid transport\nin `mcp_servers.home-assistant`"}

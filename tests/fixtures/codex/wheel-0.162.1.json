@@ -1,0 +1,201 @@
+{
+ "package": "openai-codex-cli-bin",
+ "version": "0.162.1",
+ "source": "https://pypi.org/pypi/openai-codex-cli-bin/0.162.1/json",
+ "read": "2026-10-14, the zip central directory by HTTP range (no wheel downloaded); codex-package.json read the same way",
+ "layout": {
+  "layoutVersion": 1,
+  "root": "codex_cli_bin/",
+  "entrypoint": "bin/codex (bin/codex.exe on Windows)",
+  "resourcesDir": "codex-resources",
+  "pathDir": "codex-path"
+ },
+ "wheels": {
+  "macos-x86_64": {
+   "filename": "openai_codex_cli_bin-0.162.1-py3-none-macosx_10_9_x86_64.whl",
+   "size": 134983419,
+   "sha256": "590aece9bcdeea1a4019a080ef39f6391db92ae2a9f7144fd326bbb2373be0db",
+   "target": "x86_64-apple-darwin",
+   "binary": "codex_cli_bin/bin/codex",
+   "members": [
+    {
+     "path": "codex_cli_bin/__init__.py",
+     "size": 1005,
+     "mode": "0o100644"
+    },
+    {
+     "path": "codex_cli_bin/codex-package.json",
+     "size": 199,
+     "mode": "0o100644"
+    },
+    {
+     "path": "codex_cli_bin/bin/codex",
+     "size": 266130208,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/bin/codex-code-mode-host",
+     "size": 69411680,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/codex-path/rg",
+     "size": 4437184,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/codex-resources/zsh/bin/zsh",
+     "size": 762544,
+     "mode": "0o100755"
+    }
+   ],
+   "dist_info": [
+    "openai_codex_cli_bin-0.162.1.dist-info/METADATA",
+    "openai_codex_cli_bin-0.162.1.dist-info/WHEEL",
+    "openai_codex_cli_bin-0.162.1.dist-info/RECORD"
+   ]
+  },
+  "macos-arm64": {
+   "filename": "openai_codex_cli_bin-0.162.1-py3-none-macosx_11_0_arm64.whl",
+   "size": 123964056,
+   "sha256": "490d395201c322e5bafc9c02075e36878a0c3b48d6d70ca0f0787629cb7c1c4c",
+   "target": "aarch64-apple-darwin",
+   "binary": "codex_cli_bin/bin/codex",
+   "members": [
+    {
+     "path": "codex_cli_bin/__init__.py",
+     "size": 1005,
+     "mode": "0o100644"
+    },
+    {
+     "path": "codex_cli_bin/codex-package.json",
+     "size": 200,
+     "mode": "0o100644"
+    },
+    {
+     "path": "codex_cli_bin/bin/codex",
+     "size": 246642624,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/bin/codex-code-mode-host",
+     "size": 65374704,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/codex-path/rg",
+     "size": 4030432,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/codex-resources/zsh/bin/zsh",
+     "size": 754208,
+     "mode": "0o100755"
+    }
+   ],
+   "dist_info": [
+    "openai_codex_cli_bin-0.162.1.dist-info/METADATA",
+    "openai_codex_cli_bin-0.162.1.dist-info/WHEEL",
+    "openai_codex_cli_bin-0.162.1.dist-info/RECORD"
+   ]
+  },
+  "windows-amd64": {
+   "filename": "openai_codex_cli_bin-0.162.1-py3-none-win_amd64.whl",
+   "size": 151684652,
+   "sha256": "5faae6b914d61c8cb2aee29a30d362f6afd2c06efabca5ac2546f678af2c3672",
+   "target": "x86_64-pc-windows-msvc",
+   "binary": "codex_cli_bin/bin/codex.exe",
+   "members": [
+    {
+     "path": "codex_cli_bin/__init__.py",
+     "size": 1043,
+     "mode": "0o100644"
+    },
+    {
+     "path": "codex_cli_bin/codex-package.json",
+     "size": 215,
+     "mode": "0o100644"
+    },
+    {
+     "path": "codex_cli_bin/bin/codex-code-mode-host.exe",
+     "size": 74685744,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/bin/codex.exe",
+     "size": 333479728,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/codex-path/rg.exe",
+     "size": 4218880,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/codex-resources/codex-command-runner.exe",
+     "size": 8209704,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/codex-resources/codex-windows-sandbox-setup.exe",
+     "size": 17723696,
+     "mode": "0o100755"
+    }
+   ],
+   "dist_info": [
+    "openai_codex_cli_bin-0.162.1.dist-info/METADATA",
+    "openai_codex_cli_bin-0.162.1.dist-info/WHEEL",
+    "openai_codex_cli_bin-0.162.1.dist-info/RECORD"
+   ]
+  },
+  "windows-arm64": {
+   "filename": "openai_codex_cli_bin-0.162.1-py3-none-win_arm64.whl",
+   "size": 140599920,
+   "sha256": "64381407d97fb2155a9fe48e7a2c43fe882cae2e85eb266e812d2281a23aeeb1",
+   "target": "aarch64-pc-windows-msvc",
+   "binary": "codex_cli_bin/bin/codex.exe",
+   "members": [
+    {
+     "path": "codex_cli_bin/__init__.py",
+     "size": 1043,
+     "mode": "0o100644"
+    },
+    {
+     "path": "codex_cli_bin/codex-package.json",
+     "size": 216,
+     "mode": "0o100644"
+    },
+    {
+     "path": "codex_cli_bin/bin/codex-code-mode-host.exe",
+     "size": 69820208,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/bin/codex.exe",
+     "size": 282434864,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/codex-path/rg.exe",
+     "size": 3859456,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/codex-resources/codex-command-runner.exe",
+     "size": 7353136,
+     "mode": "0o100755"
+    },
+    {
+     "path": "codex_cli_bin/codex-resources/codex-windows-sandbox-setup.exe",
+     "size": 15825712,
+     "mode": "0o100755"
+    }
+   ],
+   "dist_info": [
+    "openai_codex_cli_bin-0.162.1.dist-info/METADATA",
+    "openai_codex_cli_bin-0.162.1.dist-info/WHEEL",
+    "openai_codex_cli_bin-0.162.1.dist-info/RECORD"
+   ]
+  }
+ }
+}
