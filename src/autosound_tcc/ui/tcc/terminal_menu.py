@@ -49,7 +49,10 @@ def open_in(host, client: Optional[str] = None) -> None:
     project_dir = host._mcp_server.project_dir if host._mcp_server else config.project_dir()
     env = critic.session_env(project_dir)  # the reviewer's route, as in-app (hub #236)
     choice = host._generator_choice()
-    client = client or session_routes.client_of(choice)
+    # No model chosen: a named client opens on its own model; none named, the plain terminal —
+    # there is no pick to carry (`client_of(None)` raised in the Qt slot, the group review, M6).
+    client = client or (session_routes.client_of(choice) if choice is not None
+                        else terminal_launcher.TERMINAL)
     try:
         if client == terminal_launcher.TERMINAL:
             terminal_launcher.open_shell(project_dir, env=env, note=codex_note())

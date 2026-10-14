@@ -215,3 +215,31 @@ def test_on_windows_the_plain_terminal_s_note_names_the_console_interpreter(wind
 
     assert f'"{_CONSOLE}" -m autosound_tcc.core.codex_terminal .' in note
     assert "pythonw" not in note
+
+
+@pytest.mark.parametrize("client, cli", [("claude", "claude"), ("codex", None), ("omp", "omp"),
+                                         ("agy", "agy")])
+def test_a_named_client_opens_with_no_model_chosen(tmp_path, launched, client, cli):
+    """M6: with no model picked, `client_of(None)` raised inside the Qt slot. A named client needs
+    no pick: it opens on its own model."""
+    host = _host(tmp_path, [])
+    host._generator_choice = lambda: None
+
+    terminal_menu.open_in(host, client)
+
+    ((kind, kw),) = launched
+    assert kind == "launch" and kw["model"] is None
+    if cli:
+        assert kw["cli"] == cli
+    else:
+        assert kw["extra"][:2] == ("-m", "autosound_tcc.core.codex_terminal")
+
+
+def test_no_client_and_no_pick_opens_the_plain_terminal(tmp_path, launched):
+    host = _host(tmp_path, [])
+    host._generator_choice = lambda: None
+
+    terminal_menu.open_in(host)
+
+    ((kind, _kw),) = launched
+    assert kind == "shell"

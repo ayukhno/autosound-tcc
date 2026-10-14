@@ -179,12 +179,13 @@ def client_invocation(client: str, choice, project_dir: Path
     """`(cli, model, extra)` that opens `client` — the one named, never another (tcc #180).
 
     The pick's model rides only to the client that carries the pick (an SDK pick → Claude, omp →
-    OMP, Codex → Codex); any other client keeps its own model. omp gets its overlay always: without
+    OMP, Codex → Codex); any other client keeps its own model, and so does every client when no
+    model is chosen (`choice` None). omp gets its overlay always: without
     it TCC's tools stay behind xd:// and never reach the model. Codex runs through
     `codex_terminal`, which hands it TCC's url and token — the token never in the line; a Codex
     that is gone is `TerminalLaunchError`, said like any client the launcher cannot find.
     """
-    model = choice.model if client_of(choice) == client else None
+    model = choice.model if choice is not None and client_of(choice) == client else None
     if client == "omp":
         return "omp", model, ("--config", str(omp_session.overlay_path(project_dir)))
     if client == "codex":
