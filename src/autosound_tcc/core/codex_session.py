@@ -29,6 +29,7 @@ Qt-free; everything runs on the worker's loop (`ui.tcc.agent_worker`).
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import shlex
@@ -45,7 +46,7 @@ from autosound_tcc.core.mcp_server import (CONFIRM_TIMEOUT_S, ConfirmRequest, He
                                            UiBridge, await_confirmation)
 from autosound_tcc.core.omp_session import FRAME_LOG_MAX_BYTES
 from autosound_tcc.core.session_registry import CODEX_ROUTE, SessionRegistry
-from autosound_tcc.core.shell_gate import (GATE_AUTO, GATE_NEVER, GATE_WRITES, SHELL_BASH,
+from autosound_tcc.core.shell_gate import (GATE_NEVER, GATE_WRITES, SHELL_BASH,
                                            SHELL_POWERSHELL, Verdict, judge_action)
 from autosound_tcc.core.tuning_session import SKILL_NAME, _read_roots_for, system_prompt_append
 
@@ -59,6 +60,9 @@ REQUEST_TIMEOUT_S = 60.0
 #: How long Codex waits for one of TCC's MCP tools: above a confirmation's and a review's limits —
 #: Codex's own ~60 s default would cut either (omp's `OMP_TOOL_TIMEOUT_MS`, for the same reason).
 TOOL_TIMEOUT_S = int(max(CONFIRM_TIMEOUT_S, critic.DEFAULT_TIMEOUT_S) + 60)
+
+#: How long a request swept at the turn's end waits for Codex's own withdrawal before TCC declines it.
+SWEEP_DECLINE_S = 1.0
 
 #: The requests Codex sends before it runs something; task 7 answers them from TCC's gate.
 COMMAND_APPROVAL = "item/commandExecution/requestApproval"
@@ -184,6 +188,7 @@ class CodexSession:
         #: Approvals with the gate or on the bar, by request id: cancelled when Codex withdraws one
         #: or the turn ends — the bar comes down and nothing is sent.
         self._gating: dict[Any, asyncio.Task] = {}
+        self._timers: set[asyncio.TimerHandle] = set()
         self._retry_said = False
         self._last_error = ""
         self._getter: Optional[asyncio.Future] = None
@@ -536,79 +541,159 @@ class CodexSession:
             # Only one still pending: `resolved` also comes for requests already answered.
             if server is not None and server.withdrawn(rid):
                 self._drop_gate(rid)
+        elif method == "turn/completed":
+            # Here, in the reader and in order, not when the turn's reader gets to it: a gate that
+            # finished in between would otherwise put its `Unasked` behind `turn/completed`, where
+            # it shows as the next turn's first event (re-review M1).
+            self._sweep_gates()
 
-    def _drop_gate(self, rid: Any) -> None:
+    def _drop_gate(self, rid: Any, *, decline: bool = False) -> None:
         """Codex withdrew `rid`, or its turn ended: the gate task is cancelled — the bar's future
-        with it (`ConfirmBar._on_gave_up`) — and nothing is sent."""
+        with it (`ConfirmBar._on_gave_up`). `decline`: the turn ended, and if Codex has not
+        withdrawn `rid` within `SWEEP_DECLINE_S` it is answered `decline` (re-review M2). Not at
+        once: Codex withdraws right after `turn/completed`, and an answer racing that withdrawal
+        lands on a request it no longer has."""
         task = self._gating.pop(rid, None)
         if task is not None and not task.done():
             task.cancel()
+        if decline and task is not None:
+            handle = asyncio.get_running_loop().call_later(SWEEP_DECLINE_S, self._late_decline, rid)
+            self._timers.add(handle)
+
+    def _late_decline(self, rid: Any) -> None:
+        server = self._server
+        # `respond` refuses one Codex withdrew, one already answered, and any once it has ended.
+        if server is not None and not server.ended and not server.withdrawn(rid):
+            server.respond(rid, {"decision": "decline"})
 
     def _sweep_gates(self) -> None:
+        """The turn is over: what still waits on the gate or the bar goes, declined unless Codex
+        withdraws it (M2)."""
         for rid in list(self._gating):
-            self._drop_gate(rid)
+            self._drop_gate(rid, decline=True)
 
-    def _asked(self, method: str, params: dict) -> tuple[str, str, str, bool]:
-        """`(tool, detail, shell, deletes)` for one approval, as the gate reads it."""
+    def _asked(self, method: str, params: dict) -> tuple[str, str, str, str]:
+        """`(tool, detail, shell, always)` for one approval, as the gate reads it. `always` names
+        why it asks whatever the gate says — `irreversible` (a file delete) or `unknown` (Codex
+        did not say what runs, or where TCC cannot judge it) — and is "" otherwise."""
         if method == COMMAND_APPROVAL:
-            raw = params.get("command")
-            raw = shlex.join(map(str, raw)) if isinstance(raw, list) else str(raw or "")
-            shell = shell_of(raw)
-            # PowerShell lines whole (task 5's reader parses them); a POSIX line without Codex's
-            # `zsh -lc '…'` wrapper, which only says how it runs.
-            return "Bash", raw if shell == SHELL_POWERSHELL else inner_command(raw), shell, False
+            return self._asked_command(params)
         changes = self._changes.get(str(params.get("itemId") or ""))
         reason = str(params.get("reason") or "").strip()
         if changes:
             detail = "\n".join(f"{kind or 'change'}: {path}" for path, kind in changes)
-            deletes = any(kind == "delete" for _, kind in changes)
+            always = "irreversible" if any(kind == "delete" for _, kind in changes) else ""
         else:
             # Codex named no change TCC saw: what it does is unknown, so it is asked about as a
             # delete would be — under `auto` too.
-            detail, deletes = "a file change Codex did not describe", True
-        return "Edit", detail + (f"\n{reason}" if reason else ""), SHELL_BASH, deletes
+            detail, always = "a file change Codex did not describe", "irreversible"
+        return "Edit", detail + (f"\n{reason}" if reason else ""), SHELL_BASH, always
+
+    def _asked_command(self, params: dict) -> tuple[str, str, str, str]:
+        raw = params.get("command")
+        raw = shlex.join(map(str, raw)) if isinstance(raw, list) else str(raw or "")
+        kind = str(params.get("kind") or "command")
+        if kind != "command" or not raw.strip():
+            # Input to a running terminal (`writeStdin`), or no command at all: nothing the gate
+            # can read, so it asks (task 7's review, I2).
+            said = raw.strip() or f"{kind}: {json.dumps(params, ensure_ascii=False)[:300]}"
+            return "Bash", said, SHELL_BASH, "unknown"
+        shell = shell_of(raw)
+        line = raw
+        if shell == SHELL_BASH:
+            line = inner_command(raw)  # Codex's `zsh -lc '…'` wrapper only says how it runs
+            if shell_of(line, windows=False) == SHELL_POWERSHELL:
+                shell = SHELL_POWERSHELL  # `pwsh -c …` behind the wrapper is PowerShell's line
+        # PowerShell lines whole (task 5's reader parses them).
+        where = self._where(params.get("cwd"))
+        if where is None:
+            return "Bash", line, shell, ""
+        if where == "outside":
+            # The critical case of task 7's review: the gate reads paths from the project, so a
+            # line that runs elsewhere — `rm -rf *` in the home — is not one it can judge. The
+            # stricter way: it asks (never: through, said), and the bar shows where.
+            cwd = str(params.get("cwd"))
+            return "Bash", self._in_folder(line, cwd, shell), shell, "unknown"
+        return "Bash", self._in_folder(line, where, shell), shell, ""
+
+    def _where(self, cwd: Any) -> Optional[str]:
+        """None when `cwd` is the project itself (or not given); "outside" when it is not in the
+        project; else the folder inside the project the line runs in."""
+        if not cwd:
+            return None
+        try:
+            here = Path(os.path.realpath(str(cwd)))
+            home = Path(os.path.realpath(self.project_dir))
+        except (OSError, ValueError):
+            return "outside"
+        if os.path.normcase(str(here)) == os.path.normcase(str(home)):
+            return None
+        try:
+            inside = Path(os.path.normcase(str(here))).is_relative_to(
+                Path(os.path.normcase(str(home))))
+        except ValueError:
+            inside = False
+        return str(cwd) if inside else "outside"
 
     @staticmethod
-    def _for_delete(verdict: Verdict, detail: str, gate: str,
-                    ticks: frozenset[str]) -> Verdict:
-        """A change that deletes a file cannot be undone, so it asks under `auto` too (the plan,
-        decided 2026-10-14 after task 5's review, I1); `never` lets it through and says so; a
-        «don't ask again» tick for edits outranks `auto`, as `judge_action`'s does."""
+    def _in_folder(line: str, cwd: str, shell: str) -> str:
+        """The line as it runs in `cwd`, for the gate to judge from there."""
+        if shell == SHELL_POWERSHELL:
+            return "Set-Location '" + cwd.replace("'", "''") + "'; " + line
+        return f"cd {shlex.quote(cwd)} && {line}"
+
+    @staticmethod
+    def _always_asks(verdict: Verdict, tool: str, detail: str, why: str, gate: str,
+                     ticks: frozenset[str]) -> Verdict:
+        """What asks whatever the gate said: a file delete cannot be undone, so it asks under
+        `auto` too (the plan, decided 2026-10-14 after task 5's review, I1); a line the gate cannot
+        judge — run outside the project, input to a running terminal, no command — asks under
+        every gate. `never` lets either through and says so; a «don't ask again» tick for the tool
+        outranks, as `judge_action`'s does."""
         if gate == GATE_NEVER:
             return Verdict(True, unasked=detail)
-        if "Edit" in ticks or "edit" in ticks:
+        if tool in ticks or tool.lower() in ticks:
             return verdict
-        if verdict.allowed and gate == GATE_AUTO:
-            return Verdict(False, tool="Edit", title="Дозволити Edit?", detail=detail,
-                           reason="gateIrreversible")
-        return verdict if verdict.allowed else replace(verdict, reason="gateIrreversible")
+        reason = "gateIrreversible" if why == "irreversible" else verdict.reason
+        if verdict.allowed:
+            return Verdict(False, tool=tool, title=f"Дозволити {tool}?", detail=detail,
+                           reason=reason)
+        return replace(verdict, detail=detail, reason=reason)
 
     async def _gate(self, rid: Any, method: str, params: dict) -> None:
         """TCC's gate on one approval, answered once: `accept` or `decline`. The gate and the
-        ticks are read here, per request, so a gate narrowed mid-session holds from the next."""
+        ticks are read here, per request, so a gate narrowed mid-session holds from the next. A
+        gate that fails declines (task 7's review, I3) — a cancel stays a cancel."""
+        try:
+            allowed = await self._judge(method, params)
+        except Exception as exc:  # noqa: BLE001 — a broken gate is a closed one, said in the log
+            app_log.logger().warning("codex: the gate failed on %s %r, declined: %s: %s",
+                                     method, rid, type(exc).__name__, exc)
+            allowed = False
+        server = self._server
+        if server is not None:
+            # `respond` refuses an answer to a request Codex withdrew meanwhile.
+            server.respond(rid, {"decision": "accept" if allowed else "decline"})
+
+    async def _judge(self, method: str, params: dict) -> bool:
         gate, ticks = self.gate, frozenset(self.always_allowed)
-        tool, detail, shell, deletes = self._asked(method, params)
+        tool, detail, shell, always = self._asked(method, params)
         # Off the loop: the gate reads the disk (realpaths, globs, a walk for a recursive delete),
         # and a slow drive must not hold Codex's notifications.
         verdict = await asyncio.to_thread(judge_action, tool, detail, gate=gate,
                                           always_allowed=ticks, read_roots=self._read_roots,
                                           shell=shell)
-        if deletes:
-            verdict = self._for_delete(verdict, detail, gate, ticks)
+        if always:
+            verdict = self._always_asks(verdict, tool, detail, always, gate, ticks)
         if verdict.allowed:
-            allowed = True
             if verdict.unasked:
                 self._say(Unasked(verdict.unasked))
-        else:
-            request = ConfirmRequest(tool=verdict.tool or tool,
-                                     title=verdict.title or f"Дозволити {tool}?",
-                                     detail=verdict.detail or detail, payload=dict(params),
-                                     reason=verdict.reason)
-            allowed = await await_confirmation(self.bridge, request, CONFIRM_TIMEOUT_S)
-        server = self._server
-        if server is not None:
-            # `respond` refuses an answer to a request Codex withdrew meanwhile.
-            server.respond(rid, {"decision": "accept" if allowed else "decline"})
+            return True
+        request = ConfirmRequest(tool=verdict.tool or tool,
+                                 title=verdict.title or f"Дозволити {tool}?",
+                                 detail=verdict.detail or detail, payload=dict(params),
+                                 reason=verdict.reason)
+        return await await_confirmation(self.bridge, request, CONFIRM_TIMEOUT_S)
 
     def _say(self, event: AgentEvent) -> None:
         """An event of the gate's into the turn, in order with Codex's notifications."""
@@ -790,8 +875,6 @@ class CodexSession:
         if method == "item/completed":
             return self._item_completed(params.get("item") or {}), False
         if method == "turn/completed":
-            # What still waits on the gate or the bar belongs to a turn that is over.
-            self._sweep_gates()
             events: list[AgentEvent] = []
             if turn.get("status") == "failed":
                 said = str((turn.get("error") or {}).get("message") or "the turn failed")
@@ -900,6 +983,8 @@ class CodexSession:
         whole close 2.5 s before it cancels — past the grace it is terminated, then its tree."""
         self._drop_getter()
         self._sweep_gates()
+        for timer in list(self._timers):
+            timer.cancel()
         for task in list(self._tasks):
             task.cancel()
         server = self._server

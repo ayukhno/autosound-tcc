@@ -1011,17 +1011,22 @@ def decisions(stand_in) -> list:
     return [r.get("result", {}).get("decision") for r in stand_in.replies()]
 
 
-def approval_turn(thread: str, *, command: str = "", changes=None, after=()) -> list[dict]:
+def approval_turn(thread: str, *, command="", changes=None, after=(), cwd=None,
+                  kind: str = "command", item_id: str | None = "i1") -> list[dict]:
     """One turn whose single item asks first: a command, or a file change with `changes`."""
     tid = "turn-1"
     if changes is None:
         body = {"type": "commandExecution", "id": "i1", "command": command}
         ask = {"id": 0, "method": "item/commandExecution/requestApproval", "params": {
-            "threadId": thread, "turnId": tid, "itemId": "i1", "command": command}}
+            "threadId": thread, "turnId": tid, "itemId": "i1", "command": command, "kind": kind}}
+        if cwd is not None:
+            ask["params"]["cwd"] = str(cwd)
     else:
         body = {"type": "fileChange", "id": "i1", "changes": changes}
         ask = {"id": 0, "method": "item/fileChange/requestApproval", "params": {
-            "threadId": thread, "turnId": tid, "itemId": "i1", "reason": None}}
+            "threadId": thread, "turnId": tid, "itemId": item_id, "reason": None}}
+        if item_id is None:
+            del ask["params"]["itemId"]
     return [*opening(), *thread_start(thread), *turn(thread, tid, middle=[
         item("started", thread, tid, body), inn(ask), *after, out({"id": 0, "result": {}}),
         item("completed", thread, tid, body)])]
@@ -1236,3 +1241,162 @@ def test_a_reply_that_names_no_turn_is_treated_as_no_turn(project, tmp_path, sta
             inn({"id": 90, "result": {}}), out({"method": "never/sent"})]
     events = run_session(make(project, stand_in.use(write(tmp_path, rows))))
     assert len(events) == 2 and isinstance(events[0], Notice) and events[1] == TurnEnd("th")
+
+
+# ---- task 7's fix round (the review: cwd, kind, a failing gate) -----------------------------------
+
+
+def run_gate(project, tmp_path, stand_in, rows, **kw):
+    bridge = RecordingBridge(False)
+    session = make(project, stand_in.use(write(tmp_path, rows)), bridge=bridge, **kw)
+    events = run_session(session)
+    return bridge, events
+
+
+@pytest.fixture
+def places(tmp_path, project):
+    """Folders a command can run in: the home, `/`, a sibling project, one inside the project."""
+    sibling = tmp_path / "other-project"
+    sibling.mkdir()
+    (sibling / "keep.txt").write_text("x", encoding="utf-8")
+    inside = project / "process"
+    inside.mkdir(exist_ok=True)
+    return {"home": Path.home(), "root": Path("/"), "sibling": sibling, "inside": inside}
+
+
+@pytest.mark.parametrize("where", ["home", "root", "sibling"])
+@pytest.mark.parametrize("gate, line", [("auto", "rm -rf *"), ("writes", "cat .ssh/id_rsa"),
+                                        ("auto", "ls")])
+def test_a_command_in_a_folder_outside_the_project_asks(project, tmp_path, stand_in, places,
+                                                         where, gate, line):
+    """Critical: Codex's `cwd` is the folder the line runs in. Outside the project it always asks
+    (the stricter of the two ways) — and the bar shows where."""
+    cwd = places[where]
+    bridge, _ = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command=f"/bin/zsh -lc '{line}'", cwd=cwd), gate=gate)
+    (request,) = bridge.requests
+    assert str(cwd) in request.detail and line in request.detail
+    assert decisions(stand_in) == ["decline"] and stand_in.breaches() == []
+
+
+def test_outside_the_project_under_never_passes_and_says_where(project, tmp_path, stand_in, places):
+    bridge, events = run_gate(project, tmp_path, stand_in,
+                              approval_turn("th", command="/bin/zsh -lc 'rm -rf *'",
+                                            cwd=places["home"]), gate="never")
+    said = [e.command for e in events if isinstance(e, Unasked)]
+    assert len(said) == 1 and str(places["home"]) in said[0] and bridge.requests == []
+    assert decisions(stand_in) == ["accept"]
+
+
+@pytest.mark.parametrize("where", ["project", "inside"])
+def test_a_command_in_the_project_is_judged_as_before(project, tmp_path, stand_in, places, where):
+    cwd = project if where == "project" else places["inside"]
+    bridge, _ = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command="/bin/zsh -lc 'ls'", cwd=cwd), gate="auto")
+    assert bridge.requests == [] and decisions(stand_in) == ["accept"]
+
+
+def test_a_request_the_turn_left_behind_unwithdrawn_is_declined(project, tmp_path, stand_in):
+    """Re-review M2: the turn ended and Codex never withdrew the request still on the bar — after
+    `SWEEP_DECLINE_S` TCC declines it, once (the stand-in waits for that answer)."""
+    rows = [r for r in frames("interrupt-pending")
+            if (r.get("msg") or {}).get("method") != "serverRequest/resolved"]
+    rows.append(out({"id": 0, "result": {}}))
+    resumable(project, PENDING_THREAD)
+    bridge = RecordingBridge(None)
+    session = make(project, stand_in.use(write(tmp_path, rows)), bridge=bridge, resume=True)
+
+    async def on(event):
+        if isinstance(event, ToolCall) and event.name == "Bash":
+            while not bridge.requests:
+                await asyncio.sleep(0.01)
+            await session.interrupt()
+
+    async def go():
+        try:
+            events = await drain(session.start(), on)
+            await asyncio.sleep(codex_session.SWEEP_DECLINE_S + 0.5)
+            return events
+        finally:
+            await session.close()
+
+    events = run(go())
+    assert events[-1] == TurnEnd(PENDING_THREAD) and bridge.futures[0].cancelled()
+    assert decisions(stand_in) == ["decline"] and stand_in.breaches() == []
+
+
+def test_a_delete_in_a_project_subfolder_is_judged_from_there(project, tmp_path, stand_in,
+                                                               places, monkeypatch):
+    seen: list = []
+    real = codex_session.judge_action
+    monkeypatch.setattr(codex_session, "judge_action",
+                        lambda tool, line, **kw: seen.append(line) or real(tool, line, **kw))
+    run_gate(project, tmp_path, stand_in,
+             approval_turn("th", command="/bin/zsh -lc 'rm -rf *'", cwd=places["inside"]),
+             gate="auto")
+    assert seen == [f"cd {places['inside']} && rm -rf *"]
+
+
+@pytest.mark.parametrize("kind, command", [("writeStdin", "/bin/zsh -lc 'ls'"),
+                                           ("command", ""), ("command", None)])
+def test_input_to_a_running_command_or_no_command_asks(project, tmp_path, stand_in, kind, command):
+    bridge, _ = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command=command, kind=kind), gate="auto")
+    assert len(bridge.requests) == 1 and decisions(stand_in) == ["decline"]
+
+
+def test_input_to_a_running_command_under_never_passes_and_says_so(project, tmp_path, stand_in):
+    _, events = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command="", kind="writeStdin"), gate="never")
+    assert any(isinstance(e, Unasked) for e in events) and decisions(stand_in) == ["accept"]
+
+
+def test_a_gate_that_fails_declines(project, tmp_path, stand_in, monkeypatch):
+    def broken(tool, line, **kw):
+        raise OSError("the disk walk failed")
+
+    monkeypatch.setattr(codex_session, "judge_action", broken)
+    bridge, events = run_gate(project, tmp_path, stand_in,
+                              approval_turn("th", command="/bin/zsh -lc 'touch a'"))
+    assert decisions(stand_in) == ["decline"], "a decline, not a JSON-RPC error"
+    assert all("error" not in r for r in stand_in.replies()) and isinstance(events[-1], TurnEnd)
+
+
+def test_a_file_change_naming_no_item_asks_as_a_delete(project, tmp_path, stand_in):
+    rows = approval_turn("th", changes=[{"path": str(project / "a"), "kind": {"type": "add"}}],
+                         item_id=None)
+    bridge, _ = run_gate(project, tmp_path, stand_in, rows, gate="auto")
+    (request,) = bridge.requests
+    assert request.reason == "gateIrreversible" and decisions(stand_in) == ["decline"]
+
+
+def test_unasked_comes_strictly_before_turn_end(project, tmp_path, stand_in):
+    _, events = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command="/bin/zsh -lc 'rm -rf ~'"), gate="never")
+    kinds = [type(e).__name__ for e in events]
+    assert kinds.count("Unasked") == 1 and kinds.index("Unasked") < kinds.index("TurnEnd")
+    assert kinds[-1] == "TurnEnd"
+
+
+@pytest.mark.parametrize("command, windows, shell", [
+    ("cmd /c del x", False, "bash"),
+    ("cmd /c del x", True, "powershell"),  # not bash; PowerShell's reader is never read-only
+    ('"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command Remove-Item x', False, "powershell"),
+    ("env FOO=1 bash -c 'rm x'", False, "bash"),
+    ("env FOO=1 bash -c 'rm x'", True, "powershell"),
+    ("/bin/zsh -lc 'pwsh -c Remove-Item x'", False, "bash"),
+])
+def test_shell_of_corner_cases(command, windows, shell):
+    assert codex_session.shell_of(command, windows=windows) == shell
+
+
+def test_powershell_behind_codexs_wrapper_is_judged_as_powershell(project, tmp_path, stand_in,
+                                                                   monkeypatch):
+    seen: list = []
+    real = codex_session.judge_action
+    monkeypatch.setattr(codex_session, "judge_action",
+                        lambda tool, line, **kw: seen.append((line, kw["shell"]))
+                        or real(tool, line, **kw))
+    run_gate(project, tmp_path, stand_in,
+             approval_turn("th", command="/bin/zsh -lc 'pwsh -c Remove-Item x'"))
+    assert seen == [("pwsh -c Remove-Item x", "powershell")]
