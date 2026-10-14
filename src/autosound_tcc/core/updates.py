@@ -146,6 +146,8 @@ TCC_WINDOW_WORDS = {
              "nothing was installed. Start TCC and press «Update TCC» again.",
     "unpinned": "This uv cannot hold the update to the tested versions (that needs uv 0.5.6 or "
                 "newer) — installing without them, so uv chooses the versions. This uv:",
+    # Said only when the tag's signature WAS verified — the script has a `sha` (#195).
+    "signed": "The signature of {tag} was checked before this update: good ({principal}).",
 }
 
 #: How long the install script waits for the server to name the tag's commit (tcc#123). The person
@@ -247,6 +249,11 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     installs, and an app started from the Dock does not see that PATH. Never a retry after a
     failure: a dropped network or a locked file is not an old uv, and a retry without the file
     would put an untested set on the machine and blame the file for it (the re-review of #194).
+
+    **The check's answer is said in the window, once the tag is found still naming the commit it
+    verified and before uv runs** (#195, finding 159): the `signed` line. Only with a `sha` —
+    the one thing `check_tcc_tag` hands back after a real verification; a release from before
+    signing and the developer's switch reach here without one, and get no such line.
     """
     if folder is not None and not (Path(folder).is_absolute()
                                    and Path(folder).name.startswith(_UPDATE_FOLDER_PREFIX)):
@@ -257,6 +264,9 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     windows = _is_windows(platform)
     command = tcc_install_command(tag)
     held = tcc_install_command(tag, '"%%tcc_pins%%"' if windows else '"$tcc_pins"')
+    # `replace`, not `format`: a stray brace in a translation must not cost the update.
+    signed = (said["signed"].replace("{tag}", tag).replace("{principal}", TCC_SIGNING_PRINCIPAL)
+              if sha else "")
     if windows:
         # UTF-8 with `chcp 65001`, so the Arbiter's language arrives whole (the file is written
         # UTF-8, and cmd decodes each line it reads with the code page current at that moment).
@@ -290,6 +300,7 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             _cmd_echo(said["wait"]),
             f'powershell -NoProfile -Command "Wait-Process -Id {pid} -ErrorAction SilentlyContinue"',
             *guard,
+            *([_cmd_echo(signed)] if signed else []),
             _cmd_echo(said["updating"]),
             # `goto` keeps the errorlevel, so `:ran` reads the install that ran, either one.
             *(['uv tool install --help 2>nul | findstr /l /c:" --constraints " >nul',
@@ -349,6 +360,7 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             say(shlex.quote(said["wait"])),
             f"while kill -0 {pid} 2>/dev/null; do sleep 1; done",
             *guard,
+            *([say(shlex.quote(signed))] if signed else []),
             say(shlex.quote(said["updating"])),
             *([
                 # Outside the function: `$0` is the script there in every sh.
@@ -1625,3 +1637,126 @@ def prepare_tcc_update(channel: str = STABLE, *, pid: Optional[int] = None,
     script = write_tcc_install_script(pid, tag, words=words, platform=platform, sha=sha,
                                       constraints=pins)
     return TccUpdate(script, signature=line, tag=tag)
+
+
+# ---- the signature of what is INSTALLED (#195, finding 159) ------------------------------------
+#
+# The update checks the tag it installs (`check_tcc_tag`, `_extract_upkeep`) and said so only on
+# the row of the press — the Arbiter updated both halves on the VM and nowhere saw that the check
+# ran. So beside each version on the Updates tab, TCC checks the release that is HERE, now, with
+# the same anchors, and says what it found: good, a release from before signing, the developer's
+# switch, a signature that does not check out — or why it could not look. Never «checked» for
+# something that was not.
+
+
+@dataclass(frozen=True)
+class Seal:
+    """What TCC can say of the installed release's signature, checked by TCC itself.
+
+    `state`: "good" (verified against the author's key, and the release names the commit that is
+    installed), "predates" (a release from before signing), "skipped" (the developer's switch;
+    `detail` names it), "bad" (it does not check out — `reason` `bad_signature`, or
+    `commit_differs` when the signed tag names another commit), "unknown" (TCC could not look —
+    `reason` says why: no tag to check, no network, a git or OpenSSH too old). `detail` is git's
+    words or the data, as `Status.detail`; the panel says the rest in the reader's language."""
+
+    state: str
+    tag: str = ""
+    reason: str = ""
+    detail: str = ""
+    principal: str = ""
+    #: The method's clone carries local changes, which no signature covers (good only).
+    changed: bool = False
+
+
+#: TCC's answers that cannot change while this process runs — the installed commit and a signed
+#: tag are both fixed — by `(tag, commit)`. Only verdicts: "could not look" is asked again.
+_TCC_SEALS: dict[tuple[str, str], Seal] = {}
+
+
+def _seal_refused(tag: str, line: str, why: str) -> Seal:
+    """A check that did not pass: «bad» only for what accuses the release, «unknown» otherwise."""
+    return Seal("bad" if why == "bad_signature" else "unknown", tag, why, line)
+
+
+def _seal_by_name(tag: str, signed_from: str, order) -> Optional[Seal]:
+    """The answer `_verdict_by_name` gives without git — or None when the signature itself has to
+    be checked."""
+    early = _verdict_by_name(tag, signed_from, order)
+    if early is None:
+        return None
+    ok, line, why = early
+    if not ok:
+        return _seal_refused(tag, line, why)
+    if os.environ.get(SKIP_VERIFY_VAR) == "1":
+        return Seal("skipped", tag, detail=SKIP_VERIFY_VAR)
+    return Seal("predates", tag)
+
+
+def tcc_seal() -> Seal:
+    """The signature of the TCC that is running: the release tag uv installed it from
+    (`install_report.requested_revision`), fetched and verified as the update verifies one
+    (`check_tcc_tag`), and good only when that tag names the commit uv installed
+    (`install_report.install_source`). A fetch: off the GUI thread.
+
+    A source checkout, or a build uv installed from no tag, has nothing signed to check, and says
+    so — not «checked». What it found is remembered for this process (`_TCC_SEALS`), so a
+    Re-check does not fetch again; a fetch that failed is asked again."""
+    _url, commit = install_report.install_source()
+    if not commit:
+        return Seal("unknown", reason="source_checkout")
+    tag = install_report.requested_revision()
+    if not tag or channel_key(tag) is None:
+        return Seal("unknown", tag, "no_tag", tag)
+    known = _TCC_SEALS.get((tag, commit))
+    if known is not None:
+        return known
+    early = _seal_by_name(tag, TCC_SIGNED_FROM, channel_key)
+    if early is not None:
+        return early
+    ok, line, why, sha, _pins = check_tcc_tag(tag)
+    _log.info("installed tcc %s at %s: %s", tag, commit[:12], line)
+    if not ok:
+        seal = _seal_refused(tag, line, why)
+    elif sha != commit:
+        seal = Seal("bad", tag, "commit_differs",
+                    f"{tag} → {sha[:12]}, installed {commit[:12]}")
+    else:
+        seal = Seal("good", tag, principal=TCC_SIGNING_PRINCIPAL)
+    if seal.state != "unknown":
+        _TCC_SEALS[(tag, commit)] = seal
+    return seal
+
+
+def skill_seal() -> Seal:
+    """The signature of the method that is installed: the release tag in its clone that names the
+    commit checked out, verified there by TCC with the skill's anchor (`_verify_tag`) — the check
+    TCC runs before it runs anything of a new tag. Local git, no network.
+
+    The method's own answer cannot give it: `upkeep.py status --json` names the clone's
+    `describe` and its local changes, and no signature (`clone` gives one, for the tag it moves
+    to, and the row's receipt shows that). The clone keeps the tag since skill #92; one parked
+    before that keeps none, and says so. Local changes are said beside a good signature: the
+    signature covers the commit, not a session's patch on top of it."""
+    repo = _skill_repo_dir()
+    if repo is None:
+        return Seal("unknown", reason="not_found")
+    ok, head = _git("rev-parse", "--verify", "HEAD^{commit}", cwd=repo)
+    if not ok:
+        return Seal("unknown", reason="not_a_checkout", detail=head)
+    listed, names = _git("tag", "--points-at", head, cwd=repo)
+    tags = [name for name in names.split() if _release_key(name) is not None] if listed else []
+    if not tags:
+        return Seal("unknown", reason="clone_no_tag")
+    wanted = f"v{install_report.skill_version()}"
+    tag = wanted if wanted in tags else max(tags, key=_release_key)
+    early = _seal_by_name(tag, SKILL_SIGNED_FROM, _release_key)
+    if early is not None:
+        return early
+    good, line, why = _verify_tag(repo, tag)
+    _log.info("installed method %s: %s", tag, line)
+    if not good:
+        return _seal_refused(tag, line, why)
+    clean, changes = _git("status", "--porcelain", "--untracked-files=all", cwd=repo)
+    return Seal("good", tag, principal=SKILL_SIGNING_PRINCIPAL,
+                changed=bool(clean and changes.strip()))

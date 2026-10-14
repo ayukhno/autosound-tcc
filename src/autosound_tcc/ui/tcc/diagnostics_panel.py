@@ -203,6 +203,27 @@ def _signature_said(line: str) -> str:
     return line
 
 
+def _seal_text(seal) -> str:
+    """The mark beside a version (#195): `updates.Seal` in the reader's language. «Checked» only
+    for a signature that was verified; every other answer says what it is, or why TCC could not
+    look, with git's words after it."""
+    if seal.state == "good":
+        text = i18n.t("updSealGood").format(tag=seal.tag, principal=seal.principal)
+        return f"{text}\n{i18n.t('updSealChanged')}" if seal.changed else text
+    if seal.state == "predates":
+        return i18n.t("updSealPredates").format(tag=seal.tag)
+    if seal.state == "skipped":
+        return i18n.t("updSealSkipped").format(var=seal.detail)
+    if seal.state == "bad":
+        key = "updSealMoved" if seal.reason == "commit_differs" else "updSealBad"
+        return i18n.t(key).format(tag=seal.tag or "?",
+                                  detail=seal.detail.removeprefix(f"{seal.tag}: "))
+    why = i18n.t(f"updSealWhy_{seal.reason}")
+    if why == f"updSealWhy_{seal.reason}":  # a key this TCC has no words of its own for
+        why = _reason(seal.reason)
+    return i18n.t("updSealUnknown").format(why=f"{why}: {seal.detail}" if seal.detail else why)
+
+
 #: The tools a running AI session runs on (ruling 21, tcc#98): omp drives it and Claude Code is
 #: the other harness. Their rows wait while a session runs; agy and gh do not.
 _SESSION_TOOLS = ("omp", "claude")
@@ -719,6 +740,14 @@ class DiagnosticsDialog(QDialog):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(4)
         self._update_rows = {}
+        # The signature marks: a label under each row, the answer it shows (redrawn on a language
+        # switch), and the check running for it — TCC's fetches its tag, so each has its own.
+        self._seal_labels: dict = {}
+        self._seals: dict = {}
+        self._seal_jobs: dict = {}
+        self._seal_timer = QTimer(self)
+        self._seal_timer.setInterval(_TOOLS_POLL_MS)
+        self._seal_timer.timeout.connect(self._poll_seals)
         for name, key in (("tcc", "updTcc"), ("skill", "updSkill")):
             row = QHBoxLayout()
             row.setSpacing(8)
@@ -735,6 +764,11 @@ class DiagnosticsDialog(QDialog):
             row.addWidget(button)
             grid.addLayout(row)
             self._update_rows[name] = (label, button)
+            # Under the version: was the installed release's signature checked, and good (#195).
+            seal = _note("")
+            seal.setHidden(True)
+            grid.addWidget(seal)
+            self._seal_labels[name] = seal
         # Under the rows it changes (the Arbiter, 2026-09-14). The method is not on it yet: it keeps
         # following released tags on both channels, and the label says TCC for that reason.
         self._beta_box = QCheckBox(i18n.t("updBetaChannel"))
@@ -990,6 +1024,8 @@ class DiagnosticsDialog(QDialog):
             # The report must show the new version — but the row keeps what it just said until the
             # next Re-check, because that sentence is the receipt for the press.
             self._install_changed()
+            # The mark was about the release the clone left; the receipt says the new one's.
+            self._clear_seal("skill")
             # And the receipt is an answer: the method is now the release it was offered (VM-3).
             version = done.version.lstrip("v")
             self.updateLearned.emit(updates.Status("skill", version, version, False))
@@ -1020,7 +1056,8 @@ class DiagnosticsDialog(QDialog):
         channel = updates.current_channel()
         words = {"wait": i18n.t("updTermWait"), "updating": i18n.t("updTermUpdating"),
                  "done": i18n.t("updTermDone"), "failed": i18n.t("updTermFailed"),
-                 "moved": i18n.t("updTermMoved"), "unpinned": i18n.t("updTermUnpinned")}
+                 "moved": i18n.t("updTermMoved"), "unpinned": i18n.t("updTermUnpinned"),
+                 "signed": i18n.t("updTermSigned")}
         self._tcc_job = _UpdateStep(lambda: updates.prepare_tcc_update(channel, words=words))
         self._tcc_timer.start()
 
@@ -1535,6 +1572,44 @@ class DiagnosticsDialog(QDialog):
         self._update_probe = _UpdateProbe(updates.current_channel())
         self._update_tries = 0
         self._update_timer.start()
+        self._start_seal_check()
+
+    def _start_seal_check(self) -> None:
+        """Check the signature of each installed release again (#195), each off the GUI thread
+        and each only if it is not being checked already. Not the method's while it is being
+        updated: its row's receipt says the signature of the release it moves to."""
+        for name, work in (("tcc", updates.tcc_seal), ("skill", updates.skill_seal)):
+            if name in self._seal_jobs or (name == "skill" and self._skill_job is not None):
+                continue
+            self._seals.pop(name, None)
+            mark = self._seal_labels[name]
+            mark.setText(i18n.t("updSealChecking"))
+            mark.setHidden(False)
+            self._seal_jobs[name] = _UpdateStep(work, name=f"tcc-seal-{name}")
+        if self._seal_jobs:
+            self._seal_timer.start()
+
+    def _poll_seals(self) -> None:
+        for name, job in list(self._seal_jobs.items()):
+            if job.running:
+                continue
+            del self._seal_jobs[name]
+            self._show_seal(name, job.result if job.result is not None else updates.Seal(
+                "unknown", reason="not_checked", detail=job.error or "?"))
+        if not self._seal_jobs:
+            self._seal_timer.stop()
+
+    def _show_seal(self, name: str, seal) -> None:
+        self._seals[name] = seal
+        mark = self._seal_labels[name]
+        mark.setText(_seal_text(seal))
+        mark.setHidden(False)
+
+    def _clear_seal(self, name: str) -> None:
+        """The mark of a release that is no longer the one installed goes until the next check."""
+        self._seals.pop(name, None)
+        self._seal_jobs.pop(name, None)  # a check still running answers for the old one
+        self._seal_labels[name].setHidden(True)
 
     def _render_install(self, tools_section) -> None:
         try:
@@ -1725,6 +1800,11 @@ class DiagnosticsDialog(QDialog):
         for name, key in (("tcc", "updTcc"), ("skill", "updSkill")):
             self._update_rows[name][1].setText(i18n.t(key))
         self._beta_box.setText(i18n.t("updBetaChannel"))
+        for name, mark in self._seal_labels.items():
+            if name in self._seals:
+                mark.setText(_seal_text(self._seals[name]))
+            elif name in self._seal_jobs:
+                mark.setText(i18n.t("updSealChecking"))
         self._tools_title.setText(i18n.t("updToolsTitle"))
         for _label, button in self._tool_rows.values():
             button.setText(i18n.t("updTool"))
