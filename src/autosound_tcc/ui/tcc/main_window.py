@@ -4581,6 +4581,7 @@ class MainWindow(QMainWindow):
         resolved = model_choices.resolve(self._critic_choices, key)
         pairs: list[tuple[str, str]] = []
         hard = False
+        self._critic_instead = None
         if resolved.note:
             pairs.append((i18n.t("criticSubstituted"), resolved.note))
         actual = self_check.reviewer_mismatch()
@@ -4604,9 +4605,16 @@ class MainWindow(QMainWindow):
             hard = True
         elif key and not model_choices.critic_reaches(for_reach):
             vendor = model_choices.vendor_of(for_reach)
-            pairs.append((i18n.t("criticClipboardOnly"),
-                          i18n.t("criticClipboardOnlyTip" if vendor else "criticUnknownVendorTip")
-                          .format(model=for_reach.model, vendor=vendor)))
+            # The same vendor on a route this machine IS signed in to — agy by ADC where the pick
+            # wanted an API key (hub #262): named, and the «!»'s box takes it in one click.
+            self._critic_instead = model_choices.reviewer_on_a_signed_in_route(for_reach)
+            tip = (i18n.t("criticSignedInRoute").format(
+                       model=for_reach.model,
+                       instead=f"{self._critic_instead.route} · {self._critic_instead.label}")
+                   if self._critic_instead is not None else
+                   i18n.t("criticClipboardOnlyTip" if vendor else "criticUnknownVendorTip")
+                   .format(model=for_reach.model, vendor=vendor))
+            pairs.append((i18n.t("criticClipboardOnly"), tip))
             hard = True
         if key and not why_not and model_choices.reviewer_caution(for_reach):
             # Picked, and it reviews: the method advises a Pro tier, the choice is the Arbiter's
@@ -4658,7 +4666,19 @@ class MainWindow(QMainWindow):
         box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle(i18n.t("criticWarnTitle"))
         box.setText(self._critic_warn_detail)
+        instead = getattr(self, "_critic_instead", None)
+        if instead is not None:
+            take = box.addButton(i18n.t("criticTakeInstead").format(
+                model=f"{instead.route} · {instead.label}"), QMessageBox.ButtonRole.AcceptRole)
+            box.addButton(QMessageBox.StandardButton.Close)
+            take.clicked.connect(lambda _=False, key=instead.key: self._take_critic(key))
         box.exec()
+
+    def _take_critic(self, key: str) -> None:
+        """Put `key` in the reviewer picker, as a pick there would (hub #262)."""
+        index = self._ai_critic_combo.findData(key)
+        if index >= 0:
+            self._ai_critic_combo.setCurrentIndex(index)
 
     def _critic_pick(self):
         """The reviewer picked in the footer, or None — None too while the window is being built."""

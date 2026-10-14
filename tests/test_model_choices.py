@@ -1245,3 +1245,40 @@ def test_with_the_live_list_the_shipped_floor_stays_out(tmp_path, monkeypatch):
 
     assert [c.model for c in mc.sdk_choices()] == ["claude-opus-5-5", "claude-sonnet-5-5"]
     assert mc.shipped_note(mc.sdk_choices()[1]) == ""
+
+
+# ---- a reviewer pick with no sign-in here is offered the signed-in route (hub #262, tcc#196) --
+
+def _agy_signed_in_by_adc(monkeypatch):
+    agy = [Choice(harness="agy", model="gemini-3.1-pro-low", label="Gemini 3.1 Pro (Low)",
+                  provider="google"),
+           Choice(harness="agy", model="gemini-3.8-flash-high", label="Gemini 3.8 Flash (High)",
+                  provider="google")]
+    monkeypatch.setattr(mc, "_CLI_CACHE", {"agy": agy})
+    monkeypatch.setattr(mc, "agy_on_adc", lambda: True)
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "agy")
+    # No key on this machine: only agy's rows reach (conftest stubs the real question).
+    monkeypatch.setattr(mc, "critic_reaches", lambda choice: choice.harness == "agy")
+
+
+def test_an_api_reviewer_with_no_key_is_offered_the_agy_model_that_answers(monkeypatch):
+    """hub #262: the pick was `gemini-3.1-pro-preview` through the API, the machine had no key and
+    reached Gemini only through agy signed in by ADC — and TCC asked for GEMINI_API_KEY. The model
+    agy answers with there is the method's ADC reviewer."""
+    _agy_signed_in_by_adc(monkeypatch)
+    pick = Choice(harness="api", model="gemini-3.1-pro-preview", label="gemini-3.1-pro-preview",
+                  provider="google")
+    assert not mc.critic_reaches(pick)
+
+    offered = mc.reviewer_on_a_signed_in_route(pick)
+
+    assert offered is not None and offered.key == "agy:gemini-3.8-flash-high"
+
+
+def test_a_pick_that_reaches_or_has_no_other_route_is_offered_nothing(monkeypatch):
+    _agy_signed_in_by_adc(monkeypatch)
+    reaching = Choice(harness="agy", model="gemini-3.8-flash-high", label="x", provider="google")
+    claude = Choice(harness="api", model="claude-opus-5", label="x", provider="anthropic")
+
+    assert mc.reviewer_on_a_signed_in_route(reaching) is None
+    assert mc.reviewer_on_a_signed_in_route(claude) is None

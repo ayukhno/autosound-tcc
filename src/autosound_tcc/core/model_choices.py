@@ -1004,6 +1004,27 @@ def critic_reaches(choice: Choice) -> bool:
     return any(shutil.which(binary) for binary in binaries)
 
 
+def reviewer_on_a_signed_in_route(choice: Choice) -> Optional[Choice]:
+    """For a reviewer pick nothing here can call, the same vendor's model on a CLI this machine is
+    signed in to; None when the pick reaches or there is no such route (hub #262, tcc#196).
+
+    The pick was `api:gemini-3.1-pro-preview` on a machine that reaches Gemini only through agy
+    signed in by Google Cloud's ADC: TCC asked for `GEMINI_API_KEY` and never said that agy
+    answers. Under ADC the model is the method's own (`ADC_REVIEWER`); otherwise the recommended
+    reviewer the CLI lists, else its first row."""
+    if choice.harness != "api" or critic_reaches(choice):
+        return None  # the API route is the one that needs a key; the CLIs have their own sign-in
+    vendor = vendor_of(choice)
+    if not vendor:
+        return None
+    offered = [c for c in agy_choices() + codex_choices()
+               if c.available and c.key != choice.key and vendor_of(c) == vendor
+               and critic_reaches(c)]
+    return (next((c for c in offered if _adc_reviewer(c)), None)
+            or next((c for c in offered if recommended(c, critic=True)), None)
+            or (offered[0] if offered else None))
+
+
 def critic_choices(active_omp: list[str]) -> list[Choice]:
     """The Generator's registry PLUS whatever CLI is installed on this machine.
 

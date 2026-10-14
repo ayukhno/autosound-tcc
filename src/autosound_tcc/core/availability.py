@@ -190,10 +190,30 @@ def record_reviewer_outcome(key: str, result, *, reaches=None) -> None:
     reason = critic.refusal_reason(result.detail)
     if result.mode == critic.MODE_CHOOSE_MODEL:
         reason = reason or REFUSED
-    if reason:
+    if reason == LOCATION:
+        refused(key, reason, _region_refusal(choice, model_choices))
+    elif reason:
         # The detail is what a tooltip shows: the one thing to do when it can be named, the CLI's
         # own words when it cannot.
         refused(key, reason, critic.remedy(result.detail, harness=harness) or result.detail)
+
+
+def _region_refusal(choice, model_choices) -> str:
+    """A region refusal in words: which model, by whom, and what that route offers instead (hub
+    #262). agy's «Selected model is not supported in the selected location» read as a failure, and
+    the model that worked there was found by hand."""
+    route = model_choices.ROUTES.get(choice.harness, (choice.harness.upper(), ""))[0]
+    said = (f"{choice.model} is not offered where this machine is: {route} refused it by region, "
+            f"before the model ran. ↻ will not change that.")
+    if choice.harness != "agy":
+        return said + " Pick a different Critic model in TCC's footer."
+    with _lock:
+        by_region = {key for key, (why, _detail) in _refusals.items() if why == LOCATION}
+    instead = [c.label or c.model for c in model_choices.agy_choices()
+               if c.key != choice.key and c.key not in by_region]
+    if not instead:
+        return said + " Pick a different Critic model in TCC's footer."
+    return said + f" AGY offers instead: {', '.join(instead)} — pick a different Critic model in TCC's footer from those."
 
 
 #: How long a Windows start waits inside its console for the catalogues (the Arbiter, 2026-09-13).

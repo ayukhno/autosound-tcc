@@ -352,3 +352,27 @@ def test_an_api_key_is_a_login_for_the_session_and_not_for_a_reviewer(monkeypatc
     assert availability.status(sdk, reviewer=True, unconfirmed=lambda _c: False).reason \
         == availability.SIGN_IN
     assert availability.status(sdk, unconfirmed=lambda _c: False).ready
+
+
+def test_a_region_refusal_names_the_model_and_what_agy_offers_instead(monkeypatch):
+    """hub #262: agy's «Selected model is not supported in the selected location» read as a failure.
+    It is said as a region refusal of that model, with the models agy offers instead."""
+    from autosound_tcc.core import critic, model_choices
+    from autosound_tcc.core.model_choices import Choice
+
+    monkeypatch.setattr(model_choices, "agy_choices", lambda: [
+        Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)",
+               provider="google"),
+        Choice(harness="agy", model="gemini-3.8-flash-high", label="Gemini 3.8 Flash (High)",
+               provider="google")])
+    key = "agy:gemini-3.1-pro-high"
+    availability.record_reviewer_outcome(
+        key, _result(critic.MODE_CLIPBOARD,
+                     "error: Selected model is not supported in the selected location."),
+        reaches=lambda _c: True)
+
+    state = _status(_choice())
+    assert state.reason == availability.LOCATION
+    assert "gemini-3.1-pro-high" in state.detail
+    assert "Gemini 3.8 Flash (High)" in state.detail
+    assert "Gemini 3.1 Pro (High)" not in state.detail.split("instead", 1)[-1]

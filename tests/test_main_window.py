@@ -8507,3 +8507,41 @@ def test_the_signal_nudge_reads_every_open_signals_id_from_the_brief(tmp_path, m
         assert asked == [2], "a signal already handed a turn gets no second one"
     finally:
         window._mcp_server = None
+
+
+def test_a_reviewer_with_no_sign_in_here_is_offered_the_route_that_answers(monkeypatch):
+    """hub #262 (tcc#196): `API · gemini-3.1-pro-preview` on a machine that reaches Gemini only
+    through agy by ADC — the «!» said there was no key and stopped. It names the agy model that
+    answers there, and one click in its box takes it."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from autosound_tcc.core import model_choices
+
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    instead = model_choices.Choice(harness="agy", model="gemini-3.8-flash-high",
+                                   label="Gemini 3.8 Flash (High)", provider="google")
+    window._critic_choices = list(window._critic_choices) + [instead]
+    window._fill_combo(window._ai_critic_combo, window._critic_choices, "api:gemini-3.1-pro-preview",
+                       critic=True)
+    monkeypatch.setattr(model_choices, "critic_reaches", lambda choice: choice.harness == "agy")
+    monkeypatch.setattr(model_choices, "reviewer_on_a_signed_in_route",
+                        lambda choice: instead if choice.harness == "api" else None)
+
+    window._refresh_critic_warning()
+
+    assert "AGY · Gemini 3.8 Flash (High)" in window._critic_warn_detail
+    taken = []
+
+    def click(box):
+        taken.append([b.text() for b in box.buttons()])
+        offer = next(b for b in box.buttons() if "Gemini 3.8 Flash" in b.text())
+        offer.click()
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", click)
+    window._explain_critic_warning()
+
+    assert taken, "the box was shown"
+    assert window._ai_critic_combo.currentData() == "agy:gemini-3.8-flash-high"
