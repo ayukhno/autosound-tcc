@@ -1855,7 +1855,9 @@ def test_the_update_log_gets_the_check_s_result(monkeypatch, tmp_path):
     updates.prepare_tcc_update(pid=4242, platform="darwin")
 
     assert said == ["tcc tag v0.1.44: v0.1.44 predates signed tags (they start at v0.1.45): "
-                    "installed without a signature check"]
+                    "installed without a signature check",
+                    "tcc tag v0.1.44: no constraints.txt held — uv resolves the dependencies "
+                    "afresh, not the set uv.lock holds and CI ran"], "and nothing held uv (#194)"
 
 
 def test_a_stale_update_tcc_press_does_not_install_an_older_release(monkeypatch, tmp_path):
@@ -1890,7 +1892,7 @@ def test_a_beta_candidate_of_tcc_is_ordered_on_its_channel_not_refused_as_no_rel
         fetched.append(args) or ((True, "c" * 40) if "rev-parse" in args else
                                  (True, 'Good "git" signature for ayukhno with ED25519 key SHA256:x'))))
 
-    ok, line, why, sha = updates.check_tcc_tag("beta-v0.2.0-rc1")
+    ok, line, why, sha, _pins = updates.check_tcc_tag("beta-v0.2.0-rc1")
 
     assert (ok, why, sha) == (True, "", "c" * 40), line
     assert any("fetch" in args for args in fetched), "checked, not passed by its name"
@@ -2490,8 +2492,199 @@ def test_a_rev_parse_that_did_not_run_after_a_good_signature_is_not_a_bad_signat
 
     monkeypatch.setattr(updates.child, "run_bounded", runs)
 
-    ok, line, why, sha = updates.check_tcc_tag("v0.1.46")
+    ok, line, why, sha, _pins = updates.check_tcc_tag("v0.1.46")
 
     assert (ok, why, sha) == (False, "commit_not_checked", ""), (why, line)
     assert line.startswith("v0.1.46: ") and type(failure).__name__ in line, line
     assert _reason(why, line) == f"{i18n.t('updWhy_commit_not_checked')}: {line}"
+
+
+# ---- the locked set, not a fresh resolve (tcc#194, finding 158) ---------------------------------
+#
+# The update of 2026-10-14 let uv resolve afresh and put PySide6 6.12.0 on the Arbiter's machine,
+# against the lock's 6.11.2 that CI ran. The tag being installed carries `constraints.txt`, the
+# lock's export; the check reads it out of the signed tag's tree, the update folder keeps it beside
+# the script, and uv gets `--constraints` with it. A tag without one — every release before this —
+# installs as it always did, and the log says so.
+
+_PINS = b"# the lock's export\npyside6-essentials==6.11.2\nshiboken6==6.11.2\n"
+
+
+def test_the_install_command_carries_the_constraints_it_is_given():
+    """The option before the package, the path as the caller quoted it for its shell; without
+    one the command is what it always was — every hint a person types keeps that form."""
+    held = updates.tcc_install_command("v1.1.4", constraints='"C:\\Users\\Олег Ю\\pins.txt"')
+
+    assert held == ('uv tool install --python 3.12 --upgrade '
+                    '--constraints "C:\\Users\\Олег Ю\\pins.txt" '
+                    f'"autosound-tcc[gui,claude] @ git+{updates.TCC_REPO}@v1.1.4"')
+    assert "--constraints" not in updates.tcc_install_command("v1.1.4")
+    assert updates.tcc_install_command("") == updates.TCC_INSTALL_COMMAND
+
+
+@pytest.mark.parametrize(("platform", "held"), [
+    ("darwin", '--constraints "$(dirname -- "$0")/constraints.txt" '),
+    ("win32", '--constraints "%~dp0constraints.txt" '),
+])
+def test_the_update_script_holds_uv_to_the_constraints_beside_it(platform, held):
+    """Named from the script's own place, not written into it: a folder with a space or a
+    Cyrillic user name in it is the shell's to expand, inside double quotes."""
+    script = updates.tcc_install_script(pid=4242, tag="v1.1.4", platform=platform,
+                                        constraints=True)
+    install = next(line for line in script.splitlines() if "uv tool install" in line)
+    assert held in install and install.index(held) < install.index('"autosound-tcc['), install
+
+    plain = updates.tcc_install_script(pid=4242, tag="v1.1.4", platform=platform)
+    assert "--constraints" not in plain
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_the_update_folder_keeps_the_tag_s_constraints_beside_the_script(tmp_path, platform):
+    path = updates.write_tcc_install_script(pid=4242, tag="v1.1.4", folder=tmp_path,
+                                            platform=platform, sha=_VERIFIED, constraints=_PINS)
+
+    assert (tmp_path / "constraints.txt").read_bytes() == _PINS, "the tag's bytes, as they are"
+    assert "--constraints" in path.read_text(encoding="utf-8")
+
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    plain = updates.write_tcc_install_script(pid=4242, tag="v1.1.4", folder=bare,
+                                             platform=platform, sha=_VERIFIED)
+    assert not (bare / "constraints.txt").exists()
+    assert "--constraints" not in plain.read_text(encoding="utf-8")
+
+
+def _recording_uv(bindir, seen):
+    """A `uv` that keeps its arguments and a copy of the file `--constraints` named."""
+    if sys.platform.startswith("win"):
+        (bindir / "uv.cmd").write_text(
+            "@echo off\r\n"
+            f'echo %* > "{seen}.args"\r\n'
+            ":next\r\n"
+            'if "%~1"=="" exit /b 0\r\n'
+            f'if "%~1"=="--constraints" copy /y "%~2" "{seen}" >nul\r\n'
+            "shift\r\n"
+            "goto next\r\n", encoding="utf-8")
+        return
+    (bindir / "uv").write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$@\" > '{seen}.args'\n"
+        'while [ $# -gt 0 ]; do\n'
+        f'  if [ "$1" = --constraints ]; then cp "$2" \'{seen}\'; fi\n'
+        "  shift\n"
+        "done\n", encoding="utf-8")
+    (bindir / "uv").chmod(0o755)
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="runs the macOS script with sh")
+def test_uv_reads_the_constraints_from_a_folder_with_a_space_and_cyrillic(tmp_path):
+    """Run for real, with a fake `uv`: the path the script names reaches uv as ONE argument, and
+    it is the file the tag carried."""
+    import os
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    seen = tmp_path / "seen.txt"
+    _recording_uv(bindir, seen)
+    folder = tmp_path / "Олег Ю's update"
+    folder.mkdir()
+    path = updates.write_tcc_install_script(pid=_gone_pid(), tag="v1.1.4", words=_WORDS,
+                                            folder=folder, platform="darwin", constraints=_PINS)
+
+    out = subprocess.run(["/bin/sh", str(path)], capture_output=True, text=True, encoding="utf-8",
+                         env={**os.environ, "PATH": f"{bindir}:/usr/bin:/bin"}, timeout=30).stdout
+
+    assert out.rstrip().endswith(_WORDS["done"]), out
+    assert seen.read_bytes() == _PINS
+    args = (tmp_path / "seen.txt.args").read_text(encoding="utf-8").splitlines()
+    assert args[args.index("--constraints") + 1] == str(folder / "constraints.txt"), args
+
+
+@pytest.mark.skipif(not sys.platform.startswith("win"), reason="runs the Windows script with cmd")
+def test_uv_reads_the_constraints_from_a_windows_folder_with_a_space_and_cyrillic(tmp_path):
+    """The same through cmd: `%~dp0` is the batch file's own folder, expanded by cmd."""
+    import os
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    seen = tmp_path / "seen.txt"
+    _recording_uv(bindir, seen)
+    folder = tmp_path / "Олег Ю update"
+    folder.mkdir()
+    path = updates.write_tcc_install_script(pid=_gone_pid(), tag="v1.1.4", words=_WORDS,
+                                            folder=folder, platform="win32", constraints=_PINS)
+
+    subprocess.run(["cmd", "/c", str(path)], capture_output=True, timeout=60,
+                   env={**os.environ, "PATH": f"{bindir};{os.environ['PATH']}"})
+
+    assert seen.read_bytes() == _PINS
+
+
+def _tcc_tag_with_constraints(tmp_path, tag="v0.1.49", pins=_PINS):
+    """A signed release after `_tcc_origin`'s, whose tree carries `constraints.txt`."""
+    origin = tmp_path / "tcc-origin"
+    (origin / "constraints.txt").write_bytes(pins)
+    _git_in("add", "constraints.txt", cwd=origin)
+    _git_in("commit", "-q", "-m", "constraints", cwd=origin)
+    _git_in("-c", "gpg.format=ssh", "-c", f"user.signingkey={tmp_path / 'author'}.pub",
+            "tag", "-s", tag, "-m", tag, cwd=origin)
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_the_update_installs_the_locked_set_the_signed_tag_carries(monkeypatch, tmp_path):
+    """The red test of #194: the update's uv line carries `--constraints`, and the file beside it
+    is the one in the verified tag's tree — not the running TCC's own, which is the OLD release."""
+    temp = _tcc_origin(monkeypatch, tmp_path)
+    _tcc_tag_with_constraints(tmp_path)
+    _offering(monkeypatch, "v0.1.49")
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None and ready.reason == "", ready
+    install = next(line for line in ready.script.read_text(encoding="utf-8").splitlines()
+                   if "uv tool install" in line)
+    assert "--constraints" in install and "@v0.1.49" in install, install
+    assert (ready.script.parent / "constraints.txt").read_bytes() == _PINS
+    assert _left_in(temp) == ["autosound-tcc"], "the bare repository is gone"
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+@pytest.mark.parametrize("tag", ["v0.1.45", "v0.1.44"])
+def test_a_release_without_constraints_installs_as_before_and_the_log_says_so(
+        monkeypatch, tmp_path, caplog, tag):
+    """Every release before #194 has no `constraints.txt` (v0.1.45 is checked and has none;
+    v0.1.44 predates signing and is not fetched at all): the update is never refused for it — it
+    installs the way it always did, and the update log names what was not held."""
+    import logging
+
+    _tcc_origin(monkeypatch, tmp_path)
+    _offering(monkeypatch, tag)
+
+    with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
+        ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None, ready
+    assert "--constraints" not in ready.script.read_text(encoding="utf-8")
+    assert not (ready.script.parent / "constraints.txt").exists()
+    said = [record.getMessage() for record in caplog.records if "constraints" in record.getMessage()]
+    assert said and tag in said[0] and "uv.lock" in said[0], caplog.text
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_a_constraints_file_git_could_not_read_does_not_stop_the_update(monkeypatch, tmp_path,
+                                                                        caplog):
+    """The tag has one and `git show` fails reading it: the signature still decides, the update
+    goes ahead unconstrained, and the log carries git's words."""
+    import logging
+
+    _tcc_origin(monkeypatch, tmp_path)
+    _tcc_tag_with_constraints(tmp_path)
+    _offering(monkeypatch, "v0.1.49")
+    monkeypatch.setattr(updates, "_git_show", lambda repo, spec: (None, "fatal: bad object"))
+
+    with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
+        ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None and ready.signature.endswith("signature good (author)"), ready
+    assert "--constraints" not in ready.script.read_text(encoding="utf-8")
+    assert "fatal: bad object" in caplog.text

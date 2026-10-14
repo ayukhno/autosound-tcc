@@ -90,20 +90,27 @@ TCC_INSTALL_COMMAND = (
 )
 
 
-def tcc_install_command(tag: str = "") -> str:
+#: The file in every release from W-10 on that holds uv to the versions CI ran (tcc#194, finding
+#: 158): `uv.lock`'s export, at the root of the tag's tree (`make constraints`).
+TCC_CONSTRAINTS = "constraints.txt"
+
+
+def tcc_install_command(tag: str = "", constraints: str = "") -> str:
     """The install command, pinned to a release tag when one is known.
 
     Without a tag it falls back to the ref-less form, which resolves to the default branch. That
     is the OLD behaviour and it stays as the offline path on purpose: a machine that cannot reach
     GitHub to list tags can still be told a command that works. What it must not be is the silent
     default, which is what it was until F-024.
+
+    `constraints` is the path of the release's `TCC_CONSTRAINTS` as a word of the shell that runs
+    the command, quoted for it: uv then installs the versions `uv.lock` holds instead of resolving
+    afresh, which put PySide6 6.12.0 on a machine against the lock's 6.11.2 (tcc#194). Only the
+    update script has the file to name; the hints a person types go without it, as before.
     """
-    if not tag:
-        return TCC_INSTALL_COMMAND
-    return (
-        f'uv tool install --python 3.12 --upgrade '
-        f'"autosound-tcc[gui,claude] @ git+{TCC_REPO}@{tag}"'
-    )
+    held = f"--constraints {constraints} " if constraints else ""
+    source = f"git+{TCC_REPO}@{tag}" if tag else f"git+{TCC_REPO}"
+    return f'uv tool install --python 3.12 --upgrade {held}"autosound-tcc[gui,claude] @ {source}"'
 
 
 def running_tcc_tag() -> str:
@@ -168,7 +175,8 @@ def _cmd_echo(text: str) -> str:
 
 def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                        words: Optional[dict] = None, platform: Optional[str] = None,
-                       sha: str = "", folder: Optional[Path] = None) -> str:
+                       sha: str = "", folder: Optional[Path] = None,
+                       constraints: bool = False) -> str:
     """The update as the text of a script: the person's lines, the wait, the install, the result.
 
     **A script run by name, and its first act is to clear the window** (hub #221 ask 3, skill
@@ -219,6 +227,11 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     None removes nothing. Anything but an absolute path named `_UPDATE_FOLDER_PREFIX…` is refused
     (ValueError): on Windows the removal runs after `cd /d "%TEMP%"`, where `Path("")` — `.` —
     would have emptied the temp directory.
+
+    **`constraints`: a `TCC_CONSTRAINTS` lies beside the script, and uv is held to it** (tcc#194).
+    The script names it from its own place — `%~dp0` in cmd, `$0`'s folder in sh — rather than
+    carrying the path: the shell expands the folder itself, a space or a Cyrillic user name in it
+    included, inside double quotes.
     """
     if folder is not None and not (Path(folder).is_absolute()
                                    and Path(folder).name.startswith(_UPDATE_FOLDER_PREFIX)):
@@ -226,8 +239,11 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     if pid is None:
         pid = os.getpid()
     said = {**TCC_WINDOW_WORDS, **(words or {})}
-    command = tcc_install_command(tag)
-    if _is_windows(platform):
+    windows = _is_windows(platform)
+    beside = (f'"%~dp0{TCC_CONSTRAINTS}"' if windows
+              else f'"$(dirname -- "$0")/{TCC_CONSTRAINTS}"')
+    command = tcc_install_command(tag, beside if constraints else "")
+    if windows:
         # UTF-8 with `chcp 65001`, so the Arbiter's language arrives whole (the file is written
         # UTF-8, and cmd decodes each line it reads with the code page current at that moment).
         # `call`, so a `uv.cmd` shim would return here instead of ending the script. `goto`
@@ -320,20 +336,26 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
 
 def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                              words: Optional[dict] = None, folder: Optional[Path] = None,
-                             platform: Optional[str] = None, sha: str = "") -> Path:
+                             platform: Optional[str] = None, sha: str = "",
+                             constraints: Optional[bytes] = None) -> Path:
     """`tcc_install_script` in a file, for `terminal_launcher.run_script` to run by name.
 
     A fresh folder of this user's each time (`mkdtemp`, mode 0700): nobody else's file can be
     standing where ours is about to be run. The script removes it as it ends (tcc#123) — every
     press used to leave one behind for good; a `folder` the caller gave is the caller's, and
     stays. CRLF for the batch file, because cmd reads one by line; UTF-8 for both.
+
+    `constraints` are the release's `TCC_CONSTRAINTS` bytes, written beside the script as they are
+    for its uv to be held to (tcc#194); None writes none, and uv resolves as it always did.
     """
     windows = _is_windows(platform)
     made = None if folder else Path(tempfile.mkdtemp(prefix=_UPDATE_FOLDER_PREFIX))
     folder = Path(folder) if folder else made
     path = folder / ("tcc-update.cmd" if windows else "tcc-update.sh")
+    if constraints is not None:
+        (folder / TCC_CONSTRAINTS).write_bytes(constraints)
     path.write_text(tcc_install_script(pid, tag, words=words, platform=platform, sha=sha,
-                                       folder=made),
+                                       folder=made, constraints=constraints is not None),
                     encoding="utf-8", newline="\r\n" if windows else "\n")
     return path
 
@@ -1436,9 +1458,25 @@ def update_tools(names) -> ToolsUpdate:
 # ---- TCC's own tag, checked before the terminal gets it (tcc#102, hub #83 HUB-032) -------------
 
 
-def check_tcc_tag(tag: str) -> tuple[bool, str, str, str]:
+def _tag_constraints(repo: Path, tag: str) -> Optional[bytes]:
+    """The verified tag's `TCC_CONSTRAINTS` as it is, or None: a release from before tcc#194
+    has none, and one git could not read is logged with git's words. Never a refusal — the
+    signature decides whether the update goes ahead; this only decides how closely uv is held."""
+    lacks, why = _tag_lacks(repo, tag, TCC_CONSTRAINTS)
+    if lacks:
+        return None
+    pins = None
+    if lacks is False:
+        pins, why = _git_show(repo, f"refs/tags/{tag}:{TCC_CONSTRAINTS}")
+    if pins is None:
+        _log.warning("tcc tag %s: %s not read: %s", tag, TCC_CONSTRAINTS, why)
+    return pins
+
+
+def check_tcc_tag(tag: str) -> tuple[bool, str, str, str, Optional[bytes]]:
     """`_verify_tag`'s answer for one of TCC's own tags — `(ok, the line to show, reason key,
-    the commit the verified tag names)`, that commit "" when nothing was verified.
+    the commit the verified tag names, the tag's constraints)`, that commit "" when nothing was
+    verified.
 
     `uv tool install … @<tag>` checks no signature, so the tag object is fetched first into a
     temporary BARE repository — TCC has no clone of itself to fetch into — and verified there
@@ -1454,10 +1492,14 @@ def check_tcc_tag(tag: str) -> tuple[bool, str, str, str]:
     resolves the tag's NAME only after the person quits TCC. A verified tag whose commit git then
     cannot name is refused — fail closed, never "verified, but unpinned" — and as
     `commit_not_checked`, not `bad_signature`, when git did not run to name it (O1).
+
+    The constraints are the verified tag's `TCC_CONSTRAINTS`, read from the same fetched tree
+    (`_tag_constraints`, tcc#194): the file of the release being installed, not of the running
+    one. None when nothing was fetched or verified, or the tag has none.
     """
     early = _verdict_by_name(tag, TCC_SIGNED_FROM, channel_key)
     if early is not None:
-        return (*early, "")
+        return (*early, "", None)
     with tempfile.TemporaryDirectory(prefix="autosound-tcc-tag-", ignore_cleanup_errors=True) as tmp:
         repo = Path(tmp)
         ok, said = _git("init", "--quiet", "--bare", str(repo))
@@ -1465,20 +1507,23 @@ def check_tcc_tag(tag: str) -> tuple[bool, str, str, str]:
             ok, said = _git("fetch", "--quiet", "--no-tags", "--depth", "1", TCC_REPO,
                             f"+refs/tags/{tag}:refs/tags/{tag}", cwd=repo, timeout=_FETCH_TIMEOUT)
         if not ok:
-            return False, said, "fetch_failed", ""
+            return False, said, "fetch_failed", "", None
         ok, line, why = _verify_tag(repo, tag, signed_from=TCC_SIGNED_FROM,
                                     principal=TCC_SIGNING_PRINCIPAL, signing_key=TCC_SIGNING_KEY,
                                     order=channel_key)
         if not ok:
-            return False, line, why, ""
+            return False, line, why, "", None
         named, sha = _git("rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}", cwd=repo)
+        valid = named and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha)
+        pins = _tag_constraints(repo, tag) if valid else None
     if isinstance(sha, _DidNotRun):
         # A good signature, and git did not run to name its commit: nothing to pin the install
         # to, and nothing wrong with the release — not `bad_signature` (the re-review, O1).
-        return False, f"{tag}: {sha}", "commit_not_checked", ""
-    if not named or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha):
-        return False, f"{tag}: git names no commit for the verified tag ({sha})", "bad_signature", ""
-    return True, line, "", sha
+        return False, f"{tag}: {sha}", "commit_not_checked", "", None
+    if not valid:
+        return (False, f"{tag}: git names no commit for the verified tag ({sha})", "bad_signature",
+                "", None)
+    return True, line, "", sha, pins
 
 
 @dataclass(frozen=True)
@@ -1518,10 +1563,16 @@ def prepare_tcc_update(channel: str = STABLE, *, pid: Optional[int] = None,
         shown = _shown_tcc(version, revision)
         _log.warning("tcc: %s is ahead of %s — not moved back", shown, tag)
         return TccUpdate(None, "ahead", f"{shown} → {tag}", tag=tag)
-    ok, line, why, sha = check_tcc_tag(tag)
+    ok, line, why, sha, pins = check_tcc_tag(tag)
     # The update log's line with the check's result — the evidence HUB-032 closes on.
     (_log.info if ok else _log.warning)("tcc tag %s: %s", tag, line)
     if not ok:
         return TccUpdate(None, why, line, tag=tag)
-    script = write_tcc_install_script(pid, tag, words=words, platform=platform, sha=sha)
+    if pins is None:
+        # Never a refusal (tcc#194): a release from before the file installs the way it always
+        # did, and the log says the versions are uv's choice that day, not the lock's.
+        _log.warning("tcc tag %s: no %s held — uv resolves the dependencies afresh, not the set "
+                     "uv.lock holds and CI ran", tag, TCC_CONSTRAINTS)
+    script = write_tcc_install_script(pid, tag, words=words, platform=platform, sha=sha,
+                                      constraints=pins)
     return TccUpdate(script, signature=line, tag=tag)

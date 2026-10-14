@@ -862,7 +862,8 @@ def _tcc_at(monkeypatch, version: str, revision: str = "") -> None:
     monkeypatch.setattr(install_report, "requested_revision", lambda: revision)
 
 
-def _tag_checked(monkeypatch, answer=(True, "v0.9.9: signature good (ayukhno)", "", "c" * 40)):
+def _tag_checked(monkeypatch,
+                 answer=(True, "v0.9.9: signature good (ayukhno)", "", "c" * 40, None)):
     """TCC's own tag check (tcc#102) answered without the network; the tags it was asked about."""
     from autosound_tcc.core import updates
 
@@ -928,7 +929,7 @@ def test_a_tcc_tag_that_does_not_verify_opens_no_terminal_and_says_why(monkeypat
                         lambda path: pytest.fail("no terminal for a tag that does not verify"))
     _tcc_at(monkeypatch, "0.1.44")  # not this tree's own number: the press refuses a move back
     monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.1.46")
-    _tag_checked(monkeypatch, (False, "v0.1.46: No principal matched.", "bad_signature", ""))
+    _tag_checked(monkeypatch, (False, "v0.1.46: No principal matched.", "bad_signature", "", None))
 
     dialog._update_tcc()
     _finish_tcc_update(dialog)
