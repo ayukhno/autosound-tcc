@@ -229,6 +229,18 @@ def test_an_sdk_launch_never_resumes_a_codex_thread_and_omp_still_reads_any(tmp_
         assert _launch(host) is resumed, harness
 
 
+def test_a_codex_pick_reads_the_sdk_route_while_the_sdk_carries_it(tmp_path, monkeypatch):
+    """Until Codex has its own session (#181 task 6), a Codex pick is built as a TuningSession, which
+    resumes the SDK's id; the window must read the same route, or it says «fresh» over a session
+    that resumes (task 2's review, m1)."""
+    server = _server(tmp_path)
+    server.registry.sync_phase("2")
+    server.registry.bind_session("2", "sdk-id", route="sdk")
+
+    host, _ = _launch_host(tmp_path, SimpleNamespace(harness="codex", model="m"), server)
+    assert _launch(host) is True
+
+
 # ---- session_routes as plain functions ------------------------------------------------------
 
 
@@ -264,7 +276,7 @@ def test_factory_builds_nothing_until_called_and_asks_the_gate_then(tmp_path, bu
     assert asked == ["gate"] and built[0][1]["gate"] == "auto"
 
 
-@pytest.mark.parametrize("harness, route", [("sdk", "sdk"), ("omp", None), ("codex", "codex")])
+@pytest.mark.parametrize("harness, route", [("sdk", "sdk"), ("omp", None), ("codex", "sdk")])
 def test_resume_route_per_harness(harness, route):
     assert session_routes.resume_route(harness) == route
 

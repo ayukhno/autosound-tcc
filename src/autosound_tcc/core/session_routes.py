@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
 from autosound_tcc.core import omp_session
-from autosound_tcc.core.session_registry import CODEX_ROUTE, SDK_ROUTE
+from autosound_tcc.core.session_registry import SDK_ROUTE
 from autosound_tcc.core.tuning_session import TuningSession
 
 
@@ -70,14 +70,14 @@ def resume_route(harness: str) -> Optional[str]:
     """The registry route whose id a launch on `harness` resumes (`SessionRegistry.resumable_session`).
 
     omp → None, any route: it resumes by folder (`--continue`) and asks the registry only whether
-    the phase has a live session at all — its rule before routes existed. Codex → its own, so a
-    Claude id never reaches it, nor its thread id the SDK. Everything else is carried by the SDK
-    (`factory`).
+    the phase has a live session at all — its rule before routes existed. Everything else is
+    carried by the SDK (`factory`), so it reads the SDK's route — a hand-added Codex override
+    included, until Codex gets its own session (#181 task 6 turns `CODEX_ROUTE` on here together
+    with `factory`'s Codex branch; one without the other told the chat «fresh» over a session
+    that resumed — task 2's review, m1).
     """
     if harness == "omp":
         return None
-    if harness == "codex":
-        return CODEX_ROUTE
     return SDK_ROUTE
 
 

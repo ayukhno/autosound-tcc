@@ -13,5 +13,8 @@ def say(refusal: session_routes.Refusal) -> str:
 
 
 def omp_without_config(server) -> str:
-    """Why an omp session cannot start (`session_routes.omp_without_config`), as a sentence."""
+    """Why an omp session cannot start (`session_routes.omp_without_config`), as a sentence.
+
+    The window says it through `session_routes.blocker` and `say` now; this stays for its tests,
+    which pin the three sentences."""
     return say(session_routes.omp_without_config(server))

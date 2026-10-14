@@ -860,8 +860,7 @@ def test_a_session_is_built_where_tccs_own_copy_cannot_be_looked_up(tmp_path, mo
                                                                     sdk_client):
     """R-ao: with `~nosuchuser-xyz` in the override, looking TCC's own copy up raises RuntimeError.
     `for_project` catches it and answers refused, but the read roots looked again and let it out of
-    `__init__` — and the window builds a session only to read the registry, unguarded
-    (`main_window._launch_session`). The session is built, it reads the project alone, and its start
+    `__init__` — and the worker builds the session unguarded (`session_routes.factory`). The session is built, it reads the project alone, and its start
     says why it cannot run."""
     from autosound_tcc.core.tuning_session import _read_roots_for
 
@@ -887,7 +886,7 @@ def test_a_refused_binding_ends_the_start_with_its_sentence(tmp_path, sdk_client
     """A project whose copy TCC will not run — a real folder at the entry: a copy inside the project
     travels with it, from a backup or a clone (HUB-050) — is not a session to start. `start` raises
     the binding's own sentence before anything is built; constructing the session never refuses,
-    because the window builds one only to read the registry (`main_window._launch_session`). The
+    because the worker builds it unguarded (`session_routes.factory`). The
     refusal is in the log as well, once, as a refused write's is (#169 review m6): the bubble that
     shows it goes with the chat."""
     import logging

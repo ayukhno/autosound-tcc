@@ -372,9 +372,9 @@ class TuningSession:
     # ---- lifecycle ---------------------------------------------------------
 
     def _options(self, binding: Optional[method_binding.Binding] = None) -> "ClaudeAgentOptions":
-        # NOT in `__init__`. `main_window._launch_session` constructs a TuningSession
-        # unconditionally as a cheap probe — "only reads the registry" — before it knows whether
-        # the session will be Claude or omp, so binding in the constructor would have made the
+        # NOT in `__init__`. The worker constructs a TuningSession unguarded (`session_routes.
+        # factory`), and the window used to build one as a registry probe before it knew whether
+        # the session would be Claude or omp — binding in the constructor would have made the
         # Claude SDK a requirement for starting a GEMINI session. Bound where it is used instead,
         # which is here and in `start()` (caught by reading the caller, 2026-08-12).
         claude_sdk.bind(SDK_NAMES, globals())
