@@ -383,6 +383,22 @@ _RUINOUS = frozenset({"mkfs", "fdisk", "shutdown", "reboot", "halt", "diskutil",
 #: `mkfs.ext4`, `mkfs.vfat` — the family is spelled with a suffix, and matching the bare name
 #: would let every real invocation through.
 _RUINOUS_PREFIXES = ("mkfs.",)
+#: Windows' disk-level tools — PowerShell's Storage cmdlets and `diskpart`: each formats, wipes,
+#: repartitions or takes a disk away, as `mkfs`/`diskutil` do in bash, and any invocation asks, as
+#: `diskutil list` does (group fix C2: they passed `auto` and a `Bash` tick). PowerShell has no
+#: default aliases for them and no abbreviated command names; `Storage\Clear-Disk` and
+#: `diskpart.exe` reduce to these through `_command_name`. `format D:` is `_RUINOUS`'s `format`.
+_DISK_TOOLS = frozenset({"format-volume", "clear-disk", "remove-partition", "initialize-disk",
+                         "set-disk", "remove-volume", "reset-physicaldisk", "remove-physicaldisk",
+                         "remove-virtualdisk", "remove-storagepool", "diskpart"})
+#: What runs the program named after it: PowerShell's `Start-Process`/`saps`/`start`, cmd's `start`.
+_STARTERS = frozenset({"start-process", "saps", "start"})
+#: A raw device by its Win32 name — `\\.\PhysicalDrive1`, `\\.\Harddisk0Partition1`, a volume
+#: `\\.\D:` (not a path under it: `\\?\C:\Users\x` is a long path) — Windows' `/dev/disk2`.
+#: Named anywhere in a command it asks: writing it overwrites a disk, and nothing in a tune reads
+#: one. bash leaves one backslash of a doubled pair, so one or two are taken.
+_RAW_DEVICE = re.compile(r"(?:^|[^\w.])[\\/]{1,2}[.?][\\/]?(?:physicaldrive\d|harddisk\d|"
+                         r"harddiskvolume\d|globalroot[\\/]|[a-z]:(?![\\/]*\w))", re.I)
 #: Writing over a path nobody in this project owns. `> /etc/hosts` is not a chain and not a
 #: recursive delete, so nothing above catches it, and it is exactly the quiet kind.
 _PROTECTED_ROOTS = ("/etc/", "/usr/", "/bin/", "/sbin/", "/System/", "/Library/", "/var/", "/dev/")
@@ -1318,8 +1334,16 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
         return _new_item_is_dangerous(arguments, command.cwd)
     if name in _UNREAD_KEYWORDS or name in ("sudo", "eval"):
         return True  # sudo: asking for the whole machine is the definition of worth a question
-    if name in _RUINOUS or name.startswith(_RUINOUS_PREFIXES):
+    if name in _RUINOUS or name.startswith(_RUINOUS_PREFIXES) or name in _DISK_TOOLS:
         return True
+    if any(_RAW_DEVICE.search(word.text) for word in words):
+        return True  # `dd of=\\.\PhysicalDrive1`, `Set-Content \\.\PhysicalDrive1`
+    if name == "cipher":
+        # `cipher /w:C:\` overwrites the free space of a whole volume; `/c`, `/e` only look or encrypt.
+        return any(text.lower() == "/w" or text.lower().startswith("/w:") for text in texts)
+    if name in _STARTERS and any(_command_name(argument.text) in _DISK_TOOLS | _RUINOUS
+                                 for argument in arguments):
+        return True  # `Start-Process diskpart -Verb RunAs`
     if name in ("source", "."):
         # It runs a file the line names — unless the line does not name it: `. <(curl …)`, or
         # names stdin, where what runs is the heredoc or the pipe.

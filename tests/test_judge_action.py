@@ -770,3 +770,77 @@ def test_a_powershell_line_is_never_read_only(tmp_path, monkeypatch):
                            shell=SHELL_POWERSHELL)
 
     assert not verdict.allowed
+
+
+# ---- the danger classes, bash beside PowerShell (group fix C2) ---------------------------------
+
+#: (danger class, shell, line) — every row asks as «cannot be undone» under `auto` and with a
+#: «don't ask again» tick on `Bash`, and passes only under `never`, said there (`Unasked`). Before
+#: the group fix PowerShell's disk cmdlets passed `auto` and a tick while bash's `mkfs` asked.
+DANGER_TABLE = [
+    ("recursive delete", B, "rm -rf ~/"),
+    ("recursive delete", P, "Remove-Item -Recurse -Force $HOME"),
+    ("recursive delete", P, r"ri -r C:\Users"),
+    ("recursive delete", P, r'pwsh -Command "Remove-Item -Recurse C:\"'),
+    ("format/wipe disk", B, "mkfs.ext4 /dev/sdb1"),
+    ("format/wipe disk", B, "diskutil eraseDisk APFS X disk2"),
+    ("format/wipe disk", P, "Format-Volume -DriveLetter D"),
+    ("format/wipe disk", P, "format-volume -dr D -FileSystem NTFS"),
+    ("format/wipe disk", P, "Clear-Disk -Number 1 -RemoveData"),
+    ("format/wipe disk", P, "Get-Disk 1 | Clear-Disk -RemoveData -Confirm:$false"),
+    ("format/wipe disk", P, r"Storage\Clear-Disk -Number 1"),
+    ("format/wipe disk", P, "Remove-Partition -DriveLetter D"),
+    ("format/wipe disk", P, "Initialize-Disk -Number 1 -PartitionStyle GPT"),
+    ("format/wipe disk", P, "Set-Disk -Number 1 -PartitionStyle MBR"),
+    ("format/wipe disk", P, "Remove-Volume -DriveLetter D"),
+    ("format/wipe disk", P, "Reset-PhysicalDisk -FriendlyName PhysicalDisk1"),
+    ("format/wipe disk", P, "diskpart /s wipe.txt"),
+    ("format/wipe disk", P, "'select disk 1', 'clean' | diskpart.exe"),
+    ("format/wipe disk", P, "Start-Process diskpart -Verb RunAs"),
+    ("format/wipe disk", P, "format D: /q"),
+    ("format/wipe disk", P, r"cipher /w:C:\ "),
+    ("format/wipe disk", P, r"cmd /c cipher /W:D:\data"),
+    ("format/wipe disk", P, 'powershell.exe -Command "Format-Volume -DriveLetter D"'),
+    ("format/wipe disk", P, "pwsh -c 'Clear-Disk -Number 1 -RemoveData'"),
+    ("format/wipe disk", P, "Invoke-Command { Remove-Partition -DriveLetter D }"),
+    ("raw device overwrite", B, "dd if=/dev/zero of=/dev/disk2"),
+    ("raw device overwrite", B, "echo x > /dev/disk2"),
+    ("raw device overwrite", P, r"Set-Content -Path \\.\PhysicalDrive1 -Value 0"),
+    ("raw device overwrite", P, r"dd if=zero.bin of=\\.\PhysicalDrive1"),
+    ("raw device overwrite", P, r"[IO.File]::WriteAllBytes('\\.\PhysicalDrive0', $b)"),
+]
+
+
+def _danger_id(row):
+    return f"{row[0]}: {row[2]}"
+
+
+@pytest.mark.parametrize("cls, shell, line", DANGER_TABLE, ids=[_danger_id(r) for r in DANGER_TABLE])
+def test_each_danger_class_asks_in_bash_and_powershell_alike(cls, shell, line, tmp_path):
+    roots = _read_roots_for(tmp_path)
+
+    def judged(gate, ticked=()):
+        return judge_action("Bash", line, gate=gate, always_allowed=frozenset(ticked),
+                            read_roots=roots, shell=shell)
+
+    for gate in (GATE_WRITES, GATE_FOREIGN, GATE_AUTO):
+        assert _cell(judged(gate)) == "ask!", gate
+        assert _cell(judged(gate, ("Bash",))) == "ask!", f"{gate} with a tick"
+    never = judged(GATE_NEVER, ("Bash",))
+    assert _cell(never) == "pass!" and never.unasked == line
+
+
+def test_the_danger_table_covers_each_class_in_both_shells():
+    assert {(cls, shell) for cls, shell, _ in DANGER_TABLE} == {
+        (cls, shell) for cls in ("recursive delete", "format/wipe disk", "raw device overwrite")
+        for shell in (B, P)}
+
+
+@pytest.mark.parametrize("line", [
+    "Get-Disk", "Get-Volume", "Get-Partition -DiskNumber 1", "cipher /c secret.txt",
+    "Format-Table -AutoSize", "Get-Content notes.txt | Format-List",
+    r"Get-Content \\?\C:\Users\me\notes.txt", "Start-Process notepad"])
+def test_the_disk_class_does_not_take_in_reads(line, tmp_path):
+    """Looking at disks, and `Format-Table`, are not wiping one: they pass `auto` as before."""
+    assert judge_action("Bash", line, gate=GATE_AUTO, read_roots=_read_roots_for(tmp_path),
+                        shell=SHELL_POWERSHELL).allowed
