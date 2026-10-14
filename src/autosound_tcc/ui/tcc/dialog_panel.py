@@ -587,10 +587,11 @@ class DialogPanel(QWidget):
         that says WHY the picture matters is usually already half-written when the Arbiter reaches
         for this button.
         """
-        from autosound_tcc.core import config
+        from autosound_tcc.ui.tcc import window_folder
         from autosound_tcc.ui.tcc.attach_image import AttachImageDialog
 
-        dialog = AttachImageDialog(config.project_dir(), parent=self)
+        # Into the window's project, where its session reads it, not the process's (Fable's I4).
+        dialog = AttachImageDialog(window_folder.project(self), parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self.put_in_composer(dialog.line())

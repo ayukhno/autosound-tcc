@@ -85,3 +85,30 @@ def test_may_reread_still_skips_a_closing_window(tmp_path):
     window._closing = True
     assert not window_folder.may_reread(window, "the agent's re-read")
     assert said == []
+
+
+def test_project_follows_the_process_until_a_switch_then_keeps_the_window_s(tmp_path, monkeypatch):
+    """`project` and `state_root`, for what a window writes (Fable's I4): the process's folder while
+    the window still shows it, the folder it was built on after a cancelled switch."""
+    said: list = []
+    window = _window(said)
+    child = QWidget(window)
+    old = window._built_on
+    assert window_folder.project(child) == config.project_dir()
+    assert window_folder.state_root(child) == config.state_root()
+
+    _switch(tmp_path, monkeypatch)
+    assert window_folder.project(child) == old
+    assert window_folder.state_root(child) == old / "state"
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path / "ledger"))
+    assert window_folder.state_root(child) == tmp_path / "ledger", "the override still wins"
+    assert said == [], "a write says nothing: the read guard (`ours`) is what says it"
+
+
+def test_a_window_built_on_no_folder_keeps_the_default_one(tmp_path, monkeypatch):
+    monkeypatch.delenv("AUTOSOUND_PROJECT_DIR")
+    said: list = []
+    window = _window(said)
+    assert window._built_on is None
+    _switch(tmp_path, monkeypatch)
+    assert window_folder.project(window) == config.DEFAULT_STATE_ROOT

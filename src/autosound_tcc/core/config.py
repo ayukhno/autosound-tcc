@@ -39,8 +39,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_STATE_ROOT = _REPO_ROOT / "data" / "private" / "state"
 
 
-def state_root() -> Path:
-    """Where `<preset>/v_NNN.json` ledgers live for the CURRENT project.
+def state_root(project_dir_: Optional[Path] = None) -> Path:
+    """Where `<preset>/v_NNN.json` ledgers live for the CURRENT project, or for `project_dir_`
+    (a window still on the folder it was built on after a cancelled switch, `window_folder`).
 
     Scoped under `project_dir()` (2026-07-29 fix -- previously a project-independent global/env
     path, so opening a brand-new "Create new project" folder showed whichever ledger happened to
@@ -50,7 +51,7 @@ def state_root() -> Path:
     own CLI reads (SCR-011).
     """
     env = os.environ.get("AUTOSOUND_STATE_ROOT")
-    return Path(env).expanduser() if env else project_dir() / "state"
+    return Path(env).expanduser() if env else (project_dir_ or project_dir()) / "state"
 
 
 # QSettings keys for the user's project-folder choice. The chosen folder outlives a single run

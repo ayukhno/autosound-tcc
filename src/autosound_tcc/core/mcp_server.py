@@ -826,7 +826,7 @@ def build_server(
             vstate = vendor_loader.load_dsp_state()
         except vendor_loader.VendorNotInitializedError as exc:
             return json.dumps({"error": str(exc)})
-        history = vstate.PresetHistory(str(config.state_root()), preset,
+        history = vstate.PresetHistory(str(config.state_root(project_dir)), preset,
                                        project_dir=str(project_dir))
         raw = history.load(version or None)
         return json.dumps(raw, ensure_ascii=False, indent=2)
@@ -940,8 +940,8 @@ def build_server(
         """
         def _save() -> str:
             try:
-                car = car_library.record(
-                    config.project_dir(), make, model, generation, body, year
+                car = car_library.record(  # this server's project, not the process's (I4)
+                    project_dir, make, model, generation, body, year
                 )
             except car_library.CarLibraryError as exc:
                 # The sentence itself (#169, N9): the part to ask for, or why the copy did not run.

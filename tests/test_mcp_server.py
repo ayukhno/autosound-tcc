@@ -2303,6 +2303,30 @@ def test_the_car_is_recorded_off_the_servers_loop(tmp_path, monkeypatch):
     assert ran_on[0] is not loop_thread
 
 
+def test_the_car_goes_into_the_servers_project_not_the_processs(tmp_path, monkeypatch):
+    """Fable's final review, I4's class: the server is bound to one project by closure, and
+    `save_car` alone asked the process's folder — after a cancelled switch to project B, the session
+    still serving project A wrote A's car into B's `project.json`."""
+    from autosound_tcc.core import car_library
+
+    into: list = []
+
+    def record(project_dir, make, model, generation, body, year):
+        into.append(project_dir)
+        return {"make": make, "model": model, "generation": generation, "body": body}
+
+    monkeypatch.setattr(car_library, "record", record)
+    other = tmp_path / "car-B"
+    other.mkdir()
+    monkeypatch.setattr(mcp_server.config, "project_dir", lambda: other)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    asyncio.run(mcp.call_tool(
+        "save_car", {"make": "VW", "model": "Passat", "generation": "B8", "body": "sedan"}))
+
+    assert into == [tmp_path]
+
+
 def test_an_unwritable_advertisement_does_not_take_the_server_down(tmp_path, monkeypatch, caplog):
     """From the user's own log (2026-09-06): `PermissionError` on `.mcp.json` escaped `start()`,
     the window said "the MCP server did not start" — about a server that was SERVING — and the

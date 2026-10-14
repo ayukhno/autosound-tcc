@@ -2591,9 +2591,9 @@ class MainWindow(QMainWindow):
         try:
             # The reviewer's model and route go with it (hub #236): the terminal session's own run
             # of the method follows the footer, not a stored key.
-            terminal_launcher.launch(config.project_dir(), cli=cli, hint=hint,
+            terminal_launcher.launch(window_folder.project(self), cli=cli, hint=hint,
                                      model=getattr(self, "_intake_terminal_model", None),
-                                     env=critic.session_env(config.project_dir()))
+                                     env=critic.session_env(window_folder.project(self)))
         except terminal_launcher.TerminalLaunchError as exc:
             self._status_strip.notify(str(exc), level="warn")
 
@@ -2659,11 +2659,11 @@ class MainWindow(QMainWindow):
         viewing = str(self._meas_panel.viewing_session_id() or "")
         # A closed round is none (finding 147's fault, review M5): the method keeps the last one
         # in its state with `closed` set, and its id is not a round anything can be written into.
-        round_ = process_view.capture_round(config.project_dir()) or {}
+        round_ = process_view.capture_round(window_folder.project(self)) or {}
         open_round = "" if round_.get("closed") else str(round_.get("id") or "")
         amending = viewing if viewing and viewing != open_round else ""
         dialog = protective_dialog.open_for(
-            config.project_dir(), getattr(self, "_view", None), self, capture_id=amending)
+            window_folder.project(self), getattr(self, "_view", None), self, capture_id=amending)
         if dialog is None:
             # Answered where the question was asked. This button sits at the bottom of the right
             # column and the status strip is under the header, so a refusal written there is, from
@@ -2689,7 +2689,7 @@ class MainWindow(QMainWindow):
         attributable.
         """
         dialog, problem = listening_dialog.open_for(
-            config.project_dir(), getattr(self, "_view", None), self
+            window_folder.project(self), getattr(self, "_view", None), self
         )
         if dialog is None:
             self._status_strip.notify(problem, level="warn")
@@ -2702,7 +2702,7 @@ class MainWindow(QMainWindow):
         gate's job (`state/apply.py`), which validates against HEAD and produces the settings
         sheet somebody enters by hand -- a window that wrote ledger state past it would be a
         second way in."""
-        dialog = ResonalyzeImportDialog(config.project_dir(), self)
+        dialog = ResonalyzeImportDialog(window_folder.project(self), self)
         # Into the composer, never straight to the model: what leaves that window is the Arbiter's
         # own statement, and they read it before it goes -- the same path the curve window's
         # reading takes (`curve_dialog.readingSent`).
@@ -2737,7 +2737,7 @@ class MainWindow(QMainWindow):
         part that was missing — that this curve is not in the tool, and where its file is.
         """
         lang = i18n.current_language()
-        target = target_curve.describe(config.project_dir(), getattr(self._view, "target", None))
+        target = target_curve.describe(window_folder.project(self), getattr(self._view, "target", None))
 
         # The curve the tool lacks goes INTO a copy of the tool, which is the user's own question
         # answered ("why not just put it in the viewer's folder?"): the folder is never read, the
@@ -3984,11 +3984,11 @@ class MainWindow(QMainWindow):
         turned up: the check pulls every expected measurement out of REW, and doing that on every
         scan of an unrelated project would make the panel expensive to look at.
         """
-        state = process_view.load_state()
+        state = process_view.load_state(window_folder.project(self))
         if state:
             self._refresh_capture_task(state)
         self._sync_capture_ready()
-        round_ = process_view.capture_round() or {}
+        round_ = process_view.capture_round(window_folder.project(self)) or {}
         if not round_ or round_.get("closed"):
             return
         self._offer_title_fixes(round_)
@@ -4004,7 +4004,7 @@ class MainWindow(QMainWindow):
             self._capture_check_again = True
             return
         self._capture_check_again = False
-        self._capture_check = _CaptureCheckWorker(config.project_dir(), outstanding, round_.get("id"))
+        self._capture_check = _CaptureCheckWorker(window_folder.project(self), outstanding, round_.get("id"))
         self._capture_check.result.connect(self._on_capture_check_done)
         self._capture_check.failed.connect(self._on_capture_check_failed)
         self._capture_check.finished.connect(self._on_capture_check_finished)
@@ -4045,7 +4045,7 @@ class MainWindow(QMainWindow):
         # warning that outlives its cause teaches people to ignore the strip.
         not_run, self._capture_check_not_run = getattr(self, "_capture_check_not_run", None), None
         self._status_strip.withdraw(getattr(not_run, "line", None))
-        round_ = process_view.capture_round()
+        round_ = process_view.capture_round(window_folder.project(self))
         if round_ is None:  # it ran, and nothing it recorded can be read back: said, held (M6)
             self._capture_check_not_run = measurement_view.NotRun(i18n.t("captureCheckUnread"),
                                                                   None, tuple(titles))
@@ -4059,7 +4059,7 @@ class MainWindow(QMainWindow):
                 on_dismiss=lambda lines=frozenset(bad): setattr(self, "_unusable_dismissed", lines),
             )
         # The panel reads the recorded verdict too.
-        state = process_view.load_state()
+        state = process_view.load_state(window_folder.project(self))
         if state:
             self._refresh_capture_task(state)
 
@@ -4075,7 +4075,7 @@ class MainWindow(QMainWindow):
     def _sync_capture_ready(self) -> None:
         """«Готово» is live while the open round has taken something (finding 31). On every process
         refresh and REW change, a «did not run» whose cause has ended is taken back (I1)."""
-        round_ = process_view.capture_round()
+        round_ = process_view.capture_round(window_folder.project(self))
         not_run = getattr(self, "_capture_check_not_run", None)
         if not_run is not None and not_run.ended(round_, self._meas_panel.known_titles()):
             self._capture_check_not_run = None
@@ -4097,7 +4097,7 @@ class MainWindow(QMainWindow):
         if server is None:
             self._status_strip.notify(i18n.t("noSessionForSignal"), level="warn")
             return
-        round_ = process_view.capture_round() or {}
+        round_ = process_view.capture_round(window_folder.project(self)) or {}
         titles = sorted(str(t) for t in process_view.standing(round_))
         server.bus.push(signal_bus.CAPTURE_READY, round=round_.get("id"), titles=titles)
         listening = self._dialog.has_agent()
@@ -4124,7 +4124,7 @@ class MainWindow(QMainWindow):
         Best effort, and quiet about failing: a ruling that could not be journalled must not eat the
         answer the session is waiting on. The strip says so, the turn continues.
         """
-        project = config.chosen_project_dir()
+        project = window_folder.folder(self) or config.chosen_project_dir()
         if project is None or not (question or "").strip() or not (answer or "").strip():
             return
         try:
@@ -4312,7 +4312,7 @@ class MainWindow(QMainWindow):
         # And the project's own method when it is another: the session runs THAT one, and the
         # title said «skill 3.0.62» over a project pinned to 3.0.61 (finding 94, tcc#83).
         try:
-            project_method = install_report.project_method_version(config.project_dir())
+            project_method = install_report.project_method_version(window_folder.project(self))
         except Exception:  # noqa: BLE001 — no project yet is the ordinary case
             project_method = ""
         project_part = (f"project {project_method}"
@@ -4326,7 +4326,7 @@ class MainWindow(QMainWindow):
             ) if part
         )
         self.setWindowTitle(
-            f"Tuning Command Center — GitHub/autosound-tcc @ {config.project_dir()}"
+            f"Tuning Command Center — GitHub/autosound-tcc @ {window_folder.project(self)}"
             + (f"  ({versions})" if versions else "")
         )
 
@@ -4411,7 +4411,7 @@ class MainWindow(QMainWindow):
             # The preset the load chose, not `resolve_preset`: that is None for two or more
             # presets, and an override from another project is not what is on screen (TA-5).
             preset=self._loaded_preset,
-            project_dir=str(config.project_dir()),
+            project_dir=str(window_folder.project(self)),
             param_edit_mode=self._dialog.is_editing,
             theme=self._mode,
             # The intake's first question is "which language?", and the answer has been on screen
@@ -4877,7 +4877,7 @@ class MainWindow(QMainWindow):
         if not getattr(self, "_session_saved", False):
             return False
         try:
-            closed = process_view.session_closed(config.project_dir())
+            closed = process_view.session_closed(window_folder.project(self))
         except Exception:  # noqa: BLE001 — an unreadable journal says nothing either way
             closed = None
         return closed is not False
@@ -4902,7 +4902,7 @@ class MainWindow(QMainWindow):
             return
         self._session_open = False
         try:
-            recorded, report = process_writer.close_session(config.project_dir())
+            recorded, report = process_writer.close_session(window_folder.project(self))
         except process_writer.ProcessWriterError as exc:
             self._status_strip.notify(f"journal: {exc}", level="warn")
             return
@@ -5046,7 +5046,7 @@ class MainWindow(QMainWindow):
         if self._probe_target(key) is None:
             return
         self._clipboard_before_probe = _clipboard_snapshot()
-        worker = _ReviewerProbeWorker(key, config.project_dir())
+        worker = _ReviewerProbeWorker(key, window_folder.project(self))
         worker.done.connect(self._on_reviewer_probed)
         # The answer is known at `done`; the next check may start only at `finished`. `done` is
         # emitted inside `run()`, and a re-probe queued from it could meet the thread still
@@ -5124,7 +5124,7 @@ class MainWindow(QMainWindow):
         return [selector for selector in str(raw).split(",") if selector]
 
     def _project_setting(self, key: str) -> str:
-        return project_settings.get(config.tcc_dir(), key, "") or ""
+        return project_settings.get(config.tcc_dir(window_folder.project(self)), key, "") or ""
 
     def _always_allowed(self) -> frozenset[str]:
         """Tools the Arbiter ticked "don't ask again" on, for this project."""
@@ -5452,7 +5452,7 @@ class MainWindow(QMainWindow):
         view = self._view
         if view is None or not view.version:
             return
-        root = config.state_root()
+        root = window_folder.state_root(self)
         dialog = SaveConfigDialog(root, view.version, view.preset,
                                   config.available_presets(root), self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -5478,7 +5478,7 @@ class MainWindow(QMainWindow):
 
     def _effective_gate(self) -> str:
         """The mode this project runs in: `shell_gate.project_gate`, its strictest pushed (N1)."""
-        return shell_gate.project_gate(config.tcc_dir(), str(self._settings.value(_MACHINE_GATE_KEY, "") or ""),
+        return shell_gate.project_gate(config.tcc_dir(window_folder.project(self)), str(self._settings.value(_MACHINE_GATE_KEY, "") or ""),
                                        on_strictest=self._push_gate_to_session)
 
     def _ensure_default_terminal_answered(self) -> None:

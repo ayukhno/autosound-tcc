@@ -2793,3 +2793,89 @@ def test_a_row_rew_holds_reads_blue(monkeypatch, mode):
         label.ensurePolished()
     assert by_name["w-L_1 (sw)"].palette().color(QPalette.ColorRole.WindowText).name() == info
     assert by_name["w-R_1 (sw)"].palette().color(QPalette.ColorRole.WindowText).name() != info
+
+
+def test_a_cancelled_switch_leaves_import_and_refresh_writing_into_the_window_s_own_project(
+        tmp_path, monkeypatch):
+    """Fable's final review, I4: ☰ New project → create B → Cancel keeps project A's window, but
+    the process's folder is B for the rest of the run. ⤓ → Import wrote A's captures into B's
+    round store, B's ledger and B's title fixes, and a Refresh wrote B's level record from A's
+    listing. Every project path the panel reads or writes is its window's own (`window_folder`)."""
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QWidget
+
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc import window_folder
+
+    _app()
+    a, b = tmp_path / "car-A", tmp_path / "car-B"
+    a.mkdir()
+    b.mkdir()
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(a))
+    window = QWidget()
+    window._built_on = window_folder.pin()
+    window._status_strip = SimpleNamespace(notify=lambda *_a, **_k: None)
+    panel = MeasurementPanel()
+    panel.setParent(window)
+    panel.set_sessions(MEAS_SESSIONS, version=6)
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(b))  # the switch, then Cancel
+
+    seen: dict = {}
+
+    def spy(name, answer=None, at=0):
+        def call(*args, **kwargs):
+            seen.setdefault(name, []).append(
+                kwargs["project_dir"] if "project_dir" in kwargs
+                else (args[at] if len(args) > at else None))
+            return answer
+        return call
+
+    monkeypatch.setattr(mp.process_view, "capture_round", spy("capture_round", {"id": "r-A"}))
+    monkeypatch.setattr(mp.process_view, "title_key", spy("title_key"))
+    monkeypatch.setattr(mp.capture_import, "imported_titles", spy("imported_titles", []))
+    monkeypatch.setattr(mp.capture_import, "record_imported", spy("record_imported", 1))
+    monkeypatch.setattr(mp.capture_import, "record_retakes", spy("record_retakes", 0))
+    monkeypatch.setattr(mp.capture_import, "retake_titles", spy("retake_titles", [], at=1))
+    monkeypatch.setattr(mp.capture_import, "channel_of", spy("channel_of", "w-L", at=2))
+    monkeypatch.setattr(mp.title_fixes, "supersede_each", spy("supersede_each", ([], [], [])))
+    monkeypatch.setattr(mp.level_calibration, "notes", spy("level_calibration.notes", []))
+    monkeypatch.setattr(mp.level_calibration, "tell", spy("level_calibration.tell"))
+    captured = _fake_ledger(monkeypatch)
+    rows = capture_import.candidates(
+        {"1": {"title": "w-L_06 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:11:31"}}, a)
+
+    class _Dialog:
+        def __init__(self, _measurements, **kwargs):
+            seen.setdefault("CaptureImportDialog", []).append(kwargs.get("project_dir"))
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def taken(self):
+            return rows
+
+        def renames(self):
+            return []
+
+        def protective(self):
+            return {}
+
+        def left_for_retake(self):
+            return rows
+
+    monkeypatch.setattr(mp, "CaptureImportDialog", _Dialog)
+    listing = {"1": {"title": "w-L_06 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:11:31"}}
+    panel._on_import_offer(listing)
+    panel._on_refreshed(listing)
+    panel.retake_titles()
+    panel.taken_titles()
+    seen["_LedgerWriteWorker"] = [captured.get("project_dir")]
+
+    for name in ("CaptureImportDialog", "record_imported", "record_retakes", "supersede_each",
+                 "_LedgerWriteWorker", "level_calibration.notes", "level_calibration.tell",
+                 "capture_round", "imported_titles", "retake_titles", "title_key"):
+        assert seen.get(name), f"{name} was not reached"
+        assert all(Path(got) == a for got in seen[name]), \
+            f"{name} got {seen[name]}: the window shows {a}, the process's folder is {b}"

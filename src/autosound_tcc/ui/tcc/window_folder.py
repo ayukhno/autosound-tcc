@@ -73,6 +73,34 @@ def tcc_dir(widget) -> Path:
     return config.tcc_dir(folder(widget))
 
 
+def project(widget) -> Path:
+    """The project `widget`'s window works on, for what it writes and what it reads beside it.
+
+    The process's folder while the window still shows it; after a cancelled switch the folder the
+    window was built on — where the session beside it writes too. The measurement panel's import
+    and Refresh went to the process's: Cancel on a new project left project A's window open, and
+    ⤓ wrote A's captures into B's round store, B's ledger and B's level record (Fable's I4). A
+    window built with no folder chosen worked on `config.DEFAULT_STATE_ROOT` (`config.project_dir`).
+    """
+    kept = _kept(widget)
+    return config.project_dir() if kept is None else kept
+
+
+def state_root(widget) -> Path:
+    """`project`'s ledger root (`config.state_root`, `AUTOSOUND_STATE_ROOT` honoured)."""
+    kept = _kept(widget)
+    return config.state_root() if kept is None else config.state_root(kept)
+
+
+def _kept(widget) -> Optional[Path]:
+    """The folder `widget`'s window kept through a cancelled switch, or None: no switch (follow
+    the process's, as everything did before), or no window that pinned one."""
+    window = _owner(widget)
+    if window is None or _same(window._built_on, config.chosen_project_dir()):
+        return None
+    return window._built_on if window._built_on is not None else config.DEFAULT_STATE_ROOT
+
+
 def _owner(widget):
     """The window `widget` belongs to that pinned a folder (`pin`), or None."""
     while widget is not None:

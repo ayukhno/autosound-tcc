@@ -3050,6 +3050,9 @@ def test_save_writes_tccs_own_settings_even_with_no_session(monkeypatch, tmp_pat
     said = window._status_strip.text()
     assert said.startswith(not_saved) and str(store) in said, said
     assert len(window._dialog._bubbles) == bubbles + 2, "each failed Save answers there too"
+    # The window outlives the test, and reads ITS folder's gate from now on (`window_folder`,
+    # Fable's I4): left a folder, its store would say «could not be read» in a later test.
+    store.rmdir()
 
 
 def test_save_does_not_record_a_model_nobody_picked(monkeypatch, tmp_path):

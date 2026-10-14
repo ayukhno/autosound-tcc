@@ -36,11 +36,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import (app_log, capture_import, config, level_calibration, process_writer,
+from autosound_tcc.core import (app_log, capture_import, level_calibration, process_writer,
                                 protective, title_fixes)
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.state import process_view
-from autosound_tcc.ui.tcc import discard, i18n, qt_shutdown
+from autosound_tcc.ui.tcc import discard, i18n, qt_shutdown, window_folder
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.capture_import_dialog import CaptureImportDialog
 from autosound_tcc.ui.tcc.flow_layout import FlowLayout as _FlowLayout
@@ -944,7 +944,7 @@ class MeasurementPanel(QWidget):
 
         Never in the way of what called it — the import's window, the checklist's redraw: anything
         it raises is logged and said once, and the card carries no line (the Rounds review)."""
-        project = config.project_dir()
+        project = self._project()
         try:
             self._level_notes = level_calibration.notes(project, self._rew_answer)
             level_calibration.tell(project, self._level_notes, self._level_sentence)
@@ -1263,7 +1263,7 @@ class MeasurementPanel(QWidget):
         closed — or filtered, which is worse, because a filter is invisible from here: the same
         call answered 17, then 85, then 102 from one file as the user changed it (2026-09-02).
         """
-        return sorted(self._known_titles | set(capture_import.imported_titles()))
+        return sorted(self._known_titles | set(capture_import.imported_titles(self._project())))
 
     def taken_titles(self) -> list[str]:
         """What this project has TAKEN IN — the half of `known_titles` that colours a row.
@@ -1272,12 +1272,18 @@ class MeasurementPanel(QWidget):
         green before anything was taken, and the tuner then hit "no capture round is open" on the
         first thing that actually writes (Protection). REW's list is an offer; this is the record.
         """
-        return sorted(capture_import.imported_titles())
+        return sorted(capture_import.imported_titles(self._project()))
+
+    def _project(self) -> Path:
+        """The project this panel's window works on (`window_folder.project`): after a cancelled
+        switch the one it was built on, where its session writes too — never the process's new
+        folder, which took A's import into B's round store, ledger and level record (Fable's I4)."""
+        return window_folder.project(self)
 
     def retake_titles(self) -> list[str]:
         """Titles whose curve in REW was left on «Re-take» in the import window, until REW holds
         another curve under the name (finding 147). REW's last answer says which curves those are."""
-        return capture_import.retake_titles(self._rew_answer, config.project_dir())
+        return capture_import.retake_titles(self._rew_answer, self._project())
 
     def outstanding_titles(self) -> list[str]:
         """The full REW names this round is still waiting for, in the grid's own order.
@@ -1447,7 +1453,7 @@ class MeasurementPanel(QWidget):
             (m or {}).get("title", "") for m in measurements.values()
         )
         self._say_level_calibration()
-        round_ = process_view.capture_round() or {}
+        round_ = process_view.capture_round(self._project()) or {}
         # A closed round is none (finding 147): the method keeps the last round in its state with
         # `closed` set, and handing the ledger its id made every capture of the pass refused —
         # «no capture round is open» — so nothing was taken. With no id the pass opens its own.
@@ -1462,7 +1468,7 @@ class MeasurementPanel(QWidget):
             round_id=self._round_id,
             has_task=bool(self._has_real_sessions and self._sessions and self._sessions[0].groups),
             name_sets=self._method_channel_pairs() if self._has_real_sessions else {},
-            project_dir=config.project_dir(),
+            project_dir=self._project(),
             parent=self,
             save_order=self._store_order,
             # The ticked sweeps are checked while the microphone is still in place (tcc#21): the
@@ -1478,7 +1484,7 @@ class MeasurementPanel(QWidget):
         self._renaming = dialog.renames()
         self._protective = dialog.protective()
         # «Re-take» is an answer too: the card reads the title as waiting, not as one to import.
-        capture_import.record_retakes(dialog.left_for_retake(), project_dir=config.project_dir())
+        capture_import.record_retakes(dialog.left_for_retake(), project_dir=self._project())
         if not self._renaming:
             self._finish_import({})
             return
@@ -1501,7 +1507,7 @@ class MeasurementPanel(QWidget):
         rows = self._taking if only is None else [r for r in self._taking if r.uuid in only]
         _done, refused, not_asked = self._supersede_renamed(rows, titles)
         written = capture_import.record_imported(
-            rows, round_id=self._round_id, project_dir=config.project_dir(), titles=titles)
+            rows, round_id=self._round_id, project_dir=self._project(), titles=titles)
         # A rename in the import window can be what settled a pair the answer still shows.
         self._dup_titles = capture_import.duplicate_titles(self._rew_answer, renamed=titles)
         if titles:
@@ -1546,8 +1552,8 @@ class MeasurementPanel(QWidget):
         review of tcc#200, I1): its verdict's uuid is this one's, or with none recorded, it was
         typed as this one (`as_in_rew`). A new sweep typed `w-R_01` beside a good `w-R_1`, renamed
         to `w-L_1`, would otherwise mark the good one wrong."""
-        project = config.project_dir()
-        round_ = process_view.capture_round() or {}
+        project = self._project()
+        round_ = process_view.capture_round(project) or {}
         if round_.get("closed"):
             round_ = {}
         key = process_view.title_key(project)
@@ -1557,7 +1563,7 @@ class MeasurementPanel(QWidget):
             right = (titles or {}).get(row.uuid)
             if not right or key(row.title) == key(right):
                 continue
-            found = process_view.taken_as(round_, row.title, key)
+            found = process_view.taken_as(round_, row.title, key, project_dir=project)
             if found is not None and _is_this_capture(held[found], found, row):
                 fixes.append((row.title, right))
         return title_fixes.supersede_each(project, fixes)
@@ -1587,7 +1593,7 @@ class MeasurementPanel(QWidget):
                 return
             self._capture_version, origin = asked
         worker = self._replace_worker("_ledger_worker", _LedgerWriteWorker(
-            project_dir=config.project_dir(),
+            project_dir=self._project(),
             round_id=self._round_id,
             version=self._capture_version,
             expected=list(self._expected),
@@ -1660,7 +1666,7 @@ class MeasurementPanel(QWidget):
             if not row.identified:
                 continue
             channel = capture_import.channel_of(
-                row, str((titles or {}).get(row.uuid) or ""), config.project_dir())
+                row, str((titles or {}).get(row.uuid) or ""), self._project())
             if channel and channel not in out:
                 out[channel] = "OFF"
                 auto.add(channel)
@@ -1712,7 +1718,7 @@ class MeasurementPanel(QWidget):
         # left out, it held both, the ghost row S-039 exists to prevent.
         done, refused, not_asked = self._supersede_renamed(rows, titles)
         written = capture_import.record_imported(
-            rows, round_id=self._round_id, project_dir=config.project_dir(), titles=titles)
+            rows, round_id=self._round_id, project_dir=self._project(), titles=titles)
         self._dup_titles = capture_import.duplicate_titles(self._rew_answer, renamed=titles)
         self._set_status("capImportRenameFail", n=len(renamed), error=message, taken=written)
         # What reached the round is said too: the lead says the batch stopped, and silence would
