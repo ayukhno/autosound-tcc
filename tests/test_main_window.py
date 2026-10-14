@@ -6788,6 +6788,13 @@ def _reviewer_window(monkeypatch, *entries):
     # carrier, re-review of fix round 2 of #21).
     monkeypatch.setattr(model_choices, "critic_choices", lambda active_omp: list(entries))
     availability.reset()
+    # And the folder watcher, deaf: a pick is saved into the project's `.tcc/`, the watcher sees the
+    # project folder change (it watches the folder while `state/` is missing), and its reload
+    # lands 400 ms later (`_RELOAD_COALESCE_MS`) and asks git like any reload. One
+    # `processEvents()` that ran that long on Windows CI took the reload in, and «git's last
+    # answer» read all([True, False]) (tcc#202). These tests are about the pick; the watcher's
+    # reload has its own tests.
+    window._project_watcher.blockSignals(True)
     return window
 
 
