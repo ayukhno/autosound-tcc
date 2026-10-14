@@ -898,6 +898,41 @@ def test_the_line_about_an_old_uv_is_in_the_reader_s_language(monkeypatch, tmp_p
     assert i18n.t("updTermUnpinned") in script
 
 
+def test_the_line_about_a_release_without_its_tested_versions_is_in_the_reader_s_language(
+        monkeypatch, tmp_path):
+    """The group review of #194/#195: a release that should carry `constraints.txt` and gave none
+    installs unpinned after a line that says so — in the reader's language, the reason after it
+    in git's words."""
+    import tempfile
+
+    from autosound_tcc.core import terminal_launcher, updates
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    before = i18n.current_language()
+    i18n.set_language("uk")
+    try:
+        _app()
+        dialog = DiagnosticsDialog()
+        dialog._show_update(updates.Status("tcc", "1.1.3", "1.1.4", True))
+        seen = []
+        monkeypatch.setattr(terminal_launcher, "run_script", lambda path: seen.append(path))
+        _tcc_at(monkeypatch, "1.1.3")
+        monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v1.1.4")
+        _tag_checked(monkeypatch, (True, "v1.1.4: signature good (ayukhno)", "", "c" * 40,
+                                   updates._PinsMissing("v1.1.4 carries no constraints.txt")))
+
+        dialog._update_tcc()
+        _finish_tcc_update(dialog)
+        line = i18n.t("updTermNoPins")
+    finally:
+        i18n.set_language(before)
+
+    script = seen[0].read_text(encoding="utf-8")
+    assert line != i18n.T["en"]["updTermNoPins"] and line in script, script
+    assert "v1.1.4 carries no constraints.txt" in script
+    assert updates.TCC_WINDOW_WORDS["nopins"] not in script
+
+
 def test_updating_tcc_is_handed_to_a_terminal(monkeypatch, tmp_path):
     """TCC cannot replace its own running files -- on Windows not at all -- so it does not try.
     The window runs a script file TCC wrote, so what it shows is the person's lines (hub #221)."""
