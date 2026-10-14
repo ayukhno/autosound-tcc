@@ -51,6 +51,8 @@ from autosound_tcc.ui.tcc.theme import current_theme, mini_combo
 # measurement_panel.py -> tcc -> ui -> autosound_tcc -> assets/icons (Lucide, ISC license -- see
 # NOTICE.md at the repo root).
 _ICONS_DIR = Path(__file__).resolve().parents[2] / "assets" / "icons"
+#: The card's icon buttons' width: a 16-px icon with its border and room on either side.
+_ICON_BTN_W = 22
 
 #: How long a closing panel waits for a REW worker before handing it to `qt_shutdown` (F-027).
 #: Six seconds was the old wait; it is the grace for a normal in-flight call, not a fix for a hung
@@ -773,23 +775,40 @@ class MeasurementPanel(QWidget):
         # SVG icons (Lucide, ISC-licensed -- NOTICE.md), not unicode glyphs, for a sharper look.
         # Curves, with markers on them: the panel that turns "I read it differently" into a
         # number (see `curve_view.py`). Beside Read because that is where the measurements are.
+        # The three icons sit together, 22 px wide and 2 px apart (finding 155): the third, Refresh,
+        # had to come out of the same width two 28-px icons 4 px apart held — the right column's
+        # floor is this row's, and on two thirds of a 1512 screen every pixel past it is the
+        # centre's (VM-15, Ruling 30); 32 px more read «Табли…» in the detail tabs.
+        icons = QHBoxLayout()
+        icons.setSpacing(2)
         self._curves_btn = QPushButton()
         self._curves_btn.setIcon(QIcon(str(_ICONS_DIR / "activity.svg")))
         self._curves_btn.setIconSize(QSize(16, 16))
         self._curves_btn.setProperty("class", "meas-icon-btn")
-        self._curves_btn.setFixedSize(28, 28)
+        self._curves_btn.setFixedSize(_ICON_BTN_W, 28)
         self._curves_tip = attach_tip(self._curves_btn, i18n.t("curveBtn"))
         self._curves_btn.clicked.connect(self._on_curves_clicked)
-        head_row.addWidget(self._curves_btn)
+        icons.addWidget(self._curves_btn)
 
         self._read_btn = QPushButton()
         self._read_btn.setIcon(QIcon(str(_ICONS_DIR / "download.svg")))
         self._read_btn.setIconSize(QSize(16, 16))
         self._read_btn.setProperty("class", "meas-icon-btn meas-icon-btn-read")
-        self._read_btn.setFixedSize(28, 28)
+        self._read_btn.setFixedSize(_ICON_BTN_W, 28)
         self._read_tip = attach_tip(self._read_btn, i18n.t("measRead"))
         self._read_btn.clicked.connect(self._on_read_clicked)
-        head_row.addWidget(self._read_btn)
+        icons.addWidget(self._read_btn)
+        # Beside ⤓, what REW holds without the import window (finding 155): REW's list read
+        # again, and the rows it already holds turn blue (`mn-found`). Nothing is taken in.
+        self._refresh_btn = QPushButton()
+        self._refresh_btn.setIcon(QIcon(str(_ICONS_DIR / "refresh.svg")))
+        self._refresh_btn.setIconSize(QSize(16, 16))
+        self._refresh_btn.setProperty("class", "meas-icon-btn")
+        self._refresh_btn.setFixedSize(_ICON_BTN_W, 28)
+        self._refresh_tip = attach_tip(self._refresh_btn, i18n.t("measRefresh"))
+        self._refresh_btn.clicked.connect(self._on_refresh_clicked)
+        icons.addWidget(self._refresh_btn)
+        head_row.addLayout(icons)
         layout.addLayout(head_row)
 
         self._fit_fact_buttons()
@@ -898,6 +917,7 @@ class MeasurementPanel(QWidget):
             self._version,
             self._curves_btn,
             self._read_btn,
+            self._refresh_btn,
         ):
             widget.setVisible(False)
         self._legend.setVisible(False)
@@ -927,6 +947,7 @@ class MeasurementPanel(QWidget):
             self._version,
             self._curves_btn,
             self._read_btn,
+            self._refresh_btn,
         ):
             widget.setVisible(True)
         self._legend.setVisible(True)
@@ -1030,6 +1051,7 @@ class MeasurementPanel(QWidget):
             )
         self._version.setVisible(False)
         self._read_btn.setEnabled(is_live)
+        self._refresh_btn.setEnabled(is_live)
         idx = self._session_combo.findData(session_id)
         if idx >= 0 and self._session_combo.currentIndex() != idx:
             self._session_combo.blockSignals(True)
@@ -1122,6 +1144,7 @@ class MeasurementPanel(QWidget):
             label.setText(i18n.t(f"{key}Short"))
             label.setToolTip(i18n.t(key))
         self._read_tip.set_text(i18n.t("measRead"))
+        self._refresh_tip.set_text(i18n.t("measRefresh"))
         self._curves_tip.set_text(i18n.t("curveBtn"))
         # Both of these are WORDS on the button, not glyphs, so the label has to move too -- the
         # icon buttons above only need their tip re-set.
@@ -1304,12 +1327,40 @@ class MeasurementPanel(QWidget):
         if self._worker is not None and self._worker.isRunning():
             return
         self._read_btn.setEnabled(False)
+        self._refresh_btn.setEnabled(False)
         self._status_label.setHidden(False)
         self._set_status("measReading")
         self._replace_worker("_worker", _RewScanWorker(self._bridge))
         self._worker.done.connect(self._on_import_offer)
         self._worker.failed.connect(self._on_read_failed)
         self._worker.start()
+
+    def _on_refresh_clicked(self) -> None:
+        """Read REW's list again and mark what it holds, without the import window (finding 155).
+
+        The same one read as ⤓, on the same worker: the list goes into what REW is known to hold,
+        and the window redraws the checklist off `titlesChanged`, where a title REW holds and the
+        project has not taken in is `found` — blue. A pair REW holds twice is said as after ⤓.
+        """
+        if self._worker is not None and self._worker.isRunning():
+            return
+        self._read_btn.setEnabled(False)
+        self._refresh_btn.setEnabled(False)
+        self._status_label.setHidden(False)
+        self._set_status("measReading")
+        self._replace_worker("_worker", _RewScanWorker(self._bridge))
+        self._worker.done.connect(self._on_refreshed)
+        self._worker.failed.connect(self._on_read_failed)
+        self._worker.start()
+
+    def _on_refreshed(self, measurements: dict) -> None:
+        self.rewStatusChanged.emit(True)
+        self._read_btn.setEnabled(True)
+        self._refresh_btn.setEnabled(True)
+        self._rew_answer = dict(measurements or {})
+        self._dup_titles = capture_import.duplicate_titles(self._rew_answer)
+        self._set_status("measRefreshed", n=len(self._rew_answer))
+        self._remember_titles((m or {}).get("title", "") for m in self._rew_answer.values())
 
     def _on_import_offer(self, measurements: dict) -> None:
         """REW answered; put the answer in front of the tuner.
@@ -1321,6 +1372,7 @@ class MeasurementPanel(QWidget):
         """
         self.rewStatusChanged.emit(True)
         self._read_btn.setEnabled(True)
+        self._refresh_btn.setEnabled(True)
         self._rew_answer = dict(measurements or {})
         self._dup_titles = capture_import.duplicate_titles(self._rew_answer)
         if not measurements:
@@ -1589,6 +1641,7 @@ class MeasurementPanel(QWidget):
 
     def _on_read_failed(self, message: str) -> None:
         self._read_btn.setEnabled(True)
+        self._refresh_btn.setEnabled(True)
         # Nothing is known about REW now, so nothing is said about its pairs either.
         self._rew_answer, self._dup_titles = {}, []
         self._set_status("measReadFail", error=message)

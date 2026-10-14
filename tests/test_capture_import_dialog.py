@@ -1375,3 +1375,197 @@ def test_a_new_name_field_is_at_least_a_line_of_text_tall(tmp_path, monkeypatch,
                 f"{field.fontMetrics().height()}-px line")
     finally:
         dialog.close()
+
+
+@pytest.mark.parametrize("scale", [1.0, 1.2, 1.3, 1.5])
+def test_the_row_grows_with_the_zoom_so_the_name_field_and_the_cells_fit(
+        tmp_path, monkeypatch, scale):
+    """Finding 151's limit (tcc#204): the editable field got its whole height up to the app's zoom
+    1.2, and at 1.3–1.5 the table's fixed 30-px row was what cut it — the field's line edit and the
+    plain cells. The row follows the font the zoom gave the table and the field's own ask, so at
+    every zoom the field's line edit holds a line of its font and a plain cell's text rectangle
+    holds a line of the table's."""
+    from PySide6.QtWidgets import QComboBox
+
+    from tests import _windows
+
+    dialog = _dialog(_rew(3), tmp_path, expected=["r-L_1 (rta)", "tw-R_2 (sw)", "m_3 (sw)"])
+    _windows.theme_on(monkeypatch, dialog, "dark", scale)
+    dialog.show()
+    try:
+        _app().processEvents()
+        table = dialog._table
+        boxes = [box for box in table.findChildren(QComboBox) if box.isEditable() and box.isVisible()]
+        assert len(boxes) == 3
+        for box in boxes:
+            field = box.lineEdit()
+            assert box.height() >= box.sizeHint().height(), (
+                f"zoom {scale}: the field is {box.height()} px against its {box.sizeHint().height()}")
+            assert field.height() >= field.fontMetrics().height(), (
+                f"zoom {scale}: the line edit is {field.height()} px for a "
+                f"{field.fontMetrics().height()}-px line")
+        # A plain cell: its row less the sheet's `::item` padding (4 + 4) and its rule (1).
+        line = table.fontMetrics().height()
+        for row in range(table.rowCount()):
+            assert table.rowHeight(row) - 9 >= line, (
+                f"zoom {scale}: row {row} is {table.rowHeight(row)} px for a {line}-px line")
+    finally:
+        dialog.close()
+
+
+def _paints_a_focus_frame(delegate, table, row: int, column: int) -> bool:
+    """Whether `delegate` asks the style for a focus frame when it paints this cell as the current
+    one — read off a proxy style that counts the frames, not off pixels."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QProxyStyle, QStyle, QStyleOptionViewItem
+
+    class _Counting(QProxyStyle):
+        frames = 0
+
+        def drawPrimitive(self, element, option, painter, widget=None):  # noqa: N802
+            if element == QStyle.PrimitiveElement.PE_FrameFocusRect:
+                _Counting.frames += 1
+            super().drawPrimitive(element, option, painter, widget)
+
+    style = _Counting()
+    table.setStyle(style)
+    option = QStyleOptionViewItem()
+    option.initFrom(table)
+    option.widget = table
+    option.rect = table.visualRect(table.model().index(row, column))
+    option.state |= QStyle.StateFlag.State_HasFocus | QStyle.StateFlag.State_Enabled
+    image = QImage(400, 100, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    try:
+        delegate.paint(painter, option, table.model().index(row, column))
+    finally:
+        painter.end()
+    return _Counting.frames > 0
+
+
+def test_the_current_cell_draws_no_frame_beside_the_tick(tmp_path):
+    """Finding 152 (tcc#204): the table's current-cell frame stood to the right of the TAKE tick,
+    like an empty second checkbox — and on NO. it ringed the number. The selected row's colour
+    already says which row is current, so no cell of the table draws the frame. The probe is
+    proved on the plain delegate first, which does draw it."""
+    from PySide6.QtWidgets import QStyledItemDelegate
+
+    dialog = _dialog(_rew(3), tmp_path)
+    table = dialog._table
+    dialog.show()
+    try:
+        _app().processEvents()
+        assert _paints_a_focus_frame(QStyledItemDelegate(), table, 0, 0), "the probe sees a frame"
+        for column in (0, 1, 2, 3):
+            delegate = table.itemDelegateForIndex(table.model().index(0, column))
+            assert not _paints_a_focus_frame(delegate, table, 0, column), f"column {column}"
+    finally:
+        dialog.close()
+
+
+def test_without_the_frame_the_tick_is_still_worked_by_the_keyboard(tmp_path):
+    """Finding 152's other half: the frame went, the keyboard stays — the table takes focus, and
+    Space on the current TAKE cell flips its tick."""
+    from PySide6.QtTest import QTest
+
+    dialog = _dialog(_rew(3), tmp_path)
+    table = dialog._table
+    dialog.show()
+    try:
+        _app().processEvents()
+        assert table.focusPolicy() != Qt.FocusPolicy.NoFocus
+        table.setFocus()
+        table.setCurrentCell(0, 0)
+        before = _tick_state(dialog, 0)
+        QTest.keyClick(table, Qt.Key.Key_Space)
+        _app().processEvents()
+        assert _tick_state(dialog, 0) is not before
+    finally:
+        dialog.close()
+
+
+def _proposed_dialog(tmp_path):
+    """`m_2 (se)` in REW, the round waiting for `m_2 (sw)`: a «≈» proposal on row u2."""
+    answer = _rew(3)
+    answer["2"]["title"] = "m_2 (se)"
+    return _dialog(answer, tmp_path, expected=["m_1 (sw)", "m_2 (sw)"])
+
+
+def test_a_proposal_carries_a_red_cross(tmp_path, monkeypatch):
+    """Finding 154 (tcc#204): beside the «≈» a red cross — and only there. Drawn in the theme's
+    red (`warn`), at the title cell's right end; the cross's hover says what it does."""
+    from autosound_tcc.ui.tcc import theme
+    from autosound_tcc.ui.tcc.capture_import_dialog import _TitleDelegate
+
+    from tests import _windows
+
+    dialog = _proposed_dialog(tmp_path)
+    _windows.theme_on(monkeypatch, dialog, "dark")
+    row = _row_of(dialog, "u2")
+    assert dialog._table.item(row, 2).text().endswith("≈")
+    delegate = dialog._table.itemDelegateForColumn(2)
+    assert isinstance(delegate, _TitleDelegate)
+    assert dialog.has_proposal("u2")
+    assert not dialog.has_proposal("u1"), "a name that already answers is no proposal"
+    assert delegate.cross_colour() == theme.current_theme().warn
+    assert i18n.t("capImportProposedNo") in dialog._table.item(row, 2).toolTip()
+
+
+def test_the_cross_turns_the_proposal_down_and_takes_rews_name(tmp_path):
+    """Finding 154: «it turns the proposal down, and the capture is taken under the name it has in
+    REW» (the Arbiter, 2026-10-06). After a click on the cross: no «≈», no New name, ticked, and
+    no rename for it at Apply. Clicked where the cross is drawn, through the delegate."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QStyleOptionViewItem
+
+    dialog = _proposed_dialog(tmp_path)
+    dialog.show()
+    try:
+        _app().processEvents()
+        table = dialog._table
+        row = _row_of(dialog, "u2")
+        index = table.model().index(row, 2)
+        option = QStyleOptionViewItem()
+        option.rect = table.visualRect(index)
+        delegate = table.itemDelegateForColumn(2)
+        point = QPointF(delegate.cross_rect(option).center())
+        for kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+            event = QMouseEvent(kind, point, point, Qt.MouseButton.LeftButton,
+                                Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+            assert delegate.editorEvent(event, table.model(), option, index)
+        _app().processEvents()
+
+        row = _row_of(dialog, "u2")
+        assert not dialog.has_proposal("u2")
+        assert "≈" not in table.item(row, 2).text()
+        assert table.item(row, 4).text() == ""
+        assert "u2" in {r.uuid for r in dialog.ticked_rows()}
+        assert dict(dialog.renames()).get("u2") is None
+    finally:
+        dialog.close()
+
+
+def test_a_click_on_the_title_away_from_the_cross_changes_nothing(tmp_path):
+    """Finding 154: only the cross turns a proposal down — a click on the title selects the row."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QStyleOptionViewItem
+
+    dialog = _proposed_dialog(tmp_path)
+    dialog.show()
+    try:
+        _app().processEvents()
+        table = dialog._table
+        index = table.model().index(_row_of(dialog, "u2"), 2)
+        option = QStyleOptionViewItem()
+        option.rect = table.visualRect(index)
+        point = QPointF(option.rect.left() + 4, option.rect.center().y())
+        event = QMouseEvent(QEvent.Type.MouseButtonRelease, point, point, Qt.MouseButton.LeftButton,
+                            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+        table.itemDelegateForColumn(2).editorEvent(event, table.model(), option, index)
+        _app().processEvents()
+        assert dialog.has_proposal("u2")
+        assert dialog._names.get("u2") == "m_2 (sw)"
+    finally:
+        dialog.close()

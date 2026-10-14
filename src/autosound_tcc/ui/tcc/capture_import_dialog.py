@@ -34,7 +34,7 @@ from html import escape
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QEvent, QRect, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -44,9 +44,12 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QStyle,
     QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -66,6 +69,14 @@ _UUID = Qt.ItemDataRole.UserRole
 #: be re-counted by hand. The check's column (tcc#21) is added LAST so every other keeps its number,
 #: and is shown beside the title it judges (`moveSection` in `__init__`).
 _COL_TAKE, _COL_NUM, _COL_TITLE, _COL_WHEN, _COL_NAME, _COL_PROT, _COL_CHECK = range(7)
+
+#: What a row needs past one line of its font: the sheet's `ptable::item` padding (4 + 4 px) and its
+#: 1-px rule — neither is scaled by the zoom, which scales only `font-size` (finding 151).
+_CELL_CHROME = 9
+#: The row the table had before it followed the font (Qt's default section): it is not made shorter.
+_ROW_FLOOR = 30
+#: The red cross that turns a «≈» proposal down (finding 154).
+_CROSS = "✕"
 
 
 class _SweepCheckWorker(QThread):
@@ -121,7 +132,78 @@ def _clash_text(clash: dict) -> str:
         return text
 
 
-class _NameDelegate(QStyledItemDelegate):
+class _PlainCellDelegate(QStyledItemDelegate):
+    """A cell with no current-cell frame (finding 152).
+
+    The frame stood to the right of the TAKE tick like an empty second checkbox — the TAKE cell is
+    wider than its tick — and on NO. it ringed the number. The row's selection colour already says
+    which row is current, so no cell draws it. Only the drawing goes: the table keeps its focus,
+    its current cell and every key (Space ticks, arrows move, typing opens the name).
+    """
+
+    def paint(self, painter, option, index):
+        plain = QStyleOptionViewItem(option)
+        plain.state &= ~QStyle.StateFlag.State_HasFocus
+        super().paint(painter, plain, index)
+
+
+class _TitleDelegate(_PlainCellDelegate):
+    """REW's title, and on a row whose New name is a proposal («≈»), a red cross at the cell's right
+    end that turns it down (finding 154, the Arbiter 2026-10-06): the capture is then taken under
+    the name it has in REW. Drawn here rather than as a widget in the cell, so the cell stays the
+    item it was — its text, its colour, its hover — and the row selects as every other does."""
+
+    def __init__(self, dialog: "CaptureImportDialog") -> None:
+        super().__init__(dialog)
+        self._dialog = dialog
+
+    def _proposal_at(self, index) -> str:
+        uuid = self._dialog.uuid_at(index.row())
+        return uuid if uuid and self._dialog.has_proposal(uuid) else ""
+
+    def cross_rect(self, option) -> QRect:
+        """Where the cross is drawn and clicked: the cell's right end, as wide as the glyph and its
+        margin, the whole height of the row."""
+        width = self._dialog.fontMetrics().horizontalAdvance(_CROSS) + 12
+        rect = option.rect
+        return QRect(rect.right() - width + 1, rect.top(), width, rect.height())
+
+    @staticmethod
+    def cross_colour() -> str:
+        """The theme's red — the colour the card's «bad» dot and red names wear."""
+        return current_theme().warn
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        if not self._proposal_at(index):
+            return
+        painter.save()
+        painter.setPen(QColor(self.cross_colour()))
+        font = painter.font()
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(self.cross_rect(option), Qt.AlignmentFlag.AlignCenter, _CROSS)
+        painter.restore()
+
+    def editorEvent(self, event, model, option, index):  # noqa: N802 — Qt's name
+        if (event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease)
+                and event.button() == Qt.MouseButton.LeftButton
+                and self.cross_rect(option).contains(event.position().toPoint())):
+            uuid = self._proposal_at(index)
+            if uuid:
+                if event.type() == QEvent.Type.MouseButtonRelease:
+                    self._dialog.turn_down(uuid)
+                return True
+        return super().editorEvent(event, model, option, index)
+
+    def helpEvent(self, event, view, option, index):  # noqa: N802 — Qt's name
+        if self._proposal_at(index) and self.cross_rect(option).contains(event.pos()):
+            QToolTip.showText(event.globalPos(), i18n.t("capImportProposedNo"), view)
+            return True
+        return super().helpEvent(event, view, option, index)
+
+
+class _NameDelegate(_PlainCellDelegate):
     """The new-name cell as a list of what the round still waits for, with room to type (F-056).
 
     A delegate over the cell's own item, not a widget beside it: the item stays the one place the
@@ -155,7 +237,7 @@ class _NameDelegate(QStyledItemDelegate):
             model.setData(index, text)
 
 
-class _WholeCellDelegate(QStyledItemDelegate):
+class _WholeCellDelegate(_PlainCellDelegate):
     """The check's answer gets its whole cell (tcc#21).
 
     A styled delegate puts a cell's widget inside the item's text rectangle — the cell minus the
@@ -309,6 +391,8 @@ class CaptureImportDialog(QDialog):
         self._table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked
                                     | QTableWidget.EditTrigger.EditKeyPressed
                                     | QTableWidget.EditTrigger.AnyKeyPressed)
+        self._table.setItemDelegate(_PlainCellDelegate(self))
+        self._table.setItemDelegateForColumn(_COL_TITLE, _TitleDelegate(self))
         self._table.setItemDelegateForColumn(_COL_NAME, _NameDelegate(self))
         self._table.setItemDelegateForColumn(_COL_CHECK, _WholeCellDelegate(self))
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -507,8 +591,9 @@ class CaptureImportDialog(QDialog):
                 number.setForeground(caution)
             elif row.uuid in self._proposed and row.uuid not in self._ticked:
                 # Its New name was matched, not typed: said, and left for a conscious tick.
+                # The red cross beside it turns the proposal down (finding 154, `_TitleDelegate`).
                 title.setText(f"{row.title}  ≈")
-                title.setToolTip(i18n.t("capImportProposed"))
+                title.setToolTip(f"{i18n.t('capImportProposed')}\n{i18n.t('capImportProposedNo')}")
             self._table.setItem(index, _COL_TITLE, title)
 
             # REW's own string, verbatim. It is a display date formatted by REW's locale, and
@@ -540,10 +625,54 @@ class CaptureImportDialog(QDialog):
             self._table.setItem(index, _COL_PROT, prot)
             self._render_check(index, row)
         self._table.blockSignals(False)
+        self._fit_rows()
         self._fit_check_column()
         self._render_note(len(rows))
         self._scroll_to_pick(rows)
         self._schedule_check()
+
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt's name
+        super().showEvent(event)
+        # The sheet's font — and so the zoom's — is the table's only once it is polished for show.
+        self._fit_rows()
+
+    def _fit_rows(self) -> None:
+        """Every row as tall as a line of the table's font and the NEW NAME field's own ask, plus
+        the cell's padding (finding 151's limit, tcc#204).
+
+        96805e5 gave the field's line edit its whole height, and that held to the app's zoom 1.2;
+        at 1.3–1.5 the table's fixed 30-px row was what cut the field and the plain cells. The zoom
+        scales the sheet's `font-size` and nothing else, so the row is read off the font and the
+        field the sheet produced — never shorter than the 30 px it had.
+        """
+        need = self._table.fontMetrics().height()
+        for row in range(self._table.rowCount()):
+            editor = self._table.indexWidget(self._table.model().index(row, _COL_NAME))
+            if editor is not None:
+                need = max(need, editor.sizeHint().height())
+                break  # one field asks what all of them do: one class, one font
+        height = max(_ROW_FLOOR, need + _CELL_CHROME)
+        rows = self._table.verticalHeader()
+        rows.setDefaultSectionSize(height)
+        for row in range(self._table.rowCount()):
+            if self._table.rowHeight(row) != height:
+                self._table.setRowHeight(row, height)
+
+    def has_proposal(self, uuid: str) -> bool:
+        """Whether this row shows a «≈»: a New name found by matching, not yet taken."""
+        return (uuid in self._proposed and uuid not in self._ticked
+                and uuid not in self._repeated)
+
+    def turn_down(self, uuid: str) -> None:
+        """The red cross beside «≈» (finding 154): the proposal goes, and the capture is taken under
+        the name it has in REW — no New name, ticked. A row the check left for a re-take stays
+        unticked: taking that one is «Take it as it is», its own answer (tcc#21)."""
+        self._proposed.discard(uuid)
+        self._names.pop(uuid, None)
+        if uuid not in self._to_retake():
+            self._ticked.add(uuid)
+        # Deferred: this runs inside the view's own mouse event, and the redraw replaces the cell.
+        QTimer.singleShot(0, self, self._render)
 
     # ---- the capture check (tcc#21) ----------------------------------------------------------
 

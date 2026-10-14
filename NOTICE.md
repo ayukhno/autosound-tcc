@@ -8,6 +8,9 @@ license terms are listed here.
 - `src/autosound_tcc/assets/icons/download.svg` — the `download` icon from
   [Lucide](https://lucide.dev) (stroke color changed to `#888888`), used for the measurement
   panel's "Read" button.
+- `src/autosound_tcc/assets/icons/refresh.svg` — the `refresh-cw` icon from
+  [Lucide](https://lucide.dev) (stroke color changed to `#888888`), used for the measurement
+  panel's "Refresh" button.
 - `src/autosound_tcc/assets/icons/reorder.svg` — the `arrow-up-down` icon from
   [Lucide](https://lucide.dev) (stroke color changed to `#888888`), used for the measurement
   panel's "Assign names" button.

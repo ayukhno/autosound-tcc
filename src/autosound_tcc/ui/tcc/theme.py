@@ -1553,6 +1553,9 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="mn-bad"] {{ color: {t.warn}; }}
     QLabel[class~="mn-wait"] {{ color: {t.muted}; }}
     QLabel[class~="mn-done"] {{ color: {t.text}; }}
+    /* In REW, not taken in yet: the name in the legend dot's own blue, so what REW holds reads
+    off the list after «Refresh» (finding 155). */
+    QLabel[class~="mn-found"] {{ color: {t.info}; }}
     /* The protective-filter marker on a capture row: what was in the signal path while it
     was measured. Muted, small and to the right of the name — a fact about the recording,
     not a state of the capture, so it must not compete with the traffic light. */

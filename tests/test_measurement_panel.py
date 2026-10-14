@@ -2093,7 +2093,7 @@ def test_the_columns_scroll_sideways_on_tcc_s_own_bar(monkeypatch):
 def _head_row(panel) -> list:
     """The head row's shown widgets, left to right: the round select, «Protection», the icons."""
     widgets = (panel._session_combo, panel._protective_btn, panel._version, panel._curves_btn,
-               panel._read_btn)
+               panel._read_btn, panel._refresh_btn)
     return sorted((w for w in widgets if w.isVisible()), key=lambda w: w.geometry().left())
 
 
@@ -2407,3 +2407,109 @@ def test_the_held_row_s_words_name_no_ticket_and_no_skill():
             text = i18n.T[lang][key]
             assert "#" not in text and "hub" not in text.lower(), (lang, key, text)
             assert "skill" not in text.lower() and "скіл" not in text.lower(), (lang, key, text)
+
+
+def _found_session():
+    """A round whose `w-L_1 (sw)` REW already holds (`found`) and `w-R_1 (sw)` it does not."""
+    from autosound_tcc.state.models import MeasGroup, MeasItem
+    from autosound_tcc.ui.tcc.mock_data import MeasSession
+
+    return MeasSession(
+        id="cap_001", version={"en": "Series 1", "uk": "Серія 1"},
+        groups=(MeasGroup(type="sw", method="sw", items=(
+            MeasItem(name="w-L_1 (sw)", status="found"),
+            MeasItem(name="w-R_1 (sw)", status="wait"),
+        )),),
+    )
+
+
+def test_a_refresh_button_sits_beside_the_curve_download_button():
+    """Finding 155 (tcc#204): beside ⤓, a «Refresh» icon button, shown and enabled with it."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    from PySide6.QtWidgets import QHBoxLayout
+
+    head = next(layout for layout in panel.findChildren(QHBoxLayout)
+                if layout.indexOf(panel._read_btn) >= 0)
+    assert head.indexOf(panel._refresh_btn) == head.indexOf(panel._read_btn) + 1
+    assert not panel._refresh_btn.icon().isNull()
+    assert panel._refresh_btn.isVisibleTo(panel) == panel._read_btn.isVisibleTo(panel)
+    panel.set_no_project("none")
+    assert not panel._refresh_btn.isVisibleTo(panel)
+
+
+def test_refresh_rereads_rew_off_the_gui_thread_and_opens_no_window(monkeypatch):
+    """Finding 155: Refresh reads REW's list again — on the panel's worker, never on the GUI thread
+    — and folds it into what REW is known to hold, so the window redraws the checklist
+    (`titlesChanged`). Nothing is taken in: the import window is ⤓'s, not this button's."""
+    from PySide6.QtCore import QThread
+
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+
+    _app()
+
+    class _NoWindow:
+        def __init__(self, *_a, **_k):
+            raise AssertionError("Refresh opened the import window")
+
+    monkeypatch.setattr(mp, "CaptureImportDialog", _NoWindow)
+    gui = QThread.currentThread()
+    asked_on = []
+
+    class _Bridge(_FakeBridge):
+        def measurements(self):
+            asked_on.append(QThread.currentThread())
+            return super().measurements()
+
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._bridge = _Bridge({"1": {"title": "w-L_1 (sw)", "uuid": "a", "date": ""},
+                             "2": {"title": "m-R_9 (sw)", "uuid": "b", "date": ""}})
+    changed = []
+    panel.titlesChanged.connect(lambda: changed.append(True))
+
+    panel._refresh_btn.click()
+    assert not panel._refresh_btn.isEnabled(), "one read at a time"
+    panel._worker.wait(2000)
+    _app().processEvents()
+
+    assert asked_on and all(thread is not gui for thread in asked_on)
+    assert {"w-L_1 (sw)", "m-R_9 (sw)"} <= set(panel.known_titles())
+    assert changed
+    assert panel._refresh_btn.isEnabled() and panel._read_btn.isEnabled()
+    assert panel._status_label.text() == i18n.t("measRefreshed").format(n=2)
+
+
+def test_a_refresh_that_cannot_reach_rew_says_so():
+    """Finding 155: REW down — the same line ⤓ says, and both buttons come back."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._bridge = _FakeBridge({}, raises=ConnectionRefusedError("no REW"))
+    panel._refresh_btn.click()
+    panel._worker.wait(2000)
+    _app().processEvents()
+    assert panel._status_label.text().startswith(i18n.t("measReadFail").split("{")[0])
+    assert panel._refresh_btn.isEnabled() and panel._read_btn.isEnabled()
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_a_row_rew_holds_reads_blue(monkeypatch, mode):
+    """Finding 155: «the task's rows that REW already holds turn blue (the card's «в REW» colour)».
+    The name of a `found` row wears the legend dot's own `info`; a row still waited for does not."""
+    from PySide6.QtGui import QPalette
+
+    from autosound_tcc.ui.tcc.theme import PALETTE_DARK, PALETTE_LIGHT
+    from tests import _windows
+
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions([_found_session()], version=1)
+    _windows.theme_on(monkeypatch, panel, mode)
+    info = (PALETTE_DARK if mode == "dark" else PALETTE_LIGHT)["info"]
+    by_name = {row.item_name: row._name_label for row in panel._rows}
+    for label in by_name.values():
+        label.ensurePolished()
+    assert by_name["w-L_1 (sw)"].palette().color(QPalette.ColorRole.WindowText).name() == info
+    assert by_name["w-R_1 (sw)"].palette().color(QPalette.ColorRole.WindowText).name() != info
