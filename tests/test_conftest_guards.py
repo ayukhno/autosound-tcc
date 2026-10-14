@@ -423,7 +423,8 @@ def test_the_next_test_starts_with_the_logging_a_fresh_process_has():
     from autosound_tcc.core import app_log
 
     root = logging.getLogger().handlers
-    for log in (app_log.logger(), logging.getLogger("py.warnings")):
+    for log in (app_log.logger(), logging.getLogger("py.warnings"),
+                *map(logging.getLogger, app_log._LIBRARY_LOGGERS)):
         assert (log.propagate, log.level) == (True, logging.NOTSET), log.name
         assert [handler for handler in log.handlers if handler not in root] == [], log.name
     assert app_log.log_path() is None

@@ -435,8 +435,26 @@ def setup(*, to_stderr: Optional[bool] = None) -> Optional[Path]:
         log.addHandler(stream)
 
     _capture_python_warnings(log.handlers)
+    _route_library_loggers(log.handlers)
     _install_excepthooks()
     return _log_path
+
+
+#: Libraries whose own loggers go into TCC's file. uvicorn's: `autosound_tcc` does not propagate,
+#: so its lines fell to the root's last-resort handler — stderr, which a windowed Windows build
+#: does not have (G1-silent M7, #206). `uvicorn.error` and `uvicorn.access` propagate to it.
+_LIBRARY_LOGGERS = ("uvicorn",)
+
+
+def _route_library_loggers(handlers: list) -> None:
+    """Each of `_LIBRARY_LOGGERS` onto `handlers`, and not further up: idempotent, as `setup` is."""
+    for name in _LIBRARY_LOGGERS:
+        library = logging.getLogger(name)
+        library.propagate = False
+        for handler in list(library.handlers):
+            library.removeHandler(handler)
+        for handler in handlers:
+            library.addHandler(handler)
 
 
 def _capture_python_warnings(handlers: list) -> None:

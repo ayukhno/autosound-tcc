@@ -53,6 +53,17 @@ def test_a_library_warning_lands_in_the_file_instead_of_the_first_screen(install
     assert capsys.readouterr().err == "", "the terminal is the one place it must not appear"
 
 
+@pytest.mark.parametrize("name", ["uvicorn.error", "uvicorn.access", "uvicorn"])
+def test_uvicorn_s_own_lines_land_in_the_file(installed, capsys, name):
+    """G1-silent M7 (#206): `autosound_tcc` does not propagate, so uvicorn's own loggers fell to
+    the root's last-resort handler — stderr, which a windowed Windows build does not have. They go
+    where TCC's own lines go."""
+    logging.getLogger(name).error("could not bind 127.0.0.1:8765 (%s)", name)
+
+    assert f"could not bind 127.0.0.1:8765 ({name})" in installed.read_text(encoding="utf-8")
+    assert capsys.readouterr().err == ""
+
+
 def test_the_window_is_told_so_a_failure_is_not_silent(installed):
     seen = []
     app_log.set_ui_sink(lambda message, path: seen.append((message, path)))

@@ -2027,9 +2027,9 @@ class TccMcpServer:
             # real and this never fired).
             #
             # Passing None tells uvicorn to configure no logging of its own, which is what we want
-            # anyway: `core/app_log` owns this process's logging. (uvicorn's own loggers do not
-            # reach tcc.log -- `autosound_tcc` does not propagate -- so the death below is logged
-            # here, by TCC.) One less thing writing to a stream that may not exist.
+            # anyway: `core/app_log` owns this process's logging, and routes uvicorn's own loggers
+            # into tcc.log (`_route_library_loggers`); the death below is logged by TCC as well.
+            # One less thing writing to a stream that may not exist.
             log_config=None,
         )
         self._server = uvicorn.Server(uvicorn_config)

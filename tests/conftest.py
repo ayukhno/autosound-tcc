@@ -201,7 +201,7 @@ def real_critic_reaches(monkeypatch):
 def _app_log_left_as_found():
     """`app_log.setup()` rewires the process's logging, and a test that ran it — `test_app_log.py`,
     `test_child.py`, any `app.main()` — left it rewired for every test after it: TCC's logger and
-    `py.warnings` no longer propagating, at a level of their own, each with a file handler into
+    `py.warnings` (and uvicorn's) no longer propagating, at a level of their own, each with a file handler into
     that test's folder; `app_log`'s log path; and `threading.excepthook`, where pytest puts its own
     once per session. pytest 9 then attaches its log capture to every logger that does not
     propagate as well as to the root, so a later test that made TCC's logger propagate again for
@@ -223,7 +223,8 @@ def _app_log_left_as_found():
         return [handler for handler in log.handlers if handler not in root]
 
     found = [(log, own(log), log.propagate, log.level)
-             for log in (app_log.logger(), logging.getLogger("py.warnings"))]
+             for log in (app_log.logger(), logging.getLogger("py.warnings"),
+                         *map(logging.getLogger, app_log._LIBRARY_LOGGERS))]
     log_path, thread_hook = app_log._log_path, threading.excepthook
     sink, held, held_dropped = app_log._ui_sink, list(app_log._held), app_log._held_dropped
     yield
