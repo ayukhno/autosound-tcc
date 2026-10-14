@@ -2080,9 +2080,39 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   skill: TCC-054 (hub #269, the round's raw-title matching vs `name_key`). Resume:
   `hub/bin/role tcc --resume 530f0561-3f1c-4b26-a240-c7149565668c`.
 
+### F-102 — W-10: real use and earlier waves' leftovers, without superpowers — open the milestone
+
+**Статус**: open · written 2026-10-14 at «добраніч» · next session: `hub/bin/role tcc --no-SP` (a new conversation,
+the engine off for the whole wave); this one continues with `hub/bin/role tcc --resume b9350366-d017-4e9a-be26-e092e6bfff29`
+
+The Arbiter's decisions, 2026-10-14:
+- **W-10 takes everything outside the audit from real use, plus what earlier waves left undone.** The ranked list
+  is `docs/W-10-POOL-RANKED.md` (21 tasks in five tiers). Its preamble («the audit builds first», 2026-10-06) is
+  **stale**: hub #273's amendment (2026-10-13) closes the audit at its minimum (TCC's G8 phase 1 and G7), a wave
+  later, and sends the rest to the pool, TCC's call. Fix the preamble when the milestone opens. Finding 158 (G4 2a)
+  is then the pool's, from real use: take it in.
+- **The simplified audit comes after this wave.** TCC trims `docs/PLAN-AUDIT-2026-10.md` to the minimum and agrees it
+  with the skill first. Not now. The reason is the Arbiter's: the last audit waves cost ~30 × $20 subscriptions plus
+  ~$200 of cloud audit and built little; this is not a commercial product, and the work has to move on.
+- **W-10 runs without superpowers**, with Anthropic's skills only, to measure quality and speed (the skill does the
+  same). `hub-seam` «Без двигуна»: `feature-dev:feature-dev` for features, the seats from «Process weight», and
+  `Engine: none` in every PR body.
+
+Next, in order:
+1. Open the milestone `W-10 · v1.1.4`. Every task becomes an issue with class · model · risk · size and a
+   `Group:` line. The passat and hub tickets (#257, #260, #262, #264, #268, #277 ask 1, #246) are mirrored and
+   taken (`bin/ticket take`). Issues 1–3 of the list start with «retest on v1.1.3». Nothing is built before `ok`.
+2. **Two questions were not answered.** The Arbiter wanted to clarify them first, so ask what he wants to clarify
+   before asking them again:
+   - which large tasks go in: F-096 the car package, #264 «Описати зміни», #181 Codex (a feasibility study only,
+     or the whole build);
+   - the GitHub cleanup: close #185–#188 and #190 as duplicates of #192, #189 and #191 as duplicates of #184, and
+     hub #242 as superseded (v1.1.0 shipped 2026-10-03).
+3. Propose groups; the Arbiter confirms them.
+
 ### F-101 — After v1.1.3: the installer walk, then the queue
 
-**Статус**: open · **the installer walk done 2026-10-14** (the Arbiter, the VM: the method to v3.1.3, then TCC 1.1.2 → 1.1.3 through TCC's update; both on screen; findings 158, 159) — the queue remains · written 2026-10-14 at «добраніч», after v1.1.3 was tagged and W-9's milestone closed · resume:
+**Статус**: done 2026-10-14 · the queue moved to F-102 · was: open · **the installer walk done 2026-10-14** (the Arbiter, the VM: the method to v3.1.3, then TCC 1.1.2 → 1.1.3 through TCC's update; both on screen; findings 158, 159) — the queue remains · written 2026-10-14 at «добраніч», after v1.1.3 was tagged and W-9's milestone closed · resume:
 `hub/bin/role tcc --resume b9350366-d017-4e9a-be26-e092e6bfff29`
 
 - **The installer path walked by hand for v1.1.3** (`WAVES.md` §3.1, TCC only — the Arbiter's): an update to v1.1.3
