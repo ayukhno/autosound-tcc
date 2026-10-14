@@ -1504,6 +1504,64 @@ def test_powershell_behind_codexs_wrapper_is_judged_as_powershell(project, tmp_p
     assert seen == [("pwsh -c Remove-Item x", "powershell")]
 
 
+#: What a Windows Codex 0.162.1 sent for a delete (the Arbiter's VM, W-10): its argv joined the
+#: POSIX way — a double-quoted stretch doubles a backslash, an apostrophe closes and reopens.
+WINDOWS_DELETE = (
+    '"C:\\\\WINDOWS\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe" -Command '
+    "'$resolvedTarget = (Resolve-Path -LiteralPath '\"'test-tcc.txt').Path; if (\""
+    "'$resolvedTarget -ne '\"'C:\\\\Users\\\\o.yukhno\\\\dev\\\\testAgy-auto\\\\test-tcc.txt') "
+    "{ throw \\\"Unexpected target: \"'$resolvedTarget\" }; "
+    "Remove-Item -LiteralPath $resolvedTarget -Force'")
+#: …and the line PowerShell runs: what the bar shows.
+WINDOWS_DELETE_RUNS = (
+    "$resolvedTarget = (Resolve-Path -LiteralPath 'test-tcc.txt').Path; if ($resolvedTarget -ne "
+    "'C:\\Users\\o.yukhno\\dev\\testAgy-auto\\test-tcc.txt') { throw \"Unexpected target: "
+    "$resolvedTarget\" }; Remove-Item -LiteralPath $resolvedTarget -Force")
+
+
+@pytest.mark.parametrize("command, shown", [
+    (WINDOWS_DELETE, WINDOWS_DELETE_RUNS),
+    ('pwsh.exe -NoProfile -Command "Remove-Item x"', "Remove-Item x"),
+    ("powershell -c Remove-Item x", "Remove-Item x"),
+    # Not one `-Command` text TCC can take apart: shown whole, nothing hidden.
+    ("powershell -ExecutionPolicy Bypass -Command Remove-Item x",
+     "powershell -ExecutionPolicy Bypass -Command Remove-Item x"),
+    ("powershell -EncodedCommand AAAA", "powershell -EncodedCommand AAAA"),
+    ("Remove-Item x", "Remove-Item x"),
+])
+def test_powershell_text_is_the_line_powershell_runs(command, shown):
+    assert codex_session.shown_command(command) == shown
+
+
+def test_a_windows_delete_shows_the_line_as_it_runs_and_names_powershell(project, tmp_path,
+                                                                         stand_in, monkeypatch):
+    """The Arbiter's VM, W-10: the bar showed Codex's quoting — `\\\\` and `'"'` — and said «Bash»
+    for a PowerShell line. The gate still reads the whole line; only what is shown is unwrapped."""
+    seen: list = []
+    real = codex_session.judge_action
+    monkeypatch.setattr(codex_session, "judge_action",
+                        lambda tool, line, **kw: seen.append(line) or real(tool, line, **kw))
+    bridge, _ = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command=WINDOWS_DELETE), gate="auto")
+    (request,) = bridge.requests
+    assert seen == [WINDOWS_DELETE]
+    assert request.detail == WINDOWS_DELETE_RUNS
+    assert "\\\\" not in request.detail and "'\"'" not in request.detail
+    assert request.reason == "gateIrreversible"
+    assert (request.title, request.title_args) == (shell_gate.ALLOW_TITLE, {"tool": "PowerShell"})
+    assert request.tool == "Bash"  # what a «don't ask again» tick remembers stays the tool
+
+
+def test_a_windows_delete_run_in_a_subfolder_shows_the_folder_and_the_line(project, tmp_path,
+                                                                           stand_in):
+    (project / "process").mkdir(exist_ok=True)
+    bridge, _ = run_gate(project, tmp_path, stand_in,
+                         approval_turn("th", command=WINDOWS_DELETE, cwd=project / "process"),
+                         gate="auto")
+    (request,) = bridge.requests
+    assert request.detail == "Set-Location 'process'; " + WINDOWS_DELETE_RUNS
+
+
 # ---- task 10's live run: F1 (Codex namespaces the method), F2 (a tool left open at Stop) ---------
 
 

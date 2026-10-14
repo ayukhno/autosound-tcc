@@ -40,6 +40,7 @@ from autosound_tcc.core.mcp_server import (ConfirmRequest, HeadlessBridge, UiBri
                                            await_confirmation)
 from autosound_tcc.core.session_registry import SDK_ROUTE, SessionRegistry
 from autosound_tcc.core.shell_gate import (
+    ALLOW_TITLE,
     GATE_AUTO,
     GATE_NEVER,
     GATE_WRITES,
@@ -342,9 +343,10 @@ class TuningSession:
                 return PermissionResultAllow()
             return await self._ask(
                 tool_name,
-                f"Читання поза папкою проєкту: {target}",
+                target,
                 tool_input,
                 deny_reason=f"{target} is outside the project folder",
+                reason="confirmReadOutside",
             )
 
         if tool_name == "Bash":
@@ -356,8 +358,8 @@ class TuningSession:
         return await self._ask(tool_name, str(tool_input)[:400], tool_input, deny_reason=f"{tool_name} is not pre-approved")
 
     async def _ask(self, tool: str, detail: str, payload: dict, deny_reason: str, reason: str = ""):
-        request = ConfirmRequest(tool=tool, title=f"Дозволити {tool}?", detail=detail, payload=payload,
-                                 reason=reason)
+        request = ConfirmRequest(tool=tool, title=ALLOW_TITLE, title_args={"tool": tool},
+                                 detail=detail, payload=payload, reason=reason)
         allowed = await await_confirmation(self.bridge, request, timeout_s=600.0)
         if allowed:
             return PermissionResultAllow()

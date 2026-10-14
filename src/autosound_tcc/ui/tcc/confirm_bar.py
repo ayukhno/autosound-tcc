@@ -31,6 +31,9 @@ from PySide6.QtWidgets import (
 from autosound_tcc.core.mcp_server import ConfirmRequest
 from autosound_tcc.ui.tcc import i18n
 
+#: The reason a question is about what cannot be undone (`shell_gate.judge_action`'s key).
+IRREVERSIBLE = "gateIrreversible"
+
 
 #: How many lines of a request show before it scrolls. Enough to read an ordinary command whole; a
 #: heredoc with an issue body in it scrolls instead of pushing the answer off the window.
@@ -114,19 +117,19 @@ class ConfirmBar(QWidget):
         self._question.setAutoFillBackground(False)
         outer.addWidget(self._question_scroll)
 
-        self._always = QCheckBox(i18n.t("confirmAlways"))
+        self._always = QCheckBox()
         self._always.setCursor(Qt.CursorShape.PointingHandCursor)
         outer.addWidget(self._always)
 
         row = QHBoxLayout()
         row.setSpacing(8)
-        self._allow = QPushButton("✓ Дозволити")
+        self._allow = QPushButton()
         self._allow.setProperty("class", "composer-send")
         self._allow.setCursor(Qt.CursorShape.PointingHandCursor)
         self._allow.clicked.connect(lambda: self._answer(True))
         row.addWidget(self._allow)
 
-        self._deny = QPushButton("✕ Відхилити")
+        self._deny = QPushButton()
         self._deny.setProperty("class", "reason-btn")
         self._deny.setCursor(Qt.CursorShape.PointingHandCursor)
         self._deny.clicked.connect(lambda: self._answer(False))
@@ -138,6 +141,10 @@ class ConfirmBar(QWidget):
         row.addStretch(1)
         outer.addLayout(row)
 
+        # Every text of the bar in the window's language, and again when it changes: the title and
+        # the buttons were Ukrainian literals under an English body (the Arbiter's VM, W-10).
+        self._retranslate()
+        i18n.on_language_changed(self._retranslate)
         self.setHidden(True)
 
     # ---- API ---------------------------------------------------------------
@@ -179,7 +186,8 @@ class ConfirmBar(QWidget):
         if self._current is None:
             return
         request, future = self._current
-        always = allowed and self._always.isChecked()
+        # Only where the tick is offered: on a question about what cannot be undone it is not.
+        always = allowed and not self._always.isHidden() and self._always.isChecked()
         self._always.setChecked(False)  # a decision covers one kind, not the next one by accident
         self._current = None
         if future.done():  # given up on before this click: denied then, and said as that
@@ -207,15 +215,32 @@ class ConfirmBar(QWidget):
             if future.done():  # gave up while queued behind another request
                 continue
             self._current = (request, future)
-            self._title.setText(request.title)
-            reason = getattr(request, "reason", "")
-            self._detail.setText(f"{i18n.t(reason)}: {request.detail}" if reason else request.detail)
-            self._fit_question()
-            self._update_remaining()
+            self._show_question()
             self.setHidden(False)
             return
         self._current = None
         self.setHidden(True)
+
+    def _retranslate(self) -> None:
+        self._always.setText(i18n.t("confirmAlways"))
+        self._allow.setText(i18n.t("confirmAllow"))
+        self._deny.setText(i18n.t("confirmDeny"))
+        if self._current is not None:
+            self._show_question()
+
+    def _show_question(self) -> None:
+        """The request on screen, worded now: its title and reason are i18n keys (core is
+        language-free), so a language switch rewords the question already up."""
+        request = self._current[0]
+        self._title.setText(_title(request))
+        reason = getattr(request, "reason", "")
+        # A tick never outranks «cannot be undone» (the Arbiter, 2026-10-14), so on that question
+        # it answered nothing asked — and remembered the tool for the whole project: a later
+        # ordinary write passed unasked (the Arbiter's VM, W-10). Not offered there.
+        self._always.setHidden(reason == IRREVERSIBLE)
+        self._detail.setText(f"{i18n.t(reason)}: {request.detail}" if reason else request.detail)
+        self._fit_question()
+        self._update_remaining()
 
     def _fit_question(self) -> None:
         """As tall as the question at this width, up to `_QUESTION_LINES` — then it scrolls.
@@ -241,4 +266,15 @@ class ConfirmBar(QWidget):
 
     def _update_remaining(self) -> None:
         extra = len(self._queue)
-        self._remaining.setText(f"ще {extra} у черзі" if extra else "")
+        self._remaining.setText(i18n.t("confirmMore").format(n=extra) if extra else "")
+
+
+def _title(request: ConfirmRequest) -> str:
+    """The request's title in the window's language: its key filled from `title_args`. A title that
+    is not a key — or that its values do not fit — shows as it came."""
+    text = i18n.t(request.title)
+    args = getattr(request, "title_args", None) or {}
+    try:
+        return text.format(**args) if args else text
+    except (KeyError, IndexError, ValueError):
+        return text

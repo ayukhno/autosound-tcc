@@ -584,7 +584,7 @@ class OmpSession:
                 await self._events.put(Unasked(verdict.unasked))
             return
         request = ConfirmRequest(tool=verdict.tool, title=verdict.title,
-                                 detail=verdict.detail[:SHOWN_DETAIL], payload=dict(frame),
+                                 title_args=verdict.title_args, detail=verdict.detail[:SHOWN_DETAIL], payload=dict(frame),
                                  reason=verdict.reason)
         allowed = await await_confirmation(self.bridge, request, CONFIRM_TIMEOUT_S)
         if allowed.failure:  # omp's `Deny` carries no words: the turn says it was not a no (#206)

@@ -415,6 +415,9 @@ class ConfirmRequest:
     """A mutation waiting on the Arbiter's button. This *is* the 🟡→🟢 attest step."""
 
     tool: str
+    #: An i18n KEY, filled from `title_args` by the confirm bar in the window's language — as
+    #: `reason` is: «Дозволити Bash?» was a Ukrainian literal on every route, under an English body
+    #: (the Arbiter's VM, W-10). Text that is not a key shows as it is.
     title: str
     detail: str
     payload: dict[str, Any] = field(default_factory=dict)
@@ -423,6 +426,7 @@ class ConfirmRequest:
     #: sentence, so core stays language-free — «Команда, яку не відкотити» was a Ukrainian literal
     #: on the Claude side and missing on omp (review of tcc#115).
     reason: str = ""
+    title_args: dict[str, Any] = field(default_factory=dict)
 
 
 class UiBridge(Protocol):
@@ -1307,8 +1311,10 @@ def build_server(
         allowed = await _confirm(
             ConfirmRequest(
                 tool="write_rew_filters",
-                title=f"Записати {len(filters)} фільтр(и) у REW",
-                detail=f"Замір: {measurement}",
+                title="confirmWriteFilters",
+                title_args={"count": len(filters)},
+                detail=measurement,
+                reason="confirmMeasurement",
                 payload={"measurement": measurement, "filters": filters},
             )
         )
@@ -1351,8 +1357,9 @@ def build_server(
         allowed = await _confirm(
             ConfirmRequest(
                 tool="copy_helix_eq",
-                title="Скопіювати EQ у буфер обміну",
-                detail=note or f"{len(text.splitlines())} рядк(ів)",
+                title="confirmCopyEq",
+                detail=note or str(len(text.splitlines())),
+                reason="" if note else "confirmLines",
                 payload={"preview": text[:400]},
             )
         )

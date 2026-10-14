@@ -370,3 +370,112 @@ def test_a_queued_request_given_up_does_not_take_down_the_one_on_screen():
     assert expired == [] and bar._title.text() == "Allow write_rew_filters?"
     bar._deny.click()
     assert shown.result(timeout=1) is False and bar.isHidden(), "the given-up one is skipped"
+
+
+# ---- the window's language, on every route (the Arbiter's VM, W-10) -----------------------------
+
+@pytest.fixture
+def language():
+    """Set the window's language for one test; the one before it comes back after."""
+    from autosound_tcc.ui.tcc import i18n
+
+    before = i18n.current_language()
+    yield i18n.set_language
+    i18n.set_language(before)
+
+
+def _gate_question(tool="PowerShell"):
+    from autosound_tcc.core.shell_gate import ALLOW_TITLE
+
+    return ConfirmRequest(tool="Bash", title=ALLOW_TITLE, title_args={"tool": tool},
+                          detail="Remove-Item $x", reason="gateIrreversible")
+
+
+@pytest.mark.parametrize("lang, title, allow, deny, more", [
+    ("en", "Allow PowerShell?", "✓ Allow", "✕ Deny", "1 more in the queue"),
+    ("uk", "Дозволити PowerShell?", "✓ Дозволити", "✕ Відхилити", "ще 1 у черзі"),
+])
+def test_every_text_of_the_bar_is_in_the_windows_language(language, lang, title, allow, deny, more):
+    """The title and the buttons were Ukrainian literals while the reason and the tick followed the
+    window: an English window asked «Дозволити Bash?» over an English body."""
+    from autosound_tcc.ui.tcc import i18n
+
+    language(lang)
+    bar = ConfirmBar()
+    bar.enqueue(_gate_question(), Future())
+    bar.enqueue(_gate_question("Bash"), Future())
+
+    assert (bar._title.text(), bar._allow.text(), bar._deny.text(), bar._remaining.text()) == (
+        title, allow, deny, more)
+    assert bar._always.text() == i18n.t("confirmAlways")
+    assert bar._detail.text() == f"{i18n.t('gateIrreversible')}: Remove-Item $x"
+
+
+def test_a_language_switch_repaints_the_question_on_screen(language):
+    language("en")
+    bar = ConfirmBar()
+    bar.enqueue(_gate_question(), Future())
+    bar.enqueue(_gate_question("Bash"), Future())
+
+    language("uk")
+
+    assert (bar._title.text(), bar._allow.text(), bar._deny.text(), bar._remaining.text()) == (
+        "Дозволити PowerShell?", "✓ Дозволити", "✕ Відхилити", "ще 1 у черзі")
+    assert bar._always.text() == "Більше не питати про це в цьому проєкті"
+    assert bar._detail.text().startswith("Команда, яку не відкотити: ")
+
+
+@pytest.mark.parametrize("request_", [
+    ConfirmRequest(tool="write_rew_filters", title="confirmWriteFilters", title_args={"count": 3},
+                   detail="FL sweep", reason="confirmMeasurement"),
+    ConfirmRequest(tool="copy_helix_eq", title="confirmCopyEq", detail="12",
+                   reason="confirmLines"),
+    ConfirmRequest(tool="Read", title="confirmAllowTitle", title_args={"tool": "Read"},
+                   detail="/etc/hosts", reason="confirmReadOutside"),
+])
+def test_tccs_own_questions_and_the_sdks_read_follow_the_window_too(language, request_):
+    """Not only the gate's: TCC's REW write, its clipboard copy and the SDK's read outside the
+    project were Ukrainian literals in core."""
+    language("en")
+    bar = ConfirmBar()
+    bar.enqueue(request_, Future())
+
+    assert not re.search("[А-Яа-яІіЇїЄєҐґ]", bar._title.text() + bar._detail.text())
+    assert bar._title.text() not in ("", request_.title)
+
+
+# ---- «don't ask again» never on a question about what cannot be undone (the Arbiter's VM, W-10) --
+
+def test_an_irreversible_question_offers_no_dont_ask_again_and_remembers_nothing():
+    """A tick never outranks «cannot be undone», so on that bar it answered nothing it asked — and
+    remembered `Bash` for the whole project: a later `Set-Content` passed unasked under «every
+    write». Gone from that bar; a click with it set (as it was) remembers nothing."""
+    bar = ConfirmBar()
+    remembered: list = []
+    bar.alwaysAllowed.connect(remembered.append)
+    future: "Future[bool]" = Future()
+    bar.enqueue(ConfirmRequest(tool="Bash", title="Allow Bash?", detail="Remove-Item $x",
+                               reason="gateIrreversible"), future)
+
+    assert bar._always.isHidden()
+    bar._always.setChecked(True)
+    bar._allow.click()
+
+    assert future.result(timeout=1) is True and remembered == []
+
+
+def test_an_ordinary_question_after_an_irreversible_one_offers_the_tick_again():
+    bar = ConfirmBar()
+    remembered: list = []
+    bar.alwaysAllowed.connect(remembered.append)
+    bar.enqueue(ConfirmRequest(tool="Bash", title="t", detail="rm x", reason="gateIrreversible"),
+                Future())
+    second: "Future[bool]" = Future()
+    bar.enqueue(ConfirmRequest(tool="Bash", title="t", detail="echo hi > a.txt"), second)
+    bar._deny.click()
+
+    assert not bar._always.isHidden()
+    bar._always.setChecked(True)
+    bar._allow.click()
+
+    assert second.result(timeout=1) is True and remembered == ["Bash"]

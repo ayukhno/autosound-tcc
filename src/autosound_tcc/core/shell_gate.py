@@ -2960,7 +2960,8 @@ class Verdict:
     `mcp_server.ConfirmRequest` takes it: `tool` (the effect's i18n key, else the tool's name — also
     what a «don't ask again» tick remembers; the effect only for a command), `title`, `detail` (the
     command itself when it cannot be undone) and `reason` (`gateIrreversible` when the danger check
-    flagged the command, whichever gate asked)."""
+    flagged the command, whichever gate asked). `title` is an i18n key and `title_args` its values:
+    the bar words it in the window's language (`ALLOW_TITLE`)."""
 
     allowed: bool
     unasked: str = ""
@@ -2968,6 +2969,20 @@ class Verdict:
     title: str = ""
     detail: str = ""
     reason: str = ""
+    title_args: dict = field(default_factory=dict)
+
+
+#: The question the gate asks — «Allow {tool}?» — as an i18n key: core stays language-free, and the
+#: bar words it in the window's language (it was «Дозволити …?» in an English window, W-10).
+ALLOW_TITLE = "confirmAllowTitle"
+
+
+def allow_title_args(tool: str, shell: str = SHELL_BASH) -> dict:
+    """`ALLOW_TITLE`'s values: the tool by its name, and a shell line by the shell that runs it —
+    a PowerShell line is not «Bash» to the person reading it (Codex on Windows, W-10)."""
+    if shell == SHELL_POWERSHELL and TOOL_NAMES.get(tool, tool) == "bash":
+        return {"tool": "PowerShell"}
+    return {"tool": tool}
 
 
 def effect_of(command: str) -> Optional[str]:
@@ -3375,7 +3390,8 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
         # unread -- which is worse protection than no gate at all. Only a command has an
         # effect: an edit of `apply.py` changes the script, it does not write a ledger.
         tool=(effect_of(line) if name == "bash" else None) or tool,
-        title=f"Дозволити {tool}?",
+        title=ALLOW_TITLE,
+        title_args=allow_title_args(tool, shell),
         # Under `auto` the command alone, as it always was; elsewhere what omp sent with it
         # (its `Description:`) stays.
         detail=line if dangerous and gate == GATE_AUTO else detail,

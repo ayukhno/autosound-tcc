@@ -29,8 +29,8 @@ from autosound_tcc.core import shell_gate
 from autosound_tcc.core.agent_events import Unasked
 from autosound_tcc.core.mcp_server import ConfirmRequest
 from autosound_tcc.core.omp_session import OmpSession
-from autosound_tcc.core.shell_gate import (GATE_AUTO, GATE_FOREIGN, GATE_NEVER, GATE_WRITES,
-                                           SHELL_POWERSHELL, Verdict, judge_action)
+from autosound_tcc.core.shell_gate import (ALLOW_TITLE, GATE_AUTO, GATE_FOREIGN, GATE_NEVER,
+                                           GATE_WRITES, SHELL_POWERSHELL, Verdict, judge_action)
 from autosound_tcc.core.tuning_session import _read_roots_for
 
 GATES = (GATE_WRITES, GATE_FOREIGN, GATE_AUTO, GATE_NEVER)
@@ -317,7 +317,7 @@ def test_the_table(tool, detail, ticked, gate, cell, tmp_path):
     if verdict.unasked:
         assert verdict.unasked == _command(detail)
     if not verdict.allowed:
-        assert verdict.title == f"Дозволити {tool}?"
+        assert (verdict.title, verdict.title_args) == (ALLOW_TITLE, {"tool": tool})
         # Under `auto` «cannot be undone» shows the command alone; otherwise what omp sent.
         assert verdict.detail == (_command(detail) if gate == GATE_AUTO and cell == "ask!"
                                   else detail)
@@ -555,7 +555,18 @@ def test_a_writer_is_asked_about_by_its_effect(tmp_path):
                            command="python3 rew_tool/apply.py --preset FULL")
 
     assert verdict.tool == "effectLedger"
-    assert verdict.title == "Дозволити bash?"
+    assert (verdict.title, verdict.title_args) == (ALLOW_TITLE, {"tool": "bash"})
+
+
+@pytest.mark.parametrize("tool", ["Bash", "bash"])
+def test_a_powershell_line_is_asked_about_as_powershell(tool, tmp_path):
+    """The Arbiter's VM, W-10: Codex's PowerShell delete was titled «Bash»."""
+    verdict = judge_action(tool, "Remove-Item -Recurse -Force ~", gate=GATE_AUTO,
+                           read_roots=_read_roots_for(tmp_path), shell=SHELL_POWERSHELL)
+
+    assert not verdict.allowed
+    assert (verdict.title, verdict.title_args) == (ALLOW_TITLE, {"tool": "PowerShell"})
+    assert verdict.tool == tool  # the tick still remembers the tool
 
 
 @pytest.mark.parametrize("tool", ["Edit", "edit"])
@@ -637,7 +648,8 @@ def test_omp_answers_the_table(tool, detail, ticked, gate, cell, tmp_path):
 @pytest.mark.parametrize("verdict", [
     Verdict(True),
     Verdict(True, unasked="rm -rf ~/"),
-    Verdict(False, tool="effectLedger", title="Дозволити bash?", detail="d", reason="r"),
+    Verdict(False, tool="effectLedger", title=ALLOW_TITLE, title_args={"tool": "bash"}, detail="d",
+            reason="r"),
 ])
 def test_omps_gate_decides_through_judge_action(verdict, tmp_path, monkeypatch):
     """omp keeps no decision of its own: what `judge_action` says is what `_gate` does."""
@@ -660,8 +672,9 @@ def test_omps_gate_decides_through_judge_action(verdict, tmp_path, monkeypatch):
         assert session.bridge.requests == [] and sent[0]["value"] == "Approve"
     else:
         (request,) = session.bridge.requests
-        assert (request.tool, request.title, request.detail, request.reason) == (
-            verdict.tool, verdict.title, verdict.detail, verdict.reason)
+        assert (request.tool, request.title, request.title_args, request.detail,
+                request.reason) == (verdict.tool, verdict.title, verdict.title_args,
+                                    verdict.detail, verdict.reason)
         assert sent[0]["value"] == "Deny"
     assert [e.command for e in events if isinstance(e, Unasked)] == (
         [verdict.unasked] if verdict.unasked else [])
@@ -694,7 +707,7 @@ def test_codex_names_answer_as_omp_names(tool, detail, omp_tool, omp_detail, gat
     assert (codex.allowed, bool(codex.unasked), codex.reason) == (
         omp.allowed, bool(omp.unasked), omp.reason)
     if not codex.allowed:
-        assert codex.title == f"Дозволити {tool}?"
+        assert (codex.title, codex.title_args) == (ALLOW_TITLE, {"tool": tool})
 
 
 @pytest.mark.parametrize("gate", GATES)

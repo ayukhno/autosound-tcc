@@ -46,8 +46,9 @@ from autosound_tcc.core.mcp_server import (CONFIRM_TIMEOUT_S, ConfirmRequest, He
                                            UiBridge, await_confirmation)
 from autosound_tcc.core.omp_session import FRAME_LOG_MAX_BYTES
 from autosound_tcc.core.session_registry import CODEX_ROUTE, SessionRegistry
-from autosound_tcc.core.shell_gate import (GATE_NEVER, GATE_WRITES, SHELL_BASH,
-                                           SHELL_POWERSHELL, Verdict, judge_action)
+from autosound_tcc.core.shell_gate import (ALLOW_TITLE, GATE_NEVER, GATE_WRITES, SHELL_BASH,
+                                           SHELL_POWERSHELL, Verdict, allow_title_args,
+                                           judge_action)
 from autosound_tcc.core.tuning_session import SKILL_NAME, _read_roots_for, system_prompt_append
 
 #: Every frame both ways, next to the project's other TCC state — omp's `omp-frames.jsonl`, for the
@@ -110,6 +111,37 @@ def inner_command(command: str) -> str:
     except ValueError:
         return command
     return parts[0] if len(parts) == 1 else command
+
+
+def shown_command(command: str) -> str:
+    """What a `powershell -Command …` line runs, for the bar: the `-Command` text as PowerShell gets
+    it. Codex on Windows sends its argv joined the POSIX way (`"C:\\…\\powershell.exe" -Command
+    '…'"'"'…'`), so shown whole a doubled backslash and a `'"'` stood between the Arbiter and the
+    line (W-10). Any other shape — not PowerShell, an option before `-Command` that may take a value,
+    `-EncodedCommand`, `-File` — is returned whole: nothing is hidden by the unwrapping. Only what is
+    shown: the gate reads the whole line, as Codex sent it."""
+    try:
+        words = shlex.split(command or "")
+    except ValueError:
+        return command
+    if not words:
+        return command
+    name = words[0].replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
+    if name not in _POWERSHELL:
+        return command
+    for at, word in enumerate(words[1:], start=1):
+        flag = word.lower()
+        if flag == "-c" or len(flag) > 3 and "-command".startswith(flag):
+            rest = words[at + 1:]
+            return " ".join(rest) if rest and rest[0] != "-" else command
+        if flag not in _PS_SWITCHES:
+            return command
+    return command
+
+
+#: The PowerShell switches that take no value, so a `-Command` after them is still the line's.
+_PS_SWITCHES = frozenset({"-noprofile", "-nop", "-noninteractive", "-noni", "-nologo", "-mta",
+                          "-sta"})
 
 
 def _names_the_method(name: str) -> bool:
@@ -677,12 +709,17 @@ class CodexSession:
         for rid in list(self._gating):
             self._drop_gate(rid, decline=True)
 
-    def _asked(self, method: str, params: dict) -> tuple[str, str, str, str]:
-        """`(tool, detail, shell, always)` for one approval, as the gate reads it. `always` names
-        why it asks whatever the gate says — `irreversible` (a file delete) or `unknown` (Codex
-        did not say what runs, or where TCC cannot judge it) — and is "" otherwise."""
+    def _asked(self, method: str, params: dict) -> tuple[str, str, str, str, str]:
+        """`(tool, detail, shell, always, shown)` for one approval, as the gate reads it. `always`
+        names why it asks whatever the gate says — `irreversible` (a file delete) or `unknown`
+        (Codex did not say what runs, or where TCC cannot judge it) — and is "" otherwise. `shown`
+        is `detail` as the bar shows it: a PowerShell line by the text it runs (`shown_command`)."""
         if method == COMMAND_APPROVAL:
-            return self._asked_command(params)
+            tool, detail, shell, always = self._asked_command(params)
+            if shell != SHELL_POWERSHELL:
+                return tool, detail, shell, always, detail
+            line = self._line(params)
+            return tool, detail, shell, always, detail.replace(line, shown_command(line), 1)
         changes = self._changes.get(str(params.get("itemId") or ""))
         reason = str(params.get("reason") or "").strip()
         if changes:
@@ -692,11 +729,22 @@ class CodexSession:
             # Codex named no change TCC saw: what it does is unknown, so it is asked about as a
             # delete would be — under `auto` too.
             detail, always = "a file change Codex did not describe", "irreversible"
-        return "Edit", detail + (f"\n{reason}" if reason else ""), SHELL_BASH, always
+        detail += f"\n{reason}" if reason else ""
+        return "Edit", detail, SHELL_BASH, always, detail
+
+    @staticmethod
+    def _raw(params: dict) -> str:
+        raw = params.get("command")
+        return shlex.join(map(str, raw)) if isinstance(raw, list) else str(raw or "")
+
+    @classmethod
+    def _line(cls, params: dict) -> str:
+        """The line `_asked_command` judges, before `_in_folder`: Codex's wrapper off a bash one."""
+        raw = cls._raw(params)
+        return inner_command(raw) if shell_of(raw) == SHELL_BASH else raw
 
     def _asked_command(self, params: dict) -> tuple[str, str, str, str]:
-        raw = params.get("command")
-        raw = shlex.join(map(str, raw)) if isinstance(raw, list) else str(raw or "")
+        raw = self._raw(params)
         kind = str(params.get("kind") or "command")
         if kind != "command" or not raw.strip():
             # Input to a running terminal (`writeStdin`), or no command at all: nothing the gate
@@ -733,7 +781,7 @@ class CodexSession:
 
     @staticmethod
     def _always_asks(verdict: Verdict, tool: str, detail: str, why: str, gate: str,
-                     ticks: frozenset[str]) -> Verdict:
+                     ticks: frozenset[str], shell: str = SHELL_BASH) -> Verdict:
         """What asks whatever the gate said: a file delete cannot be undone, so it asks under
         `auto` too (the plan, decided 2026-10-14 after task 5's review, I1); a line the gate cannot
         judge — run outside the project, input to a running terminal, no command — asks under
@@ -743,8 +791,8 @@ class CodexSession:
             return Verdict(True, unasked=detail)
         reason = "gateIrreversible" if why == "irreversible" else verdict.reason
         if verdict.allowed:
-            return Verdict(False, tool=tool, title=f"Дозволити {tool}?", detail=detail,
-                           reason=reason)
+            return Verdict(False, tool=tool, title=ALLOW_TITLE,
+                           title_args=allow_title_args(tool, shell), detail=detail, reason=reason)
         return replace(verdict, detail=detail, reason=reason)
 
     async def _gate(self, rid: Any, method: str, params: dict) -> None:
@@ -769,21 +817,23 @@ class CodexSession:
 
     async def _judge(self, method: str, params: dict) -> bool:
         gate, ticks = self.gate, frozenset(self.always_allowed)
-        tool, detail, shell, always = self._asked(method, params)
+        tool, detail, shell, always, shown = self._asked(method, params)
         # Off the loop: the gate reads the disk (realpaths, globs, a walk for a recursive delete),
         # and a slow drive must not hold Codex's notifications.
         verdict = await asyncio.to_thread(judge_action, tool, detail, gate=gate,
                                           always_allowed=ticks, read_roots=self._read_roots,
                                           shell=shell)
         if always:
-            verdict = self._always_asks(verdict, tool, detail, always, gate, ticks)
+            verdict = self._always_asks(verdict, tool, detail, always, gate, ticks, shell)
         if verdict.allowed:
             if verdict.unasked:
                 self._say(Unasked(verdict.unasked))
             return True
-        request = ConfirmRequest(tool=verdict.tool or tool,
-                                 title=verdict.title or f"Дозволити {tool}?",
-                                 detail=verdict.detail or detail, payload=dict(params),
+        # What the gate read whole is shown as it runs (`shown`): the same text, unwrapped.
+        said = verdict.detail or detail
+        request = ConfirmRequest(tool=verdict.tool or tool, title=verdict.title or ALLOW_TITLE,
+                                 title_args=verdict.title_args or allow_title_args(tool, shell),
+                                 detail=shown if said == detail else said, payload=dict(params),
                                  reason=verdict.reason)
         allowed = await await_confirmation(self.bridge, request, CONFIRM_TIMEOUT_S)
         if allowed.failure:  # a `decline` carries no words: the turn says it was not a no (#206)
