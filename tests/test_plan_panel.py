@@ -230,7 +230,10 @@ def test_a_done_step_is_drawn_as_a_green_box_with_a_tick_and_a_todo_step_is_not(
         green_box, open_box = (row.findChild(QCheckBox) for row in rows)
         # The fill and the ring are the ok green; the tick is the phase header's ink (`.st-done`).
         assert count(green_box, palette.ok) >= 40, f"{mode}: the done box is not green"
-        assert count(green_box, "#04160d") >= 6, f"{mode}: the done box has no tick"
+        # The tick is present, not counted to a pixel (#166: `>= 6` of 7 had a one-pixel margin):
+        # its ink is inside the done box and nowhere in the open one.
+        assert count(green_box, "#04160d") >= 1, f"{mode}: the done box has no tick"
+        assert count(open_box, "#04160d") == 0, f"{mode}: an open box has a tick"
         assert count(open_box, palette.ok) == 0, f"{mode}: an open step is green"
         assert count(open_box, palette.accent) == 0, f"{mode}: an open step is accent"
     finally:
@@ -508,6 +511,19 @@ def test_a_long_name_with_no_separator_is_cut_at_a_word():
     assert short_title(text) == (" ".join(["alpha"] * 11) + "…", text)
 
 
+def test_a_head_past_the_title_max_is_cut_at_a_word_too():
+    """Group review I2 (#167): a separator found past `_TITLE_MAX` skipped the cut, so a name whose
+    first separator sat at 106 showed 106 characters. The head is cut at a word with `…` too."""
+    from autosound_tcc.ui.tcc.plan_panel import _TITLE_MAX, short_title
+
+    head = " ".join(["alpha"] * 18)  # 107 characters
+    text = head + " (why it is done this way)"
+    shown, rest = short_title(text)
+    assert rest == text
+    assert len(shown) <= _TITLE_MAX + 1, shown
+    assert shown == " ".join(["alpha"] * 11) + "\u2026"
+
+
 def test_a_short_name_has_no_rest():
     from autosound_tcc.ui.tcc.plan_panel import short_title
 
@@ -526,6 +542,21 @@ def test_a_long_step_shows_its_short_title_and_a_hint_with_the_full_name():
     assert name.text() == "2a: зчитати поточні фільтри кожного каналу"
     assert hint.text() == "?"
     assert _LONG_STEP in hint.hover_tip.text()
+
+
+def test_a_step_name_with_markup_characters_is_escaped_in_its_tip():
+    """#167: the name is the method's text, not markup: `<` and `&` reach the tip as themselves."""
+    from PySide6.QtWidgets import QLabel
+
+    _app()
+    text = "Level the <b>sub</b> & the mids \u2014 why: A&B <i>"
+    step = PlanStep(id="x.9", name={"en": text, "uk": text})
+    row = _PhaseStepRow(step, _PlanProgress(), lambda *_: None, lambda _sid: None)
+
+    hint = next(w for w in row.findChildren(QLabel) if w.property("class") == "step-title-hint")
+    tip = hint.hover_tip.text()
+    assert "&lt;b&gt;sub&lt;/b&gt; &amp; the mids" in tip, tip
+    assert "<b>" not in tip and "<i>" not in tip
 
 
 def test_a_short_step_has_no_hint():

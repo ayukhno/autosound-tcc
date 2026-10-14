@@ -119,8 +119,8 @@ def short_title(text: str) -> tuple[str, str]:
     """`(shown, rest)`: the title a step row shows, and the whole name when there is more to it.
 
     `rest` is empty when `shown` is the whole name. Otherwise the name is cut at its first
-    qualifying separator, or, with none, at the last space within `_TITLE_MAX` characters and
-    marked with an ellipsis. The row keeps the full name one hover away.
+    qualifying separator; a head still longer than `_TITLE_MAX` characters (or a name with no
+    separator) is cut at the last space within it and marked with an ellipsis. The row keeps the full name one hover away.
     """
     cut = None
     for sep in _TITLE_SEPARATORS:
@@ -129,14 +129,13 @@ def short_title(text: str) -> tuple[str, str]:
             at = text.find(sep, at + 1)
         if at != -1 and (cut is None or at < cut):
             cut = at
-    if cut is not None:
-        return text[:cut].strip(), text
-    if len(text) > _TITLE_MAX:
-        space = text.rfind(" ", 0, _TITLE_MAX + 1)
+    head = text if cut is None else text[:cut].strip()
+    if len(head) > _TITLE_MAX:  # a separator past the max cuts nothing short enough (I2)
+        space = head.rfind(" ", 0, _TITLE_MAX + 1)
         if space <= 0:  # one token with no space in it: cut it where the title ends
             space = _TITLE_MAX
-        return text[:space].rstrip() + "\u2026", text
-    return text, ""
+        head = head[:space].rstrip() + "\u2026"
+    return (head, text) if head != text else (text, "")
 
 
 def _collapse_runs(steps: "tuple[PlanStep, ...]") -> "list[PlanStep]":
