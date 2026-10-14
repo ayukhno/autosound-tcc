@@ -5685,6 +5685,24 @@ def test_a_pick_of_another_field_leaves_the_bank_s_set_aside_line_on_the_window(
     assert delay_bank.load()["w-L_01 (sw)"] == pytest.approx(0.3)
 
 
+def test_a_curve_window_built_after_the_pick_still_says_the_bank_was_set_aside(app_log_told):
+    """Fable's re-review of the branch fix, round 2, m1 (#208): the window kept the sentence it had
+    read, but one opened after the pick read the store's own, which the pick's fresh file had
+    cleared — «(0)», «no delays read yet», the copy named nowhere on it. The memo is the bank's
+    (`delay_bank.aside_said`), so every window reads it, until the bank's own write lands."""
+    from autosound_tcc.core import config, delay_bank, project_settings
+
+    first, store, said = _a_bank_set_aside(app_log_told)
+    assert project_settings.pick(config.tcc_dir(), "gate", "auto").landed
+    first.close()
+
+    again = _plotted(_SIDE[:2])
+    _says_the_bank_was_set_aside(again, said)
+    again._view.set_delay(0.3)  # the person's step: the bank's own write
+    assert again._status.isHidden(), again._status.text()
+    assert delay_bank.aside_said() == "", "and the bank's memo with it"
+
+
 def test_the_bank_s_own_write_takes_the_set_aside_line_off_even_with_nothing_moved(
         app_log_told):
     """The bank's own write is what ends the line, not readings coming back: a step that banks the

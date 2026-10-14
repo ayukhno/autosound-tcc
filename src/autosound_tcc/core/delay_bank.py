@@ -44,10 +44,12 @@ Lives in `.tcc/` with TCC's other state, never in the skill's files (D-6).
 
 from __future__ import annotations
 
+import os
+import threading
 from pathlib import Path
 from typing import Any, Iterable, NamedTuple, Optional
 
-from autosound_tcc.core import config, project_settings
+from autosound_tcc.core import config, own_store, project_settings
 from autosound_tcc.core.allpass import Allpass
 
 KEY = "curve_delays"
@@ -55,6 +57,36 @@ KEY = "curve_delays"
 #: `put(allpass=_KEEP)`: leave whatever all-pass the entry already carries. The delay is banked on
 #: every change of every trace, and a call that only meant to move a delay must not wipe a filter.
 _KEEP = object()
+
+
+#: `{store path: sentence}` — the bank's store found set aside as broken, and the sentence said
+#: then, while nothing has been banked since (`aside_said`). The store's own memo goes with any
+#: write that lands a fresh file — a gate, an effort or a model pick — and a curve window opened
+#: after such a pick read «nothing banked», the copy holding the readings named nowhere on it
+#: (Fable's re-review of the branch fix, round 2, m1; #208). Kept here, so every window reads it.
+_aside: dict[str, str] = {}
+_aside_lock = threading.Lock()
+
+
+def _store_key(tcc_dir: Optional[Path]) -> str:
+    return os.path.abspath(project_settings.path_for(tcc_dir or config.tcc_dir()))
+
+
+def aside_said(tcc_dir: Optional[Path] = None) -> str:
+    """The sentence said when the bank's store was set aside as broken — until the bank's own
+    write lands (`put_many`, `clear`) or a read finds readings (`forget_aside`) — or ""."""
+    key = _store_key(tcc_dir)
+    said = own_store.aside_said(Path(key))
+    with _aside_lock:
+        if said:
+            _aside[key] = said
+        return said or _aside.get(key, "")
+
+
+def forget_aside(tcc_dir: Optional[Path] = None) -> None:
+    """The set-aside is over for the bank: readings were found, or the bank wrote a fresh one."""
+    with _aside_lock:
+        _aside.pop(_store_key(tcc_dir), None)
 
 
 class Reading(NamedTuple):
@@ -264,6 +296,7 @@ def put_many(
         return _carried(raw, _serialised(entries), {str(reading.title) for reading in readings})
 
     project_settings.update_value(tcc_dir, KEY, change)
+    forget_aside(tcc_dir)  # the fresh bank the set-aside line said the next step would start
     return banked
 
 
@@ -330,6 +363,7 @@ def clear(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> None
     tcc_dir = tcc_dir or config.tcc_dir()
     if session is None:
         project_settings.set_value(tcc_dir, KEY, None)
+        forget_aside(tcc_dir)
         return
 
     def change(raw: Any) -> Optional[dict[str, Any]]:
@@ -344,6 +378,7 @@ def clear(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> None
         return keep or None
 
     project_settings.update_value(tcc_dir, KEY, change)
+    forget_aside(tcc_dir)
 
 
 def clear_or_say(tcc_dir: Optional[Path] = None, session: Optional[str] = None) -> bool:
