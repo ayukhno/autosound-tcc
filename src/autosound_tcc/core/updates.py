@@ -256,9 +256,11 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     **`constraints`: a `TCC_CONSTRAINTS` lies beside the script, and uv is held to it** (tcc#194).
     The script names it from its own place — `%~dp0` in cmd, `$0`'s folder in sh — rather than
     carrying the path: the shell expands the folder itself, a space or a Cyrillic user name in it
-    included, inside double quotes. In cmd it goes through a variable: `call` expands `%` a second
-    time and doubles `^`, so `%~dp0` on the `call` line breaks a folder like `50%off`; `set` takes
-    it once, and `%%tcc_pins%%` is expanded by `call` itself, where the value is not read again.
+    included, inside double quotes. In cmd no folder goes through `call` at all: `call` expands
+    `%` a second time and doubles `^`, and both ways of handing it the folder — `%~dp0` on the
+    `call` line, then a variable expanded by `call` — lost the file in a folder `50%off ^x`
+    (PR #215's Windows CI), while `%~dp0` on a plain line found it. So the script stands in its
+    own folder (`cd /d "%~dp0"`, a plain line) and uv gets the bare file name.
 
     **Whether this uv takes the file is asked before the install, not guessed after it.** A uv
     older than 0.5.6 does not know `uv tool install --constraints` (uv #9547), and the file must
@@ -299,7 +301,7 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     said = {**TCC_WINDOW_WORDS, **(words or {})}
     windows = _is_windows(platform)
     command = tcc_install_command(tag)
-    held = tcc_install_command(tag, '"%%tcc_pins%%"' if windows else '"$tcc_pins"')
+    held = tcc_install_command(tag, TCC_CONSTRAINTS if windows else '"$tcc_pins"')
     # `replace`, not `format`: a stray brace in a translation must not cost the update.
     signed = (said["signed"].replace("{tag}", tag).replace("{principal}", TCC_SIGNING_PRINCIPAL)
               if sha else "")
@@ -346,7 +348,7 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                "if %errorlevel% neq 0 goto failed",
                'uv tool install --help 2>nul | findstr /l /c:" --constraints " >nul',
                "if errorlevel 1 goto unpinned",
-               f'set "tcc_pins=%~dp0{TCC_CONSTRAINTS}"',
+               'cd /d "%~dp0"',  # the folder on a plain line; `call` gets the bare name
                f"call {held}",
                "goto ran",
                ":unpinned",

@@ -2528,7 +2528,7 @@ def test_the_install_command_carries_the_constraints_it_is_given():
 
 @pytest.mark.parametrize(("platform", "held", "named"), [
     ("darwin", '--constraints "$tcc_pins" ', 'tcc_pins="$(dirname -- "$0")/constraints.txt"'),
-    ("win32", '--constraints "%%tcc_pins%%" ', 'set "tcc_pins=%~dp0constraints.txt"'),
+    ("win32", '--constraints constraints.txt ', 'cd /d "%~dp0"'),
 ])
 def test_the_update_script_holds_uv_to_the_constraints_beside_it(platform, held, named):
     """Named from the script's own place, not written into it: a folder with a space or a
@@ -2544,17 +2544,22 @@ def test_the_update_script_holds_uv_to_the_constraints_beside_it(platform, held,
     assert "--constraints" not in plain
 
 
-def test_cmd_takes_the_folder_once_so_a_percent_or_a_caret_in_it_survives_call():
+def test_no_folder_goes_through_cmd_s_call_so_a_percent_or_a_caret_in_it_survives():
     """The review of #194: `call` expands `%` a second time and doubles `^`, so `%~dp0` on the
-    `call` line turned a folder like `50%off` into a file uv could not find, and failed an update
-    that used to work. `set` takes the folder once; `%%tcc_pins%%` is expanded by `call` itself,
-    and a value is not read again."""
+    `call` line turned a folder like `50%off` into a file uv could not find. The fix after it --
+    the folder in a variable, `%%tcc_pins%%` expanded by `call` -- still lost the file on
+    windows-latest in a folder `Олег Ю 50%off ^x` (PR #215's CI: uv ran once, and the file its
+    `--constraints` named was not there), while `%~dp0` on plain lines of the same script found
+    its files. So no path goes through `call` at all: the script stands in its own folder
+    (`cd /d "%~dp0"`, a plain line) and hands uv the bare file name."""
     lines = updates.tcc_install_script(pid=4242, tag="v1.1.4", platform="win32",
                                        constraints=True).splitlines()
     held = next(line for line in lines if "--constraints" in line and "--python" in line)
 
-    assert lines[lines.index(held) - 1] == 'set "tcc_pins=%~dp0constraints.txt"'
-    assert held.startswith("call uv tool install ") and "%~dp0" not in held, held
+    assert lines[lines.index(held) - 1] == 'cd /d "%~dp0"'
+    assert held.startswith("call uv tool install --python 3.12 --upgrade "
+                           "--constraints constraints.txt "), held
+    assert "%" not in held and "^" not in held, held
 
 
 @pytest.mark.parametrize("platform", ["darwin", "win32"])
@@ -2748,6 +2753,7 @@ def test_uv_reads_the_constraints_from_a_windows_folder_with_a_percent_and_a_car
         assert not seen.exists() and "--constraints" not in calls[0], calls
         assert updates.TCC_WINDOW_WORDS["unpinned"] in out and _OLD_UV in out, out
     else:
+        assert seen.is_file(), f"uv was not handed the file; uv got {calls[0]!r}; err={err!r}"
         assert seen.read_bytes() == _PINS
         assert updates.TCC_WINDOW_WORDS["unpinned"] not in out, out
     if fails:
@@ -2875,7 +2881,7 @@ def test_the_windows_script_s_pinned_path_runs_in_this_order():
     lines = _cmd_lines(constraints=True)
     order = ["call uv --version >nul", "if %errorlevel% neq 0 goto failed",
              next(line for line in lines if "tool install --help" in line),
-             "if errorlevel 1 goto unpinned", 'set "tcc_pins=%~dp0constraints.txt"',
+             "if errorlevel 1 goto unpinned", 'cd /d "%~dp0"',
              next(line for line in lines if line.startswith("call uv tool install")
                   and "--constraints" in line),
              "goto ran", ":unpinned", ":ran", "if %errorlevel% neq 0 goto failed"]
