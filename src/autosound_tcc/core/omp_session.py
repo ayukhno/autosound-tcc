@@ -74,8 +74,8 @@ from autosound_tcc.core.shell_gate import (
     GATE_FOREIGN as GATE_FOREIGN,
     GATE_NEVER as GATE_NEVER,
     GATE_WRITES as GATE_WRITES,
-    bash_is_dangerous,
-    bash_is_read_only,
+    Verdict,
+    judge_action,
 )
 from autosound_tcc.core.tuning_session import SKILL_NAME, _read_roots_for, language_rule
 
@@ -206,14 +206,8 @@ _ACTIVITY_TYPES = frozenset({
     "turn_start", "agent_start", _RETRY_START, _RETRY_END,
 })
 
-# Tools that only look. Auto-approved because `--approval-mode always-ask` otherwise puts a
-# dialog in front of every file the skill opens -- and the skill is built on opening files, so the
-# Arbiter learns to click through, which is worse than not asking.
-_READ_ONLY_TOOLS = frozenset({"read", "glob", "grep", "ls", "list", "todo", "hub"})
-
-# Never auto-approved, whatever else is true: these can overwrite a measurement, a ledger or the
-# project's own files, which is the evidence everything else is built on.
-_ALWAYS_GATED_TOOLS = frozenset({"write", "edit", "ast_edit", "eval", "browser", "task"})
+# Which tools pass unasked, which always ask, and what a writer's effect is called: the gate's
+# table, in `shell_gate` since tcc#181 (`judge_action`), where Codex's approvals read it too.
 
 CONFIRM_TIMEOUT_S = 600.0
 READY_TIMEOUT_S = 60.0
@@ -252,22 +246,6 @@ FRAME_LIST_MAX_ITEMS = 24
 # cancelled -- but "it has been silent for two minutes" is a fact the Arbiter can act on, and
 # staring at an animated line is not.
 SILENCE_WARN_S = 120.0
-
-# What the skill's own writers do, so a permission can ask about the effect instead of the command
-# line. "Allow bash: python3 rew_tool/apply.py --preset FULL ..." is not a question anyone can
-# answer -- it is a script that starts a Python that computes -- while "write a ledger snapshot"
-# is. Only the writers are listed: readers never reach the gate.
-_EFFECTS: tuple[tuple[str, str], ...] = (
-    ("state/process.py", "effectProcess"),
-    ("dsp_profile.py", "effectProfile"),
-    ("apply.py", "effectLedger"),
-    ("project.py", "effectProject"),
-    ("contract.py", "effectContract"),
-)
-
-# Paths the skill legitimately owns inside a project.
-_SKILL_OWNED = ("process/", "state/", "dsp_profile.json", "dsp_profile.draft.json",
-                "project.json", "autosound_context.md", "tuning-changelog", "audit-trail.md")
 
 
 def _shrink(value: Any, limit: int = FRAME_VALUE_MAX_CHARS, depth: int = 0) -> Any:
@@ -593,84 +571,31 @@ class OmpSession:
         agent's own progress frames queue up behind the question we are asking about them.
         """
         tool, detail = self._tool_and_detail(frame)
-        command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
-        if self._auto_allowed(tool, detail):
+        verdict = self._judge(tool, detail)
+        if verdict.allowed:
             self._answer_frame(frame, True)
-            # `never` asks about nothing, and is never silent about what `auto` would have asked
-            # (tcc#115) — the same line as on the Agent SDK side.
-            if (self.gate == GATE_NEVER and tool == "bash"
-                    and bash_is_dangerous(command, self._read_roots)):
-                await self._events.put(Unasked(command))
+            if verdict.unasked:
+                # `never` asks about nothing, and is never silent about what `auto` would have
+                # asked (tcc#115) — the same line as on the Agent SDK side.
+                await self._events.put(Unasked(verdict.unasked))
             return
-        effect = self.effect_of(command)
-        # Under `auto` the only thing that reaches here is what cannot be undone, and the question
-        # says so — the same reason, by the same key, as the SDK side (review of tcc#115).
-        irreversible = self.gate == GATE_AUTO
-        request = ConfirmRequest(
-            # The question is what it will change, not what it will run: a command line three
-            # nested calls deep is not something anyone can read and judge, so they approve it
-            # unread -- which is worse protection than no gate at all.
-            tool=effect or tool,
-            title=f"Дозволити {tool}?",
-            detail=command if irreversible else detail,
-            payload=dict(frame),
-            reason="gateIrreversible" if irreversible else "",
-        )
+        request = ConfirmRequest(tool=verdict.tool, title=verdict.title, detail=verdict.detail,
+                                 payload=dict(frame), reason=verdict.reason)
         allowed = await await_confirmation(self.bridge, request, CONFIRM_TIMEOUT_S)
         self._answer_frame(frame, allowed)
 
+    def _judge(self, tool: str, detail: str) -> Verdict:
+        """The gate's decision on one permission — `shell_gate.judge_action`, the table omp and
+        Codex share (tcc#181). omp's `Command: …` is split off here: the split is omp's frame
+        format, not the gate's. The gate and the ticks are read per request, so a gate narrowed
+        mid-session holds from the next one."""
+        command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
+        return judge_action(tool, detail, gate=self.gate, always_allowed=self.always_allowed,
+                            read_roots=self._read_roots, command=command)
+
     def _auto_allowed(self, tool: str, detail: str) -> bool:
-        """Whether this can go through without asking.
-
-        Three things pass, and the reasoning for each is different. TCC's own tools raise their
-        own confirmation *inside* the tool, so asking here too prompts twice for one action and
-        teaches the Arbiter to click through both. Tools that only look cannot damage the evidence
-        the tune is built on. And a bash command already judged read-only by the SDK adapter's
-        allowlist -- one definition, shared -- is the same command whichever harness runs it.
-
-        Everything else asks, and a short list can never be talked into passing: anything that
-        writes or evaluates goes in front of the Arbiter even if it looks harmless, because what
-        it can overwrite is a measurement or a ledger.
-        """
-        if self.gate == GATE_NEVER:
-            return True
-        if tool in self.always_allowed:
-            return True  # a remembered tick outranks the `auto` guard below, as on the SDK side
-        if self.gate == GATE_AUTO:
-            # "Don't ask" never meant "don't look" (HUB-028). This returned True before any look,
-            # so on omp a delete passed silently while the menu told the Arbiter `auto` still asks
-            # about what cannot be undone (review of tcc#115). The SDK adapter's narrow check, shared.
-            command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
-            return not (tool == "bash" and bash_is_dangerous(command, self._read_roots))
-        if tool in _ALWAYS_GATED_TOOLS:
-            return False
-        if tool.startswith("mcp__tcc"):
-            return True
-        if tool in _READ_ONLY_TOOLS:
-            return True
-        if tool == "bash":
-            command = detail.split("Command:", 1)[-1].strip() if "Command:" in detail else detail
-            if bash_is_read_only(command, self._read_roots):
-                return True
-            # `foreign`: the skill writing its own namespace is the skill doing its job, and asking
-            # about it teaches the Arbiter to click through the ones that matter.
-            return self.gate == GATE_FOREIGN and self._touches_only_skill_files(command)
-        return False
-
-    @staticmethod
-    def _touches_only_skill_files(command: str) -> bool:
-        paths = re.findall(r"[\w./\-]+\.(?:json|md|jsonl|txt)\b|\b(?:process|state)/[\w./\-]*", command)
-        if not paths:
-            return False
-        return all(any(owned in path for owned in _SKILL_OWNED) for path in paths)
-
-    @staticmethod
-    def effect_of(command: str) -> Optional[str]:
-        """An i18n key naming what a prescribed command writes, or None if TCC does not know it."""
-        for needle, key in _EFFECTS:
-            if needle in command:
-                return key
-        return None
+        """Whether this can go through without asking (`_judge`, read as yes or no)."""
+        return self._judge(tool, detail).allowed
 
     def _answer_frame(self, frame: dict[str, Any], allowed: bool) -> None:
         if frame.get("method") == _CONFIRM_METHOD:

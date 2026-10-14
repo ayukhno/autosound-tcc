@@ -2154,3 +2154,155 @@ def _single_command_is_read_only(command: str, roots: tuple[Path, ...]) -> bool:
             return False
         return _within_roots(script, roots)
     return False
+
+
+# ---- the one decision: omp's gate, and Codex's approvals (tcc#181) ------------------------------
+#
+# Lifted from `OmpSession._auto_allowed` and `_gate` with its order kept, so the two harnesses TCC
+# drives itself answer one table. The Agent SDK route keeps its own (`TuningSession._can_use_tool`):
+# it shares the two readings above, not this order.
+
+# Tools that only look. Auto-approved because `--approval-mode always-ask` otherwise puts a
+# dialog in front of every file the skill opens -- and the skill is built on opening files, so the
+# Arbiter learns to click through, which is worse than not asking.
+READ_ONLY_TOOLS = frozenset({"read", "glob", "grep", "ls", "list", "todo", "hub"})
+
+# Never auto-approved, whatever else is true: these can overwrite a measurement, a ledger or the
+# project's own files, which is the evidence everything else is built on.
+ALWAYS_GATED_TOOLS = frozenset({"write", "edit", "ast_edit", "eval", "browser", "task"})
+
+#: The names a Codex session passes, mapped onto omp's — the names this table is written in.
+#: `item/commandExecution/requestApproval` is "Bash" (the inner command), `item/fileChange/
+#: requestApproval` is "Edit" (its paths); TCC's tools come as `mcp__tcc__<tool>` and need no
+#: mapping (the `mcp__tcc` prefix is the rule). Any other name is taken as it is, and an unknown
+#: one asks. omp's own names (`bash`, `edit`, …) map to themselves.
+TOOL_NAMES = {"Bash": "bash", "Edit": "edit"}
+
+# What the skill's own writers do, so a permission can ask about the effect instead of the command
+# line. "Allow bash: python3 rew_tool/apply.py --preset FULL ..." is not a question anyone can
+# answer -- it is a script that starts a Python that computes -- while "write a ledger snapshot"
+# is. Only the writers are listed: readers never reach the gate.
+_EFFECTS: tuple[tuple[str, str], ...] = (
+    ("state/process.py", "effectProcess"),
+    ("dsp_profile.py", "effectProfile"),
+    ("apply.py", "effectLedger"),
+    ("project.py", "effectProject"),
+    ("contract.py", "effectContract"),
+)
+
+# Paths the skill legitimately owns inside a project.
+_SKILL_OWNED = ("process/", "state/", "dsp_profile.json", "dsp_profile.draft.json",
+                "project.json", "autosound_context.md", "tuning-changelog", "audit-trail.md")
+
+#: The shells `judge_action` reads a command line as.
+SHELL_BASH = "bash"
+SHELL_POWERSHELL = "powershell"
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """What the gate decided about one request, complete enough to act on without deciding again.
+
+    `allowed` — run it without asking. `unasked` — set only when `never` let through what `auto`
+    would have stopped: the caller says it in the dialog (`agent_events.Unasked(unasked)`), never
+    silently (tcc#115). When not allowed, the rest is the confirmation's text, field for field as
+    `mcp_server.ConfirmRequest` takes it: `tool` (the effect's i18n key, else the tool's name — also
+    what a «don't ask again» tick remembers), `title`, `detail` and `reason` (`gateIrreversible`
+    under `auto`, where only what cannot be undone asks)."""
+
+    allowed: bool
+    unasked: str = ""
+    tool: str = ""
+    title: str = ""
+    detail: str = ""
+    reason: str = ""
+
+
+def effect_of(command: str) -> Optional[str]:
+    """An i18n key naming what a prescribed command writes, or None if TCC does not know it."""
+    for needle, key in _EFFECTS:
+        if needle in command:
+            return key
+    return None
+
+
+def touches_only_skill_files(command: str) -> bool:
+    """Whether every path the command names is one the skill owns (the `foreign` gate's pass)."""
+    paths = re.findall(r"[\w./\-]+\.(?:json|md|jsonl|txt)\b|\b(?:process|state)/[\w./\-]*", command)
+    if not paths:
+        return False
+    return all(any(owned in path for owned in _SKILL_OWNED) for path in paths)
+
+
+def _is_dangerous(command: str, roots: Sequence[Path], shell: str) -> bool:
+    """`bash_is_dangerous`, and for a line the caller knows is PowerShell its own reader as well:
+    read as bash, `C:\\Users` loses its backslash and a recursive delete of it passes. Either
+    reading that flags it asks, so a PowerShell line is never judged more loosely than a bash one."""
+    if bash_is_dangerous(command, roots):
+        return True
+    return shell == SHELL_POWERSHELL and _powershell_line_is_dangerous(command.strip(), depth=0)
+
+
+def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[str] = (),
+                 read_roots: Sequence[Path] = (), command: Optional[str] = None,
+                 shell: str = SHELL_BASH) -> Verdict:
+    """Whether this can go through without asking, and if not, what the question says.
+
+    `tool` is omp's name or Codex's (`TOOL_NAMES`); `detail` what it wants to do, shown when it
+    asks; `command` the shell line inside `detail` (omp's `Command: …` already split off by the
+    caller — this does not parse it, so a line that SAYS «Command:» cannot hide its head), or
+    `detail` itself when None. `shell`: `powershell` for a line the caller knows is PowerShell —
+    never read-only, and judged dangerous by either reader. `gate` and `always_allowed` are read
+    per call, so a gate narrowed mid-session takes effect on the next request.
+
+    Three things pass, and the reasoning for each is different. TCC's own tools raise their
+    own confirmation *inside* the tool, so asking here too prompts twice for one action and
+    teaches the Arbiter to click through both. Tools that only look cannot damage the evidence
+    the tune is built on. And a bash command already judged read-only by the SDK adapter's
+    allowlist -- one definition, shared -- is the same command whichever harness runs it.
+
+    Everything else asks, and a short list can never be talked into passing: anything that
+    writes or evaluates goes in front of the Arbiter even if it looks harmless, because what
+    it can overwrite is a measurement or a ledger.
+    """
+    name = TOOL_NAMES.get(tool, tool)
+    line = detail if command is None else command
+    if gate == GATE_NEVER:
+        # `never` asks about nothing, and is never silent about what `auto` would have asked
+        # (tcc#115) — the same line as on the Agent SDK side.
+        dangerous = name == "bash" and _is_dangerous(line, read_roots, shell)
+        return Verdict(True, unasked=line if dangerous else "")
+    ticked = frozenset(always_allowed)
+    if tool in ticked or name in ticked:
+        return Verdict(True)  # a remembered tick outranks the `auto` guard below, as on the SDK side
+    if gate == GATE_AUTO:
+        # "Don't ask" never meant "don't look" (HUB-028). This returned True before any look,
+        # so on omp a delete passed silently while the menu told the Arbiter `auto` still asks
+        # about what cannot be undone (review of tcc#115). The SDK adapter's narrow check, shared.
+        allowed = not (name == "bash" and _is_dangerous(line, read_roots, shell))
+    elif name in ALWAYS_GATED_TOOLS:
+        allowed = False
+    elif name.startswith("mcp__tcc") or name in READ_ONLY_TOOLS:
+        allowed = True
+    elif name == "bash":
+        # `foreign`: the skill writing its own namespace is the skill doing its job, and asking
+        # about it teaches the Arbiter to click through the ones that matter.
+        allowed = (shell != SHELL_POWERSHELL and bash_is_read_only(line, read_roots)
+                   or gate == GATE_FOREIGN and touches_only_skill_files(line))
+    else:
+        allowed = False
+    if allowed:
+        return Verdict(True)
+    # Under `auto` the only thing that reaches here is what cannot be undone, and the question
+    # says so — the same reason, by the same key, as the SDK side (review of tcc#115).
+    irreversible = gate == GATE_AUTO
+    return Verdict(
+        False,
+        # The question is what it will change, not what it will run: a command line three
+        # nested calls deep is not something anyone can read and judge, so they approve it
+        # unread -- which is worse protection than no gate at all.
+        tool=effect_of(line) or tool,
+        title=f"Дозволити {tool}?",
+        detail=line if irreversible else detail,
+        reason="gateIrreversible" if irreversible else "",
+    )
