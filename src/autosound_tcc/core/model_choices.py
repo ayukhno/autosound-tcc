@@ -22,6 +22,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 import urllib.request
 from dataclasses import dataclass
@@ -156,8 +157,10 @@ CATALOGUE_TIMEOUT_S = 20.0
 # does not hold the picker open.
 CLI_TIMEOUT_S = 15.0
 
-#: What Codex offers. Hardcoded because `codex models` needs a terminal (it answers "stdin is not
-#: a terminal" when driven), unlike `agy models` which prints a plain list.
+#: What Codex offers when it cannot be asked — the CLI missing, or `codex app-server` silent. The
+#: list itself is read from `codex app-server`'s `model/list` (`_ask_codex_models`, tcc#182): these
+#: two stood alone until then, and on a ChatGPT login of 2026-10 both were refused while Codex
+#: worked in a terminal on the gpt-6 family.
 CODEX_MODELS: tuple[str, ...] = ("gpt-5.2-codex", "gpt-5.2")
 
 #: The reviewer through the key and nothing else — «API · …» (tcc#74). Both answered live through
@@ -531,14 +534,15 @@ def refresh_cli_catalogue(*, force: bool = False, now=None,
     """
     now = now or time.monotonic
     _load_cached_catalogue()
-    global _CLAUDE_ASKED
+    global _CLAUDE_ASKED, _CODEX_ASKED
     if force:
-        _CLAUDE_ASKED = False  # ↻ asks `claude` again too
+        _CLAUDE_ASKED = _CODEX_ASKED = False  # ↻ asks `claude` and `codex` again too
     for route, fetch in (("agy", _fetch_agy_choices), ("sdk", _fetch_sdk_choices),
-                         (_SDK_CLI_ROUTE, _fetch_sdk_cli_choices)):
+                         (_SDK_CLI_ROUTE, _fetch_sdk_cli_choices),
+                         ("codex", _fetch_codex_choices)):
         if route == "agy" and not force and _skip_agy(now):
             continue
-        if route == _SDK_CLI_ROUTE and _CLAUDE_ASKED:
+        if (route == _SDK_CLI_ROUTE and _CLAUDE_ASKED) or (route == "codex" and _CODEX_ASKED):
             continue
         _LAST_ASKED[route] = now()
         fetched = fetch()
@@ -668,10 +672,97 @@ def codex_choices() -> list[Choice]:
     of vanishing. `agy` cannot: with its CLI gone there is no catalogue to name.
     """
     here = cli_available("codex")
+    _load_cached_catalogue()
+    read = _CLI_CACHE.get("codex") or []
+    if read:
+        # What this login's Codex said it offers (tcc#182); greyed like the floor when the CLI went.
+        return [Choice(harness="codex", model=c.model, label=c.label, provider="openai",
+                       available=here) for c in read]
     return [
         Choice(harness="codex", model=model, label=model, provider="openai", available=here)
         for model in CODEX_MODELS
     ]
+
+
+def _app_server_exchange(binary: str, requests: list, want, timeout: float) -> Optional[dict]:
+    """Send `requests` to `<binary> app-server`, one JSON line each, and return the reply whose
+    `id` is `want`; None on silence, an error or `timeout`.
+
+    The pipe stays open until that reply: `codex app-server` exits at the end of stdin before it
+    answers (measured on 0.162.1), so `run_bounded`'s write-and-close gets nothing back."""
+    try:
+        proc = subprocess.Popen(
+            [binary, "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+            **child.flags())
+    except OSError:
+        return None
+    found: dict = {}
+
+    def read() -> None:
+        for line in proc.stdout:  # type: ignore[union-attr]
+            try:
+                frame = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(frame, dict) and frame.get("id") == want:
+                found["frame"] = frame
+                return
+
+    reader = threading.Thread(target=read, name="tcc-codex-models", daemon=True)
+    reader.start()
+    try:
+        for request in requests:
+            proc.stdin.write(json.dumps(request) + "\n")  # type: ignore[union-attr]
+        proc.stdin.flush()  # type: ignore[union-attr]
+    except OSError:
+        pass
+    reader.join(timeout)
+    try:
+        proc.stdin.close()  # type: ignore[union-attr]
+    except OSError:
+        pass
+    child.kill_tree(proc)
+    try:
+        proc.wait(timeout=child.REAP_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        pass
+    return found.get("frame")
+
+
+def _ask_codex_models() -> list[Choice]:
+    """The models this machine's Codex offers its login, from `codex app-server`'s `model/list`
+    (tcc#182) — the supported way to ask (`codex models` wants a terminal). No turn runs; [] when
+    there is no Codex or it did not answer, and the shipped pair stands in."""
+    binary = shutil.which("codex") if cli_available("codex") else None
+    if binary is None:
+        return []
+    frame = _app_server_exchange(binary, [
+        {"method": "initialize", "id": 0,
+         "params": {"clientInfo": {"name": "autosound-tcc", "title": "TCC", "version": "1"}}},
+        {"method": "initialized"},
+        {"method": "model/list", "id": 1, "params": {}},
+    ], 1, CLI_TIMEOUT_S)
+    data = ((frame or {}).get("result") or {}).get("data") or []
+    out: list[Choice] = []
+    for entry in data:
+        if not isinstance(entry, dict) or entry.get("hidden"):
+            continue
+        model = str(entry.get("model") or entry.get("id") or "")
+        if model:
+            out.append(Choice(harness="codex", model=model,
+                              label=str(entry.get("displayName") or model), provider="openai"))
+    return out
+
+
+def _fetch_codex_choices() -> list[Choice]:
+    """`_ask_codex_models`, once per launch (and again on ↻), as the Claude list is asked."""
+    global _CODEX_ASKED
+    _CODEX_ASKED = True
+    return _ask_codex_models()
+
+
+_CODEX_ASKED = False
 
 
 #: The catalogue as last read in this process, so `choices()` can put a label on a model the user

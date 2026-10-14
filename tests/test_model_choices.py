@@ -1282,3 +1282,69 @@ def test_a_pick_that_reaches_or_has_no_other_route_is_offered_nothing(monkeypatc
 
     assert mc.reviewer_on_a_signed_in_route(reaching) is None
     assert mc.reviewer_on_a_signed_in_route(claude) is None
+
+
+# ---- the Codex list is read from `codex app-server` (tcc#182) -------------------------------
+
+#: `codex app-server` 0.162.1's answers to `initialize` and `model/list` (2026-10-14, this login).
+_CODEX_FRAMES = [json.loads(line) for line in (
+    Path(__file__).parent / "fixtures" / "codex-0.162.1-app-server-model-list.jsonl"
+).read_text(encoding="utf-8").splitlines() if line.strip()]
+
+_REAL_ASK_CODEX = mc._ask_codex_models
+
+
+def test_the_codex_list_is_what_codex_offers_this_login(monkeypatch):
+    """tcc#182: the picker held `gpt-5.2-codex` and `gpt-5.2`, both refused, while Codex worked in a
+    terminal — this login's Codex offers the gpt-6/5.6 family. `model/list` names them."""
+    asked = {}
+
+    def exchange(binary, requests, want, timeout):
+        asked["methods"] = [r.get("method") for r in requests]
+        return next(f for f in _CODEX_FRAMES if f.get("id") == want)
+
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
+    monkeypatch.setattr(mc.shutil, "which", lambda name: "/usr/local/bin/codex")
+    monkeypatch.setattr(mc, "_app_server_exchange", exchange)
+
+    rows = _REAL_ASK_CODEX()
+
+    assert "model/list" in asked["methods"]
+    assert rows[0].key == "codex:gpt-6.1-sol" and rows[0].label == "GPT-6.1-Sol"
+    assert "gpt-5.2-codex" not in [c.model for c in rows]
+    assert all(c.harness == "codex" and c.provider == "openai" and c.available for c in rows)
+
+
+def test_codex_rows_come_from_its_answer_and_the_floor_only_without_one(monkeypatch):
+    monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
+    monkeypatch.setattr(mc, "_CLI_CACHE", {"codex": [
+        Choice(harness="codex", model="gpt-6.1-sol", label="GPT-6.1-Sol", provider="openai")]})
+    assert [c.model for c in mc.codex_choices()] == ["gpt-6.1-sol"]
+
+    monkeypatch.setattr(mc, "_CLI_CACHE", {})
+    assert [c.model for c in mc.codex_choices()] == list(mc.CODEX_MODELS)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX script stands in for codex")
+def test_the_app_server_is_kept_open_until_it_answers(tmp_path):
+    """`codex app-server` exits on stdin's end before answering (measured): the requests go in and
+    the pipe stays open until the reply with the wanted id is read."""
+    import textwrap
+
+    codex = tmp_path / "codex"
+    codex.write_text(textwrap.dedent('''\
+        #!/usr/bin/env python3
+        import json, sys, time
+        for line in sys.stdin:
+            msg = json.loads(line)
+            if msg.get("method") == "model/list":
+                time.sleep(0.2)
+                print(json.dumps({"id": msg["id"], "result": {"data": [{"id": "m1"}]}}), flush=True)
+        '''), encoding="utf-8")
+    codex.chmod(0o755)
+
+    frame = mc._app_server_exchange(
+        str(codex), [{"method": "initialize", "id": 0, "params": {}},
+                     {"method": "model/list", "id": 1, "params": {}}], 1, 5.0)
+
+    assert frame == {"id": 1, "result": {"data": [{"id": "m1"}]}}

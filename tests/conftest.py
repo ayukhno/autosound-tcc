@@ -1174,3 +1174,5 @@ def _no_claude_asked_for_its_models(monkeypatch):
     from autosound_tcc.core import model_choices
 
     monkeypatch.setattr(model_choices, "_ask_claude_models", lambda: [])
+    # And `codex app-server` for Codex's (tcc#182).
+    monkeypatch.setattr(model_choices, "_ask_codex_models", lambda: [])

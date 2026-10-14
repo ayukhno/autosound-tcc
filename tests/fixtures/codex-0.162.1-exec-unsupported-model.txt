@@ -1,0 +1,17 @@
+OpenAI Codex v0.162.1
+--------
+workdir: /tmp/project
+model: gpt-0-nonexistent-tcc
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 00000000-0000-0000-0000-000000000000
+--------
+user
+Say OK.
+
+warning: Model metadata for `gpt-0-nonexistent-tcc` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.
+ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-0-nonexistent-tcc' model is not supported when using Codex with a ChatGPT account."}}
+ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-0-nonexistent-tcc' model is not supported when using Codex with a ChatGPT account."}}

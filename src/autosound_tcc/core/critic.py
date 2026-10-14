@@ -792,6 +792,40 @@ def _refused_tool(said: str) -> str:
     return match.group(1) if match else ""
 
 
+#: Codex's start banner, which `codex exec` prints before anything else (0.162.1).
+_CODEX_BANNER = re.compile(r"OpenAI Codex v\d")
+#: Codex's own refusal line: `ERROR: {"type":"error","status":400,"error":{"message":"…"}}`.
+_CODEX_ERROR = re.compile(r"^\s*ERROR:\s*(.+)$", re.M)
+
+
+def _codex_refusal(detail: str) -> str:
+    """Codex's reason for a failed review, in its own words, or "" when `detail` is not Codex's.
+
+    tcc#182: the tooltip held the banner (`workdir:`, `model:`, `sandbox:`…) and the echoed prompt,
+    and the reason came last, after `ERROR:`. The method keeps 400 characters of a CLI's failure
+    counted from its first `error:` line, and Codex writes `ERROR:` — so most often only the banner
+    arrives. Then that is what is said: the reason did not arrive, and where it is usually found."""
+    if not _CODEX_BANNER.search(detail or ""):
+        return ""
+    reasons: list[str] = []
+    for raw in _CODEX_ERROR.findall(detail):
+        try:
+            payload = json.loads(raw)
+            error = payload.get("error") if isinstance(payload, dict) else None
+            text = str((error or {}).get("message") or payload.get("message") or raw)
+        except (ValueError, AttributeError):
+            text = raw.strip()
+        if text not in reasons:
+            reasons.append(text)
+    pick = ("Pick another Codex model in TCC's footer — the list is read from Codex itself, and ↻ "
+            "reads it again.")
+    if reasons:
+        return f"Codex: {' '.join(reasons)} {pick}"
+    return ("Codex stopped before answering, and its reason did not reach TCC: the method's report "
+            "kept only Codex's start banner, and Codex prints the reason after it. Most often the "
+            "model is not offered to this Codex login. " + pick)
+
+
 def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None) -> str:
     """ONE concrete thing to do, or "" when we cannot name one honestly.
 
@@ -807,6 +841,11 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
     said = _said(detail)
     if not said.strip():
         return ""
+    codex = _codex_refusal(detail)
+    if codex:
+        # Before the word lists: Codex's banner and the prompt it echoes say «approval», «sandbox»
+        # and whatever the package says, and none of that is the reason (tcc#182).
+        return codex
     if any(word in said for word in _PERMISSION_WORDS):
         where = project_dir or config.project_dir()
         # agy's own words, not a guess about its settings (tcc#36). This used to name

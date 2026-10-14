@@ -1756,3 +1756,32 @@ def test_the_reviewer_doctor_is_bounded_on_windows(tmp_path, monkeypatch):
 
     assert said.startswith("doctor failed")
     assert spawns.hung and all(child.killed for child in spawns.hung)
+
+
+# ---- Codex's refusal said in its own words, not its start banner (tcc#182) --------------------
+
+#: `codex exec` 0.162.1 refusing a model this ChatGPT login is not offered (2026-10-14; workdir and
+#: session id replaced): the banner, the echoed prompt, then `ERROR: {json}` twice.
+_CODEX_REFUSAL = (Path(__file__).parent / "fixtures" / "codex-0.162.1-exec-unsupported-model.txt"
+                  ).read_text(encoding="utf-8")
+
+
+def test_codexs_own_error_is_said_first():
+    """tcc#182: the tooltip showed Codex's banner and the echoed prompt, and the reason — at the
+    end, after `ERROR:` — never: «refused» with nothing to act on."""
+    fix = critic.remedy("CLI 'codex': " + _CODEX_REFUSAL, harness="codex")
+
+    assert fix.startswith("Codex: The 'gpt-0-nonexistent-tcc' model is not supported when using "
+                          "Codex with a ChatGPT account."), fix
+    assert "workdir" not in fix and "session id" not in fix
+
+
+def test_a_codex_refusal_cut_to_its_banner_says_the_reason_did_not_arrive():
+    """The method keeps 400 characters of a CLI's failure from its first `error:` line, and Codex
+    writes `ERROR:` — so what reached TCC was the banner alone. Said so, not shown as the reason."""
+    cut = "CLI 'codex': " + _CODEX_REFUSAL.strip()[:400]
+
+    fix = critic.remedy(cut, harness="codex")
+
+    assert "did not reach TCC" in fix, fix
+    assert "workdir" not in fix
