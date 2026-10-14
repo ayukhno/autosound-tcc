@@ -785,6 +785,46 @@ def test_a_new_sweep_typed_as_a_good_take_s_key_never_supersedes_it(tmp_path, mo
     assert asked == [("w-R_1 (sw)", "w-L_1 (sw)")], "the round's own capture is asked about"
 
 
+@pytest.mark.parametrize("pinned", ["", "u1"], ids=["by-typed-spelling", "by-pinned-uuid"])
+def test_a_duplicate_typed_as_the_round_s_listed_title_never_supersedes_its_take(
+        tmp_path, monkeypatch, pinned):
+    """tcc#200's re-review, I1: the round took a capture typed `w-R_01 (sw)` (u1), stored under the
+    list's `w-R_1 (sw)` with `as_in_rew` — and REW also holds a new sweep typed exactly
+    `w-R_1 (sw)` (uB): the AMBIGUOUS case, whose line tells the tuner to rename the other one.
+    Renaming uB to `w-L_1 (sw)` matched the round's row by its title as typed and marked the good
+    take wrong. The pinned uuid decides first, then the typed spelling; the title only after."""
+    from autosound_tcc.core import config, process_writer, vendor_loader
+
+    from tests import _rounds
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    process = _rounds.write_round(tmp_path, version=1, expected=["w-R_1 (sw)", "w-L_1 (sw)"],
+                                  taken=["w-R_1 (sw)"], pad=False)
+    state = process.load()
+    entry = state["capture"]["taken"]["w-R_1 (sw)"]
+    entry["as_in_rew"] = "w-R_01 (sw)"
+    if pinned:
+        entry["verified"] = {"ok": True, "uuid": pinned}
+    process._write(state)
+    asked = []
+    monkeypatch.setattr(process_writer, "supersede_capture",
+                        lambda project_dir, wrong, right: asked.append((wrong, right)) or (0, "", ""))
+    panel = MeasurementPanel()
+    answer = {"1": {"title": "w-R_01 (sw)", "uuid": "u1", "date": "2026-Aug-25 20:10:00"},
+              "2": {"title": "w-R_1 (sw)", "uuid": "uB", "date": "2026-Aug-25 20:12:00"}}
+    panel._taking = capture_import.candidates(answer, tmp_path)
+    duplicate = [row for row in panel._taking if row.uuid == "uB"]
+
+    panel._supersede_renamed(duplicate, {"uB": "w-L_1 (sw)"})
+    assert asked == [], "uB is not the round's capture: asked nothing"
+    own = [row for row in panel._taking if row.uuid == "u1"]
+    panel._supersede_renamed(own, {"u1": "w-L_1 (sw)"})
+    assert asked == [("w-R_01 (sw)", "w-L_1 (sw)")], "the round's own capture is asked about"
+
+
 def test_a_project_on_a_copy_before_v314_still_sends_a_same_key_rename(
         tmp_path, tmp_path_factory, monkeypatch):
     """tcc#200's review, I2(b): a bound copy before v3.1.4 matches raw titles, and for it a rename

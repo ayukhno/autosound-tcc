@@ -255,14 +255,19 @@ def _origin_of(foreign: bool, project: str, their_n: str) -> str:
 
 def _is_this_capture(entry: dict, title: str, row) -> bool:
     """Whether the round's row `title` (its `entry`) is the capture `row` the import window holds:
-    the same title as typed; else, found by key under the list's title, the uuid its verdict pins
-    when there is one, or the spelling it was typed as (`as_in_rew`, #153) when there is none."""
-    if title == row.title:
-        return True
-    pinned = str(((entry or {}).get("verified") or {}).get("uuid") or "")
+    the uuid its verdict pins decides when there is one; else the spelling it was typed as
+    (`as_in_rew`, #153) when the method kept one; only a row with neither — a round an older copy
+    wrote, stored under the title as typed — is matched by that title. In this order because a
+    duplicate typed exactly as the list's title (the AMBIGUOUS case, whose line says to rename the
+    other one) shares the row's title and is NOT its capture (tcc#200's re-review, I1)."""
+    entry = entry or {}
+    pinned = str((entry.get("verified") or {}).get("uuid") or "")
     if pinned:
         return pinned == row.uuid
-    return str((entry or {}).get("as_in_rew") or "") == row.title
+    typed = str(entry.get("as_in_rew") or "")
+    if typed:
+        return typed == row.title
+    return title == row.title
 
 
 def _arrows(pairs) -> str:
