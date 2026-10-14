@@ -1020,7 +1020,7 @@ class DiagnosticsDialog(QDialog):
         channel = updates.current_channel()
         words = {"wait": i18n.t("updTermWait"), "updating": i18n.t("updTermUpdating"),
                  "done": i18n.t("updTermDone"), "failed": i18n.t("updTermFailed"),
-                 "moved": i18n.t("updTermMoved")}
+                 "moved": i18n.t("updTermMoved"), "unpinned": i18n.t("updTermUnpinned")}
         self._tcc_job = _UpdateStep(lambda: updates.prepare_tcc_update(channel, words=words))
         self._tcc_timer.start()
 

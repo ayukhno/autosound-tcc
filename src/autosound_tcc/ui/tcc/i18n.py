@@ -262,6 +262,9 @@ _CORE: dict[Lang, dict[str, str]] = {
         "updTermFailed": "The update did not finish — the lines above say why.",
         "updTermMoved": "The new version changed after it was checked, or the server did not "
                         "answer — nothing was installed. Start TCC and press «Update TCC» again.",
+        "updTermUnpinned": "This uv cannot hold the update to the tested versions (that needs uv "
+                           "0.5.6 or newer) — installing without them, so uv chooses the versions. "
+                           "This uv:",
         "updToolsTitle": "Tools the installer put in",
         "updToolsChecking": "asking omp, agy, gh and Claude Code for their versions — this can take a minute…",
         "updToolsNone": "none of omp, agy, gh, Claude Code is installed here — nothing to update",
@@ -623,6 +626,8 @@ answers the first five questions anybody would ask.",
         "copiedValue": "Copied: {value}",
         "criticClipboardOnly": "clipboard only",
         "criticClipboardOnlyTip": "{model} is a {vendor} model and this machine has neither that vendor's API key nor its CLI. `call_critic` will still work — it hands you the package to review by hand — but nothing is called.",
+        "criticSignedInRoute": "{model} goes through the API key, and this machine has none. The same vendor answers here through a CLI that is signed in: {instead}. Take it in this box, or in the footer.",
+        "criticTakeInstead": "Use {model}",
         "criticUnknownVendorTip": "The reviewer script calls Google, Anthropic or OpenAI models; {model} is none of those, so no transport here can run it. It will hand you a package to review by hand instead of calling anything.",
         "protTitle": "Protective filters for this capture round",
         "protRound": "Round {series}. What was in the signal path while these sweeps were taken.",
@@ -1597,6 +1602,9 @@ Choose sweeps (sw) above to read this.",
         "updTermFailed": "Оновлення не завершилось — чому, написано вище.",
         "updTermMoved": "Нова версія змінилась після перевірки, або сервер не відповів — нічого "
                         "не встановлено. Запусти ТСС і натисни «Оновити ТСС» ще раз.",
+        "updTermUnpinned": "Цей uv не вміє тримати оновлення на перевірених версіях (для цього "
+                           "потрібен uv 0.5.6 або новіший) — ставлю без них, тож версії вибирає uv. "
+                           "Цей uv:",
         "updToolsTitle": "Програми, які поставив інсталятор",
         "updToolsChecking": "питаю omp, agy, gh і Claude Code про їхні версії — це може тривати хвилину…",
         "updToolsNone": "omp, agy, gh, Claude Code тут не встановлено — нічого оновлювати",
@@ -1944,6 +1952,8 @@ Choose sweeps (sw) above to read this.",
         "copiedValue": "Скопійовано: {value}",
         "criticClipboardOnly": "лише буфер обміну",
         "criticClipboardOnlyTip": "{model} — модель вендора {vendor}, а на цій машині нема ні його API-ключа, ні CLI. `call_critic` спрацює, але нічого не викличе: він віддасть пакет, який ви рецензуєте руками.",
+        "criticSignedInRoute": "{model} іде через API-ключ, а на цій машині його нема. Той самий вендор відповідає тут через CLI, у який виконано вхід: {instead}. Візьми його в цьому вікні або внизу.",
+        "criticTakeInstead": "Узяти {model}",
         "criticUnknownVendorTip": "Скрипт рецензента вміє викликати моделі Google, Anthropic або OpenAI; {model} — не з них, тож жоден тутешній транспорт її не запустить. Замість виклику він віддасть пакет для ручної рецензії.",
         "protTitle": "Захисні фільтри цього набору замірів",
         "protRound": "Набір {series}. Що було в тракті, поки знімались ці свіпи.",
@@ -2861,6 +2871,9 @@ Choose sweeps (sw) above to read this.",
         "updTermFailed": "Aktualizacja się nie zakończyła — powód jest wyżej.",
         "updTermMoved": "Nowa wersja zmieniła się po sprawdzeniu albo serwer nie odpowiedział — "
                         "nic nie zainstalowano. Uruchom TCC i naciśnij «Zaktualizuj TCC» jeszcze raz.",
+        "updTermUnpinned": "Ten uv nie potrafi utrzymać aktualizacji na przetestowanych wersjach "
+                           "(do tego potrzeba uv 0.5.6 lub nowszego) — instaluję bez nich, więc "
+                           "wersje wybiera uv. Ten uv:",
         "updToolsTitle": "Narzędzia dodane przez instalator",
         "updToolsChecking": "pytam omp, agy, gh i Claude Code o ich wersje — to może potrwać minutę…",
         "updToolsNone": "żadne z omp, agy, gh, Claude Code nie jest tu zainstalowane — nie ma czego aktualizować",
@@ -3239,6 +3252,8 @@ Choose sweeps (sw) above to read this.",
         "criticClipboardOnly": 'tylko schowek',
         "criticClipboardOnlyTip": '{model} to model producenta {vendor}, a ta maszyna nie ma ani jego klucza API, ani jego CLI. '
                                   '`call_critic` zadziała — odda ci pakiet do recenzji ręcznej — ale nic nie zostanie wywołane.',
+        "criticSignedInRoute": "{model} działa przez klucz API, a na tym komputerze go nie ma. Ten sam dostawca odpowiada tu przez CLI, w którym jesteś zalogowany: {instead}. Wybierz go w tym oknie albo na dole.",
+        "criticTakeInstead": "Użyj {model}",
         "criticUnknownVendorTip": 'Skrypt recenzenta wywołuje modele Google, Anthropic albo OpenAI; {model} nie jest żadnym z '
                                   'nich, więc żaden tutejszy transport go nie uruchomi. Zamiast wywołania odda ci pakiet do '
                                   'recenzji ręcznej.',
@@ -4204,6 +4219,9 @@ Choose sweeps (sw) above to read this.",
         "updTermMoved": "Die neue Version hat sich nach der Prüfung geändert, oder der Server hat "
                         "nicht geantwortet — es wurde nichts installiert. Starte TCC und drücke "
                         "«TCC aktualisieren» noch einmal.",
+        "updTermUnpinned": "Dieses uv kann das Update nicht auf den getesteten Versionen halten "
+                           "(dafür braucht es uv 0.5.6 oder neuer) — installiere ohne sie, also "
+                           "wählt uv die Versionen. Dieses uv:",
         "updToolsTitle": "Tools, die der Installer eingerichtet hat",
         "updToolsChecking": "frage omp, agy, gh und Claude Code nach ihren Versionen — das kann eine Minute dauern…",
         "updToolsNone": "weder omp, agy, gh noch Claude Code sind hier installiert — nichts zu aktualisieren",
@@ -4586,6 +4604,8 @@ Choose sweeps (sw) above to read this.",
         "criticClipboardOnlyTip": '{model} ist ein Modell von {vendor}, und diese Maschine hat weder dessen API-Schlüssel noch '
                                   'dessen CLI. `call_critic` funktioniert weiterhin — es gibt dir das Paket zur Prüfung von '
                                   'Hand —, aber es wird nichts aufgerufen.',
+        "criticSignedInRoute": "{model} läuft über den API-Schlüssel, und auf diesem Rechner gibt es keinen. Derselbe Anbieter antwortet hier über eine CLI, in der du angemeldet bist: {instead}. Übernimm ihn in diesem Fenster oder unten.",
+        "criticTakeInstead": "{model} verwenden",
         "criticUnknownVendorTip": 'Das Prüfer-Skript ruft Modelle von Google, Anthropic oder OpenAI auf; {model} ist keines '
                                   'davon, also kann kein Transport hier es starten. Es gibt dir stattdessen ein Paket zur '
                                   'Prüfung von Hand.',

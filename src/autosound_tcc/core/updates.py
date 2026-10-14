@@ -144,8 +144,8 @@ TCC_WINDOW_WORDS = {
     "failed": "The update did not finish — the lines above say why.",
     "moved": "The new version changed after it was checked, or the server did not answer — "
              "nothing was installed. Start TCC and press «Update TCC» again.",
-    "unpinned": "uv did not install the tested versions (constraints.txt) — trying once more "
-                "without them, so uv chooses the versions this time.",
+    "unpinned": "This uv cannot hold the update to the tested versions (that needs uv 0.5.6 or "
+                "newer) — installing without them, so uv chooses the versions. This uv:",
 }
 
 #: How long the install script waits for the server to name the tag's commit (tcc#123). The person
@@ -237,10 +237,16 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     time and doubles `^`, so `%~dp0` on the `call` line breaks a folder like `50%off`; `set` takes
     it once, and `%%tcc_pins%%` is expanded by `call` itself, where the value is not read again.
 
-    **A refused pinned install is tried once more without the file**, saying so (`unpinned`): a uv
+    **Whether this uv takes the file is asked before the install, not guessed after it.** A uv
     older than 0.5.6 does not know `uv tool install --constraints` (uv #9547), and the file must
-    never fail an update that would have gone through without it. The second try's own failure is
-    the update's failure, as before.
+    never fail an update that would have gone through without it. So the script reads `uv tool
+    install --help` first: an option line `-c, --constraints` (not `--build-constraints`) → the
+    pinned install, and its failure is the update's failure; anything else — an old uv, or one
+    that would not answer — → the plain install as before, after the `unpinned` line and uv's
+    own version. Asked in the script and not by TCC: it is the uv the terminal's PATH finds that
+    installs, and an app started from the Dock does not see that PATH. Never a retry after a
+    failure: a dropped network or a locked file is not an old uv, and a retry without the file
+    would put an untested set on the machine and blame the file for it (the re-review of #194).
     """
     if folder is not None and not (Path(folder).is_absolute()
                                    and Path(folder).name.startswith(_UPDATE_FOLDER_PREFIX)):
@@ -250,8 +256,7 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     said = {**TCC_WINDOW_WORDS, **(words or {})}
     windows = _is_windows(platform)
     command = tcc_install_command(tag)
-    held = tcc_install_command(tag, '"%%tcc_pins%%"' if windows
-                               else f'"$(dirname -- "$0")/{TCC_CONSTRAINTS}"')
+    held = tcc_install_command(tag, '"%%tcc_pins%%"' if windows else '"$tcc_pins"')
     if windows:
         # UTF-8 with `chcp 65001`, so the Arbiter's language arrives whole (the file is written
         # UTF-8, and cmd decodes each line it reads with the code page current at that moment).
@@ -286,14 +291,19 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             f'powershell -NoProfile -Command "Wait-Process -Id {pid} -ErrorAction SilentlyContinue"',
             *guard,
             _cmd_echo(said["updating"]),
-            *([f'set "tcc_pins=%~dp0{TCC_CONSTRAINTS}"',
+            # `goto` keeps the errorlevel, so `:ran` reads the install that ran, either one.
+            *(['uv tool install --help 2>nul | findstr /l /c:" --constraints " >nul',
+               "if errorlevel 1 goto unpinned",
+               f'set "tcc_pins=%~dp0{TCC_CONSTRAINTS}"',
                f"call {held}",
-               "if not errorlevel 1 goto installed",
+               "goto ran",
+               ":unpinned",
                "echo.",
-               _cmd_echo(said["unpinned"])] if constraints else []),
+               _cmd_echo(said["unpinned"]),
+               "call uv --version 2>nul"] if constraints else []),
             f"call {command}",
+            *([":ran"] if constraints else []),
             "if errorlevel 1 goto failed",
-            *([":installed"] if constraints else []),
             "echo.",
             _cmd_echo(said["done"]),
             "goto end",
@@ -340,8 +350,20 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             f"while kill -0 {pid} 2>/dev/null; do sleep 1; done",
             *guard,
             say(shlex.quote(said["updating"])),
-            (f"if {held} || {{ echo; {say(shlex.quote(said['unpinned']))}; {command}; }}; then"
-             if constraints else f"if {command}; then"),
+            *([
+                # Outside the function: `$0` is the script there in every sh.
+                f'tcc_pins="$(dirname -- "$0")/{TCC_CONSTRAINTS}"',
+                "tcc_install() {",
+                "  if uv tool install --help 2>/dev/null | grep -qF -e ' --constraints '; then",
+                f"    {held}",
+                "  else",
+                "    echo; " + say(shlex.quote(said["unpinned"])),
+                "    uv --version 2>/dev/null",
+                f"    {command}",
+                "  fi",
+                "}",
+                "if tcc_install; then",
+            ] if constraints else [f"if {command}; then"]),
             "  echo; " + say(shlex.quote(said["done"])),
             "else",
             "  echo; " + say(shlex.quote(said["failed"])),

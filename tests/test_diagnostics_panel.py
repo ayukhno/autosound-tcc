@@ -872,6 +872,32 @@ def _tag_checked(monkeypatch,
     return asked
 
 
+def test_the_line_about_an_old_uv_is_in_the_reader_s_language(monkeypatch, tmp_path):
+    """#194: a release with `constraints.txt` asks uv first, and the line said when this uv cannot
+    take the file reaches the window translated, like every other line of it."""
+    import tempfile
+
+    from autosound_tcc.core import terminal_launcher, updates
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    _app()
+    dialog = DiagnosticsDialog()
+    dialog._show_update(updates.Status("tcc", "0.1.1", "0.9.9", True))
+    seen = []
+    monkeypatch.setattr(terminal_launcher, "run_script", lambda path: seen.append(path))
+    _tcc_at(monkeypatch, "0.1.1")
+    monkeypatch.setattr(updates, "newest_tcc_tag", lambda channel="stable": "v0.9.9")
+    _tag_checked(monkeypatch, (True, "v0.9.9: signature good (ayukhno)", "", "c" * 40,
+                               b"pyside6-essentials==6.11.2\n"))
+
+    dialog._update_tcc()
+    _finish_tcc_update(dialog)
+
+    script = seen[0].read_text(encoding="utf-8")
+    assert "--constraints" in script
+    assert i18n.t("updTermUnpinned") in script
+
+
 def test_updating_tcc_is_handed_to_a_terminal(monkeypatch, tmp_path):
     """TCC cannot replace its own running files -- on Windows not at all -- so it does not try.
     The window runs a script file TCC wrote, so what it shows is the person's lines (hub #221)."""
