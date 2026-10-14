@@ -2294,6 +2294,24 @@ def _pick_group(dialog, name: str) -> None:
     dialog._group_combo.setCurrentIndex(at)
 
 
+def test_a_group_s_aside_waits_for_its_own_curves_while_they_load():
+    """#209 (the re-review of G10 fix B, out of scope there): a group pick set «What is drawn is
+    the sum of a different set» and reloaded, and until the read answered the previous selection's
+    curves stood under it — an aside about curves that were not yet drawn. Held while what is
+    drawn is not this selection's, as it is while nothing is."""
+    dialog = _group_dialog()
+    _fetch(dialog)
+    aside = "sw_01 (sw)"
+    _pick_group(dialog, "SW+Ws")
+    dialog._version_combo.setCurrentIndex(dialog._version_combo.findData("01"))
+    assert dialog._group_note and aside in dialog._group_note, "the situation this is about"
+    assert [t.name for t in dialog._view._traces] == ["w-L_02 (sw)", "w-R_02 (sw)"], "loading"
+
+    assert aside not in dialog._status.text(), dialog._status.text()
+    _fetch(dialog)
+    assert aside in dialog._status.text(), "said over its own curves"
+
+
 def test_a_group_is_its_members_sweeps_at_one_config_version():
     """The ask that started step 3: see what the woofers do together before touching the DSP. The
     names are the car's own glossary, and what gets fetched is each member's `(sw)` capture — the

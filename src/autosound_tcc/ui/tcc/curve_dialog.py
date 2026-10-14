@@ -1744,9 +1744,13 @@ class CurveDialog(QDialog):
         """
         # The group's aside — «what is drawn is the sum of a different set» — is about what is
         # drawn, and is held back while nothing is: a failed read or REW offline left it over the
-        # empty plot (R3). Held, not dropped: the same set read again is the same aside. A group
-        # or round that cannot be shown at all is a refusal, and stands whatever is drawn.
-        group = self._group_note if self._note_bad or self._view._traces else ""
+        # empty plot (R3). Held, not dropped: the same set read again is the same aside. And
+        # held while what is drawn is the previous selection's — `_plotted` is empty from a pick
+        # until its curves come back — or it stood over curves that were not its set while they
+        # loaded (#209). A group or round that cannot be shown at all is a refusal, and stands
+        # whatever is drawn.
+        drawn = self._view._traces and self._plotted
+        group = self._group_note if self._note_bad or drawn else ""
         self._note = " ".join(
             _sentence(part) for part in (self._read_note, self._refused_note, group,
                                          self._twice_note, self._bank_note) if part
@@ -1879,6 +1883,8 @@ class CurveDialog(QDialog):
             # fails keeps it, and an emptied plot uncovered it (N-B1, #209).
             self._unread, self._apf_unshown, self._kept_raw = {}, {}, {}
         self._view.set_traces(traces)
+        # What came back, in the order it is drawn: the group's aside is about these (#209).
+        self._plotted = [str(trace.name) for trace in traces]
         self._render_note()
         # A curve already argued about comes back with its answer on it. `set_traces` clears the
         # delays by design (a new selection is a new question); the bank is what makes coming BACK
@@ -1890,10 +1896,9 @@ class CurveDialog(QDialog):
         self._frame(traces, positions)
         self._sync_channel_delay()
         self._render_bank()
-        # What came back, in the order it is drawn — and the chips are re-coloured off it, because
-        # a title REW could not produce is missing from here while its chip is still on the row,
-        # and from that point the two lists no longer agree about which colour belongs to whom.
-        self._plotted = [str(trace.name) for trace in traces]
+        # The chips are re-coloured off what came back (`_plotted`, set above), because a title
+        # REW could not produce is missing from it while its chip is still on the row, and from
+        # that point the two lists no longer agree about which colour belongs to whom.
         self._render_chips()
 
     def _restore_bank(self, *, came_back: bool = True) -> None:
