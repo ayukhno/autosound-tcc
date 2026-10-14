@@ -107,7 +107,7 @@ _strictest_said: dict[str, str] = {}
 #: written since.
 _gate_seen: dict[str, int] = {}
 #: For each store, what looking beside it for a copy set aside found while it held no gate: the
-#: store as `stat` saw it then (`own_store.file_state`), the sentence to say (`STRICTEST_COPY_SAID`,
+#: store as `stat` saw it then (`own_store.file_state`) with its folder's mtime, the sentence to say (`STRICTEST_COPY_SAID`,
 #: `STRICTEST_UNLISTED_SAID`) or "", and the copies seen. Looked again only when the store changed
 #: — another process can set it aside after this one looked (Fable's re-review of the branch fix,
 #: round 2, I1) — not at every permission judged. Dropped when a gate is picked.
@@ -160,7 +160,7 @@ def project_gate(tcc_dir: Path, machine_choice: str = "",
         history = _copy_history.get(store, frozenset())
     copy = ""
     if not chosen and not gone:
-        state = own_store.file_state(path)
+        state = (own_store.file_state(path), _folder_mtime(path))
         if seen is not None and seen[0] == state:
             copy = seen[1]
         else:
@@ -174,6 +174,17 @@ def project_gate(tcc_dir: Path, machine_choice: str = "",
     with _strictest_lock:
         _strictest_said.pop(store, None)
     return effective_gate(chosen, machine_choice)
+
+
+def _folder_mtime(path: Path) -> Optional[int]:
+    """The store's folder's `st_mtime_ns`, or None: it moves on every entry made, removed or
+    renamed in it (POSIX and NTFS alike), so a copy set aside there by another process changes the
+    memo's key even when the store was absent both times this process looked (Fable's re-review of
+    the branch fix, round 3, m1; #208)."""
+    try:
+        return os.stat(path.parent).st_mtime_ns
+    except OSError:
+        return None
 
 
 def _look_for_copy(path: Path, history: frozenset) -> tuple[str, frozenset]:

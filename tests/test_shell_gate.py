@@ -871,6 +871,28 @@ def test_a_store_another_process_set_aside_runs_the_strictest_gate_here_too(tmp_
     assert app_log_told[told:] == [shell_gate.STRICTEST_COPY_SAID.format(path=store, copy=copy)]
 
 
+def test_a_store_absent_when_last_looked_then_written_and_set_aside_elsewhere_is_seen(
+        tmp_path, app_log_told):
+    """Fable's re-review of the branch fix, round 3, m1 (#208): the look beside the store is
+    memoised on the store's own `stat`, and an absent store reads the same before and after. With
+    no settings file at all when this process last looked, another TCC writes one, it breaks and
+    is set aside — absent again, a copy beside it — and this process answered from the memo: the
+    machine's gate, nothing said. The folder's own `st_mtime_ns` is in the memo's key: an entry
+    made, removed or renamed in `.tcc/` moves it."""
+    from autosound_tcc.core import project_settings, shell_gate
+
+    store = project_settings.path_for(tmp_path)
+    assert not store.exists()
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_AUTO
+
+    store.write_text('{"effort": "high"}', encoding="utf-8")  # the other TCC's pick ...
+    copy = _another_process_sets_it_aside(store)  # ... broken, and set aside there
+    assert not store.exists(), "absent again, as when this process last looked"
+
+    assert shell_gate.project_gate(tmp_path, shell_gate.GATE_AUTO) == shell_gate.GATE_WRITES
+    assert app_log_told == [shell_gate.STRICTEST_COPY_SAID.format(path=store, copy=copy)]
+
+
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,
                     reason="POSIX permissions, and root lists a folder whatever its mode")
 def test_a_store_whose_folder_cannot_be_looked_in_runs_the_strictest_gate(tmp_path,
