@@ -2080,6 +2080,18 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   skill: TCC-054 (hub #269, the round's raw-title matching vs `name_key`). Resume:
   `hub/bin/role tcc --resume 530f0561-3f1c-4b26-a240-c7149565668c`.
 
+### F-101 — After v1.1.3: the installer walk, then the queue
+
+**Статус**: open · written 2026-10-14 at «добраніч», after v1.1.3 was tagged and W-9's milestone closed · resume:
+`hub/bin/role tcc --resume b9350366-d017-4e9a-be26-e092e6bfff29`
+
+- **The installer path walked by hand for v1.1.3** (`WAVES.md` §3.1, TCC only — the Arbiter's): an update to v1.1.3
+  on Windows from an installed v1.1.x.
+- **Then the start, the Arbiter picks:** the queue `to:tcc` — hub #242, #246, #262, #277; passat #257, #260, #264,
+  #268 — and this repo's new issues #180–#192 (several duplicates: the capture window not opening after an update,
+  the capture panel freezing on Done, the curves window crashing). Between waves, so they are collection: into the
+  pool, duplicates merged, no fixing.
+
 ### F-100 — W-9's review findings left for the next wave
 
 **Статус**: чекає · the next wave's collection takes them in · from W-9's group reviews, the two Fable seats and
