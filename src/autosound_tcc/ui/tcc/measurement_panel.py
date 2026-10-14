@@ -36,8 +36,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import (capture_import, config, level_calibration, process_writer, protective,
-                                title_fixes)
+from autosound_tcc.core import (app_log, capture_import, config, level_calibration, process_writer,
+                                protective, title_fixes)
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc import discard, i18n, qt_shutdown
@@ -698,6 +698,7 @@ class MeasurementPanel(QWidget):
         #: What REW's level calibration says about the round against the last one (tcc#198), as
         #: `level_calibration.Note`s — keys, so a language switch redraws them.
         self._level_notes: list = []
+        self._level_failed_said = False
         self._rows: list[_MeasRow] = []
         self._preset_provider = preset_provider
         self._settings = get_settings()
@@ -939,10 +940,21 @@ class MeasurementPanel(QWidget):
     def _say_level_calibration(self) -> None:
         """What REW's last answer and TCC's own record say about the round's level calibration
         (tcc#198): on this card while it holds, and on the strip once. Nothing is corrected — the
-        common base is the method's (hub #285)."""
+        common base is the method's (hub #285).
+
+        Never in the way of what called it — the import's window, the checklist's redraw: anything
+        it raises is logged and said once, and the card carries no line (the Rounds review)."""
         project = config.project_dir()
-        self._level_notes = level_calibration.notes(project, self._rew_answer)
-        level_calibration.tell(project, self._level_notes, self._level_sentence)
+        try:
+            self._level_notes = level_calibration.notes(project, self._rew_answer)
+            level_calibration.tell(project, self._level_notes, self._level_sentence)
+        except Exception as exc:  # noqa: BLE001 — a comparison is never worth the import
+            app_log.logger().exception("REW's level calibration could not be compared")
+            self._level_notes = []
+            if not self._level_failed_said:
+                self._level_failed_said = True
+                app_log.warn(i18n.t("levelCalFailed").format(
+                    error=f"{type(exc).__name__}: {exc}"))
         self._render_status()
 
     def set_no_project(self, message: str) -> None:

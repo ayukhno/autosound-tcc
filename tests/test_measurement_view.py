@@ -1796,8 +1796,45 @@ def test_the_window_checks_an_unplanned_take_as_it_checks_a_planned_one(project)
 
     round_ = _check(process, {"w-L_7 (sw)": _held("u-wl"), "sw_7 (sw)": _held("u-sw", _SILENCE),
                               "sw_7 (rta)": _held("u-rta", _NOT_SWEPT, applicable=False)})
-    assert mv.to_check(round_, held, project) == [sw], "the bad one is asked again; the rest settled"
+    assert mv.to_check(round_, held, project) == [], "judged, each: not asked again till retaken"
     assert mv.unusable_lines(round_, [sw, rta], project) == [f"{sw} — {_SILENCE}"]
+
+
+def test_an_unplanned_take_with_a_verdict_is_not_checked_again_until_it_is_retaken(project):
+    """tcc#199's review: a bad unplanned sweep was re-sent to the check on every change of REW's
+    list for the rest of the round. Once judged — good or bad — it is asked again only when it is
+    taken again (the method drops the row's verdict on a re-take). A planned one keeps today's
+    rule: bad is asked again, its re-take may be there now."""
+    process = _round(project, version=7, expected=["w-L_7 (sw)"],
+                     taken=["w-L_7 (sw)", "sw_7 (sw)"])
+    sw, wl = _as_typed("sw_7 (sw)"), _as_typed("w-L_7 (sw)")
+    round_ = _check(process, {"w-L_7 (sw)": _held("u-wl", _SILENCE),
+                              "sw_7 (sw)": _held("u-sw", _SILENCE)})
+
+    assert mv.to_check(round_, [wl, sw], project) == [wl], "the planned bad one only"
+    process.record_capture(sw)  # taken again: a new curve under the title, no verdict yet
+    assert mv.to_check(process.load()["capture"], [wl, sw], project) == [wl, sw]
+
+
+def test_an_unplanned_take_absent_at_its_check_is_asked_again(project):
+    """Absent is no verdict on the curve: REW did not hold it then, and may now."""
+    process = _round(project, version=7, expected=["w-L_7 (sw)"], taken=["sw_7 (sw)"])
+    sw = _as_typed("sw_7 (sw)")
+    round_ = _check(process, {"sw_7 (sw)": _not_held(sw)})
+
+    assert mv.to_check(round_, [sw], project) == [sw]
+
+
+def test_a_superseded_unplanned_typo_is_not_checked(project):
+    """A typo corrected (S-039) is a trace, not a capture the round took: never handed to the
+    check, planned row or not."""
+    _round(project, version=7, expected=["w-L_7 (sw)"], taken=["w-L_9 (sw)"],
+           superseded={"w-L_9 (sw)": "w-L_7 (sw)"})
+    round_ = process_view.capture_round(project)
+    typo = _as_typed("w-L_9 (sw)")
+    assert round_["taken"][typo]["superseded_by"]
+
+    assert typo not in mv.to_check(round_, [typo, _as_typed("w-L_7 (sw)")], project)
 
 
 def test_the_card_shows_an_unplanned_takes_verdict_like_a_planned_ones(project):

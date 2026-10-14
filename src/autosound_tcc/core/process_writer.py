@@ -91,13 +91,21 @@ LANDED_IN = {
     "target": "2.8.0",
 }
 
-#: Flags newer than their command, and the first method tag whose `process.py` has each — read as
-#: `LANDED_IN` is (`git show <tag>:…/state/process.py`, 2026-10-14). A bound copy without one is
-#: refused before it starts (`method_cli`'s `UnknownFlag`), and `_run` says which version has it.
+#: A command's flags, and the first method tag whose `process.py` has each — read as `LANDED_IN`
+#: is (`git show <tag>:…/state/process.py`, 2026-10-14). A bound copy without one is refused before
+#: it starts (`method_cli`'s `UnknownFlag`), and `_run` says which version has it (tcc#199). Every
+#: flag `start_capture` sends is here (`test_every_flag_start_capture_sends_has_…`).
 FLAG_LANDED_IN = {
-    "--under": "3.0.60",
-    "--level": "3.0.60",
-    "--level-read-as": "3.0.60",
+    "capture-start": {
+        "--step": "3.0.0",
+        "--origin": "3.0.59",
+        "--under": "3.0.60",
+        "--level": "3.0.60",
+        "--level-read-as": "3.0.60",
+        "--plan": "3.0.62",
+        "--optional": "3.0.62",
+        "--start": "3.0.62",
+    },
 }
 
 
@@ -199,7 +207,7 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
     try:
         code, out, err = _spawn(project_dir, args, timeout_s, **kw)
     except UnknownFlag as unknown:
-        since = FLAG_LANDED_IN.get(unknown.flag)
+        since = FLAG_LANDED_IN.get(args[0], {}).get(unknown.flag)
         if since is None:
             raise
         raise FlagTooOld(unknown.flag, args[0], since, _remedy(project_dir)) from None

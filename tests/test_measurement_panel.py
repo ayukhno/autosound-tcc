@@ -1963,7 +1963,7 @@ def test_a_copy_older_than_both_plan_and_origin_is_refused_whole_and_opens_no_un
     `--origin`: no round opened, and the pass refused whole. It used to be said as «recorded as
     unplanned» too, set before the retry had returned, for a round that never opened. The real
     chain: the copy's own `process.py` text through the real `spawn`, and no child starts."""
-    from autosound_tcc.core import method_cli, process_writer
+    from autosound_tcc.core import method_cli
     from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
 
     from tests._method_copies import copy_of_the_method, linked_and_approved
@@ -1987,7 +1987,9 @@ def test_a_copy_older_than_both_plan_and_origin_is_refused_whole_and_opens_no_un
     worker.run()
 
     assert seen["opened"] == ""
-    assert seen["refused"] == [str(process_writer.UnknownFlag("--origin"))]
+    # With the version that has it (`FlagTooOld`, tcc#199's review), still the one refusal.
+    refused, = seen["refused"]
+    assert "does not know --origin of `capture-start`" in refused and "v3.0.59" in refused, refused
     assert seen["unplanned"] == "", f"said for a round that never opened: {seen['unplanned']}"
     assert seen["recorded"] == [], "nothing recorded without a round"
 
@@ -2684,6 +2686,92 @@ def test_the_card_and_the_strip_name_a_change_of_rews_level_calibration(tmp_path
 
     panel._on_refreshed(listing(103.35))
     assert panel._level_label.isHidden() and not panel._level_label.text()
+
+
+def _three_rounds_apart(tmp_path, monkeypatch):
+    """Rounds 3 and 4 written by the method; REW's listing at 103.35 and 120.0. What reached the
+    strip as a warning is returned."""
+    from autosound_tcc.core import app_log, config, vendor_loader
+
+    from tests import _rounds
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    told = []
+    monkeypatch.setattr(app_log, "warn", told.append)
+    _rounds.write_round(tmp_path, version=3, expected=["w-L_3 (sw)"], taken=["w-L_3 (sw)"],
+                        pad=False)
+    _rounds.write_round(tmp_path, version=4, expected=["w-L_4 (sw)"], taken=["w-L_4 (sw)"],
+                        pad=False)
+    listing = {"1": {"title": "w-L_3 (sw)", "uuid": "u3", "splOffsetdB": 103.35},
+               "2": {"title": "w-L_4 (sw)", "uuid": "u4", "splOffsetdB": 120.0}}
+    return told, listing
+
+
+def _offer_seen(monkeypatch) -> list:
+    """The import window, closed with Cancel; each opening of it recorded."""
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+
+    opened = []
+
+    class _Dialog:
+        def __init__(self, measurements, **kwargs):
+            opened.append(measurements)
+
+        def exec(self):
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(mp, "CaptureImportDialog", _Dialog)
+    return opened
+
+
+def _after_import(panel, listing):
+    """The import's pass written to the round: the ledger worker's answer, REW's list in hand."""
+    panel._rew_answer = dict(listing)
+    panel._on_ledger_written({"round_id": "cap_002"})
+
+
+@pytest.mark.parametrize("read", [
+    pytest.param(lambda panel, listing: panel._on_import_offer(listing), id="the-import-read"),
+    pytest.param(_after_import, id="after-the-import"),
+])
+def test_every_read_of_rews_list_names_a_change_of_its_level_calibration(tmp_path, monkeypatch,
+                                                                         read):
+    """The Rounds group's review, I3: the import's read and the pass written after it say it too,
+    as Refresh does (below)."""
+    told, listing = _three_rounds_apart(tmp_path, monkeypatch)
+    _offer_seen(monkeypatch)
+    panel = MeasurementPanel()
+    said = i18n.t("levelCalJump").format(delta="+16.65", before="103.35", after="120.0")
+
+    read(panel, listing)
+
+    assert panel._level_label.text() == said and not panel._level_label.isHidden()
+    assert told == [said]
+
+
+def test_a_level_calibration_that_cannot_be_read_never_blocks_the_import(tmp_path, monkeypatch):
+    """The review: the comparison ran unguarded before the import window opened, and anything it
+    raised took the offer with it. Logged, said once, and the window still opens."""
+    from autosound_tcc.core import level_calibration
+
+    told, listing = _three_rounds_apart(tmp_path, monkeypatch)
+    opened = _offer_seen(monkeypatch)
+
+    def _broken(*_a, **_k):
+        raise RuntimeError("the record went away")
+
+    monkeypatch.setattr(level_calibration, "notes", _broken)
+    panel = MeasurementPanel()
+
+    panel._on_import_offer(listing)
+    panel._on_import_offer(listing)
+
+    assert len(opened) == 2, "the import window opened both times"
+    assert told == [i18n.t("levelCalFailed").format(error="RuntimeError: the record went away")]
+    assert panel._level_label.isHidden()
 
 
 @pytest.mark.parametrize("mode", ["dark", "light"])

@@ -693,6 +693,38 @@ def test_a_bound_copy_before_under_and_level_is_told_the_version_that_has_them(
     assert not (project / "process").exists(), "nothing written"
 
 
+def test_every_flag_start_capture_sends_has_the_method_version_that_has_it(tmp_path, monkeypatch):
+    """tcc#199's review: a flag `start_capture` sends with no version in `FLAG_LANDED_IN` would
+    answer an older bound copy with the bare «does not know» again. Read off every flag it sends
+    with every option given, against the first method tags whose `process.py` has each (`git show
+    <tag>:…/state/process.py`, 2026-10-14)."""
+    seen = []
+    monkeypatch.setattr(process_writer, "_run", lambda d, args, **kw: seen.append(args) or "")
+    process_writer.start_capture(tmp_path, "49", ["m-L p1_49 (sw)"], step="2.9",
+                                 origin="passat-b8-2026:49", plan=True, optional=["Ws_49 (sw)"],
+                                 start_method="rta", under="v_008", level="-25 dB rel. max",
+                                 level_read_as="7 lamps")
+
+    sent = {arg for arg in seen[0] if arg.startswith("--")}
+    assert sent == set(process_writer.FLAG_LANDED_IN["capture-start"]), sent
+
+
+def test_a_flag_tccs_own_copy_lacks_is_told_to_update_through_tccs_own_row(
+        tmp_path, monkeypatch, own_copy_is_the_submodule):
+    """`_remedy`'s other branch under `FlagTooOld`: a project with no entry runs TCC's own copy,
+    and the remedy is TCC's own update row — no copy elsewhere to name."""
+    monkeypatch.setattr(method_cli, "_flags_known_to", lambda script: frozenset())
+    monkeypatch.setattr(method_cli.child, "run_bounded",
+                        lambda argv, **_kw: pytest.fail("a child started"))
+
+    with pytest.raises(process_writer.FlagTooOld) as refused:
+        process_writer.start_capture(tmp_path / "car", "3", ["sw_3 (sw)"], under="v_008")
+
+    said = str(refused.value)
+    assert refused.value.flag == "--under" and "v3.0.60" in said, said
+    assert "TCC's own update row offers it" in said, said
+
+
 # ---- which copy a write runs (#169, G5 S1) ------------------------------------------------------
 # Every write started TCC's own `process.py`, whatever the project linked at
 # `.claude/skills/autosound-tuning` — so a session could advise from one copy while the writers wrote
@@ -834,8 +866,9 @@ def test_a_flag_the_bound_copy_does_not_know_is_refused_before_anything_starts(
         process_writer.start_capture(project, "49", ["m-L p1_49 (sw)"], origin="import")
 
     assert refused.value.flag == "--origin"
-    assert str(refused.value) == ("this project's method does not know --origin; update it, or "
-                                  "re-link the project to TCC's copy")
+    said = str(refused.value)  # with the version that has it (tcc#199's review): `FLAG_LANDED_IN`
+    assert "does not know --origin of `capture-start`" in said and "v3.0.59" in said, said
+    assert str(older) in said, "the copy to update"
     assert (started, locked) == ([], []), "nothing started and no lock taken"
     assert not (project / "process").exists(), "nothing written either"
 

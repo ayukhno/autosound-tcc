@@ -50,24 +50,29 @@ def _said(notes) -> list[tuple[str, dict]]:
     return [(note.key, note.values) for note in notes]
 
 
-def _two_rounds(project, before, after):
+def _two_rounds(project, before, after, pad=False):
     """`cap_001` at series 3 took `w-L_3`, `w-R_3`; `cap_002` at series 4 took `w-L_4`, `w-R_4`.
-    REW lists all four, round 3's at `before`, round 4's at `after`."""
+    REW lists all four, round 3's at `before`, round 4's at `after`. `pad`: titles as a person
+    types them in REW (`w-L_03`), the fixtures' default."""
+    typed = _rounds.as_typed if pad else str
     _rounds.write_round(project, version=3, expected=["w-L_3 (sw)", "w-R_3 (sw)"],
-                        taken=["w-L_3 (sw)", "w-R_3 (sw)"], pad=False)
+                        taken=["w-L_3 (sw)", "w-R_3 (sw)"], pad=pad)
     _rounds.write_round(project, version=4, expected=["w-L_4 (sw)", "w-R_4 (sw)"],
-                        taken=["w-L_4 (sw)", "w-R_4 (sw)"], pad=False)
-    return _listing(("w-L_3 (sw)", "u-l3", before), ("w-R_3 (sw)", "u-r3", before),
-                    ("w-L_4 (sw)", "u-l4", after), ("w-R_4 (sw)", "u-r4", after))
+                        taken=["w-L_4 (sw)", "w-R_4 (sw)"], pad=pad)
+    return _listing((typed("w-L_3 (sw)"), "u-l3", before), (typed("w-R_3 (sw)"), "u-r3", before),
+                    (typed("w-L_4 (sw)"), "u-l4", after), (typed("w-R_4 (sw)"), "u-r4", after))
 
 
-@pytest.mark.parametrize("before, after, delta", [
-    (103.35, 120.0, "+16.65"),
-    (120.0, 103.35, "-16.65"),
+@pytest.mark.parametrize("before, after, delta, pad", [
+    (103.35, 120.0, "+16.65", False),
+    (120.0, 103.35, "-16.65", False),
+    (103.35, 120.0, "+16.65", True),
 ])
-def test_a_jump_between_rounds_is_named_with_its_sign_and_value(project, before, after, delta):
-    """PAS-015's case: the round reads 16.65 dB above the last as REW shows it, and says so."""
-    listing = _two_rounds(project, before, after)
+def test_a_jump_between_rounds_is_named_with_its_sign_and_value(project, before, after, delta,
+                                                                pad):
+    """PAS-015's case: the round reads 16.65 dB above the last as REW shows it, and says so — with
+    the titles as typed in REW too (`pad`)."""
+    listing = _two_rounds(project, before, after, pad=pad)
 
     assert _said(lc.notes(project, listing)) == [(lc.JUMP, {
         "delta": delta, "before": lc._db(before), "after": lc._db(after)})]
@@ -151,3 +156,103 @@ def test_the_strip_is_told_once(project, monkeypatch):
         lc.tell(project, lc.notes(project, listing), lambda note: f"{note.key} {note.values}")
 
     assert len(told) == 1 and told[0].startswith(lc.JUMP), told
+
+
+def _record_round_three(project, offset=103.35):
+    """Round 3 open, read while REW lists its two takes at `offset`: TCC's record of it."""
+    _rounds.write_round(project, version=3, expected=["w-L_3 (sw)", "w-R_3 (sw)"],
+                        taken=["w-L_3 (sw)", "w-R_3 (sw)"], pad=False)
+    assert lc.notes(project, _listing(("w-L_3 (sw)", "u-l3", offset),
+                                      ("w-R_3 (sw)", "u-r3", offset))) == []
+
+
+@pytest.mark.parametrize("listing_of_round_three", [
+    pytest.param((("w-L_3 (sw)", "u-l3", 120.0), ("w-R_3 (sw)", "u-r3", 120.0)),
+                 id="its-own-captures-listed-at-the-new-offset"),
+    pytest.param((("w-L_3 (sw)", "u-l3-retake", 120.0),), id="a-new-capture-under-its-title"),
+])
+def test_the_last_rounds_record_is_not_rewritten_from_todays_listing(project,
+                                                                     listing_of_round_three):
+    """The Rounds group's review, I1: the record exists to outlast REW. Written over from today's
+    listing, the jump was said once and gone on the next Refresh. A closed round's record is never
+    written again; the same listing gives the same answer twice."""
+    _record_round_three(project)
+    _rounds.write_round(project, version=4, expected=["w-L_4 (sw)"], taken=["w-L_4 (sw)"],
+                        pad=False)
+    listing = _listing(*listing_of_round_three, ("w-L_4 (sw)", "u-l4", 120.0))
+    jump = [(lc.JUMP, {"delta": "+16.65", "before": "103.35", "after": "120.0"})]
+
+    assert _said(lc.notes(project, listing)) == jump
+    assert _said(lc.notes(project, listing)) == jump
+    assert lc.recorded(project)["cap_001"] == {"w-L_3 (sw)": 103.35, "w-R_3 (sw)": 103.35}
+
+
+def test_an_empty_round_between_does_not_hide_the_jump(project):
+    """I2: round 4 took nothing; round 5 is compared with round 3, the newest that has offsets."""
+    _record_round_three(project)
+    _rounds.write_round(project, version=4, expected=["w-L_4 (sw)"], pad=False)
+    _rounds.write_round(project, version=5, expected=["w-L_5 (sw)"], taken=["w-L_5 (sw)"],
+                        pad=False)
+
+    assert _said(lc.notes(project, _listing(("w-L_5 (sw)", "u-l5", 120.0)))) == [
+        (lc.JUMP, {"delta": "+16.65", "before": "103.35", "after": "120.0"})]
+
+
+def test_the_newest_earlier_round_is_compared_not_the_oldest(project):
+    _record_round_three(project, offset=100.0)
+    _rounds.write_round(project, version=4, expected=["w-L_4 (sw)"], taken=["w-L_4 (sw)"],
+                        pad=False)
+    assert _said(lc.notes(project, _listing(("w-L_4 (sw)", "u-l4", 103.35))))[0][1]["before"] \
+        == "100.0"
+    _rounds.write_round(project, version=5, expected=["w-L_5 (sw)"], taken=["w-L_5 (sw)"],
+                        pad=False)
+
+    assert _said(lc.notes(project, _listing(("w-L_5 (sw)", "u-l5", 120.0)))) == [
+        (lc.JUMP, {"delta": "+16.65", "before": "103.35", "after": "120.0"})]
+
+
+def test_a_record_set_aside_as_broken_says_the_comparison_is_gone_once(project, monkeypatch):
+    """The review: a broken record is set aside (`own_store`), and the earlier rounds' offsets go
+    with it. Said once — a change against them cannot be named — rather than silence."""
+    from autosound_tcc.core import self_check
+    from autosound_tcc.ui.tcc import i18n
+
+    told = []
+    monkeypatch.setattr(app_log, "warn", told.append)
+    monkeypatch.setattr(self_check, "_translate", i18n.t)
+    _record_round_three(project)
+    lc.store_path(project).write_text("{broken", encoding="utf-8")
+    _rounds.write_round(project, version=4, expected=["w-L_4 (sw)"], taken=["w-L_4 (sw)"],
+                        pad=False)
+
+    for _ in range(2):
+        assert lc.notes(project, _listing(("w-L_4 (sw)", "u-l4", 120.0))) == []
+    assert told == [i18n.t(lc.RECORD_LOST)], told
+
+
+def test_a_listing_entry_that_is_no_record_is_passed_over(project):
+    """The review: `offset_of` guarded what it read, its index did not — a non-object in REW's
+    answer raised out of the panel's read."""
+    _rounds.write_round(project, version=3, expected=["w-L_3 (sw)"], taken=["w-L_3 (sw)"],
+                        pad=False)
+
+    assert lc.notes(project, {"1": "oops", "2": None, "3": {"title": "w-L_3 (sw)",
+                                                            "uuid": "u", "splOffsetdB": 1}}) == []
+
+
+def test_the_journal_is_read_again_only_when_it_changed(project, monkeypatch):
+    """The review: `notes` runs on the GUI thread on every Refresh; the journal is folded once per
+    state of it, not once per read of REW."""
+    from autosound_tcc.state import process_view
+
+    listing = _two_rounds(project, 103.35, 120.0)
+    folds = []
+    real = process_view.capture_rounds
+    monkeypatch.setattr(process_view, "capture_rounds",
+                        lambda *a, **kw: folds.append(1) or real(*a, **kw))
+
+    first = lc.notes(project, listing)
+    assert lc.notes(project, listing) == first and len(folds) <= 1, folds
+    _rounds.write_round(project, version=5, expected=["w-L_5 (sw)"], pad=False)
+    lc.notes(project, listing)
+    assert len(folds) == 2, "a changed journal is read again"

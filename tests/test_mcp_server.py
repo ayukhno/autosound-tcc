@@ -2668,6 +2668,26 @@ def test_start_capture_passes_under_and_level_to_the_method(tmp_path, monkeypatc
     assert (bare["under"], bare["level"], bare["level_read_as"]) == ("", "", "")
 
 
+def test_start_capture_hands_the_session_the_methods_refusal_in_its_words(tmp_path):
+    """tcc#199's review: TCC adds no rule for `under` or `level`; the method's refusal is the
+    answer the session reads, word for word, and no round is opened."""
+    from autosound_tcc.core import vendor_loader
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                           encoding="utf-8")
+    (tmp_path / "state" / "1.A-alt").mkdir(parents=True)
+    (tmp_path / "state" / "1.A-alt" / "v_008.json").write_text("{}", encoding="utf-8")
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    out = json.loads(_text(asyncio.run(mcp.call_tool("start_capture", {
+        "version": "3", "expected": ["sw_3 (sw)"], "under": "v_009", "level": "66.4 dBA"}))))
+
+    assert out["recorded"] is False
+    assert "--under 'v_009': not a banked ledger version (banked: v_008)" in out["error"], out
+
+
 def test_with_the_omp_route_an_omp_reviewer_pick_is_called(tmp_path, monkeypatch):
     from autosound_tcc.core import config, critic, project_settings
 

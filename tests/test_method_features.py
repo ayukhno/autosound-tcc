@@ -68,3 +68,42 @@ def test_an_older_bound_copy_is_read_raw_and_said_once(older_project, told):
     assert method_features.say_if_older(older_project) is True
     assert len(told) == 1, told
     assert "v3.1.4" in told[0] and "TCC" in told[0], told
+
+
+def test_a_bound_copy_tcc_cannot_read_is_said_as_unreadable_not_as_older(
+        tmp_path, tmp_path_factory, told):
+    """tcc#200, the Rounds group's review: a copy whose scripts cannot be read counts as one
+    without the features — the rule TCC had before — but «older than v3.1.4» would send the person
+    to update a copy that may be new and broken. It is said as what it is, once."""
+    unreadable = copy_of_the_method(tmp_path_factory.mktemp("unreadable"))
+    (unreadable / "rew_tool" / "state" / "process.py").unlink()
+    project = tmp_path / "car"
+    project.mkdir()
+    linked_and_approved(project, unreadable)
+
+    assert method_features.older_than_v314(project), "read as one without the features"
+    assert method_features.say_if_older(project) is True
+    assert method_features.say_if_older(project) is True
+    assert len(told) == 1, told
+    assert "could not be read" in told[0] and "older than v3.1.4" not in told[0], told
+    assert str(unreadable / "rew_tool" / "state" / "process.py") in told[0], told
+
+
+def test_a_series_key_tcc_cannot_load_falls_back_to_raw_titles_and_says_so_once(
+        tmp_path, monkeypatch, own_copy_is_the_submodule, caplog):
+    """tcc#200, the review: the fallback to raw titles was silent — a card that matched `w-R_01`
+    to `w-R_1` yesterday stops matching and nothing says why. Logged, once."""
+    from autosound_tcc.core import vendor_loader
+
+    def _broken():
+        raise ImportError("naming.py: SyntaxError")
+
+    monkeypatch.setattr(vendor_loader, "load_process", _broken)
+    monkeypatch.setattr(process_view, "_KEY_FAILURE_LOGGED", False)
+    with caplog.at_level("WARNING"):
+        first = process_view.title_key(tmp_path)
+        process_view.title_key(tmp_path)
+
+    assert first("w-R_01 (sw)") != first("w-R_1 (sw)"), "raw titles"
+    said = [r.getMessage() for r in caplog.records if "series key" in r.getMessage()]
+    assert len(said) == 1 and "SyntaxError" in said[0], said

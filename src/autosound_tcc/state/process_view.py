@@ -166,20 +166,31 @@ def _raw(title) -> tuple[str, str]:
     return ("raw", str(title))
 
 
+#: Whether `title_key`'s fallback to raw titles has been logged in this run: once is the news.
+_KEY_FAILURE_LOGGED = False
+
+
 def title_key(project_dir: Optional[Path] = None):
     """`title -> its identity within a round`, by the rule of the copy the project is BOUND to
     (`method_features`, tcc#200): from v3.1.4 the series key (`process.title_key`, #153), so
     `w-R_01 (sw)` taken is the `w-R_1 (sw)` the round asked for; a bound copy before v3.1.4 has no
     such rule and matches raw titles, and so does this then — its close, its gate and the cards
     agree. The rule itself is read from TCC's own copy, which TCC imports; the bound copy is only
-    read as text. Never raises."""
-    from autosound_tcc.core import method_features
+    read as text. Never raises; a series key TCC's copy cannot give falls back to raw titles,
+    logged once (the Rounds group's review): a card matching `w-R_01` to `w-R_1` stopped silently."""
+    global _KEY_FAILURE_LOGGED
+    from autosound_tcc.core import app_log, method_features
 
     try:
         if not method_features.has(method_features.TITLE_KEY, project_dir):
             return _raw
         key = getattr(vendor_loader.load_process(), "title_key", None)
-    except Exception:  # noqa: BLE001 — no method on this machine: the raw title, as before #153
+    except Exception as exc:  # noqa: BLE001 — no method on this machine: the raw title, as before #153
+        if not _KEY_FAILURE_LOGGED:
+            _KEY_FAILURE_LOGGED = True
+            app_log.logger().warning("the series key (`process.title_key`) could not be loaded "
+                                     "from TCC's copy of the method (%s: %s); rounds are matched "
+                                     "by raw titles", type(exc).__name__, exc)
         key = None
     return key if callable(key) else _raw
 

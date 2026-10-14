@@ -414,7 +414,10 @@ def to_check(round_: dict, rew_titles, project_dir: Optional[Path] = None) -> li
 
     Then each take the round did not ask for, by its own title (tcc#199, hub #260): the method
     judges any title it is handed and records the verdict on that take's row, planned or not —
-    `cap_003`'s check covered the list alone, and an unplanned sweep stood with no verdict."""
+    `cap_003`'s check covered the list alone, and an unplanned sweep stood with no verdict. Asked
+    until it has one: none yet, or absent (REW did not hold it then). Judged good or bad, it is not
+    asked again until it is taken again — the method drops the row's verdict on a re-take — or a
+    bad one nobody asked for was pulled from REW on every change of its list (the review)."""
     key = process_view.title_key(project_dir)
     held = {key(str(title)) for title in rew_titles}
     taken = process_view.standing(round_)
@@ -425,10 +428,15 @@ def to_check(round_: dict, rew_titles, project_dir: Optional[Path] = None) -> li
         return row is not None and verdict_state(taken[row].get("verified"), title, as_is) \
             in (VERDICT_ABSENT, VERDICT_BAD)
 
+    def unjudged(title: str) -> bool:
+        verdict = taken[title].get("verified")
+        return not verdict or verdict_state(verdict, title, as_is) == VERDICT_ABSENT
+
     expected = [str(title) for title in round_.get("expected") or []]
     listed = {key(title) for title in expected}
     unplanned = [str(title) for title in taken if key(str(title)) not in listed]
-    return [title for title in expected + unplanned if key(title) in held and unsettled(title)]
+    return ([title for title in expected if key(title) in held and unsettled(title)]
+            + [title for title in unplanned if key(title) in held and unjudged(title)])
 
 
 @dataclass(frozen=True)

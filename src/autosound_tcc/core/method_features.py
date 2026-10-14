@@ -51,17 +51,30 @@ def _text(script: Path) -> Optional[str]:
     return text
 
 
-def has(feature: tuple[str, str], project_dir: Optional[Path | str] = None) -> bool:
-    """Whether the copy `project_dir` is bound to holds `feature` in its text. A copy TCC refuses
-    runs nothing, so TCC's own copy answers for it; a copy that cannot be read holds nothing."""
+def _script(feature: tuple[str, str], project_dir: Optional[Path | str]) -> Path:
+    """The script `feature` is read from, in the copy `project_dir` is bound to. A copy TCC
+    refuses runs nothing, so TCC's own copy answers for it."""
     binding = method_binding.for_project(Path(project_dir or config.project_dir()))
-    rel, needle = feature
     if binding.state == method_binding.REFUSED or binding.skill_dir is None:
-        script = method_binding.own_copy() / "rew_tool" / rel
-    else:
-        script = binding.script(rel)
-    text = _text(script)
-    return text is not None and needle in text
+        return method_binding.own_copy() / "rew_tool" / feature[0]
+    return binding.script(feature[0])
+
+
+def has(feature: tuple[str, str], project_dir: Optional[Path | str] = None) -> bool:
+    """Whether the copy `project_dir` is bound to holds `feature` in its text; a copy that cannot
+    be read holds nothing."""
+    text = _text(_script(feature, project_dir))
+    return text is not None and feature[1] in text
+
+
+def unreadable(project_dir: Optional[Path | str] = None) -> Optional[Path]:
+    """The first script of the v3.1.4 features the bound copy holds that TCC cannot read, or None:
+    such a copy is read as one without them, and is said as unreadable, not as older."""
+    for feature in (TITLE_KEY, OWN_RANGE):
+        script = _script(feature, project_dir)
+        if _text(script) is None:
+            return script
+    return None
 
 
 def older_than_v314(project_dir: Optional[Path | str] = None) -> bool:
@@ -72,7 +85,8 @@ def older_than_v314(project_dir: Optional[Path | str] = None) -> bool:
 
 def say_if_older(project_dir: Optional[Path | str] = None) -> bool:
     """Tell the person once per project in this run, on the strip as a warning, that its copy is
-    older than v3.1.4 and what that means on the card — and the way out. True when it is older."""
+    older than v3.1.4 and what that means on the card — and the way out; or, for a copy whose
+    scripts cannot be read, that. True when it is read as older."""
     project = Path(project_dir or config.project_dir())
     if not older_than_v314(project):
         return False
@@ -83,6 +97,11 @@ def say_if_older(project_dir: Optional[Path | str] = None) -> bool:
     from autosound_tcc.core import self_check  # its translator is the window's (`use_translator`)
 
     binding = method_binding.for_project(project)
+    script = unreadable(project)
+    if script is not None:  # not known to be older: it could not be read (the Rounds review)
+        app_log.warn(self_check.translated("methodCopyUnreadable").format(
+            path=script, entry=binding.entry))
+        return True
     app_log.warn(self_check.translated("methodOlderThan314").format(
         path=binding.skill_dir or binding.entry, entry=binding.entry))
     return True
