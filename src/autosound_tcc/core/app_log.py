@@ -25,6 +25,7 @@ Nothing here imports Qt at module level: `app.py` sets this up before the QAppli
 from __future__ import annotations
 
 import functools
+import inspect
 import logging
 import os
 import sys
@@ -275,12 +276,22 @@ def _notify(message: str, warning: bool = False) -> None:
     if _ui_sink is None:
         return
     try:
-        if warning:
+        if warning and _takes_warning(_ui_sink):
             _ui_sink(message, _log_path, warning=True)
-        else:
+        else:  # a sink with no level hears the sentence still: never lost to a keyword (#205)
             _ui_sink(message, _log_path)
     except Exception:  # noqa: BLE001 — a failing notifier must never mask the error it reports
         logger().exception("the UI log sink raised")
+
+
+def _takes_warning(sink: Callable) -> bool:
+    """Whether `sink` takes `warning=`: by name, or through `**kwargs`. A signature that cannot be
+    read is asked as the documented one (`set_ui_sink`)."""
+    try:
+        params = inspect.signature(sink).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(p.name == "warning" or p.kind is p.VAR_KEYWORD for p in params)
 
 
 #: Set on a thread while its report is being handed to the sink (`report`).

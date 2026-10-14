@@ -3488,9 +3488,16 @@ def test_a_cancelled_confirmation_is_a_cancel_not_a_denial(caplog):
     assert not caplog.records
 
 
-def test_a_tool_s_confirmation_that_fails_is_logged_and_writes_nothing(tmp_path, caplog):
+@pytest.mark.parametrize("tool, args, done", [
+    ("copy_helix_eq", {"text": "PK 1000 -3 Q2"}, "copied"),
+    ("write_rew_filters", {"measurement": "w-L_10 (sw)", "filters": [{}]}, "applied"),
+])
+def test_a_tool_s_confirmation_that_fails_is_logged_and_writes_nothing(tmp_path, caplog,
+                                                                       app_log_told, tool, args,
+                                                                       done):
     """The two tools that change the tune ask through `_confirm`; reverting it to the silent
-    swallow passed every test before (the G1 review)."""
+    swallow passed every test before (the G1 review). The apply-EQ tool's `reason` is checked as
+    the copy's is, and the person hears it on the strip (#206's group review)."""
     import logging
 
     from autosound_tcc.core import app_log
@@ -3499,15 +3506,15 @@ def test_a_tool_s_confirmation_that_fails_is_logged_and_writes_nothing(tmp_path,
     bridge.request_confirmation = _BrokenBar().request_confirmation
     mcp, _, _ = _server(tmp_path, bridge)
     with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
-        result = json.loads(_text(asyncio.run(
-            mcp.call_tool("copy_helix_eq", {"text": "PK 1000 -3 Q2"}))))
+        result = json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
 
-    assert result["copied"] is False and bridge.clipboard == []
-    assert any("copy_helix_eq" in r.getMessage() and "boom" in r.getMessage()
-               for r in caplog.records)
+    assert result[done] is False and bridge.clipboard == []
+    assert any(tool in r.getMessage() and "boom" in r.getMessage() for r in caplog.records)
     # The model is told it was not the Arbiter's answer (G1-silent M2, #206): no bar was shown.
     assert "not the Arbiter's answer" in result["reason"] and "boom" in result["reason"], result
     assert "denied" not in result["reason"], result
+    assert [m for m in app_log_told.warned if tool in m and "boom" in m
+            and "could not be shown" in m], app_log_told
 
 
 @pytest.mark.parametrize("text", ["[]", "null", "3", '{"mcpServers": [], "other": 1}'])

@@ -541,7 +541,7 @@ async def await_confirmation(bridge: "UiBridge", request: ConfirmRequest,
 
     A timeout is a denial: nobody answered -- one INFO line says what was denied and after how
     long, because it once left nothing in tcc.log at all. A failure is a denial too — the gate
-    stays shut — but it is a WARNING with what failed and which command (F3e): three places asked
+    stays shut — but it is a WARNING with what failed and which command, on the strip too (F3e): three places asked
     this way and swallowed the failure as a plain «no», so a broken confirmation bar read as the
     Arbiter refusing everything. Only this clock running out is "nobody answered": since 3.11
     every TimeoutError is asyncio's, and a bridge's own was read as silence (the G1 review). A
@@ -559,10 +559,17 @@ async def await_confirmation(bridge: "UiBridge", request: ConfirmRequest,
         failure: BaseException = exc
     except Exception as exc:  # noqa: BLE001 — any failure is a denial, said in the log
         failure = exc
-    app_log.logger().warning("confirmation for %s failed, read as a denial: %s: %s (%s: %s)",
-                             request.tool, type(failure).__name__, failure, request.title,
-                             (request.detail or "")[:200])
+    # A WARNING in the log and a line on the strip, on every route: the SDK's and these tools'
+    # answers reach only the model, and omp's and Codex's turns said it alone (#206's group review).
+    app_log.warn(CONFIRM_UNSHOWN_SAID.format(
+        tool=request.tool, why=f"{type(failure).__name__}: {failure}",
+        what=f"{request.title}: {(request.detail or '')[:200]}"))
     return Confirmation(False, f"{type(failure).__name__}: {failure}")
+
+
+#: What the person hears when a confirmation bar could not be shown (`await_confirmation`).
+CONFIRM_UNSHOWN_SAID = ("The confirmation for {tool} could not be shown ({why}): read as a no, "
+                        "not your answer — nothing was done. Asked: {what}")
 
 
 def build_server(

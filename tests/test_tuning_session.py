@@ -162,7 +162,8 @@ def test_denial_tells_the_model_why(tmp_path):
     assert "allowlist" in result.message
 
 
-def test_a_confirmation_that_could_not_be_shown_is_not_told_as_the_arbiter_s_no(tmp_path):
+def test_a_confirmation_that_could_not_be_shown_is_not_told_as_the_arbiter_s_no(tmp_path,
+                                                                                app_log_told):
     """G1-silent M2 (#206): the bar failed to show, and the model was told «Arbiter did not
     approve» — and told the Arbiter they had declined a question they never saw."""
     session, arbiter = _session(tmp_path, allow=False)
@@ -176,6 +177,9 @@ def test_a_confirmation_that_could_not_be_shown_is_not_told_as_the_arbiter_s_no(
     assert result.behavior == "deny"
     assert "could not be shown" in result.message and "the bridge is gone" in result.message
     assert "did not approve" not in result.message, result.message
+    # And the person hears it, on the strip, as omp's and Codex's turns say it (#206's group review).
+    assert [m for m in app_log_told.warned if "could not be shown" in m
+            and "the bridge is gone" in m and "Bash" in m], app_log_told
 
 
 def test_the_tools_that_reach_outside_are_hard_blocked(tmp_path):

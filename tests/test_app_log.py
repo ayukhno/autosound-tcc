@@ -231,6 +231,12 @@ def test_a_warning_reaches_the_window_as_a_warning_and_the_log_as_one(tmp_path, 
     app_log.set_ui_sink(lambda message, path: plain.append(message))
     app_log.report("an error")
     assert plain == ["an error"], "a sink with no level still hears a report"
+    app_log.warn("note: to a plain sink")
+    assert plain == ["an error", "note: to a plain sink"], "and a warning: the sentence, not lost"
+    keyed = []
+    app_log.set_ui_sink(lambda message, path, **kwargs: keyed.append((message, kwargs)))
+    app_log.warn("note: keyed")
+    assert keyed == [("note: keyed", {"warning": True})], "a sink taking any keyword hears its level"
 
 
 def test_a_report_reaches_the_window_with_no_log_file_to_point_at(monkeypatch):
