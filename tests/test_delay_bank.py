@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -20,24 +21,28 @@ _POSIX_MODES = pytest.mark.skipif(
     reason="POSIX permissions, and root reads and writes whatever the mode",
 )
 
-#: What a store holds before the step: a driver with an all-pass, an arrival and a series; one
-#: from the first version (a bare number, no series); one from another series; a field that is
-#: not the bank's at all.
+#: What a store holds before the step, in v1.1.3's shape (one entry per title): a driver of the
+#: step's own series with an all-pass, an arrival and a series; one from the first version (a bare
+#: number, no series); one from another series; one the step's series banks too, from another
+#: series.
 _SEED = {
-    "w-L_01 (sw)": {"ms": 0.198, "at": 4.52, "set": "cap_001",
+    "w-L_01 (sw)": {"ms": 0.198, "at": 4.52, "set": "cap_002",
                     "apf": {"type": "APF2", "f": 250.0, "q": 0.71}},
     "m-L_01 (sw)": 0.4,
     "sw_01 (sw)": {"ms": 1.1, "at": 9.6, "set": "cap_000"},
+    "w-R_01 (sw)": {"ms": 0.1, "at": 4.7, "set": "cap_001"},
 }
 
 
 def _step():
-    """One step's readings: a delay that keeps the all-pass and the arrival it does not name; an
-    old entry that picks up an arrival and the series; a new driver with a filter; the same driver
-    twice, the later taking the filter off; a filter banked earlier in the same set and kept."""
+    """One step's readings under cap_002: a delay that keeps the all-pass and the arrival it does
+    not name; an old entry with no series, which cap_002 takes its own of; a driver another series
+    holds, which cap_002 gets its own entry for; a new driver with a filter; the same driver twice,
+    the later taking the filter off; a filter banked earlier in the same set and kept."""
     return [
         delay_bank.Reading("w-L_01 (sw)", 0.26),
         delay_bank.Reading("m-L_01 (sw)", 0.5, arrival_ms=4.78),
+        delay_bank.Reading("w-R_01 (sw)", 0.0),
         delay_bank.Reading("tw-L_01 (sw)", 0.0, allpass=Allpass(1, 80.0)),
         delay_bank.Reading("w-L_01 (sw)", 0.3, allpass=None),
         delay_bank.Reading("tw-L_01 (sw)", -0.1),
@@ -70,7 +75,11 @@ def test_put_many_stores_exactly_what_one_put_per_reading_stores(tmp_path):
     bank = stored[delay_bank.KEY]
     assert bank["w-L_01 (sw)"] == {"ms": 0.3, "at": 4.52, "set": "cap_002"}, "filter off, arrival kept"
     assert bank["tw-L_01 (sw)"]["apf"] == {"type": "APF1", "f": 80.0}, "kept within the set"
-    assert bank["m-L_01 (sw)"] == {"ms": 0.5, "at": 4.78, "set": "cap_002"}
+    assert bank["m-L_01 (sw)"] == [0.4, {"ms": 0.5, "at": 4.78, "set": "cap_002"}], \
+        "cap_002's own, the one with no series kept for the others (#197)"
+    assert bank["w-R_01 (sw)"] == [{"ms": 0.1, "at": 4.7, "set": "cap_001"},
+                                   {"ms": 0.0, "at": None, "set": "cap_002"}], \
+        "cap_002's own beside cap_001's, not moved (#197)"
     assert bank["sw_01 (sw)"] == {"ms": 1.1, "at": 9.6, "set": "cap_000"}, "another series untouched"
 
 
@@ -102,7 +111,7 @@ def test_no_reading_is_no_write(tmp_path):
     before = path.read_bytes()
 
     assert delay_bank.put_many([], tmp_path) == {"w-L_01 (sw)": 0.198, "m-L_01 (sw)": 0.4,
-                                                  "sw_01 (sw)": 1.1}
+                                                  "sw_01 (sw)": 1.1, "w-R_01 (sw)": 0.1}
     assert path.read_bytes() == before
 
 
@@ -383,3 +392,146 @@ def test_a_clear_of_one_series_carries_another_s_entries_it_cannot_read(tmp_path
     delay_bank.clear(tmp_path, session="S1")
 
     assert _stored(tmp_path) == other
+
+
+# ---- one entry per (series, title) (#197, F-100 O4) -----------------------------------------------
+
+
+_V113 = Path(__file__).parent / "fixtures" / "tcc-project-bank-v1.1.3.json"
+
+
+def _from_v113(folder):
+    """The store as TCC v1.1.3 left it: written by that version's `delay_bank` (one entry per
+    title, the series a field of it), with one entry banked with no series."""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = project_settings.path_for(folder)
+    path.write_bytes(_V113.read_bytes())
+    return path
+
+
+def test_a_v113_bank_reads_every_reading_under_its_own_series(tmp_path):
+    _from_v113(tmp_path)
+
+    assert delay_bank.load(tmp_path, "cap_001") == {
+        "w-L_01 (sw)": 0.198, "m-L_01 (sw)": 1.25, "c_01 (sw)": 0.4}
+    assert delay_bank.references(tmp_path, "cap_001") == ["w-R_01 (sw)"]
+    assert delay_bank.allpasses(tmp_path, "cap_001") == {"w-L_01 (sw)": Allpass(2, 250.0, 0.71)}
+    assert delay_bank.load(tmp_path, "cap_002") == {"sub_01 (sw)": 1.5, "c_01 (sw)": 0.4}
+    assert delay_bank.allpasses(tmp_path, "cap_002") == {"m-R_01 (sw)": Allpass(1, 80.0)}
+    assert delay_bank.load(tmp_path, "cap_009") == {"c_01 (sw)": 0.4}, "no series: under every one"
+    assert delay_bank.arrivals(tmp_path, "cap_001")["w-L_01 (sw)"] == 4.52
+
+
+def test_a_v113_bank_loses_no_reading_to_a_step_under_the_next_series(tmp_path):
+    """The bug, on the file a user has today: the next round (cap_003) banks the side on screen.
+    Every earlier series still reads what it read, and the step stored the new shape — a list for
+    a title two series hold — with every other entry as it was."""
+    path = _from_v113(tmp_path)
+    before = json.loads(path.read_text(encoding="utf-8"))
+    readings = [delay_bank.Reading(title, 0.05 * i) for i, title in enumerate(
+        ("w-L_01 (sw)", "w-R_01 (sw)", "c_01 (sw)", "sub_01 (sw)"))]
+
+    delay_bank.put_many(readings, tmp_path, session="cap_003")
+
+    for series in ("cap_001", "cap_002"):
+        assert delay_bank.load(tmp_path, series) == {
+            title: entry["ms"] for title, entry in before[delay_bank.KEY].items()
+            if entry["set"] in (series, None) and entry["ms"]}, series
+        assert delay_bank.seen(tmp_path, series) == {
+            title for title, entry in before[delay_bank.KEY].items()
+            if entry["set"] in (series, None)}, series
+    assert delay_bank.allpasses(tmp_path, "cap_001") == {"w-L_01 (sw)": Allpass(2, 250.0, 0.71)}
+    assert delay_bank.load(tmp_path, "cap_003") == {
+        "w-R_01 (sw)": 0.05, "c_01 (sw)": 0.1, "sub_01 (sw)": 0.15}
+    assert delay_bank.references(tmp_path, "cap_003") == ["w-L_01 (sw)"]
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert stored["generator"] == "sdk:claude-opus-5", "the rest of the file is kept"
+    bank = stored[delay_bank.KEY]
+    assert bank["w-L_01 (sw)"][0] == before[delay_bank.KEY]["w-L_01 (sw)"], "as it was read"
+    assert bank["w-L_01 (sw)"][1] == {"ms": 0.0, "at": None, "set": "cap_003"}
+    assert bank["m-L_01 (sw)"] == before[delay_bank.KEY]["m-L_01 (sw)"], "untouched: one entry"
+    assert bank["c_01 (sw)"][0] == before[delay_bank.KEY]["c_01 (sw)"], "no series: kept"
+
+
+def test_an_entry_with_no_series_stays_for_the_others_when_one_series_touches_it(tmp_path):
+    """#197's rule for an entry written before the scope: shown under every series with none of
+    its own; touched under one, that one gets its own, starting from it (the arrival and the
+    filter carry), and the one with no series stays for every other. A step with no series moves
+    the one with no series, as it always has."""
+    project_settings.set_value(tmp_path, delay_bank.KEY, {
+        "w-L_01 (sw)": {"ms": 0.198, "at": 4.52, "set": None,
+                        "apf": {"type": "APF1", "f": 80.0}}})
+
+    delay_bank.put("w-L_01 (sw)", 0.3, tmp_path, session="A")
+
+    assert delay_bank.load(tmp_path, "A") == {"w-L_01 (sw)": 0.3}
+    assert delay_bank.arrivals(tmp_path, "A") == {"w-L_01 (sw)": 4.52}, "the arrival carried"
+    assert delay_bank.allpasses(tmp_path, "A") == {"w-L_01 (sw)": Allpass(1, 80.0)}, "and the filter"
+    assert delay_bank.load(tmp_path, "B") == {"w-L_01 (sw)": 0.198}, "not lost to B"
+
+    delay_bank.put("w-L_01 (sw)", 0.25, tmp_path)
+
+    assert delay_bank.load(tmp_path, "B") == {"w-L_01 (sw)": 0.25}, "no series: the shared one"
+    assert delay_bank.load(tmp_path, "A") == {"w-L_01 (sw)": 0.3}, "A's own untouched"
+
+
+def test_clear_takes_the_shown_series_and_the_entries_with_no_series_and_nothing_else(tmp_path):
+    """Clear's meaning is kept (#197): the series shown, and the entries with no series, which are
+    shown under it. Another series' entry of the same title stays — under the old per-title bank
+    it could not have been there to stay. No series named: everything."""
+    delay_bank.put("w-L_01 (sw)", 0.5, tmp_path, session="A")
+    delay_bank.put("w-L_01 (sw)", 0.7, tmp_path, session="B")
+    delay_bank.put("sub_01 (sw)", 1.5, tmp_path, session="B")
+    delay_bank.put("c_01 (sw)", 0.4, tmp_path)
+
+    delay_bank.clear(tmp_path, session="B")
+
+    assert delay_bank.load(tmp_path, "A") == {"w-L_01 (sw)": 0.5}
+    assert delay_bank.load(tmp_path, "B") == {}
+    assert _stored(tmp_path) == {"w-L_01 (sw)": {"ms": 0.5, "at": None, "set": "A"}}
+
+    delay_bank.clear(tmp_path)
+
+    assert delay_bank.KEY not in json.loads(
+        project_settings.path_for(tmp_path).read_text(encoding="utf-8"))
+
+
+def test_what_one_series_cannot_read_is_named_for_it_alone_and_carried_through_the_other(tmp_path):
+    """#208 per series: a title two series hold, A's entry a hand edit. Named for A, not for B; a
+    step under B writes B's entry and carries A's exactly as it was read."""
+    odd = {"ms": "0,5", "at": None, "set": "A", "note": "kept"}
+    project_settings.set_value(tmp_path, delay_bank.KEY, {
+        "w-L_01 (sw)": [odd, {"ms": 0.7, "at": None, "set": "B"}]})
+
+    assert set(delay_bank.unread_entries(tmp_path, "A")) == {"w-L_01 (sw)"}
+    assert delay_bank.unread_entries(tmp_path, "B") == {}
+
+    delay_bank.put("w-L_01 (sw)", 0.8, tmp_path, session="B")
+
+    assert _stored(tmp_path)["w-L_01 (sw)"] == [odd, {"ms": 0.8, "at": None, "set": "B"}]
+
+
+@pytest.mark.parametrize("field", [["w-L_01 (sw)", 0.198], "w-L_01 (sw)=0.198", 3],
+                         ids=["list", "text", "number"])
+def test_a_bank_of_a_shape_this_tcc_does_not_know_is_refused_never_written_over(
+        tmp_path, app_log_told, field):
+    """A newer TCC's bank, or a hand edit: not a map of titles. A plain read is «nothing banked»;
+    a strict read, a step and a Clear refuse it, and the file keeps its bytes. Said once."""
+    project_settings.set_value(tmp_path, delay_bank.KEY, field)
+    path = project_settings.path_for(tmp_path)
+    before = path.read_bytes()
+
+    assert delay_bank.load(tmp_path, "A") == {}
+    for refused in (lambda: delay_bank.load(tmp_path, "A", strict=True),
+                    lambda: delay_bank.unread_entries(tmp_path, "A"),
+                    lambda: delay_bank.put("w-L_01 (sw)", 0.3, tmp_path, session="A"),
+                    lambda: delay_bank.clear(tmp_path, session="A"),
+                    lambda: delay_bank.clear(tmp_path)):
+        with pytest.raises(delay_bank.BankShapeUnknown):
+            refused()
+    assert delay_bank.put_many_or_say(_seven(), tmp_path, session="A") is False
+    assert delay_bank.clear_or_say(tmp_path, session="A") is False
+
+    assert path.read_bytes() == before, "never written over"
+    told = [line for line in app_log_told if "delay bank" in line]
+    assert len(told) == 1 and "not a shape this TCC reads" in told[0], app_log_told

@@ -1584,7 +1584,11 @@ def test_a_reading_banked_before_series_scoping_shows_under_every_series():
 
     delay_bank.put("w-L_01 (sw)", 0.2, session="cap_001")
 
-    assert delay_bank.load(session="cap_009") == {}, "touching it settles which series it is in"
+    # Touched under one series it is not moved there (#197): that series gets its own, and the
+    # one with no series stays for every other — moved, it was gone from every series but one,
+    # and nothing says which series it was read in.
+    assert delay_bank.load(session="cap_001") == {"w-L_01 (sw)": 0.2}, "cap_001's own"
+    assert delay_bank.load(session="cap_009") == {"w-L_01 (sw)": 0.198}, "not lost to the others"
 
 
 def test_switching_series_in_the_panel_re_reads_the_bank_but_keeps_the_plot():
@@ -1611,8 +1615,6 @@ def test_switching_series_in_the_panel_re_reads_the_bank_but_keeps_the_plot():
     assert [t.name for t in dialog._view._traces] == plotted
 
 
-@pytest.mark.xfail(strict=True, reason="#197: the bank keeps one entry per title, so a step under "
-                   "series B moves series A's entries to B and A reads 0 on the way back")
 def test_a_series_switched_to_and_back_keeps_its_own_reading():
     """#197 (F-100 O4): the bank held one entry per title. A step after a series switch banks every
     driver on screen into the new series, which MOVED each one's entry there; back on the old
@@ -1649,6 +1651,72 @@ def test_a_series_switched_to_and_back_keeps_its_own_reading():
 
     assert delay_bank.load(session="A") == {wl: 0.5, wr: 0.1}, "the step lost nothing"
     assert delay_bank.load(session="B") == {wl: 0.7}
+
+
+def _two_series_window():
+    """A side's pair on screen under series A, with A and B each holding readings of both titles:
+    A two delays, B one delay and a reference."""
+    from autosound_tcc.core import delay_bank
+
+    wl, wr = "w-L_01 (sw)", "w-R_01 (sw)"
+    delay_bank.put_many([delay_bank.Reading(wl, 0.5), delay_bank.Reading(wr, 0.2)], session="A")
+    delay_bank.put_many([delay_bank.Reading(wl, 0.7), delay_bank.Reading(wr, 0.0)], session="B")
+    series = ["A"]
+    dialog = _dialog([wl, wr], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog.set_session_provider(lambda: series[0])
+    dialog._on_curves([Trace(wl, *_impulse(4.52)), Trace(wr, *_impulse(4.78))])
+    return dialog, series, wl, wr
+
+
+def test_the_bank_button_counts_the_series_shown_and_puts_its_readings_on_screen():
+    """#197: the count on the button is the shown series' — not «(0)» after a switch — and the
+    switch puts that series' readings on the drivers on screen, its zero included: the other
+    series' value left drawn was banked over it by the next step."""
+    dialog, series, wl, wr = _two_series_window()
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=2)
+    assert dialog._view.delays()[:2] == pytest.approx([0.5, 0.2])
+
+    series[0] = "B"
+    dialog.session_switched()
+
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=1), "B: one delay"
+    assert dialog._view.delays()[:2] == pytest.approx([0.7, 0.0]), "B's reference put back too"
+    tip = _tip(dialog._bank_btn)
+    assert "B" in tip and "+0.700" in tip and "+0.500" not in tip
+
+    series[0] = "A"
+    dialog.session_switched()
+
+    assert dialog._bank_btn.text() == i18n.t("curveBankBtn").format(n=2)
+    assert dialog._view.delays()[:2] == pytest.approx([0.5, 0.2])
+
+
+def test_clear_in_the_window_clears_the_series_shown_and_leaves_the_other_s_same_titles():
+    from autosound_tcc.core import delay_bank
+
+    dialog, series, wl, wr = _two_series_window()
+    series[0] = "B"
+    dialog.session_switched()
+
+    dialog._bank_clear_btn.click()
+
+    assert delay_bank.seen(session="B") == set(), "B's gone"
+    assert delay_bank.load(session="A") == {wl: 0.5, wr: 0.2}, "A's same titles stay"
+    assert dialog._view.delays()[:2] == pytest.approx([0.0, 0.0])
+
+
+def test_the_set_sent_for_analysis_is_the_series_shown():
+    dialog, series, wl, wr = _two_series_window()
+    series[0] = "B"
+    dialog.session_switched()
+    sent = []
+    dialog.readingSent.connect(sent.append)
+
+    dialog._bank_ask_btn.click()
+
+    assert len(sent) == 1 and "+0.700" in sent[0] and "+0.500" not in sent[0], sent
+    assert wr in sent[0], "B's reference is named as one"
 
 
 def test_a_driver_with_no_reading_is_named_not_assumed_to_be_at_zero():

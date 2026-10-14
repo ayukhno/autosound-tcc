@@ -1391,10 +1391,19 @@ class CurveDialog(QDialog):
     def session_switched(self) -> None:
         """The measurement panel moved to another capture series while this window was open.
 
-        Only the bank is re-read. The curves stay: the Arbiter may well be switching series in
-        order to compare, and yanking the plot out from under them would be the window deciding
-        what they are doing.
+        The curves stay: the Arbiter may well be switching series in order to compare, and yanking
+        the plot out from under them would be the window deciding what they are doing. What this
+        series holds is put back on them (#197): the bank is per series, and the other series'
+        values left on screen were banked over this one's readings by the next step. A driver this
+        series holds nothing for keeps what is drawn, and the next step carries it into this
+        series, as a new round starts from the last.
+
+        Not while drivers wait for a read of the bank (`_unread`): the step's retry puts them back
+        from every series their curves came back under (the re-review of G10 fix A, N1 and R1).
         """
+        if self._view._traces and not self._unread:
+            self._restore_bank()
+            self._sync_channel_delay()
         self._render_bank()
 
     def _session(self) -> Optional[str]:
@@ -1933,12 +1942,11 @@ class CurveDialog(QDialog):
         is theirs and stays — and the set is banked again from there.
 
         Put back from every series their curves came back under (`_unread_series`), never from
-        the one the panel has moved to since: that one holds none of their titles, the bank being
-        keyed by title, and the step banked the zeros drawn for them into it over the first
-        series' readings (the re-review of G10 fix A, N1). Every one, not the first: curves read
-        again under a second series while the store still failed were put back from the first
-        alone, and the step banked the zero drawn for a driver the second holds over its reading
-        (round 2, R1). `came_back` — the curves on screen came back just now, under the series
+        the one the panel has moved to since: that one need hold none of their entries, and the
+        step banked the zeros drawn for them into it over the first series' readings (the
+        re-review of G10 fix A, N1). Every one, not the first: curves read again under a second
+        series while the store still failed were put back from the first alone, and the step
+        banked the zero drawn for a driver the second holds over its reading (round 2, R1). `came_back` — the curves on screen came back just now, under the series
         shown now, whose bank is theirs too; the step's retry is not a read of curves, so it puts
         back only what the failed reads missed.
         """
@@ -1950,11 +1958,13 @@ class CurveDialog(QDialog):
         bank: dict = {}
         apfs: dict = {}
         odd: dict = {}
+        held: set = set()  # every driver with an entry, at zero and with no filter too (#197)
         own = window_folder.tcc_dir(self)  # the folder this window's own shows (#206, I1)
         try:
             for source in self._unread_series:
                 bank.update(delay_bank.load(own, source, strict=True))
                 apfs.update(delay_bank.allpasses(own, source, strict=True))
+                held.update(delay_bank.seen(own, source, strict=True))
                 odd.update(delay_bank.unread_entries(own, source))
         except own_store.StoreUnreadable:
             for index, trace in enumerate(self._view._traces):
@@ -1971,15 +1981,20 @@ class CurveDialog(QDialog):
                 drawn = unread.get(trace.name)
                 if trace.name in touched:
                     drawn = (None, object())  # set by the person since: neither is put back
-                if trace.name in bank and (drawn is None or self._view.delay_ms(index) == drawn[0]):
+                # A zero and «no filter» are put back too: after a series switch what is drawn is
+                # the other series', and a reference left at its value was banked over this one's
+                # zero by the next step (#197). After `set_traces` they are what is drawn already.
+                if trace.name in held and (drawn is None or self._view.delay_ms(index) == drawn[0]):
                     self._view.set_delay_target(index)
-                    self._view.set_delay(bank[trace.name])
-                if trace.name in apfs and (drawn is None or self._view.allpass(index) == drawn[1]):
+                    self._view.set_delay(bank.get(trace.name, 0.0))
+                apf = apfs.get(trace.name)
+                if (trace.name in held and (apf is not None or self._view.allpass(index) is not None)
+                        and (drawn is None or self._view.allpass(index) == drawn[1])):
                     # The filter comes back with the driver for the same reason the delay does —
                     # and it is the one of the two that is lost on the first × otherwise (a
                     # driver taken off the plot and put back is a new selection to the view).
                     try:
-                        self._view.set_allpass(apfs[trace.name], index)
+                        self._view.set_allpass(apf, index)
                     except AllpassError as exc:
                         # No skill to compute it with. A machine without the skill cannot show
                         # the filter, and it should not pretend to — nor bank its absence: the

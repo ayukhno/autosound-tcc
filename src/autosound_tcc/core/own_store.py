@@ -329,6 +329,14 @@ def say_unwritten(path: Path, exc: OSError) -> None:
               kind="write")
 
 
+def say_once(path: Path, message: str, kind: str) -> None:
+    """Say `message` about the store once for this state of the file — for an owner that finds,
+    inside a store read whole, a field it cannot read and will not write over (the delay bank's,
+    #197). `kind` keeps it apart from the store's own read and write sentences, which a good
+    read and a landed write forget: said under those, it would be said again on every step."""
+    _say_once(Path(path), message, kind)
+
+
 def said_about(path: Path) -> str:
     """The sentence last said about this store and still standing — about reading it, else about
     writing it — or "". For an answer the memo must not silence: a Save is the person asking,
