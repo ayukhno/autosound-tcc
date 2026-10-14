@@ -16,15 +16,18 @@ moved here unchanged.
 from __future__ import annotations
 
 import fnmatch
+import glob
 import itertools
 import os
 import posixpath
 import re
 import shlex
 import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Callable, Iterable, Optional, Sequence
+from typing import Callable, Iterable, Iterator, Optional, Sequence
 
 from autosound_tcc.core import app_log, own_store, project_settings
 
@@ -508,7 +511,23 @@ def bash_is_dangerous(command: str, roots: Sequence[Path]) -> bool:
     delete's target, a redirect, the program of `sh -c` or `python3 -c`) the answer is dangerous:
     `rm -rf $(cat list)` and `sh -c "$(curl …)"` ask, however harmless the inside reads.
     """
-    return _script_is_dangerous(command.strip(), depth=0)
+    with _in_project(roots):
+        return _script_is_dangerous(command.strip(), depth=0)
+
+
+#: The project a line runs in while the danger check reads it: what a link is resolved against
+#: (`roots[0]`, as `_read_roots_for` gives it). None when the caller named none — then only the
+#: line's text is judged, as it always was.
+_PROJECT: ContextVar[Optional[Path]] = ContextVar("shell_gate_project", default=None)
+
+
+@contextmanager
+def _in_project(roots: Sequence[Path]) -> Iterator[None]:
+    token = _PROJECT.set(Path(roots[0]) if roots else None)
+    try:
+        yield
+    finally:
+        _PROJECT.reset(token)
 
 
 def _has_substitution(text: str) -> bool:
@@ -1283,6 +1302,14 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
     texts = [argument.text for argument in arguments]
     if name in ("for", "select"):
         return False  # its list was read word by word, and its body is commands of their own
+    if name in _LINK_FOLLOWERS and _reaches_out_through_a_link(arguments, command.cwd):
+        return True  # `rm -rf h/` where `h` is `ln -s ~ h`: the home, not a folder of the project
+    if name == "ln":
+        return _ln_is_dangerous(arguments, command.cwd)
+    if name == "mklink":
+        return _mklink_is_dangerous(arguments, command.cwd)
+    if name in ("new-item", "ni"):
+        return _new_item_is_dangerous(arguments, command.cwd)
     if name in _UNREAD_KEYWORDS or name in ("sudo", "eval"):
         return True  # sudo: asking for the whole machine is the definition of worth a question
     if name in _RUINOUS or name.startswith(_RUINOUS_PREFIXES):
@@ -1521,6 +1548,222 @@ def _xargs_command(arguments: list[_Word]) -> Optional[list[_Word]]:
         return [replace(word, dynamic=True, quoted=True) if placeholder in word.text else word
                 for word in tail]
     return [*tail, _Word(text="…", started=True, dynamic=True)]
+
+
+#: What acts on the place a link points to rather than on the link: a delete or a move of `h/`
+#: where `h` is `ln -s ~ h` reaches the home (macOS's `rm -rf link/` follows it; Windows
+#: PowerShell's `Remove-Item -Recurse` follows a junction). The third fix round of tcc#181.
+_LINK_FOLLOWERS = frozenset({"rm", "unlink", "mv", "remove-item", "ri", "del", "erase", "rd",
+                             "rmdir", "move-item", "mi", "move"})
+#: What `New-Item -ItemType` makes that is a link.
+_LINK_KINDS = frozenset({"symboliclink", "junction", "hardlink"})
+#: How far a recursive PowerShell delete is looked into for a junction; past it, it asks.
+_WALK_LIMIT = 5000
+
+
+def _operand_words(arguments: list[_Word]) -> list[_Word]:
+    """The words a command acts on: not its options, `-Path:x`'s value, every word after `--`."""
+    operands: list[_Word] = []
+    ended = False
+    for word in arguments:
+        text = word.text
+        if not ended and text == "--":
+            ended = True
+        elif not ended and text.startswith("-") and len(text) > 1 and not word.quoted:
+            _, colon, value = text.partition(":")
+            if colon and value:
+                operands.append(_Word(text=value, started=True, dynamic="$" in value))
+        else:
+            operands.append(word)
+    return operands
+
+
+def _base(cwd: Optional[str]) -> Optional[str]:
+    """The folder a command runs in, absolute; None when the line does not spell it."""
+    project = _PROJECT.get()
+    if project is None or cwd is None:
+        return None
+    if cwd.startswith("~"):
+        return os.path.expanduser(cwd)
+    return cwd if _is_absolute(cwd) else os.path.join(str(project), cwd)
+
+
+def _resolve(text: str, base: str) -> Optional[str]:
+    """Where a path lands as written, absolute and normalised (links not followed yet); None for a
+    Windows place (`C:/…`, `//server/…`) on a machine that has none — outside the project there."""
+    text = text.replace("\\", "/")
+    if re.match(r"[A-Za-z]:", text) or text.startswith("//"):
+        if os.name != "nt":
+            return None
+        path = text
+    elif text.startswith("~"):
+        path = os.path.expanduser(text)
+    elif text.startswith("/"):
+        path = text
+    else:
+        path = os.path.join(base, text)
+    return os.path.normpath(path)
+
+
+def _within(path: str, root: str) -> bool:
+    path, root = os.path.normcase(path), os.path.normcase(root)
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+
+def _in_the_project(path: str) -> bool:
+    """Whether a path, as written, is inside the project — given or resolved (`/var` is
+    `/private/var` on macOS)."""
+    project = _PROJECT.get()
+    return project is not None and (_within(path, os.path.normpath(str(project)))
+                                    or _within(path, os.path.realpath(project)))
+
+
+def _lands_outside(path: str) -> bool:
+    """Whether a path, every link on it followed, lands outside the project."""
+    project = _PROJECT.get()
+    return project is not None and not _within(os.path.realpath(path), os.path.realpath(project))
+
+
+def _matches(path: str) -> list[str]:
+    """A path, or for a glob what it matches and the folder it is in."""
+    if not re.search(r"[*?\[]", path):
+        return [path]
+    fixed = os.path.dirname(re.split(r"[*?\[]", path, maxsplit=1)[0]) or path
+    return [fixed, *glob.glob(path, include_hidden=True)]
+
+
+def _reaches_out_through_a_link(arguments: list[_Word], cwd: Optional[str]) -> bool:
+    """A delete's or a move's operand written inside the project that a link takes outside it.
+    What is written outside is left to the narrow rules: `rm /tmp/x.txt` is not this case."""
+    base = _base(cwd)
+    if base is None:
+        return False
+    for word in _operand_words(arguments):
+        if word.dynamic:
+            continue  # what the line does not spell: the narrow rules have their own answer
+        path = _resolve(word.text, base)
+        if path is not None and _in_the_project(path) and any(
+                _lands_outside(match) for match in _matches(path)):
+            return True
+    return False
+
+
+def _holds_a_link_out(target: _Word, cwd: Optional[str]) -> bool:
+    """A folder inside the project holding a link or junction to outside it, looked for as deep as
+    `_WALK_LIMIT` entries; past that, unknown — and so it asks."""
+    base = _base(cwd)
+    if base is None or target.dynamic:
+        return False
+    path = _resolve(target.text, base)
+    if path is None or not _in_the_project(path):
+        return False
+    isjunction = getattr(os.path, "isjunction", lambda _: False)
+    seen = 0
+    for match in _matches(path):
+        if not os.path.isdir(match) or os.path.islink(match):
+            continue
+        for folder, folders, files in os.walk(match, followlinks=False):
+            for name in folders + files:
+                seen += 1
+                if seen > _WALK_LIMIT:
+                    return True
+                entry = os.path.join(folder, name)
+                if (os.path.islink(entry) or isjunction(entry)) and _lands_outside(entry):
+                    return True
+    return False
+
+
+def _link_target_is_outside(target: str, link: Optional[str], symbolic: bool,
+                            cwd: Optional[str]) -> bool:
+    """Whether a link made to `target` points outside the project. A symbolic link's relative
+    target is read from the link's folder (`ln -s .. state/up` is the project), a hard link's or a
+    junction's from where the command runs. Without a project, any target that is absolute, the
+    home or a climb is outside."""
+    text = target.replace("\\", "/")
+    base = _base(cwd)
+    if base is None:
+        return _is_absolute(text) or ".." in text.split("/")
+    if symbolic and link is not None:
+        link_path = _resolve(link, base)
+        if link_path is None:
+            return True
+        base = link_path if os.path.isdir(link_path) else os.path.dirname(link_path)
+    path = _resolve(text, base)
+    return path is None or _lands_outside(path)
+
+
+def _ln_is_dangerous(arguments: list[_Word], cwd: Optional[str]) -> bool:
+    """`ln` making a link to outside the project: once it stands, a delete of the link with a slash
+    — or anything that writes through it — reaches there (third fix round of tcc#181)."""
+    options = [word.text for word in arguments
+               if word.text.startswith("-") and len(word.text) > 1 and not word.quoted]
+    if "--" in [word.text for word in arguments]:
+        options = options[:[w.text for w in arguments].index("--")]
+    operands = _operand_words(arguments)
+    if not operands:
+        return False
+    if any(word.dynamic for word in operands):
+        return True
+    shorts = "".join(option[1:] for option in options if not option.startswith("--"))
+    if "t" in shorts or any(option.startswith("--target") for option in options):
+        return True  # the link's folder given as an option: not read here
+    symbolic = "s" in shorts or "--symbolic" in options
+    targets = operands[:-1] if len(operands) > 1 else operands
+    link = operands[-1].text if len(operands) > 1 else None
+    return any(_link_target_is_outside(word.text, link, symbolic, cwd) for word in targets)
+
+
+def _mklink_is_dangerous(arguments: list[_Word], cwd: Optional[str]) -> bool:
+    """cmd's `mklink [/D|/H|/J] link target`, judged as `ln` is."""
+    switches = {word.text.lower() for word in arguments if word.text.lower() in ("/d", "/h", "/j")}
+    operands = [word for word in arguments if word.text.lower() not in ("/d", "/h", "/j")]
+    if len(operands) != 2 or any(word.dynamic for word in operands):
+        return True
+    symbolic = not switches & {"/h", "/j"}
+    return _link_target_is_outside(operands[1].text, operands[0].text, symbolic, cwd)
+
+
+def _is_param(name: str, full: str, shortest: int) -> bool:
+    return len(name) >= shortest and full.startswith(name)
+
+
+def _new_item_is_dangerous(arguments: list[_Word], cwd: Optional[str]) -> bool:
+    """`New-Item -ItemType SymbolicLink|Junction|HardLink … -Value <target>`: a link, and its
+    `-Value` (or `-Target`) is where it points — dangerous when that is outside the project, or
+    when the line does not spell the kind or the target."""
+    kind: Optional[_Word] = None
+    target: Optional[_Word] = None
+    at = 0
+    while at < len(arguments):
+        word = arguments[at]
+        text = word.text
+        if text.startswith("-") and len(text) > 1 and not word.quoted:
+            name, colon, value = text[1:].partition(":")
+            name = name.lower()
+            takes = any(_is_param(name, full, 2) for full in ("itemtype", "type", "value",
+                                                             "target", "path", "name"))
+            given: Optional[_Word] = None
+            if colon:
+                given = _Word(text=value, started=True, dynamic="$" in value)
+            elif takes and at + 1 < len(arguments):
+                at += 1
+                given = arguments[at]
+            if _is_param(name, "itemtype", 2) or _is_param(name, "type", 2):
+                kind = given
+            elif _is_param(name, "value", 2) or _is_param(name, "target", 3):
+                target = given
+        elif text.lower() in _LINK_KINDS:
+            kind = word
+        at += 1
+    if kind is None:
+        return False
+    if kind.dynamic:
+        return True
+    if kind.text.lower() not in _LINK_KINDS:
+        return False
+    if target is None or target.dynamic:
+        return True
+    return _link_target_is_outside(target.text, None, symbolic=False, cwd=cwd)
 
 
 def _rm_is_dangerous(arguments: list[_Word], cwd: Optional[str] = "") -> bool:
@@ -1930,6 +2173,8 @@ def _powershell_statement_is_dangerous(words: list[_Word], piped: bool, called: 
         return False  # its condition and its body are statements of their own
     if name in ("iex", "invoke-expression"):
         return True  # PowerShell's `eval`
+    if name in _LINK_FOLLOWERS and _reaches_out_through_a_link(words[1:], cwd):
+        return True
     if name in _PS_REMOVERS:
         return _remove_item_is_dangerous(words[1:], piped, cwd)
     return _words_are_dangerous(words, _Command(piped=piped, cwd=cwd), set(), depth)
@@ -1956,6 +2201,8 @@ def _remove_item_is_dangerous(arguments: list[_Word], piped: bool, cwd: Optional
     splat = any(target.text.startswith("@") for target in targets)  # `@args` may hold -Recurse
     if not (recurse or splat):
         return False
+    if any(_holds_a_link_out(target, cwd) for target in targets):
+        return True  # Windows PowerShell 5.1 recurses through a junction inside what it deletes
     if not targets:
         return piped
     return any(target.dynamic or _is_wide_here(target.text, cwd)
@@ -2319,6 +2566,8 @@ def touches_only_skill_files(command: str, *, shell: str = "bash", project: Opti
             continue
         if head not in _FOREIGN_PATH_HEADS[shell]:
             return False
+        if head == "new-item" and not _new_item_is_a_file_or_folder(operands):
+            return False
         paths = _powershell_operands(operands) if shell == SHELL_POWERSHELL else _bash_operands(
             operands)
         if paths is None or any(_skill_path(path, project, shell) is None for path in paths):
@@ -2405,15 +2654,30 @@ def _powershell_simple_statements(line: str) -> Optional[list[tuple[list[str], l
     return [statement for statement in statements if statement[0] or statement[1]]
 
 
+def _new_item_is_a_file_or_folder(operands: list[str]) -> bool:
+    """`New-Item` takes `foreign`'s pass as a file or a folder only: as a link its `-Value` is where
+    the link points, not text (`-ItemType Junction -Value C:/Users`)."""
+    kinds = [value for name, _, value in (word.partition(":") for word in operands)
+             if value and name.lower() in ("-itemtype", "-type")]
+    kinds += [operands[at + 1] for at, word in enumerate(operands[:-1])
+              if word.lower() in ("-itemtype", "-type")]
+    if any(word.lower() in _LINK_KINDS for word in operands):
+        return False
+    return all(kind.lower() in ("file", "directory") for kind in kinds)
+
+
 def _bash_operands(operands: list[str]) -> Optional[list[str]]:
     """What a path command names: every word but its options, and an option's `=value`."""
     paths = []
+    ended = False
     for word in operands:
-        if word.startswith("-") and len(word) > 1:
+        if not ended and word == "--":
+            ended = True
+        elif not ended and word.startswith("-") and len(word) > 1:
             if "=" in word:
                 paths.append(word.split("=", 1)[1])
-            continue
-        paths.append(word)
+        else:
+            paths.append(word)
     return paths
 
 
@@ -2422,12 +2686,15 @@ def _powershell_operands(operands: list[str]) -> Optional[list[str]]:
     `-Path:x` value is a path. A word after any other parameter is read as a path too — a switch's
     neighbour or a parameter's value, either way it may only add a question."""
     paths = []
-    skip = False
+    skip = ended = False
     for word in operands:
         if skip:
             skip = False
             continue
-        if word.startswith("-") and len(word) > 1:
+        if not ended and word == "--":
+            ended = True
+            continue
+        if not ended and word.startswith("-") and len(word) > 1:
             name, colon, value = word.partition(":")
             if name.lower() in _PS_DATA_PARAMS:
                 skip = not colon
@@ -2458,9 +2725,19 @@ def _runs_the_writer(head: str, operands: list[str], project: Optional[Path],
     at = 0
     while at < len(operands) and operands[at] in _WRITER_RUNNER_OPTIONS:
         at += 1
-    if at >= len(operands):
+    if at >= len(operands) or not _is_the_writer(_slashed(operands[at], shell), project, skill):
         return False
-    script = _slashed(operands[at], shell)
+    # Its arguments are data — but the first is the folder it writes into (`--root <folder>` the
+    # same), and that must be the project's own: `… process.py /etc done x` is not a skill write.
+    rest = operands[at + 1:]
+    if rest and rest[0] == "--root":
+        rest = rest[1:]
+    elif rest and rest[0].startswith("--root="):
+        rest = [rest[0].split("=", 1)[1], *rest[1:]]
+    return bool(rest) and _skill_path(rest[0], project, shell) is not None
+
+
+def _is_the_writer(script: str, project: Optional[Path], skill: Path) -> bool:
     writer = os.path.realpath(skill.joinpath(*_SKILL_WRITER))
     for ref in _SKILL_ROOT_REFS:
         if script.startswith(ref):
@@ -2520,10 +2797,15 @@ def _skill_path(word: str, project: Optional[Path], shell: str) -> Optional[str]
     if project is not None:
         fixed = re.split(r"[*?\[]", path, maxsplit=1)[0]  # a glob's folder, not its pattern
         fixed = fixed if fixed == path else posixpath.dirname(fixed)
-        real = os.path.realpath(project / fixed) if fixed else ""
-        landed = os.path.relpath(real, os.path.realpath(project)) if real else ""
-        if not landed or landed.startswith("..") or not _is_owned(landed.replace(os.sep, "/")):
-            return None
+        places = [str(project / fixed)] if fixed else [""]
+        if fixed != path:  # and every match, each landing where its own links take it
+            places += glob.glob(str(project / path), include_hidden=True)
+        for place in places:
+            real = os.path.realpath(place) if place else ""
+            landed = os.path.relpath(real, os.path.realpath(project)) if real else ""
+            if (not landed or landed.startswith("..")
+                    or not _is_owned(landed.replace(os.sep, "/"))):
+                return None
     return path
 
 
@@ -2537,7 +2819,20 @@ def _is_dangerous(command: str, roots: Sequence[Path], shell: str) -> bool:
     reading that flags it asks, so a PowerShell line is never judged more loosely than a bash one."""
     if bash_is_dangerous(command, roots):
         return True
-    return shell == SHELL_POWERSHELL and _powershell_line_is_dangerous(command.strip(), depth=0)
+    with _in_project(roots):
+        return shell == SHELL_POWERSHELL and _powershell_line_is_dangerous(command.strip(),
+                                                                           depth=0)
+
+
+#: The method's root as the line may READ it; any other mention of the name sets it, or might.
+_SKILL_ROOT_READS = re.compile(r"\$AUTOSOUND_SKILL_ROOT(?![\w=:\[])|\$\{AUTOSOUND_SKILL_ROOT\}")
+
+
+def _sets_skill_root(line: str) -> bool:
+    """`export`/`set`/`$env:`/an assignment of `AUTOSOUND_SKILL_ROOT`: the root is TCC's to set
+    (`binding.session_env`), and the writer check trusts it — a persistent shell would carry one
+    the line set into every line after it. So it asks, in every gate that asks."""
+    return "autosound_skill_root" in _SKILL_ROOT_READS.sub("", line).lower()
 
 
 def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[str] = (),
@@ -2570,13 +2865,14 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
     name = TOOL_NAMES.get(tool, tool)
     line = detail if command is None else command
     stranger = name not in OMP_TOOLS and not name.startswith("mcp__tcc")
+    rooted = name == "bash" and _sets_skill_root(line)
     dangerous = False  # read once, only where it decides or names the question
     if name == "bash" and gate in (GATE_NEVER, GATE_AUTO, GATE_FOREIGN):
         dangerous = _is_dangerous(line, read_roots, shell)
     if gate == GATE_NEVER:
         # `never` asks about nothing, and is never silent about what `auto` would have asked
         # (tcc#115) — the same line as on the Agent SDK side. A stranger `auto` would have asked.
-        return Verdict(True, unasked=line if dangerous or stranger else "")
+        return Verdict(True, unasked=line if dangerous or stranger or rooted else "")
     ticked = frozenset(always_allowed)
     if tool in ticked or name in ticked:
         return Verdict(True)  # a remembered tick outranks the `auto` guard below, as on the SDK side
@@ -2585,7 +2881,7 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
         # so on omp a delete passed silently while the menu told the Arbiter `auto` still asks
         # about what cannot be undone (review of tcc#115). The SDK adapter's narrow check, shared.
         # A name this table has no row for is not looked at by that check, so it asks.
-        allowed = not (dangerous or stranger)
+        allowed = not (dangerous or stranger or rooted)
     elif name in ALWAYS_GATED_TOOLS:
         allowed = False
     elif name.startswith("mcp__tcc") or name in READ_ONLY_TOOLS:
@@ -2594,7 +2890,7 @@ def judge_action(tool: str, detail: str, *, gate: str, always_allowed: Iterable[
         # `foreign`: the skill writing its own namespace is the skill doing its job, and asking
         # about it teaches the Arbiter to click through the ones that matter. Danger first: a
         # line that also deletes the home is not the skill doing its job (`rm -rf process/ ~`).
-        allowed = (shell != SHELL_POWERSHELL and bash_is_read_only(line, read_roots)
+        allowed = not rooted and (shell != SHELL_POWERSHELL and bash_is_read_only(line, read_roots)
                    or gate == GATE_FOREIGN and not dangerous and touches_only_skill_files(
                        line, shell=shell, project=read_roots[0] if read_roots else None,
                        skill=read_roots[1] if len(read_roots) > 1 else None))

@@ -215,6 +215,30 @@ FOREIGN_ROWS = [
     ("method: block", "python3 " + WRITER +
      ' {project}/process block -1.2 "the first ✗ line of reviewer-check.md"', B, False, True),
     ("method: --root", "python3 " + WRITER + " --root ./state registry render", B, False, True),
+    # Third round. The writer's first operand is the folder it writes into: a skill path.
+    ("the writer into /etc", "python3 {skill}/" + WRITER + " /etc done x", B, True, False),
+    ("the writer into another car", "python3 " + WRITER + " ../other-car/process done -1.1 x", B,
+     True, False),
+    ("the writer into the home", "python3 " + WRITER + " ~/other/process show", B, True, False),
+    ("the writer with --root elsewhere", "python3 " + WRITER + " --root /tmp/state registry render",
+     B, True, False),
+    ("the writer with nothing to write into", "python3 {skill}/" + WRITER, B, False, False),
+    # After `--` every word is an operand.
+    ("an option-looking word after --", "rm -rf -- -x process/a.json", B, True, False),
+    ("a skill file after --", "rm -- process/a.json", B, False, True),
+    # New-Item takes the pass as a file or a folder, never as a link.
+    ("a junction out of the namespace", "New-Item -ItemType Junction -Path process/j -Value C:/Users",
+     P, False, False),
+    ("a junction to the parent", "New-Item -ItemType Junction -Path process/j -Value ..", P, False,
+     False),
+    ("a link inside the namespace",
+     "New-Item -ItemType SymbolicLink -Path process/l -Value process/a.json", P, False, False),
+    ("a skill folder by New-Item", "New-Item -ItemType Directory -Path process/runs", P, False, True),
+    # The skill's root is TCC's to set, not the line's.
+    ("the skill's root exported", "export AUTOSOUND_SKILL_ROOT=/tmp/evil", B, True, False),
+    ("the skill's root set for the writer",
+     'AUTOSOUND_SKILL_ROOT=/tmp/evil python3 "$AUTOSOUND_SKILL_ROOT/' + WRITER + '" ./process show',
+     B, True, False),
     # …and by the paths a session's shell has: the skill's own, its variable, the project's link.
     ("method by the skill's absolute path",
      "python3 {skill}/" + WRITER + " {project}/process done lang ok", B, False, True),
@@ -244,6 +268,13 @@ CHANGED_FOR_OMP.update({
         ("a script written into state/", "a `.py` in state/ is not a skill file"),
         ("a script run from state/", "only the writer in the skill's own folder is trusted"),
         ("a shell script from process/", "`bash` is not on the allow-list"),
+        ("the writer into /etc", "the writer's first operand is the folder it writes into"),
+        ("the writer into another car", "the writer's first operand is the folder it writes into"),
+        ("the writer into the home", "the writer's first operand is the folder it writes into"),
+        ("the writer with --root elsewhere", "`--root` names the folder it writes into"),
+        ("an option-looking word after --", "after `--`, `-x` is a file"),
+        ("the skill's root exported", "only TCC sets the skill's root (it also asks under `auto`)"),
+        ("the skill's root set for the writer", "only TCC sets the skill's root"),
     ]
 })
 
@@ -267,7 +298,7 @@ def _rows(table=OMP_TABLE):
 
 def test_every_changed_row_is_in_the_table():
     assert set(CHANGED_FOR_OMP) <= {row[0] for row in OMP_TABLE} | {
-        row[0] for row in FOREIGN_ROWS if row[3]}
+        row[0] for row in FOREIGN_ROWS if row[3]} | {row[0] for row in AUTO_LINK_ROWS}
 
 
 @pytest.mark.parametrize("tool, detail, ticked, gate, cell", list(_rows()))
@@ -330,6 +361,139 @@ def test_a_link_out_of_the_namespace_is_not_the_skills(tmp_path):
     # Where it lands decides: through the link to the project's own `process/` is the skill's.
     for line in ("rm -rf state/runs/", "rm -rf state/up/process/old"):
         assert judge_action("Bash", line, gate=GATE_FOREIGN, read_roots=roots).allowed, line
+
+
+# ---- links: what a delete or a move reaches, and links made out of the project ----------------
+#
+# Third fix round (the Arbiter's «fix fully»): `ln -s ~ h` passed `auto`, and then `rm -rf h/` —
+# macOS's `rm -rf link/` follows the link. The danger check (`bash_is_dangerous`) now resolves
+# what `rm`/`mv`/`Remove-Item`/`Move-Item` reach against the project, and a link made to outside
+# it is itself dangerous. The SDK route asks the same check, so these rows changed there too.
+
+#: (name, line, shell) — each asks as «cannot be undone» under `auto`, in a project where `h` is a
+#: link to a folder outside it and `process/j` one inside the skill's folder (`_linked_project`).
+AUTO_LINK_ROWS = [
+    ("rm through a link out", "rm -rf h/", B),
+    ("rm below a link out", "rm -rf h/sub", B),
+    ("rm of a link out", "rm -rf h", B),
+    ("mv out through a link", "mv h/ elsewhere", B),
+    ("mv into a link out", "mv process/a.json h/", B),
+    ("rm of a glob over a link out", "rm -rf process/*", B),
+    ("a link to the home", "ln -s ~ h2", B),
+    ("a link to the root", "ln -s / r", B),
+    ("a link to the project's parent", "ln -s .. up", B),
+    ("a link to a folder outside", "ln -s {outside} x", B),
+    ("a hard link to a system file", "ln /etc/hosts x", B),
+    ("a junction by cmd", r"cmd /c mklink /J j C:\Users", B),
+    ("a junction by PowerShell, from bash",
+     "powershell -c 'New-Item -ItemType Junction -Path j -Value C:/Users'", B),
+    ("a junction by PowerShell", "New-Item -ItemType Junction -Path process/j2 -Value C:/Users", P),
+    ("a PowerShell link up", "New-Item -ItemType SymbolicLink -Path process/l -Value ..", P),
+    ("a PowerShell delete over a nested link", "Remove-Item -Recurse -Force process", P),
+    ("a PowerShell delete of a glob over a link", "Remove-Item -Recurse -Force process/*", P),
+    ("a PowerShell move through a link", "Move-Item h/sub process/", P),
+]
+
+#: …and what still passes `auto` there: links and deletes that stay inside the project.
+AUTO_LINK_PASS = [
+    ("a link inside the project", "ln -s ../process/a.json state/b", B),
+    ("a plain skill file removed", "rm process/a.json", B),
+    ("rm -rf of a folder holding a link", "rm -rf process", B),  # POSIX rm removes the link
+    ("a folder by New-Item", "New-Item -ItemType Directory -Path process/runs", P),
+    ("a PowerShell link inside", "New-Item -ItemType SymbolicLink -Path state/l -Value "
+                                 "process/a.json", P),
+]
+
+#: What changed for omp AND the SDK route (`TuningSession._can_use_tool` asks `bash_is_dangerous`
+#: under `auto`): every bash row of `AUTO_LINK_ROWS` passed `auto` before, and asks now.
+CHANGED_FOR_SDK = {
+    name: "auto pass -> ask!: " + ("what it reaches lies outside the project through a link"
+                                   if line.startswith(("rm", "mv")) else
+                                   "a link made to outside the project")
+    for name, line, shell in AUTO_LINK_ROWS if shell == B
+}
+CHANGED_FOR_OMP.update(CHANGED_FOR_SDK)
+
+
+def _linked_project(tmp_path):
+    """A project where `h` and `process/j` are links to a folder outside it."""
+    project, roots = _project(tmp_path)
+    outside = tmp_path / "outside"
+    (outside / "sub").mkdir(parents=True)
+    (project / "process").mkdir()
+    (project / "state").mkdir()
+    (project / "process" / "a.json").write_text("{}")
+    (project / "h").symlink_to(outside, target_is_directory=True)
+    (project / "process" / "j").symlink_to(outside, target_is_directory=True)
+    return project, roots, outside
+
+
+@pytest.mark.parametrize("name, line, shell", AUTO_LINK_ROWS, ids=[r[0] for r in AUTO_LINK_ROWS])
+def test_a_link_out_of_the_project_asks_under_auto(name, line, shell, tmp_path):
+    project, roots, outside = _linked_project(tmp_path)
+    line = line.format(outside=outside)
+
+    verdict = judge_action("Bash", line, gate=GATE_AUTO, read_roots=roots, shell=shell)
+
+    assert _cell(verdict) == "ask!"
+
+
+@pytest.mark.parametrize("name, line, shell", AUTO_LINK_PASS, ids=[r[0] for r in AUTO_LINK_PASS])
+def test_a_link_inside_the_project_still_passes_auto(name, line, shell, tmp_path):
+    project, roots, _ = _linked_project(tmp_path)
+
+    assert judge_action("Bash", line, gate=GATE_AUTO, read_roots=roots, shell=shell).allowed
+
+
+@pytest.mark.parametrize("name, line", [(r[0], r[1]) for r in AUTO_LINK_ROWS if r[2] == B],
+                         ids=[r[0] for r in AUTO_LINK_ROWS if r[2] == B])
+def test_omp_and_the_sdk_route_ask_about_a_link_out(name, line, tmp_path):
+    """The same rows through omp's `_gate` and the SDK route's `_can_use_tool`, both under `auto`."""
+    from autosound_tcc.core.tuning_session import TuningSession
+
+    project, _, outside = _linked_project(tmp_path)
+    line = line.format(outside=outside)
+    session, sent, _ = _omp_gate(project, "bash", f"Command: {line}", (), GATE_AUTO)
+    assert len(session.bridge.requests) == 1
+    assert session.bridge.requests[0].reason == "gateIrreversible"
+
+    sdk = TuningSession(project_dir=project, gate=GATE_AUTO)
+    asked: list = []
+
+    async def ask(*args, **kwargs):
+        asked.append(args)
+        return "asked"
+
+    sdk._ask = ask
+    asyncio.run(sdk._can_use_tool("Bash", {"command": line}, None))
+    assert len(asked) == 1
+
+
+def test_a_foreign_glob_over_a_link_asks(tmp_path):
+    """C2 for globs: `process/*` matches `process/j`, a link out; each match's own landing counts."""
+    project, roots, _ = _linked_project(tmp_path)
+
+    for line, shell in (("rm -rf process/*", B), ("Remove-Item -Recurse -Force process/*", P),
+                        ("rm process/*", B)):
+        verdict = judge_action("Bash", line, gate=GATE_FOREIGN, read_roots=roots, shell=shell)
+        assert not verdict.allowed, line
+
+
+@pytest.mark.parametrize("gate", GATES)
+@pytest.mark.parametrize("line, shell", [
+    ("export AUTOSOUND_SKILL_ROOT=/tmp/evil", B),
+    ("AUTOSOUND_SKILL_ROOT=/tmp/evil python3 x.py", B),
+    ("unset AUTOSOUND_SKILL_ROOT", B),
+    ("set AUTOSOUND_SKILL_ROOT=C:/evil", B),
+    ("$env:AUTOSOUND_SKILL_ROOT = 'C:/evil'", P),
+])
+def test_setting_the_skills_root_always_asks(line, shell, gate, tmp_path):
+    """A persistent shell would carry a root the line set, and the writer check trusts the root."""
+    verdict = judge_action("Bash", line, gate=gate, read_roots=_read_roots_for(tmp_path),
+                           shell=shell)
+
+    # A line the bash reader cannot spell (`$env:…` as a command) asks as «cannot be undone» too.
+    assert _cell(verdict) in (("pass!",) if gate == GATE_NEVER else ("ask", "ask!"))
 
 
 def test_a_writer_the_project_holds_at_the_documents_path_is_not_the_skills(tmp_path):
