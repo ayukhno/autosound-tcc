@@ -525,6 +525,63 @@ def test_the_frame_log_rotates_at_its_cap_and_keeps_the_late_frames(tmp_path):
         "the very last frame (the end) is still written"
 
 
+def test_a_rotation_that_cannot_move_the_log_empties_it_and_writing_goes_on(tmp_path):
+    """M3: `.1` cannot be replaced (here a folder; on Windows a viewer holding it) — the log is
+    emptied instead and the late frames are still written."""
+    ours = tmp_path / "frames.jsonl"
+    ours.write_text("x" * 350 + "\n", encoding="utf-8")
+    (tmp_path / "frames.jsonl.1").mkdir()
+
+    async def go():
+        server = AppServer(fake("signed-out", tmp_path / "fake.jsonl"), log=ours, log_cap=400)
+        await server.open()
+        await server.close()
+
+    run(go())
+
+    text = ours.read_text(encoding="utf-8")
+    assert "x" * 350 not in text and ours.stat().st_size <= 400
+    last = json.loads(text.splitlines()[-1])
+    assert last["dir"] == "note" and "ended" in json.dumps(last["msg"])
+
+
+def test_open_cancelled_at_the_spawn_ends(tmp_path):
+    """M4: a cancel through the awaiting task at the moment of the spawn ends promptly and leaves
+    no process (a spawn left pending to `asyncio.run`'s cleanup is CPython's hang — see `open`)."""
+    log = tmp_path / "fake.jsonl"
+
+    async def go():
+        server = AppServer(fake(write_scenario(tmp_path / "s.jsonl", [
+            *opening(), {"dir": "out", "t": 0.0, "msg": {"method": "never/sent"}}]), log))
+        task = asyncio.ensure_future(server.open())
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(asyncio.shield(task), 10)
+        await server.close()
+        return server
+
+    server = run(go())
+    if server.pid is not None:
+        assert server.returncode is not None
+
+
+def test_the_notification_hook_sees_each_notification_before_it_is_queued(tmp_path):
+    seen: list[str] = []
+
+    async def go():
+        server = AppServer(fake("mcp-elicitation", tmp_path / "fake.jsonl"),
+                           on_request=lambda msg: None,
+                           on_notification=lambda msg: seen.append(
+                               (msg["method"], server.notifications.qsize())))
+        await server.open()
+        await server.close()
+
+    run(go())
+    assert seen and seen[0][0] == "remoteControl/status/changed"
+    assert seen[0][1] == 0, "called before the notification is queued"
+
+
 def test_a_frame_log_that_cannot_be_written_does_not_stop_anything(tmp_path):
     async def go():
         server = AppServer(fake("signed-out", tmp_path / "fake.jsonl"),

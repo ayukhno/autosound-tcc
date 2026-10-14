@@ -17,8 +17,11 @@ two speak (`docs/PLAN-W-10-codex.md`, «The session»):
   ending. `TurnEnd` is the last event of a turn and only ever the last.
 * **Codex's own requests** — answered exactly once, through `AppServer.respond` (it refuses a
   second answer). TCC's MCP server's elicitation is accepted (its tools gate themselves inside the
-  tool); command and file-change approvals are DECLINED in this build — task 7 puts TCC's gate
-  (`shell_gate.judge_action`) there; anything else is a JSON-RPC error.
+  tool); command and file-change approvals go through TCC's gate (`shell_gate.judge_action`, the
+  table omp shares), then the confirm bar when it asks — `accept` or `decline`, never
+  `acceptForSession` (TCC's ticks are the only memory of what was allowed); anything else is a
+  JSON-RPC error. A request Codex withdraws (`serverRequest/resolved`) takes the bar down and is
+  never answered.
 
 Qt-free; everything runs on the worker's loop (`ui.tcc.agent_worker`).
 """
@@ -30,16 +33,20 @@ import os
 import re
 import shlex
 from pathlib import Path
+from dataclasses import replace
 from typing import Any, AsyncIterator, Optional
 
 from autosound_tcc.core import (app_log, child, codex_cli, codex_rpc, config, critic,
                                 method_binding, model_choices, openers, signal_bus,
                                 vendor_loader)
-from autosound_tcc.core.agent_events import AgentEvent, Notice, TextDelta, ToolCall, ToolEnd, TurnEnd
-from autosound_tcc.core.mcp_server import CONFIRM_TIMEOUT_S, HeadlessBridge, UiBridge
+from autosound_tcc.core.agent_events import (AgentEvent, Notice, TextDelta, ToolCall, ToolEnd,
+                                             TurnEnd, Unasked)
+from autosound_tcc.core.mcp_server import (CONFIRM_TIMEOUT_S, ConfirmRequest, HeadlessBridge,
+                                           UiBridge, await_confirmation)
 from autosound_tcc.core.omp_session import FRAME_LOG_MAX_BYTES
 from autosound_tcc.core.session_registry import CODEX_ROUTE, SessionRegistry
-from autosound_tcc.core.shell_gate import GATE_WRITES
+from autosound_tcc.core.shell_gate import (GATE_AUTO, GATE_NEVER, GATE_WRITES, SHELL_BASH,
+                                           SHELL_POWERSHELL, Verdict, judge_action)
 from autosound_tcc.core.tuning_session import SKILL_NAME, _read_roots_for, system_prompt_append
 
 #: Every frame both ways, next to the project's other TCC state — omp's `omp-frames.jsonl`, for the
@@ -57,6 +64,12 @@ TOOL_TIMEOUT_S = int(max(CONFIRM_TIMEOUT_S, critic.DEFAULT_TIMEOUT_S) + 60)
 COMMAND_APPROVAL = "item/commandExecution/requestApproval"
 FILE_APPROVAL = "item/fileChange/requestApproval"
 ELICITATION = "mcpServer/elicitation/request"
+
+#: Not a notification Codex sends: the gate's `Unasked`, put on the notifications queue so it reaches
+#: the turn's events in order with Codex's own.
+_UNASKED = "tcc/unasked"
+#: The programs whose command line is PowerShell's, by the first word's basename.
+_POWERSHELL = frozenset({"powershell", "pwsh"})
 
 #: `/bin/zsh -lc '…'` — how Codex on macOS/Linux wraps every command it runs.
 _SHELL_WRAPPER = re.compile(r"^(?:\S*/)?(?:zsh|bash|sh)\s+-l?c\s+(.+)$", re.S)
@@ -91,6 +104,27 @@ def inner_command(command: str) -> str:
     except ValueError:
         return command
     return parts[0] if len(parts) == 1 else command
+
+
+def shell_of(command: str, *, windows: Optional[bool] = None) -> str:
+    """Which shell's reader judges `command` (`judge_action`'s `shell`): PowerShell when its first
+    word is `powershell`/`pwsh` (any folder, `.exe` or not, quoted or not); bash when it is Codex's
+    `sh`/`bash`/`zsh -lc` wrapper; otherwise the platform's — Codex on Windows runs its commands in
+    PowerShell, everywhere else in a POSIX shell."""
+    text = (command or "").lstrip()
+    if text.startswith('"'):
+        first = text[1:].split('"', 1)[0]
+    else:
+        first = text.split(None, 1)[0] if text else ""
+    name = first.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    if name in _POWERSHELL:
+        return SHELL_POWERSHELL
+    if _SHELL_WRAPPER.match(text):
+        return SHELL_BASH
+    windows = os.name == "nt" if windows is None else windows
+    return SHELL_POWERSHELL if windows else SHELL_BASH
 
 
 class CodexSession:
@@ -144,8 +178,12 @@ class CodexSession:
         self._streamed: set[str] = set()
         self._running: dict[str, str] = {}     # itemId -> the ToolCall name it was shown as
         self._running_label = ""               # what the silence notice names
-        #: fileChange paths by itemId: the approval request names only the item (task 7).
-        self._paths: dict[str, list[str]] = {}
+        #: A fileChange's `(path, kind)` by itemId — the approval names only the item. Recorded in
+        #: the reader (`_on_notification`), so the gate never waits on whoever drains the queue.
+        self._changes: dict[str, list[tuple[str, str]]] = {}
+        #: Approvals with the gate or on the bar, by request id: cancelled when Codex withdraws one
+        #: or the turn ends — the bar comes down and nothing is sent.
+        self._gating: dict[Any, asyncio.Task] = {}
         self._retry_said = False
         self._last_error = ""
         self._getter: Optional[asyncio.Future] = None
@@ -278,7 +316,8 @@ class CodexSession:
             secrets = (codex_cli.TOKEN_ENV,)
         self._server = codex_rpc.AppServer(
             argv, cwd=self.project_dir, env=env, spawn_kwargs=self._spawn_kwargs(),
-            log=self._frame_log(), on_request=self._on_request, secret_env=secrets,
+            log=self._frame_log(), on_request=self._on_request,
+            on_notification=self._on_notification, secret_env=secrets,
             log_cap=FRAME_LOG_MAX_BYTES)
         try:
             await self._server.open()
@@ -447,8 +486,9 @@ class CodexSession:
 
     # ---- Codex's requests -----------------------------------------------------------------------
 
-    def _on_request(self, msg: dict) -> None:
-        """Every request Codex sends, answered once, here (the reader calls this)."""
+    def _on_request(self, msg: dict) -> Optional[asyncio.Task]:
+        """Every request Codex sends, answered once (the reader calls this): at once, or by the
+        approval's gate task."""
         server = self._server
         if server is None:
             return
@@ -463,16 +503,119 @@ class CodexSession:
                 server.respond(rid, {"action": "decline"})
             return
         if method in (COMMAND_APPROVAL, FILE_APPROVAL):
-            # TASK 7 puts TCC's gate here (`shell_gate.judge_action`, then `await_confirmation`).
-            # Until then nothing Codex asks to run, runs: a decline, never an accept — and never
-            # `acceptForSession`, which would make Codex the memory of what was allowed.
-            app_log.logger().info("codex: %s %r declined (the gate comes with task 7)", method, rid)
-            server.respond(rid, {"decision": "decline"})
-            return
+            # Its own task: the reader goes on reading while the gate looks and the bar waits.
+            # Returned, so `AppServer` answers with an error if the gate itself fails.
+            task = asyncio.ensure_future(self._gate(rid, method, params))
+            self._gating[rid] = task
+
+            def done(finished: asyncio.Task, rid: Any = rid) -> None:
+                if self._gating.get(rid) is finished:
+                    del self._gating[rid]
+
+            task.add_done_callback(done)
+            return task
         app_log.logger().warning("codex: a request TCC does not handle, answered with an error: %s",
                                  method)
         server.respond(rid, error={"code": codex_rpc.METHOD_NOT_FOUND,
                                    "message": f"TCC does not handle {method}"})
+
+    def _on_notification(self, msg: dict) -> None:
+        """In the reader, before the notification is queued: what the gate needs at once."""
+        method = msg.get("method")
+        params = msg.get("params") or {}
+        if method == "item/started":
+            item = params.get("item") or {}
+            if item.get("type") == _FILE_CHANGE:
+                self._changes[str(item.get("id") or "")] = [
+                    (str(change.get("path")), str((change.get("kind") or {}).get("type") or ""))
+                    for change in item.get("changes") or []
+                    if isinstance(change, dict) and change.get("path")]
+        elif method == "serverRequest/resolved":
+            rid = params.get("requestId")
+            server = self._server
+            # Only one still pending: `resolved` also comes for requests already answered.
+            if server is not None and server.withdrawn(rid):
+                self._drop_gate(rid)
+
+    def _drop_gate(self, rid: Any) -> None:
+        """Codex withdrew `rid`, or its turn ended: the gate task is cancelled — the bar's future
+        with it (`ConfirmBar._on_gave_up`) — and nothing is sent."""
+        task = self._gating.pop(rid, None)
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _sweep_gates(self) -> None:
+        for rid in list(self._gating):
+            self._drop_gate(rid)
+
+    def _asked(self, method: str, params: dict) -> tuple[str, str, str, bool]:
+        """`(tool, detail, shell, deletes)` for one approval, as the gate reads it."""
+        if method == COMMAND_APPROVAL:
+            raw = params.get("command")
+            raw = shlex.join(map(str, raw)) if isinstance(raw, list) else str(raw or "")
+            shell = shell_of(raw)
+            # PowerShell lines whole (task 5's reader parses them); a POSIX line without Codex's
+            # `zsh -lc '…'` wrapper, which only says how it runs.
+            return "Bash", raw if shell == SHELL_POWERSHELL else inner_command(raw), shell, False
+        changes = self._changes.get(str(params.get("itemId") or ""))
+        reason = str(params.get("reason") or "").strip()
+        if changes:
+            detail = "\n".join(f"{kind or 'change'}: {path}" for path, kind in changes)
+            deletes = any(kind == "delete" for _, kind in changes)
+        else:
+            # Codex named no change TCC saw: what it does is unknown, so it is asked about as a
+            # delete would be — under `auto` too.
+            detail, deletes = "a file change Codex did not describe", True
+        return "Edit", detail + (f"\n{reason}" if reason else ""), SHELL_BASH, deletes
+
+    @staticmethod
+    def _for_delete(verdict: Verdict, detail: str, gate: str,
+                    ticks: frozenset[str]) -> Verdict:
+        """A change that deletes a file cannot be undone, so it asks under `auto` too (the plan,
+        decided 2026-10-14 after task 5's review, I1); `never` lets it through and says so; a
+        «don't ask again» tick for edits outranks `auto`, as `judge_action`'s does."""
+        if gate == GATE_NEVER:
+            return Verdict(True, unasked=detail)
+        if "Edit" in ticks or "edit" in ticks:
+            return verdict
+        if verdict.allowed and gate == GATE_AUTO:
+            return Verdict(False, tool="Edit", title="Дозволити Edit?", detail=detail,
+                           reason="gateIrreversible")
+        return verdict if verdict.allowed else replace(verdict, reason="gateIrreversible")
+
+    async def _gate(self, rid: Any, method: str, params: dict) -> None:
+        """TCC's gate on one approval, answered once: `accept` or `decline`. The gate and the
+        ticks are read here, per request, so a gate narrowed mid-session holds from the next."""
+        gate, ticks = self.gate, frozenset(self.always_allowed)
+        tool, detail, shell, deletes = self._asked(method, params)
+        # Off the loop: the gate reads the disk (realpaths, globs, a walk for a recursive delete),
+        # and a slow drive must not hold Codex's notifications.
+        verdict = await asyncio.to_thread(judge_action, tool, detail, gate=gate,
+                                          always_allowed=ticks, read_roots=self._read_roots,
+                                          shell=shell)
+        if deletes:
+            verdict = self._for_delete(verdict, detail, gate, ticks)
+        if verdict.allowed:
+            allowed = True
+            if verdict.unasked:
+                self._say(Unasked(verdict.unasked))
+        else:
+            request = ConfirmRequest(tool=verdict.tool or tool,
+                                     title=verdict.title or f"Дозволити {tool}?",
+                                     detail=verdict.detail or detail, payload=dict(params),
+                                     reason=verdict.reason)
+            allowed = await await_confirmation(self.bridge, request, CONFIRM_TIMEOUT_S)
+        server = self._server
+        if server is not None:
+            # `respond` refuses an answer to a request Codex withdrew meanwhile.
+            server.respond(rid, {"decision": "accept" if allowed else "decline"})
+
+    def _say(self, event: AgentEvent) -> None:
+        """An event of the gate's into the turn, in order with Codex's notifications."""
+        server = self._server
+        if server is not None and isinstance(event, Unasked):
+            server.notifications.put_nowait({"method": _UNASKED,
+                                             "params": {"command": event.command}})
 
     # ---- turns ----------------------------------------------------------------------------------
 
@@ -529,7 +672,8 @@ class CodexSession:
             self._streamed.clear()
             self._running.clear()
             self._running_label = ""
-            self._paths.clear()
+            self._changes.clear()
+            self._sweep_gates()
             self._drop_getter()
             if self.bus is not None:
                 self.bus.restore_delivered()
@@ -557,13 +701,8 @@ class CodexSession:
                              else "Codex has said nothing.")
                     yield Notice(f"{int(SILENCE_WARN_S)}s with no output. {where}")
                 continue
-            if reply is not None and reply in done:
-                answered, reply = reply, None
-                events, over = self._on_reply(answered)
-                for event in events:
-                    yield event
-                if over:
-                    return
+            # The notification first (re-review M1): a `turn/started` arriving with `turn/start`'s
+            # timeout names the turn before the timeout is read as «no turn».
             if getter in done:
                 self._getter = None
                 warned = False
@@ -572,6 +711,13 @@ class CodexSession:
                     yield self._ended_notice()
                     return
                 events, over = self._map(msg)
+                for event in events:
+                    yield event
+                if over:
+                    return
+            if reply is not None and reply in done:
+                answered, reply = reply, None
+                events, over = self._on_reply(answered)
                 for event in events:
                     yield event
                 if over:
@@ -592,11 +738,19 @@ class CodexSession:
                 return [], False  # `turn/started` named it; the turn goes on
             app_log.logger().warning("codex: turn/start not confirmed in %g s and no turn/started",
                                      REQUEST_TIMEOUT_S)
-            return [Notice(f"Codex did not start the turn in {int(REQUEST_TIMEOUT_S)} s, so it "
-                           "ended here. Send the message again."), TurnEnd(self.session_id)], True
+            return self._no_turn(f"Codex did not start the turn in {int(REQUEST_TIMEOUT_S)} s"), True
         self._turn_id = self._turn_id or ((result.get("turn") or {}).get("id")) or None
+        if not self._turn_id:
+            # A reply that names no turn, and no `turn/started` before it (re-review M2): nothing
+            # will complete what has no id, and Stop could not reach it.
+            app_log.logger().warning("codex: turn/start answered without a turn id: %r", result)
+            return self._no_turn("Codex answered the message without starting a turn"), True
         self._interrupt_if_wanted()
         return [], False
+
+    def _no_turn(self, said: str) -> list[AgentEvent]:
+        return [Notice(f"{said}, so it ended here. Send the message again."),
+                TurnEnd(self.session_id)]
 
     def _interrupt_if_wanted(self) -> None:
         """A Stop that came before the turn had an id, carried out now that it has one."""
@@ -617,6 +771,8 @@ class CodexSession:
         params = msg.get("params") or {}
         turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
         of_turn = params.get("turnId") or turn.get("id")
+        if method == _UNASKED:
+            return [Unasked(str(params.get("command") or ""))], False
         if method == "turn/started":
             self._turn_id = self._turn_id or of_turn
             self._interrupt_if_wanted()
@@ -634,6 +790,8 @@ class CodexSession:
         if method == "item/completed":
             return self._item_completed(params.get("item") or {}), False
         if method == "turn/completed":
+            # What still waits on the gate or the bar belongs to a turn that is over.
+            self._sweep_gates()
             events: list[AgentEvent] = []
             if turn.get("status") == "failed":
                 said = str((turn.get("error") or {}).get("message") or "the turn failed")
@@ -671,7 +829,6 @@ class CodexSession:
         if kind == _FILE_CHANGE:
             paths = [str(change.get("path")) for change in item.get("changes") or []
                      if isinstance(change, dict) and change.get("path")]
-            self._paths[item_id] = paths
             self._running[item_id] = "Edit"
             self._running_label = "an edit of " + (", ".join(paths[:3]) or "a file")
             return [ToolCall("Edit", {"paths": paths})]
@@ -742,6 +899,7 @@ class CodexSession:
         A short grace: app-server leaves at its stdin's end, and the worker's shutdown gives the
         whole close 2.5 s before it cancels — past the grace it is terminated, then its tree."""
         self._drop_getter()
+        self._sweep_gates()
         for task in list(self._tasks):
             task.cancel()
         server = self._server

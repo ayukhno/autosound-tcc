@@ -25,7 +25,8 @@ from pathlib import Path
 import pytest
 
 from autosound_tcc.core import codex_session, method_binding
-from autosound_tcc.core.agent_events import Notice, TextDelta, ToolCall, ToolEnd, TurnEnd
+from autosound_tcc.core.agent_events import (Notice, TextDelta, ToolCall, ToolEnd, TurnEnd,
+                                             Unasked)
 from autosound_tcc.core.codex_session import (CodexSession, CodexSignedOut, CodexStartFailed,
                                               inner_command)
 from autosound_tcc.core.session_registry import SessionRegistry
@@ -296,10 +297,10 @@ def test_a_message_codex_did_not_stream_arrives_whole_once(project, tmp_path, st
     assert run(go()) == [TextDelta("Whole."), TextDelta("Stre"), TextDelta("amed."), TurnEnd(thread)]
 
 
-def test_command_and_file_approvals_are_declined_until_the_gate_comes(project, stand_in):
-    """Task 6 declines every approval (task 7 puts TCC's gate there): each is answered once, with
-    `decline` — never `accept`, never `acceptForSession`. file-approval has two turns, so the bus
-    contract is read here too: the brief rides each turn, and each turn gives back what it read."""
+def test_two_turns_with_approvals_each_answered_once_and_the_brief_rides_each(project, stand_in):
+    """file-approval, two turns, the headless bridge (it says no): under `writes` each edit asks
+    and is declined, the read-only `ls` passes — each answered once, never `acceptForSession`. The
+    bus contract is read here too: the brief rides each turn, each turn gives back what it read."""
 
     class Bus:
         restored = 0
@@ -328,7 +329,7 @@ def test_command_and_file_approvals_are_declined_until_the_gate_comes(project, s
     assert calls[0] == ToolCall("Edit", {"paths": [f"{project}/yes.txt"]}), \
         "the path from the item, kept for the approval that names only the item"
     assert ToolCall("Bash", {"command": "ls -1 yes.txt no.txt 2>&1"}) in first, "unwrapped"
-    assert [r["result"] for r in stand_in.replies()] == [{"decision": "decline"}] * 4
+    assert decisions(stand_in) == ["decline", "decline", "accept", "decline"]
     assert server.returncode == 0 and stand_in.breaches() == []
     assert Bus.restored == 2, "restore_delivered once per turn"
     texts = [m["params"]["input"][0]["text"] for m in stand_in.sent("turn/start")]
@@ -976,3 +977,262 @@ def test_a_lost_connection_at_start_is_said_without_the_token(project, tmp_path,
     with pytest.raises(CodexStartFailed) as main_failed:
         run(start(make(project, stand_in.use(mid_start))))
     assert TOKEN not in str(main_failed.value) and "lost" in str(main_failed.value)
+
+
+# ---- task 7: approvals through TCC's gate ---------------------------------------------------------
+
+from concurrent.futures import Future  # noqa: E402
+import time  # noqa: E402
+
+from autosound_tcc.core import shell_gate  # noqa: E402
+
+
+class RecordingBridge:
+    """A stand-in Arbiter: answers `allow` at once, or (allow=None) never — the bar stays up."""
+
+    def __init__(self, allow=True) -> None:
+        self.allow = allow
+        self.requests: list = []
+        self.futures: list[Future] = []
+
+    def snapshot(self) -> dict:
+        return {}
+
+    def request_confirmation(self, request) -> Future:
+        self.requests.append(request)
+        future: Future = Future()
+        if self.allow is not None:
+            future.set_result(self.allow)
+        self.futures.append(future)
+        return future
+
+
+def decisions(stand_in) -> list:
+    return [r.get("result", {}).get("decision") for r in stand_in.replies()]
+
+
+def approval_turn(thread: str, *, command: str = "", changes=None, after=()) -> list[dict]:
+    """One turn whose single item asks first: a command, or a file change with `changes`."""
+    tid = "turn-1"
+    if changes is None:
+        body = {"type": "commandExecution", "id": "i1", "command": command}
+        ask = {"id": 0, "method": "item/commandExecution/requestApproval", "params": {
+            "threadId": thread, "turnId": tid, "itemId": "i1", "command": command}}
+    else:
+        body = {"type": "fileChange", "id": "i1", "changes": changes}
+        ask = {"id": 0, "method": "item/fileChange/requestApproval", "params": {
+            "threadId": thread, "turnId": tid, "itemId": "i1", "reason": None}}
+    return [*opening(), *thread_start(thread), *turn(thread, tid, middle=[
+        item("started", thread, tid, body), inn(ask), *after, out({"id": 0, "result": {}}),
+        item("completed", thread, tid, body)])]
+
+
+def run_session(session) -> list:
+    async def go():
+        try:
+            return await drain(session.start())
+        finally:
+            await session.close()
+    return run(go())
+
+
+@pytest.mark.parametrize("allow, said", [(True, "accept"), (False, "decline")])
+def test_the_arbiters_answer_reaches_codex_once(project, stand_in, allow, said):
+    bridge = RecordingBridge(allow)
+    session = make(project, stand_in.use("command-approval"), bridge=bridge)
+    events = run_session(session)
+    assert isinstance(events[-1], TurnEnd)
+    assert [r.detail for r in bridge.requests] == ["echo hi > note.txt", "touch denied.txt"]
+    assert decisions(stand_in) == [said, said] and stand_in.breaches() == []
+
+
+def test_never_lets_a_dangerous_command_through_and_says_so(project, tmp_path, stand_in):
+    bridge = RecordingBridge(False)
+    rows = approval_turn("th", command="/bin/zsh -lc 'rm -rf ~'")
+    session = make(project, stand_in.use(write(tmp_path, rows)), bridge=bridge, gate="never")
+    events = run_session(session)
+    assert Unasked("rm -rf ~") in events and bridge.requests == []
+    assert decisions(stand_in) == ["accept"] and stand_in.breaches() == []
+
+
+def test_an_always_allowed_tick_passes_without_the_bar(project, stand_in):
+    bridge = RecordingBridge(False)
+    session = make(project, stand_in.use("command-approval"), bridge=bridge, gate="writes",
+                   always_allowed=frozenset({"Bash"}))
+    run_session(session)
+    assert bridge.requests == [] and decisions(stand_in) == ["accept", "accept"]
+
+
+def test_a_gate_narrowed_mid_session_holds_from_the_next_request(project, stand_in):
+    bridge = RecordingBridge(False)
+    session = make(project, stand_in.use("file-approval"), bridge=bridge, gate="auto")
+
+    async def go():
+        try:
+            await drain(session.start())
+            first = list(bridge.requests)
+            session.gate = "writes"
+            await drain(session.send("Create ws.txt"))
+            return first
+        finally:
+            await session.close()
+
+    first = run(go())
+    assert first == [], "under auto two new files and an `ls` pass"
+    assert [r.tool for r in bridge.requests] == ["Edit"]
+    assert f"{project}/ws.txt" in bridge.requests[0].detail
+    assert decisions(stand_in) == ["accept", "accept", "accept", "decline"]
+    assert stand_in.breaches() == []
+
+
+@pytest.mark.parametrize("resolved_first", [False, True])
+def test_stop_while_the_bar_waits_takes_the_bar_down_and_sends_nothing(
+        project, tmp_path, stand_in, resolved_first):
+    """interrupt-pending: the approval waits on the bar; Stop → `turn/interrupt` → Codex withdraws
+    the request. The bar's future is cancelled (`ConfirmBar._on_gave_up`), no answer goes out, the
+    turn ends — whether `turn/completed` or `serverRequest/resolved` comes first."""
+    rows = frames("interrupt-pending")
+    if resolved_first:
+        resolved = next(r for r in rows if (r.get("msg") or {}).get("method")
+                        == "serverRequest/resolved")
+        rows.remove(resolved)
+        at = next(i for i, r in enumerate(rows) if (r.get("msg") or {}).get("method")
+                  == "turn/completed")
+        rows.insert(at, resolved)
+    resumable(project, PENDING_THREAD)
+    bridge = RecordingBridge(None)
+    session = make(project, stand_in.use(write(tmp_path, rows)), bridge=bridge, resume=True)
+
+    async def on(event):
+        if isinstance(event, ToolCall) and event.name == "Bash":
+            while not bridge.requests:
+                await asyncio.sleep(0.01)
+            await session.interrupt()
+
+    async def go():
+        try:
+            return await drain(session.start(), on), session._server
+        finally:
+            await session.close()
+
+    events, server = run(go())
+    assert events[-1] == TurnEnd(PENDING_THREAD)
+    assert len(bridge.futures) == 1 and bridge.futures[0].cancelled(), "the bar came down"
+    assert stand_in.replies() == [] and stand_in.breaches() == []
+    assert server.returncode == 0
+
+
+@pytest.mark.parametrize("kind, asks", [("delete", True), ("add", False), ("update", False)])
+def test_under_auto_a_file_delete_asks_and_an_edit_passes(project, tmp_path, stand_in, kind, asks):
+    bridge = RecordingBridge(False)
+    path = str(project / "process" / "ledger.json")
+    rows = approval_turn("th", changes=[{"path": path, "kind": {"type": kind}, "diff": ""}])
+    session = make(project, stand_in.use(write(tmp_path, rows)), bridge=bridge, gate="auto")
+    run_session(session)
+    if asks:
+        (request,) = bridge.requests
+        assert request.reason == "gateIrreversible" and path in request.detail
+        assert decisions(stand_in) == ["decline"]
+    else:
+        assert bridge.requests == [] and decisions(stand_in) == ["accept"]
+    assert stand_in.breaches() == []
+
+
+def test_a_file_delete_under_never_passes_and_says_so(project, tmp_path, stand_in):
+    path = str(project / "x.txt")
+    rows = approval_turn("th", changes=[{"path": path, "kind": {"type": "delete"}, "diff": ""}])
+    session = make(project, stand_in.use(write(tmp_path, rows)), bridge=RecordingBridge(False),
+                   gate="never")
+    events = run_session(session)
+    assert any(isinstance(e, Unasked) and path in e.command for e in events)
+    assert decisions(stand_in) == ["accept"]
+
+
+@pytest.mark.parametrize("command, shell, detail", [
+    ('"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Remove-Item x"',
+     "powershell", None),
+    ("pwsh.exe -NoProfile -Command Get-ChildItem", "powershell", None),
+    ("/bin/zsh -lc 'echo hi > note.txt'", "bash", "echo hi > note.txt"),
+])
+def test_a_powershell_line_is_judged_as_powershell_and_whole(project, tmp_path, stand_in,
+                                                               monkeypatch, command, shell, detail):
+    seen: list = []
+    real = codex_session.judge_action
+
+    def recorder(tool, line, **kw):
+        seen.append((tool, line, kw))
+        return real(tool, line, **kw)
+
+    monkeypatch.setattr(codex_session, "judge_action", recorder)
+    session = make(project, stand_in.use(write(tmp_path, approval_turn("th", command=command))),
+                   bridge=RecordingBridge(True))
+    run_session(session)
+    ((tool, line, kw),) = seen
+    assert tool == "Bash" and kw["shell"] == shell and line == (detail or command)
+    assert "command" not in kw and kw["gate"] == session.gate
+    assert kw["read_roots"] == session._read_roots and kw["read_roots"]
+
+
+def test_the_gate_runs_off_the_loop(project, tmp_path, stand_in, monkeypatch):
+    """`judge_action` touches the disk; a slow one must not hold the notifications."""
+    stamps: dict = {}
+
+    def slow(tool, line, **kw):
+        stamps["judge_start"] = time.monotonic()
+        time.sleep(1.0)
+        stamps["judge_end"] = time.monotonic()
+        return shell_gate.Verdict(True)
+
+    monkeypatch.setattr(codex_session, "judge_action", slow)
+    delta = inn({"method": "item/agentMessage/delta",
+                 "params": {"threadId": "th", "turnId": "turn-1", "itemId": "m", "delta": "meanwhile"}})
+    rows = approval_turn("th", command="/bin/zsh -lc 'touch a'", after=[delta])
+    session = make(project, stand_in.use(write(tmp_path, rows)))
+
+    async def on(event):
+        if isinstance(event, TextDelta):
+            stamps["delta"] = time.monotonic()
+
+    async def go():
+        try:
+            return await drain(session.start(), on)
+        finally:
+            await session.close()
+
+    run(go())
+    assert stamps["delta"] < stamps["judge_end"], "the delta arrived while the gate was thinking"
+    assert decisions(stand_in) == ["accept"]
+
+
+# ---- the re-review's Minors ---------------------------------------------------------------------
+
+
+def test_a_turn_started_arriving_with_the_timeout_is_not_dropped(project):
+    """M1: the notifications are read before the reply, so a `turn/started` that arrives together
+    with `turn/start`'s timeout names the turn, and the turn goes on to its own completion."""
+    session = CodexSession(project_dir=project)
+    session.session_id = "th"
+
+    class Server:
+        notifications: asyncio.Queue
+
+    async def go():
+        server = Server()
+        server.notifications = asyncio.Queue()
+        server.notifications.put_nowait({"method": "turn/started",
+                                         "params": {"threadId": "th", "turn": {"id": "t1"}}})
+        server.notifications.put_nowait({"method": "turn/completed", "params": {
+            "threadId": "th", "turn": {"id": "t1", "status": "completed"}}})
+        reply = asyncio.get_running_loop().create_future()
+        reply.set_exception(TimeoutError("turn/start: no answer"))
+        return [e async for e in session._read_turn(server, reply)]
+
+    assert run(go()) == [TurnEnd("th")]
+
+
+def test_a_reply_that_names_no_turn_is_treated_as_no_turn(project, tmp_path, stand_in):
+    """M2: a `turn/start` reply without `turn.id`, and no `turn/started` — the turn ends, said."""
+    rows = [*opening(), *thread_start("th"), out({"id": 90, "method": "turn/start"}),
+            inn({"id": 90, "result": {}}), out({"method": "never/sent"})]
+    events = run_session(make(project, stand_in.use(write(tmp_path, rows))))
+    assert len(events) == 2 and isinstance(events[0], Notice) and events[1] == TurnEnd("th")

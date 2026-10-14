@@ -126,13 +126,26 @@ class _FrameLog:
                                            "msg": payload}, ensure_ascii=False)) + "\n"
             data = line.encode("utf-8")
             if self.written and self.written + len(data) > self.cap:
-                os.replace(self.path, self.path.with_name(self.path.name + ".1"))
-                self.written = 0
+                self._rotate()
             with self.path.open("ab") as fh:
                 fh.write(data)
             self.written += len(data)
         except Exception:  # noqa: BLE001 — a log that fails must not take the session with it
             pass
+
+    def _rotate(self) -> None:
+        """To `.1`; when that cannot be done (the log deleted by hand, a viewer on Windows holding
+        `.1`), the log is emptied instead — writing goes on either way (task 6's re-review, M3)."""
+        assert self.path is not None
+        try:
+            os.replace(self.path, self.path.with_name(self.path.name + ".1"))
+        except OSError:
+            try:
+                with self.path.open("wb"):
+                    pass
+            except OSError:
+                pass
+        self.written = 0
 
 
 class AppServer:
@@ -141,12 +154,17 @@ class AppServer:
     def __init__(self, argv: Sequence[str], *, cwd: Union[str, Path, None] = None,
                  env: Optional[dict] = None, spawn_kwargs: Optional[dict] = None,
                  log: Union[str, Path, None] = None, on_request: Optional[OnRequest] = None,
-                 secret_env: Iterable[str] = (), log_cap: int = LOG_CAP_BYTES) -> None:
+                 secret_env: Iterable[str] = (), log_cap: int = LOG_CAP_BYTES,
+                 on_notification: Optional[Callable[[dict], None]] = None) -> None:
         self.argv = list(argv)
         self.cwd = str(cwd) if cwd is not None else None
         self.env = env
         self.spawn_kwargs = dict(spawn_kwargs or {})
         self.on_request = on_request
+        #: Called in the reader with each notification BEFORE it is queued (after
+        #: `serverRequest/resolved` has been applied): what a server request needs from the
+        #: notifications before it — a fileChange's paths — cannot wait for whoever drains the queue.
+        self.on_notification = on_notification
         source = env if env is not None else os.environ
         self._log = _FrameLog(log, [source.get(name, "") for name in secret_env], log_cap)
         self.notifications: asyncio.Queue = asyncio.Queue()
@@ -193,6 +211,11 @@ class AppServer:
     async def open(self, timeout: float = OPEN_TIMEOUT_S) -> dict:
         """Spawn, `initialize`, `initialized`; the `initialize` result. An end before the answer
         (a bad `-c` makes app-server exit 1 at start) is `ConnectionLost` with the stderr tail."""
+        # Known, not fixed here (task 6's review, M4): a spawn left PENDING to `asyncio.run`'s own
+        # cleanup never finishes on CPython 3.12/macOS — plain `create_subprocess_exec` hangs the
+        # same way, TCC's code aside, and shielding it does not help (the cleanup cancels every
+        # task). A cancel that goes through the awaiting task — the worker's shutdown cancels its
+        # main task — ends at once (`test_open_cancelled_at_the_spawn_ends`).
         try:
             self._proc = await asyncio.create_subprocess_exec(
                 *self.argv, cwd=self.cwd, env=self.env,
@@ -381,6 +404,11 @@ class AppServer:
             if msg.get("method") == "serverRequest/resolved":
                 rid = (msg.get("params") or {}).get("requestId")
                 self.resolved(rid)
+            if self.on_notification is not None:
+                try:
+                    self.on_notification(msg)
+                except Exception as exc:  # noqa: BLE001 — a hook must not stop the reader
+                    self._note("the notification hook failed on %s: %r", msg.get("method"), exc)
             self.notifications.put_nowait(msg)
         elif "id" in msg:
             future = self._pending.get(msg["id"])
