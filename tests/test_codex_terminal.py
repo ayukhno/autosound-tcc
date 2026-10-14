@@ -90,7 +90,26 @@ def test_tcc_s_tools_are_approved_and_nothing_else_of_the_session_reaches_the_te
     assert 'mcp_servers.tcc.default_tools_approval_mode="approve"' in pairs
     isolation = set(_pairs(codex_cli.isolation_args({})))
     assert not isolation & set(pairs)
-    assert len(pairs) == 4, pairs
+    # The four of TCC's server, and one more: the token blanked for the shells Codex starts.
+    assert len(pairs) == 5, pairs
+    assert f'shell_environment_policy.set.{codex_cli.TOKEN_ENV}=""' in pairs
+
+
+def test_the_shells_codex_starts_never_see_tcc_s_token(tmp_path, started):
+    """I3: Codex's shells inherit its environment, token included, unless its shell policy says
+    otherwise. The session excludes it with its isolation; here the user's own
+    `shell_environment_policy.exclude` must stay theirs, so the token is added to the policy's
+    `set` table — a dotted key, which adds one entry (checked live against Codex 0.162.1's
+    `config/read`: the user's own `set` keys stay) — set to empty. No form replaces a list."""
+    _write_config(tmp_path)
+
+    codex_terminal.main([str(tmp_path)])
+
+    ((argv, env, _cwd),) = started
+    pairs = _pairs(argv)
+    assert [p for p in pairs if p.startswith("shell_environment_policy")] == [
+        'shell_environment_policy.set.TCC_MCP_TOKEN=""']
+    assert env[codex_cli.TOKEN_ENV] == TOKEN, "Codex itself still has it, for the MCP header"
 
 
 def test_the_model_passes_through_as_codex_s_own_flag(tmp_path, started):
@@ -111,12 +130,34 @@ def test_no_model_means_codex_keeps_its_own(tmp_path, started):
     assert "--model" not in argv and "-m" not in argv
 
 
-def test_the_terminal_and_the_session_build_tcc_s_server_in_one_place():
-    """The terminal passes exactly what the session passes for TCC's server (F3)."""
+def test_the_terminal_line_is_tcc_s_server_as_pinned_plus_the_shell_blank():
+    """The terminal passes TCC's server as the session does (F3) — pinned here as text, so a
+    change in `tcc_tool_args` shows (the old form compared the call with itself, M10) — and the
+    one terminal-only pair, the token blanked for Codex's shells (I3)."""
     from autosound_tcc.core.codex_session import TOOL_TIMEOUT_S
 
-    assert codex_terminal.command("codex", URL, None)[1:] == codex_cli.tcc_tool_args(
-        URL, timeout_sec=TOOL_TIMEOUT_S)
+    assert codex_terminal.command("codex", URL, None) == [
+        "codex",
+        "-c", f'mcp_servers.tcc.url="{URL}"',
+        "-c", 'mcp_servers.tcc.env_http_headers={"X-TCC-Token"="TCC_MCP_TOKEN"}',
+        "-c", f"mcp_servers.tcc.tool_timeout_sec={TOOL_TIMEOUT_S}",
+        "-c", 'mcp_servers.tcc.default_tools_approval_mode="approve"',
+        "-c", 'shell_environment_policy.set.TCC_MCP_TOKEN=""',
+    ]
+    session = codex_cli.tcc_tool_args(URL, timeout_sec=TOOL_TIMEOUT_S)
+    assert codex_terminal.command("codex", URL, None)[1:len(session) + 1] == session
+
+
+def test_the_mcp_json_tcc_writes_is_the_one_the_terminal_reads(tmp_path):
+    """I7: the file the terminal reads, written by `mcp_server.write_mcp_config` itself — not by
+    hand — beside another server of the user's."""
+    from autosound_tcc.core import mcp_server
+
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"mine": {"command": "x"}}}),
+                                        encoding="utf-8")
+    mcp_server.write_mcp_config(tmp_path, 8765, TOKEN)
+
+    assert codex_terminal.connection(tmp_path) == ("http://127.0.0.1:8765/mcp", TOKEN)
 
 
 @pytest.mark.parametrize("case", ["no-file", "unreadable-json", "no-entry", "no-token", "no-url"])

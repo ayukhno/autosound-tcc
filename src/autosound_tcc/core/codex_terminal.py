@@ -16,7 +16,8 @@ Everything else stays the user's own Codex config (the Arbiter, 2026-10-14: «к
 servers, the extras — no `isolation_args`.
 
 The token is never in argv, the terminal's line, the screen, a log line or a new file: it goes
-from the file TCC already wrote into this process's memory and into Codex's environment.
+from the file TCC already wrote into this process's memory and into Codex's environment — and is
+blanked for the shells Codex starts (`codex_cli.token_blank_for_shells_args`).
 
 The method: Codex takes an extra skills root only over app-server (`skills/extraRoots/set`), and
 its config has no key for one (0.162.1: `skills` holds `bundled`, `include_instructions`,
@@ -98,11 +99,13 @@ def _install_line() -> str:
 
 
 def command(binary: str, url: str, model: Optional[str]) -> list[str]:
-    """Codex's argv: TCC's server as the session has it (connection + approval), then the model
-    when one was chosen."""
+    """Codex's argv: TCC's server as the session has it (connection + approval), the token
+    blanked for the shells Codex starts (its config is the user's: no isolation excludes it
+    here), then the model when one was chosen."""
     from autosound_tcc.core.codex_session import TOOL_TIMEOUT_S  # the session's own bound
 
-    argv = [binary, *codex_cli.tcc_tool_args(url, timeout_sec=TOOL_TIMEOUT_S)]
+    argv = [binary, *codex_cli.tcc_tool_args(url, timeout_sec=TOOL_TIMEOUT_S),
+            *codex_cli.token_blank_for_shells_args()]
     if model:
         argv += ["--model", model]
     return argv

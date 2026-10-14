@@ -534,6 +534,14 @@ def tcc_connection_args(url: str, *, timeout_sec: int) -> list[str]:
     ]
 
 
+def token_blank_for_shells_args() -> list[str]:
+    """The token, empty, in every shell Codex starts — for a Codex whose config is the user's (the
+    terminal; the session excludes it with its isolation). A dotted key into the policy's `set`
+    table adds one entry and keeps the user's own: checked live against Codex 0.162.1's
+    `config/read` (the group review, I3). `exclude=[…]` would replace the user's own list."""
+    return _c(f"shell_environment_policy.set.{TOKEN_ENV}", '""')
+
+
 def tcc_tool_args(url: str, *, timeout_sec: int) -> list[str]:
     """TCC's MCP server for Codex — the in-app session and the terminal alike (F3, the Arbiter,
     2026-10-14): the connection (`tcc_connection_args`), its tools approved, since the ones that
@@ -593,7 +601,7 @@ __all__ = [
     "find", "forget", "settled", "version", "known_version", "too_old", "usable", "probe", "signed_in",
     "mark_signed_out", "models",
     "supported_efforts", "efforts_in", "tcc_copy_path", "dock_folders", "tcc_tool_args",
-    "tcc_connection_args",
+    "tcc_connection_args", "token_blank_for_shells_args",
     "isolation_args",
     "unsafe_server_names", "unknown_enabled_features", "OFF_FEATURES", "HARMLESS_FEATURES",
 ]
