@@ -4,7 +4,7 @@
 
 PY ?= uv run --extra dev --python 3.12 python
 
-.PHONY: help check test lint ship
+.PHONY: help check test lint ship constraints
 
 #: Pinned, and the same version CI installs. A linter that drifts between the two is a linter
 #: that fails on somebody else's machine for reasons this one cannot show.
@@ -14,6 +14,7 @@ help:
 	@echo "make check          the linter AND the whole suite — what CI runs, one verdict"
 	@echo "make test           just the suite (~8 min; there is no fast subset on purpose)"
 	@echo "make lint           just the linter, pinned to the version CI installs"
+	@echo "make constraints    constraints.txt again from uv.lock — after every change to the lock"
 	@echo "                    in a hurry, and willing to re-run a dead worker (~1 min):"
 	@echo "                    PYTEST_ADDOPTS='-n auto --dist loadfile' make test"
 	@echo "make ship           dry run: work out the next patch, check everything, write nothing"
@@ -45,6 +46,14 @@ lint:
 
 test:
 	$(PY) -m pytest tests/ -q
+
+# What an install and an update hold uv to (tcc#194, finding 158): the lock's own versions of what
+# `uv tool install 'autosound-tcc[gui,claude]'` pulls in, the project itself left out. Committed,
+# because the updater reads it from the signed tag's tree — a git install has no build step to
+# make it in. `tests/test_constraints.py` fails when it no longer says what the lock says.
+constraints:
+	uv export --frozen --extra gui --extra claude --no-dev --no-emit-project --no-hashes \
+		--no-annotate -o constraints.txt
 
 # Dry run is the default and the real run is asked for by name. The last thing `ship` does is
 # publish a tag, and a published tag can never be moved or deleted by anyone afterwards.
