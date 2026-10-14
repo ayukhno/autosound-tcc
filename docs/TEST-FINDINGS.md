@@ -3730,3 +3730,16 @@ Updates tab of Project diagnostics — `TCC 1.1.3 — up to date` and `The metho
 installed tag's signature was checked and good.
 
 **Task.** W-10 · v1.1.4, #195.
+
+### 160. The main AI's model is not checked when picked, as the Critic's is
+
+**What.** The Arbiter, 2026-10-14, the W-10 Windows pass on the VM: the AI Critic's picker checks the model it is
+given — a green frame and `gemini-3.1-pro-preview · 7 d ago` beside it, the day it last answered — while the main
+AI's picker (`CODEX · GPT-6-Luna`, effort `x-high`) takes a pick with no such check: whether the model answers on
+this login is learned only when a session starts. Asked: the same check for the main AI at the moment of picking.
+
+**Where.** Windows VM, the top bar: MAIN AI · EFFORT · AI CRITIC.
+
+**Weight.** Medium: a pick the login cannot use fails at the session's start, not when it is chosen.
+
+**Task.** The next wave's collection (the Arbiter: «запиши на наступну хвилю»).
