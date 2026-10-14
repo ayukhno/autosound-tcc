@@ -16,6 +16,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from autosound_tcc.core import critic, omp_session, session_routes, terminal_launcher  # noqa: E402
+from autosound_tcc.core.codex_session import CodexSession  # noqa: E402
 from autosound_tcc.core.omp_session import OmpSession  # noqa: E402
 from autosound_tcc.core.session_registry import SessionRegistry  # noqa: E402
 from autosound_tcc.core.session_routes import Refusal  # noqa: E402
@@ -36,6 +37,7 @@ def built(monkeypatch):
 
     monkeypatch.setattr(TuningSession, "__init__", recorder(TuningSession))
     monkeypatch.setattr(OmpSession, "__init__", recorder(OmpSession))
+    monkeypatch.setattr(CodexSession, "__init__", recorder(CodexSession))
     return seen
 
 
@@ -229,19 +231,25 @@ def test_an_sdk_launch_never_resumes_a_codex_thread_and_omp_still_reads_any(tmp_
         assert _launch(host) is resumed, harness
 
 
-def test_a_codex_pick_is_refused_until_codex_has_its_session(tmp_path, monkeypatch):
-    """The picker offers Codex rows since #181 task 4, before Codex has a session of its own: built,
-    the pick would run Claude under a Codex name. Refused with its sentence, and nothing is built;
-    task 6 lifts the refusal together with `factory`'s Codex branch and `CODEX_ROUTE` (until then
-    `resume_route` keeps reading the SDK's route — task 2's review, m1)."""
+def test_a_codex_pick_launches_and_resumes_only_a_codex_thread(tmp_path, built):
+    """#181 task 6: a Codex pick is no longer refused — it reaches the factory, which builds a
+    `CodexSession`, and the launch reads the Codex route: an SDK id in the phase is not a thread
+    Codex can continue, a Codex thread id is."""
     server = _server(tmp_path)
     server.registry.sync_phase("2")
     server.registry.bind_session("2", "sdk-id", route="sdk")
+    host, said = _launch_host(tmp_path, SimpleNamespace(harness="codex", model="gpt-a"), server)
 
-    host, said = _launch_host(tmp_path, SimpleNamespace(harness="codex", model="m"), server)
-    assert _launch(host) is None
-    assert said == [i18n.t("codexNotYet")]
-    assert session_routes.resume_route("codex") == session_routes.SDK_ROUTE
+    assert _launch(host) is False, "an SDK id is not Codex's to resume"
+    server.registry.bind_session("2", "thread-1", route="codex")
+    assert _launch(host) is True
+    assert said == []
+
+    factory_host, _ = _factory_host()
+    MainWindow._session_factory(factory_host, SimpleNamespace(harness="codex", model="gpt-a"),
+                                server, True, "max")()
+    assert built and built[0][0] is CodexSession
+    assert built[0][1]["resume"] is True and built[0][1]["mcp_token"] == "tok"
 
 
 # ---- session_routes as plain functions ------------------------------------------------------
@@ -257,6 +265,7 @@ def _made(choice, tmp_path, gate=lambda: "writes", resumed=False):
 def test_factory_builds_each_routes_session(tmp_path, built):
     _made(SimpleNamespace(harness="sdk", model="claude-opus-5"), tmp_path)()
     _made(SimpleNamespace(harness="omp", model="google/gemini"), tmp_path, resumed=True)()
+    _made(SimpleNamespace(harness="codex", model="gpt-a"), tmp_path, resumed=True)()
 
     assert built == [
         (TuningSession, dict(project_dir=tmp_path, mcp_url="http://u", mcp_token="tok",
@@ -265,6 +274,9 @@ def test_factory_builds_each_routes_session(tmp_path, built):
         (OmpSession, dict(project_dir=tmp_path, bridge="the-bridge", model="google/gemini",
                           resume=True, gate="writes", always_allowed=frozenset({"Bash"}),
                           effort="max", language="de")),
+        (CodexSession, dict(project_dir=tmp_path, bridge="the-bridge", model="gpt-a",
+                            resume=True, gate="writes", always_allowed=frozenset({"Bash"}),
+                            effort="max", language="de", mcp_url="http://u", mcp_token="tok")),
     ]
 
 
@@ -279,7 +291,7 @@ def test_factory_builds_nothing_until_called_and_asks_the_gate_then(tmp_path, bu
     assert asked == ["gate"] and built[0][1]["gate"] == "auto"
 
 
-@pytest.mark.parametrize("harness, route", [("sdk", "sdk"), ("omp", None), ("codex", "sdk")])
+@pytest.mark.parametrize("harness, route", [("sdk", "sdk"), ("omp", None), ("codex", "codex")])
 def test_resume_route_per_harness(harness, route):
     assert session_routes.resume_route(harness) == route
 
@@ -287,6 +299,8 @@ def test_resume_route_per_harness(harness, route):
 def test_blocker_refuses_omp_only(tmp_path, monkeypatch):
     unwritten = _server(tmp_path, config_error="PermissionError: ro")
     omp, sdk = SimpleNamespace(harness="omp"), SimpleNamespace(harness="sdk")
+    assert session_routes.blocker(SimpleNamespace(harness="codex"), unwritten) is None, \
+        "Codex takes the url and token directly; its own blockers are tasks 8/9's"
 
     monkeypatch.setattr(omp_session, "is_available", lambda: False)
     assert session_routes.blocker(omp, unwritten) == Refusal("ompMissing"), "missing comes first"

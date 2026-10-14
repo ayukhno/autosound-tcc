@@ -13,8 +13,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
-from autosound_tcc.core import omp_session
-from autosound_tcc.core.session_registry import SDK_ROUTE
+from autosound_tcc.core import codex_session, omp_session
+from autosound_tcc.core.session_registry import CODEX_ROUTE, SDK_ROUTE
 from autosound_tcc.core.tuning_session import TuningSession
 
 
@@ -53,6 +53,21 @@ def factory(choice, *, project_dir: Path, bridge, mcp_url: Optional[str],
             effort=effort,
             language=language,
         )
+    if choice.harness == "codex":
+        # Codex reaches TCC's tools by url, its token in the environment only
+        # (`codex_session.CodexSession._spawn`) — never through `.mcp.json`.
+        return lambda: codex_session.CodexSession(
+            project_dir=project_dir,
+            bridge=bridge,
+            model=choice.model,
+            resume=resumed,
+            gate=gate(),
+            always_allowed=always_allowed(),
+            effort=effort,
+            language=language,
+            mcp_url=mcp_url,
+            mcp_token=mcp_token,
+        )
     return lambda: TuningSession(
         project_dir=project_dir,
         mcp_url=mcp_url,
@@ -70,14 +85,15 @@ def resume_route(harness: str) -> Optional[str]:
     """The registry route whose id a launch on `harness` resumes (`SessionRegistry.resumable_session`).
 
     omp → None, any route: it resumes by folder (`--continue`) and asks the registry only whether
-    the phase has a live session at all — its rule before routes existed. Everything else is
-    carried by the SDK (`factory`), so it reads the SDK's route — a hand-added Codex override
-    included, until Codex gets its own session (#181 task 6 turns `CODEX_ROUTE` on here together
-    with `factory`'s Codex branch; one without the other told the chat «fresh» over a session
-    that resumed — task 2's review, m1).
+    the phase has a live session at all — its rule before routes existed. Codex → its own route:
+    a thread id is resumed only by `CodexSession`, which `factory` builds for the same pick (#181
+    task 6 — turned on together; one without the other told the chat «fresh» over a session that
+    resumed, task 2's review, m1). Everything else is carried by the SDK and reads the SDK's route.
     """
     if harness == "omp":
         return None
+    if harness == "codex":
+        return CODEX_ROUTE
     return SDK_ROUTE
 
 
@@ -86,19 +102,14 @@ def blocker(choice, server) -> Optional[Refusal]:
 
     The SDK route takes TCC's url and token directly, so an unwritten `.mcp.json` refuses nothing
     there; omp reaches TCC only through that file, unwritten, it would run without TCC's tools.
-    A Codex pick is refused until its session exists (task 6).
+    Codex takes the url and token directly too; its own blockers (not found, too old, signed out)
+    come with tasks 8/9 — until then the session's start says each of them itself.
     """
     if choice.harness == "omp":
         if not omp_session.is_available():
             return Refusal("ompMissing")
         if getattr(server, "config_error", ""):
             return omp_without_config(server)
-    if choice.harness == "codex":
-        # The picker offers Codex rows (W-10 task 4) before Codex has a session of its own: built,
-        # a Codex pick would fall to `factory`'s Claude branch and run Claude under a Codex name.
-        # Task 6 removes this refusal, together with `factory`'s Codex branch and `CODEX_ROUTE` in
-        # `resume_route`; tasks 8/9 put Codex's own blockers here (not found, too old, signed out).
-        return Refusal("codexNotYet")
     return None
 
 

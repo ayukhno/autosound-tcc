@@ -338,7 +338,15 @@ def last_probe() -> Probe:
 
 def supported_efforts(model: str) -> tuple[str, ...]:
     """The reasoning efforts Codex says `model` takes, from the last probe; () when not known."""
-    for entry in models():
+    return efforts_in(models(), model)
+
+
+def efforts_in(entries, model: str) -> tuple[str, ...]:
+    """The reasoning efforts `model`'s entry in a `model/list` page offers; () when it is not
+    there. Pure: the session reads its own app-server's list with it (task 6)."""
+    for entry in entries or ():
+        if not isinstance(entry, dict):
+            continue
         if entry.get("model") == model or entry.get("id") == model:
             return tuple(str(item.get("reasoningEffort")) for item in
                          entry.get("supportedReasoningEfforts") or []
@@ -524,6 +532,7 @@ def unknown_enabled_features(config_read: Mapping) -> list[str]:
 __all__ = [
     "Found", "Probe", "MIN_VERSION", "PIN", "SOURCE_PATH", "SOURCE_FOLDER", "SOURCE_TCC",
     "find", "forget", "version", "too_old", "usable", "probe", "signed_in", "models",
-    "supported_efforts", "tcc_copy_path", "dock_folders", "tcc_tool_args", "isolation_args",
+    "supported_efforts", "efforts_in", "tcc_copy_path", "dock_folders", "tcc_tool_args",
+    "isolation_args",
     "unsafe_server_names", "unknown_enabled_features", "OFF_FEATURES", "HARMLESS_FEATURES",
 ]

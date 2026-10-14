@@ -292,22 +292,10 @@ def test_codex_rows_are_offered_once_to_the_generator_and_the_reviewer(monkeypat
     assert keys.count("codex:gpt-a") == 1
 
 
-def test_a_codex_pick_is_refused_at_launch_until_its_session_exists():
+def test_a_codex_pick_is_not_refused_at_launch_now_that_it_has_its_session():
+    """Task 6 lifted the «not yet» refusal; Codex's own blockers are tasks 8/9's."""
     pick = Choice(harness="codex", model="gpt-a", label="GPT-A", provider="openai")
-    assert session_routes.blocker(pick, server=object()) == session_routes.Refusal("codexNotYet")
-
-
-def test_the_launch_refusal_is_said_in_every_language():
-    from autosound_tcc.ui.tcc import i18n
-
-    was = i18n.current_language()
-    try:
-        for language in ("en", "uk", "pl", "de"):
-            i18n.set_language(language)
-            text = i18n.t("codexNotYet")
-            assert text != "codexNotYet" and "Codex" in text
-    finally:
-        i18n.set_language(was)
+    assert session_routes.blocker(pick, server=object()) is None
 
 
 @pytest.mark.parametrize("level, supported, sent", [
