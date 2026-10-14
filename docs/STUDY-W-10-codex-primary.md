@@ -201,3 +201,10 @@ than bash — TCC's gate parses bash (`shell_gate.py:482`, `:2099`); a guess, to
 4. **Approvals follow TCC's own setting** when Codex runs inside TCC (the same gate as the other backends);
    in a terminal, Codex's own configuration applies.
 5. **The spike is in W-10.** The build is decided on the spike's result (all six points pass).
+
+### The Arbiter's answers for the build (2026-10-14, `feature-dev` phase 3)
+
+1. **The program:** a Codex already installed is used; none — TCC installs it from the official source.
+2. **Sign-in:** a button in TCC («Увійти в Codex», the browser opens); the sign-in is shared with the user's own Codex.
+3. **The user's own Codex extras** (their MCP servers, plugins, hooks): **off** in TCC's sessions — TCC's tools only.
+4. **«Open terminal in this project» → Codex:** with TCC's tools wired in; otherwise Codex's own configuration.
