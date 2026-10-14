@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import child, model_choices
+from autosound_tcc.core import child, codex_rpc, model_choices
 from autosound_tcc.core import model_choices as mc
 from autosound_tcc.core.model_choices import Choice, OmpCatalogueError
 from tests import _hung_child
@@ -1257,6 +1257,23 @@ _CODEX_FRAMES = [json.loads(line) for line in (
 _REAL_ASK_CODEX = mc._ask_codex_models
 
 
+def _as_ask(exchange):
+    """The model list asks through `codex_rpc.ask_blocking` (W-10 task 3); these tests still speak
+    in frames — `exchange(binary, requests, want, timeout)` returns the reply frame or None."""
+
+    def ask_blocking(binary, calls, *, timeout, **_kw):
+        requests = [{"method": "initialize", "id": 0}, {"method": "initialized"}] + [
+            {"method": method, "id": 1, "params": params} for method, params in calls]
+        frame = exchange(binary, requests, 1, timeout)
+        if frame is None:
+            raise TimeoutError("model/list: no answer")
+        if "error" in frame:
+            return [codex_rpc.RpcError(frame["error"].get("code"), frame["error"]["message"])]
+        return [frame["result"]]
+
+    return ask_blocking
+
+
 def test_the_codex_list_is_what_codex_offers_this_login(monkeypatch):
     """tcc#182: the picker held `gpt-5.2-codex` and `gpt-5.2`, both refused, while Codex worked in a
     terminal — this login's Codex offers the gpt-6/5.6 family. `model/list` names them."""
@@ -1268,7 +1285,7 @@ def test_the_codex_list_is_what_codex_offers_this_login(monkeypatch):
 
     monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
     monkeypatch.setattr(mc.shutil, "which", lambda name: "/usr/local/bin/codex")
-    monkeypatch.setattr(mc, "_app_server_exchange", exchange)
+    monkeypatch.setattr(mc.codex_rpc, "ask_blocking", _as_ask(exchange))
 
     rows = _REAL_ASK_CODEX()
 
@@ -1300,17 +1317,17 @@ def test_the_app_server_is_kept_open_until_it_answers(tmp_path):
         import json, sys, time
         for line in sys.stdin:
             msg = json.loads(line)
+            if msg.get("method") == "initialize":
+                print(json.dumps({"id": msg["id"], "result": {}}), flush=True)
             if msg.get("method") == "model/list":
                 time.sleep(0.2)
                 print(json.dumps({"id": msg["id"], "result": {"data": [{"id": "m1"}]}}), flush=True)
         '''), encoding="utf-8")
     codex.chmod(0o755)
 
-    frame = mc._app_server_exchange(
-        str(codex), [{"method": "initialize", "id": 0, "params": {}},
-                     {"method": "model/list", "id": 1, "params": {}}], 1, 5.0)
+    replies = codex_rpc.ask_blocking(str(codex), [("model/list", {})], timeout=5.0)
 
-    assert frame == {"id": 1, "result": {"data": [{"id": "m1"}]}}
+    assert replies == [{"data": [{"id": "m1"}]}]
 
 
 # ---- the group review: a list that could not be read is said, never a confident answer --------
@@ -1376,7 +1393,7 @@ def test_a_claude_that_did_not_answer_is_said_on_the_rows_and_as_a_quiet_route(t
 def _codex_on_path(monkeypatch, exchange):
     monkeypatch.setattr(mc, "cli_available", lambda harness: harness == "codex")
     monkeypatch.setattr(mc.shutil, "which", lambda name: "/usr/local/bin/codex")
-    monkeypatch.setattr(mc, "_app_server_exchange", exchange)
+    monkeypatch.setattr(mc.codex_rpc, "ask_blocking", _as_ask(exchange))
 
 
 @pytest.mark.parametrize("frame, said", [
@@ -1424,6 +1441,8 @@ def test_an_app_server_that_quits_at_stdins_end_still_answers_while_it_is_open(t
         wanted = None
         for line in sys.stdin:
             msg = json.loads(line)
+            if msg.get("method") == "initialize":
+                print(json.dumps({"id": msg["id"], "result": {}}), flush=True)
             if msg.get("method") == "model/list":
                 wanted = msg["id"]
                 break
@@ -1435,11 +1454,9 @@ def test_an_app_server_that_quits_at_stdins_end_still_answers_while_it_is_open(t
         '''), encoding="utf-8")
     codex.chmod(0o755)
 
-    frame = mc._app_server_exchange(
-        str(codex), [{"method": "initialize", "id": 0, "params": {}}, {"method": "initialized"},
-                     {"method": "model/list", "id": 1, "params": {}}], 1, 5.0)
+    replies = codex_rpc.ask_blocking(str(codex), [("model/list", {})], timeout=5.0)
 
-    assert frame == {"id": 1, "result": {"data": []}}
+    assert replies == [{"data": []}]
 
 
 def test_a_normal_refresh_asks_the_cli_lists_once_and_the_recheck_again(tmp_path, monkeypatch):

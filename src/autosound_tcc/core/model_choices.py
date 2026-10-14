@@ -23,14 +23,13 @@ import os
 import re
 import shutil
 import subprocess
-import threading
 import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
-from autosound_tcc.core import child
+from autosound_tcc.core import child, codex_rpc
 from autosound_tcc.core import claude_sdk, model_overrides
 
 from autosound_tcc.core import reviewer_key
@@ -792,56 +791,13 @@ def codex_choices() -> list[Choice]:
     ]
 
 
-def _app_server_exchange(binary: str, requests: list, want, timeout: float) -> Optional[dict]:
-    """Send `requests` to `<binary> app-server`, one JSON line each, and return the reply whose
-    `id` is `want`; None on silence, an error or `timeout`.
-
-    The pipe stays open until that reply: `codex app-server` exits at the end of stdin before it
-    answers (measured on 0.162.1), so `run_bounded`'s write-and-close gets nothing back."""
-    try:
-        proc = subprocess.Popen(
-            [binary, "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-            **child.flags())
-    except OSError:
-        return None
-    found: dict = {}
-
-    def read() -> None:
-        for line in proc.stdout:  # type: ignore[union-attr]
-            try:
-                frame = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(frame, dict) and frame.get("id") == want:
-                found["frame"] = frame
-                return
-
-    reader = threading.Thread(target=read, name="tcc-codex-models", daemon=True)
-    reader.start()
-    try:
-        for request in requests:
-            proc.stdin.write(json.dumps(request) + "\n")  # type: ignore[union-attr]
-        proc.stdin.flush()  # type: ignore[union-attr]
-    except OSError:
-        pass
-    reader.join(timeout)
-    try:
-        proc.stdin.close()  # type: ignore[union-attr]
-    except OSError:
-        pass
-    child.kill_tree(proc)
-    try:
-        proc.wait(timeout=child.REAP_TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        pass
-    return found.get("frame")
-
-
 def _ask_codex_models() -> list[Choice]:
     """The models this machine's Codex offers its login, from `codex app-server`'s `model/list`
     (tcc#182) — the supported way to ask (`codex models` wants a terminal). No turn runs; [] when
     there is no Codex or it did not answer — why is in `_LIST_WHY`, and the shipped pair stands in.
+
+    Through `codex_rpc.ask_blocking`, which holds stdin open until the reply: `codex app-server`
+    exits at the end of stdin before it answers (measured on 0.162.1).
     """
     binary = shutil.which("codex") if cli_available("codex") else None
     if binary is None:
@@ -850,21 +806,19 @@ def _ask_codex_models() -> list[Choice]:
     cursor = None
     for _page in range(10):
         params = {"cursor": cursor} if cursor else {}
-        frame = _app_server_exchange(binary, [
-            {"method": "initialize", "id": 0,
-             "params": {"clientInfo": {"name": "autosound-tcc", "title": "TCC", "version": "1"}}},
-            {"method": "initialized"},
-            {"method": "model/list", "id": 1, "params": params},
-        ], 1, CLI_TIMEOUT_S)
-        if frame is None:
+        try:
+            (reply,) = codex_rpc.ask_blocking(binary, [("model/list", params)],
+                                              timeout=CLI_TIMEOUT_S)
+        except TimeoutError:
             _LIST_WHY["codex"] = f"codex app-server gave no answer in {int(CLI_TIMEOUT_S)} s"
             return []
-        error = frame.get("error")
-        if error is not None:
-            said = error.get("message") if isinstance(error, dict) else error
-            _LIST_WHY["codex"] = f"codex app-server: {said}"
+        except (codex_rpc.ConnectionLost, OSError) as exc:
+            _LIST_WHY["codex"] = f"codex app-server: {exc}"
             return []
-        result = frame.get("result") if isinstance(frame.get("result"), dict) else {}
+        if isinstance(reply, codex_rpc.RpcError):
+            _LIST_WHY["codex"] = f"codex app-server: {reply.message}"
+            return []
+        result = reply if isinstance(reply, dict) else {}
         for entry in result.get("data") or []:
             if not isinstance(entry, dict) or entry.get("hidden"):
                 continue
