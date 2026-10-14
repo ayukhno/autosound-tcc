@@ -194,7 +194,12 @@ resumes anyway.
   `command=None`; on Windows `shell="powershell"`; tool names `"Bash"`/`"Edit"` (`TOOL_NAMES`). Task 5's fix round
   (the Arbiter, 2026-10-14: «виправити повністю») closes the `foreign` hole — danger first, owned paths anchored
   (relative, an owned prefix, no `..`) — and makes an unknown tool name ask under `auto`.
-- **Task 6 turns `CODEX_ROUTE` on** in `session_routes.resume_route` together with `factory`'s Codex branch (e89f0ca: until then a Codex pick reads the SDK's route — one without the other told the chat «fresh» over a resumed session).
+- **`CodexSession` as built (1464e49, task 6) — for task 7:** the decision sits in `CodexSession._on_request` (runs in
+  the reader; return an awaitable to gate asynchronously); read `self.gate`, `self.always_allowed`, `self._read_roots`
+  per request; file-change paths in `self._paths[itemId]` (cleared in the turn's `finally`); `inner_command()` for the
+  gate's detail; no `turn/completed` sweep of leftover requests yet; `serverRequest/resolved` handled only by
+  `codex_rpc`; a refused `turn/start` → Notice + `TurnEnd`. The `codexNotYet` i18n key is now unused (drop it).
+- **Task 6 turned `CODEX_ROUTE` on** in `session_routes.resume_route` together with `factory`'s Codex branch (e89f0ca: until then a Codex pick reads the SDK's route — one without the other told the chat «fresh» over a resumed session).
 - The method's `session-start` takes any harness string (`rew_tool/state/process.py:9259-9261`): `codex` journals as
   `"harness": "codex"`.
 - The stand-in: `tests/fakes/fake_codex_app_server.py` (`--scenario` / `FAKE_CODEX_*`; exit 3 with `ASSERT` on an
