@@ -729,7 +729,7 @@ def test_every_drop_down_box_reads_in_the_theme_s_own_colours(monkeypatch, mode)
     theme; the boxes hold no words, so no font is measured — the words' colour is the one Qt is
     given to draw them with."""
     from PySide6.QtCore import QRect
-    from PySide6.QtGui import QPalette
+    from PySide6.QtGui import QColor, QPalette
     from PySide6.QtWidgets import QApplication, QComboBox, QVBoxLayout, QWidget
 
     from tests import _windows
@@ -737,6 +737,15 @@ def test_every_drop_down_box_reads_in_the_theme_s_own_colours(monkeypatch, mode)
     app = QApplication.instance() or QApplication([])
     host = QWidget()
     palette = _windows.theme_on(monkeypatch, host, mode)
+    # apply_theme's palette carries `text` as Text and ButtonText and `faint` as the placeholder, so
+    # a box that took its words from the palette passed with the sheet's colour gone (W-7's round-1
+    # M1). The host gets the colour that must NOT be there instead: the words and the placeholder
+    # pass only when the sheet gives them.
+    native = QPalette(host.palette())
+    for role in (QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText,
+                 QPalette.ColorRole.PlaceholderText):
+        native.setColor(role, QColor("#ff00ff"))
+    host.setPalette(native)
     layout = QVBoxLayout(host)
     closed = QComboBox()  # as the provider box: no class
     closed.addItems(["", "", ""])
