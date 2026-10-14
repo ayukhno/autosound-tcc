@@ -410,7 +410,11 @@ def to_check(round_: dict, rew_titles, project_dir: Optional[Path] = None) -> li
     and each check is a pull from REW and a journal event — an RTA's, read as unchecked, started
     one on every scan of REW (hub #154 §1). An absent one is asked again: the curve may be there
     now. By the series key (#153, v3.1.4): the round holds `w-R_01 (sw)` taken under the list's
-    `w-R_1 (sw)`, REW still under `w-R_01`, and the method's check finds it there by key."""
+    `w-R_1 (sw)`, REW still under `w-R_01`, and the method's check finds it there by key.
+
+    Then each take the round did not ask for, by its own title (tcc#199, hub #260): the method
+    judges any title it is handed and records the verdict on that take's row, planned or not —
+    `cap_003`'s check covered the list alone, and an unplanned sweep stood with no verdict."""
     key = process_view.title_key(project_dir)
     held = {key(str(title)) for title in rew_titles}
     taken = process_view.standing(round_)
@@ -421,8 +425,10 @@ def to_check(round_: dict, rew_titles, project_dir: Optional[Path] = None) -> li
         return row is not None and verdict_state(taken[row].get("verified"), title, as_is) \
             in (VERDICT_ABSENT, VERDICT_BAD)
 
-    return [str(title) for title in round_.get("expected") or []
-            if key(str(title)) in held and unsettled(str(title))]
+    expected = [str(title) for title in round_.get("expected") or []]
+    listed = {key(title) for title in expected}
+    unplanned = [str(title) for title in taken if key(str(title)) not in listed]
+    return [title for title in expected + unplanned if key(title) in held and unsettled(title)]
 
 
 @dataclass(frozen=True)
@@ -784,6 +790,13 @@ def build_session(
         groups.append(MeasGroup(type=spec["label"], items=items, method=spec.get("method")))
 
     extras = _extras(naming, glossary, parsed, groups_spec, version, taken_keys, retake_keys)
+    # An extra the round took and the check called unusable is red with its words, as a listed
+    # row is (tcc#199): green for being taken hid the verdict the method recorded on it.
+    extras = tuple(
+        _row(item.name, STATUS_STALE, issues_for(item.name), False, additional=True,
+             ambiguous=ambiguous_for(item.name))
+        if item.status == STATUS_DONE and verdict_for(item.name)[1] == VERDICT_BAD else item
+        for item in extras)
     if round_open:
         # Captured in this round though nobody asked, under a title the grammar cannot read --
         # `D_L w+m_7 (rta) inv`, the `D_` refused (S-042; read for one release, v3.0.65, and

@@ -2628,7 +2628,7 @@ def test_start_capture_takes_the_methods_plan_when_no_list_is_given(tmp_path, mo
     seen = {}
 
     def _start(project_dir, version, expected, step="", origin="", plan=False, optional=(),
-               start_method=""):
+               start_method="", under="", level="", level_read_as=""):
         seen.update(version=version, expected=list(expected), plan=plan,
                     optional=list(optional), start=start_method)
         return "cap_001 — the method's list"
@@ -2644,6 +2644,28 @@ def test_start_capture_takes_the_methods_plan_when_no_list_is_given(tmp_path, mo
 
     asyncio.run(mcp.call_tool("start_capture", {"version": "61", "expected": ["sw_61 (sw)"]}))
     assert seen["plan"] is False and seen["expected"] == ["sw_61 (sw)"]
+
+
+def test_start_capture_passes_under_and_level_to_the_method(tmp_path, monkeypatch):
+    """tcc#199 (hub #260, PAS-013): the session can say what a round is taken under and at what
+    level — `cap_003` lay with `under: null, level: null` because the tool could not pass them.
+    Not given, they go as nothing, and the writer sends no flag for them."""
+    from autosound_tcc.core import process_writer
+
+    seen = []
+    monkeypatch.setattr(process_writer, "start_capture",
+                        lambda *a, **kw: seen.append(kw) or "cap_003 open at 3, under v_008")
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    asyncio.run(mcp.call_tool("start_capture", {
+        "version": "3", "expected": ["sw_3 (sw)"], "under": "v_008", "level": "66.4 dBA",
+        "level_read_as": "pink noise AYA #2 at the judge's level"}))
+    asyncio.run(mcp.call_tool("start_capture", {"version": "3", "expected": ["sw_3 (sw)"]}))
+
+    given, bare = seen
+    assert (given["under"], given["level"], given["level_read_as"]) == (
+        "v_008", "66.4 dBA", "pink noise AYA #2 at the judge's level")
+    assert (bare["under"], bare["level"], bare["level_read_as"]) == ("", "", "")
 
 
 def test_with_the_omp_route_an_omp_reviewer_pick_is_called(tmp_path, monkeypatch):

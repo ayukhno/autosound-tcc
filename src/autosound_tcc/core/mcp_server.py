@@ -1131,7 +1131,8 @@ def build_server(
         step's gate reads what it recorded.
 
         A step that asked for captures will not close until they pass. `titles` defaults to
-        everything the round expects. `recorded: true` means the check ran and recorded its
+        everything the round expects; a take the round did not ask for is judged too when named
+        in `titles`, its verdict on its own row (the window's check names them). `recorded: true` means the check ran and recorded its
         verdicts — which captures pass is in `said`, the method's own lines; `recorded: false`
         means it did not run or did not finish, and `error` says why.
 
@@ -1202,7 +1203,8 @@ def build_server(
     @tool()
     async def start_capture(version: str, expected: list[str] | None = None, step: str = "",
                             plan: bool | None = None, optional: list[str] | None = None,
-                            start: str = "") -> str:
+                            start: str = "", under: str = "", level: str = "",
+                            level_read_as: str = "") -> str:
         """Open a capture round before measuring: the series being captured, and the list the
         METHOD gives for it (SCR-034; the Arbiter's round rule, SKL-054).
 
@@ -1218,12 +1220,21 @@ def build_server(
         open measurements.
 
         `step` binds the round to the plan step it satisfies, which is what lets that step's gate
-        refuse to close while a capture it asked for is unusable (SCR-040)."""
+        refuse to close while a capture it asked for is unusable (SCR-040).
+
+        `under` is the ledger version (`v_008`) the series is taken under — the configuration in
+        the processor while it was measured, which `predict --rew` reads back as `--from-state`;
+        it must be a version banked on disk. Leave it out when the processor held no banked
+        state: the method records nothing rather than a guess. `level` is the level the series was
+        measured at, as a quantity in dB (`"-25 dB rel. max"`, `"66.4 dBA"`), and `level_read_as`
+        how it was read off the device (`"7 lamps on the Conductor"`). Each is sent only when
+        given; a version nobody banked or a level without dB is the method's refusal, in its words
+        — say it as it is."""
         listed = [str(title) for title in expected or [] if str(title).strip()]
         return await _in_thread(
             _record, process_writer.start_capture, version, listed, step,
             plan=(not listed) if plan is None else bool(plan), optional=list(optional or []),
-            start_method=start,
+            start_method=start, under=under, level=level, level_read_as=level_read_as,
         )
 
     @tool()

@@ -1778,6 +1778,46 @@ def test_a_check_that_did_not_run_ends_when_what_it_asked_is_recorded_or_the_rou
         process.load()["capture"], typed, project), "the round closed"
 
 
+def test_the_window_checks_an_unplanned_take_as_it_checks_a_planned_one(project):
+    """tcc#199 (hub #260, PAS-013): `cap_003`'s check covered the round's list only, and six takes
+    nobody asked for — one a sweep, `c_3 (sw) +6dB` — stayed with no verdict. The method judges any
+    title it is handed and records the verdict on that take's row, planned or not; the window now
+    hands it the round's unplanned takes too, while REW holds them, until each verdict settles."""
+    process = _round(project, version=7, expected=["w-L_7 (sw)"],
+                     taken=["w-L_7 (sw)", "sw_7 (sw)", "sw_7 (rta)"])
+    round_ = process_view.capture_round(project)
+    sw, rta = _as_typed("sw_7 (sw)"), _as_typed("sw_7 (rta)")
+    assert round_["taken"][sw]["planned"] is False
+    held = [_as_typed("w-L_7 (sw)"), sw, rta]
+
+    assert mv.to_check(round_, held, project) == [_as_typed("w-L_7 (sw)"), sw, rta]
+    assert mv.to_check(round_, held[:1], project) == [_as_typed("w-L_7 (sw)")], \
+        "an unplanned take REW no longer holds is not asked about"
+
+    round_ = _check(process, {"w-L_7 (sw)": _held("u-wl"), "sw_7 (sw)": _held("u-sw", _SILENCE),
+                              "sw_7 (rta)": _held("u-rta", _NOT_SWEPT, applicable=False)})
+    assert mv.to_check(round_, held, project) == [sw], "the bad one is asked again; the rest settled"
+    assert mv.unusable_lines(round_, [sw, rta], project) == [f"{sw} — {_SILENCE}"]
+
+
+def test_the_card_shows_an_unplanned_takes_verdict_like_a_planned_ones(project):
+    """tcc#199: the unplanned sweep the check called unusable is red with the checker's words, on
+    the live card while REW holds it and in the round's history — not green for being taken."""
+    process = _round(project, version=7, expected=["w-L_7 (sw)"], taken=["w-L_7 (sw)", "sw_7 (sw)"])
+    sw = _as_typed("sw_7 (sw)")
+    _check(process, {"w-L_7 (sw)": _held("u-wl"), "sw_7 (sw)": _held("u-sw", _SILENCE)})
+
+    live = mv.build_session("0", 7, [_as_typed("w-L_7 (sw)"), sw], project, taken=[])
+    row = _item(live, sw)
+    assert (row.status, row.additional, row.extra) == (mv.STATUS_STALE, True, _SILENCE)
+    assert _item(live, "w-L_7 (sw)").status == mv.STATUS_DONE
+    rew_closed = mv.build_session("0", 7, [], project, taken=[])
+    assert _item(rew_closed, sw).status == mv.STATUS_STALE, "REW closed: the round's own row"
+
+    process.start_capture(7, expected=["sw_7 (sw)"])  # closes cap_001: history now
+    assert _item(_past(project, "cap_001"), sw).status == mv.STATUS_STALE
+
+
 def test_a_title_no_longer_to_check_has_nothing_left_to_say(project):
     """A title the tuner has since taken as it is, or one whose verdict reads fine, is no longer
     one `to_check` asks about: the line about it has nothing left to promise."""

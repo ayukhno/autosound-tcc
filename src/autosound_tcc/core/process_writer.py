@@ -91,6 +91,15 @@ LANDED_IN = {
     "target": "2.8.0",
 }
 
+#: Flags newer than their command, and the first method tag whose `process.py` has each — read as
+#: `LANDED_IN` is (`git show <tag>:…/state/process.py`, 2026-10-14). A bound copy without one is
+#: refused before it starts (`method_cli`'s `UnknownFlag`), and `_run` says which version has it.
+FLAG_LANDED_IN = {
+    "--under": "3.0.60",
+    "--level": "3.0.60",
+    "--level-read-as": "3.0.60",
+}
+
 
 #: `method_cli`'s, under the names every caller already catches — the same classes, not copies, so
 #: an `except process_writer.ProcessWriterError` (or `.Busy`, `.Refused`, `.UnknownFlag`,
@@ -100,6 +109,18 @@ Busy = method_cli.Busy
 Refused = method_cli.Refused
 UnknownFlag = method_cli.UnknownFlag
 TimedOut = method_cli.TimedOut
+
+
+class FlagTooOld(UnknownFlag):
+    """The project's copy of the method does not know a flag `FLAG_LANDED_IN` dates: what
+    `UnknownFlag` is — the same `flag`, and nothing started — said as `TooOld` says a command, with
+    the version that has it and the copy to update (tcc#199)."""
+
+    def __init__(self, flag: str, command: str, since: str, remedy: str) -> None:
+        ProcessWriterError.__init__(
+            self, f"this project's method does not know {flag} of `{command}` — the method has it "
+                  f"by v{since}. {remedy}; nothing here is broken on TCC's side.")
+        self.flag = flag
 
 
 class TooOld(ProcessWriterError):
@@ -175,7 +196,13 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
     (`check_captures`, the G6+G7 review's M2); a method too old for the command (`TooOld`) with
     TCC's sentence beside them. Not what `spawn` raises: it logs its own busy, timed-out, refused
     and failed-to-start answers. `kw` is spawn's own (`under_lock=`)."""
-    code, out, err = _spawn(project_dir, args, timeout_s, **kw)
+    try:
+        code, out, err = _spawn(project_dir, args, timeout_s, **kw)
+    except UnknownFlag as unknown:
+        since = FLAG_LANDED_IN.get(unknown.flag)
+        if since is None:
+            raise
+        raise FlagTooOld(unknown.flag, args[0], since, _remedy(project_dir)) from None
     try:
         _refuse_if_too_old(project_dir, args[0], out, err)
     except TooOld as too_old:
@@ -587,20 +614,24 @@ def _refuse_if_too_old(project_dir: Path, command: str, out: str, err: str) -> N
         return
     since = LANDED_IN.get(command)
     has_it = f" — the method has it by v{since}" if since else ""
+    raise TooOld(f"this project's method does not have `{command}`{has_it}. "
+                 f"{_remedy(project_dir)}; nothing here is broken on TCC's side.")
+
+
+def _remedy(project_dir: Path) -> str:
+    """What a copy too old for a command or a flag is mended by: the copy the project runs (M28)."""
     binding = method_binding.for_project(project_dir)
     if binding.state in (method_binding.KNOWN, method_binding.APPROVED):
-        remedy = (f"This project runs the copy at {binding.skill_dir}, which TCC's update row does "
-                  f"not update: update that copy, or re-link {binding.entry} to TCC's copy, or do "
-                  f"this step by hand")
-    else:
-        remedy = "Update the method (TCC's own update row offers it), or do this step by hand"
-    raise TooOld(f"this project's method does not have `{command}`{has_it}. {remedy}; nothing here "
-                 f"is broken on TCC's side.")
+        return (f"This project runs the copy at {binding.skill_dir}, which TCC's update row does "
+                f"not update: update that copy, or re-link {binding.entry} to TCC's copy, or do "
+                f"this step by hand")
+    return "Update the method (TCC's own update row offers it), or do this step by hand"
 
 
 def start_capture(
     project_dir: Path, version: str, expected: list[str], step: str = "", origin: str = "",
-    plan: bool = False, optional=(), start_method: str = "",
+    plan: bool = False, optional=(), start_method: str = "", under: str = "", level: str = "",
+    level_read_as: str = "",
 ) -> str:
     """Open a capture round: which ledger version it is taken at, and what was asked for (SCR-034).
 
@@ -623,6 +654,14 @@ def start_capture(
     what this phase measures at series `version`, for the project's channels, `optional` captures
     on it and ordered by setup from `start_method` (`sw` / `rta`). What it prints is the list the
     person reads — returned here as it is.
+
+    `under` is the ledger version (`v_NNN`) the series is taken under, the configuration in the
+    processor while it was measured — what `predict --rew` reads back as `--from-state` (the
+    method's #57 P0); `level` the level as a quantity in dB (`"-25 dB rel. max"`), and
+    `level_read_as` how it was read off the device (`"7 lamps"`, S-026). Each is sent only when
+    given, and checked by the method alone: a version nobody banked, or a level that is no dB
+    quantity, is its refusal in its words (tcc#199, hub #260). A copy before v3.0.60 has none of
+    the three: `FlagTooOld`, before anything starts.
     """
     args = ["capture-start", str(version), *[str(t) for t in expected or []]]
     if plan:
@@ -635,6 +674,9 @@ def start_capture(
         args += ["--step", step]
     if origin:
         args += ["--origin", str(origin)]
+    for flag, value in (("--under", under), ("--level", level), ("--level-read-as", level_read_as)):
+        if value is not None and str(value).strip():
+            args += [flag, str(value)]
     return _run(project_dir, args)
 
 

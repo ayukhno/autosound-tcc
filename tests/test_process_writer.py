@@ -605,6 +605,94 @@ def test_a_round_can_be_opened_from_the_methods_plan(tmp_path, monkeypatch):
     assert seen["args"][seen["args"].index("--start") + 1] == "rta"
 
 
+def test_under_and_level_reach_the_method_only_when_given(tmp_path, monkeypatch):
+    """tcc#199 (hub #260, PAS-013): `--under`, `--level` and `--level-read-as` go to `capture-start`
+    when the caller gives them, each with its value as given — and a round opened without them
+    sends none, so a copy without them opens it as before."""
+    seen = []
+    monkeypatch.setattr(process_writer, "_run", lambda d, args, **kw: seen.append(args) or "")
+
+    process_writer.start_capture(tmp_path, "3", ["sw_3 (sw)"], under="v_008",
+                                 level="-25 dB rel. max", level_read_as="7 lamps")
+    process_writer.start_capture(tmp_path, "3", ["sw_3 (sw)"])
+    process_writer.start_capture(tmp_path, "3", ["sw_3 (sw)"], level_read_as="7 lamps")
+
+    given, bare, read_as = seen
+    assert given[given.index("--under") + 1] == "v_008"
+    assert given[given.index("--level") + 1] == "-25 dB rel. max"
+    assert given[given.index("--level-read-as") + 1] == "7 lamps"
+    assert not {"--under", "--level", "--level-read-as"} & set(bare)
+    assert "--level-read-as" in read_as and not {"--under", "--level"} & set(read_as)
+
+
+def _banked(project: Path, *versions: str) -> Path:
+    """A project the vendored method opens rounds in, with ledger snapshots `versions` on disk."""
+    project.mkdir(parents=True, exist_ok=True)
+    (project / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                          encoding="utf-8")
+    for version in versions:
+        (project / "state" / "1.A-alt").mkdir(parents=True, exist_ok=True)
+        (project / "state" / "1.A-alt" / f"{version}.json").write_text("{}", encoding="utf-8")
+    return project
+
+
+def test_a_round_records_what_it_was_taken_under_and_at_what_level(tmp_path):
+    """tcc#199 through the vendored method: the round records `under` and the level as the method
+    keeps them — `cap_003` lay with `under: null, level: null`, and the level the Arbiter read
+    after the shoot (66.4 dBA) had no field but prose."""
+    project = _banked(tmp_path / "car", "v_008")
+    process_writer.start_capture(project, "3", ["sw_3 (sw)"], under="v_008",
+                                 level="66.4 dBA", level_read_as="pink noise AYA #2, judge's level")
+
+    round_ = json.loads((project / "process" / "process-state.json").read_text("utf-8"))["capture"]
+    assert round_["under"] == "v_008"
+    assert round_["level"] == {"value": "66.4 dBA", "read_as": "pink noise AYA #2, judge's level"}
+
+
+@pytest.mark.parametrize("given, words", [
+    ({"under": "v_009"}, "--under 'v_009': not a banked ledger version (banked: v_008)"),
+    ({"level": "loud"}, "--level 'loud': a level is a quantity in dB"),
+])
+def test_a_wrong_under_or_level_is_refused_in_the_methods_words(tmp_path, given, words):
+    """TCC adds no rule of its own for either: the method checks `under` against the ledger and
+    the level for a dB quantity, and its sentence is what the caller reads. No round opened."""
+    project = _banked(tmp_path / "car", "v_008")
+
+    with pytest.raises(process_writer.ProcessWriterError) as refused:
+        process_writer.start_capture(project, "3", ["sw_3 (sw)"], **given)
+
+    assert words in str(refused.value)
+    state = project / "process" / "process-state.json"
+    assert not state.exists() or not json.loads(state.read_text("utf-8")).get("capture")
+
+
+@pytest.mark.parametrize("flag, given", [
+    ("--under", {"under": "v_008"}),
+    ("--level", {"level": "-25 dB rel. max"}),
+    ("--level-read-as", {"level_read_as": "7 lamps"}),
+])
+def test_a_bound_copy_before_under_and_level_is_told_the_version_that_has_them(
+        tmp_path, monkeypatch, own_copy_is_the_submodule, flag, given):
+    """tcc#199: a project bound to a copy older than v3.0.60 — the first tag whose `process.py`
+    has `--under`, `--level` and `--level-read-as` — is refused before anything starts, and told
+    the version that has the flag and what to update, as a command too old is (`LANDED_IN`). Still
+    an `UnknownFlag` naming it, so a caller that retries without a flag reads it as before."""
+    older = _method_copy(tmp_path / "older-method", lambda text: text.replace(flag, "--gone"))
+    project = tmp_path / "car"
+    _linked_and_approved(project, older)
+    monkeypatch.setattr(method_cli.child, "run_bounded",
+                        lambda argv, **_kw: pytest.fail("a child started"))
+
+    with pytest.raises(process_writer.UnknownFlag) as refused:
+        process_writer.start_capture(project, "3", ["sw_3 (sw)"], **given)
+
+    said = str(refused.value)
+    assert refused.value.flag == flag
+    assert flag in said and "v3.0.60" in said, said
+    assert str(older) in said, "the copy to update is named, as for a command too old"
+    assert not (project / "process").exists(), "nothing written"
+
+
 # ---- which copy a write runs (#169, G5 S1) ------------------------------------------------------
 # Every write started TCC's own `process.py`, whatever the project linked at
 # `.claude/skills/autosound-tuning` — so a session could advise from one copy while the writers wrote
@@ -752,7 +840,8 @@ def test_a_flag_the_bound_copy_does_not_know_is_refused_before_anything_starts(
     assert not (project / "process").exists(), "nothing written either"
 
 
-#: Every flag TCC sends to `process.py`: the 23 the map lists (W-9, #169 N19), and `--json`.
+#: Every flag TCC sends to `process.py`: the 23 the map lists (W-9, #169 N19), `--json`, and
+#: the three of `capture-start` tcc#199 added.
 _FLAGS_TCC_SENDS = {
     "--project",                         # add_step(situational=True)
     "--superseded-by",                   # skip_step
@@ -768,6 +857,7 @@ _FLAGS_TCC_SENDS = {
     # record_decision, assembled when the call runs: f"--invalidates={invalidates}"
     "--invalidates",
     "--plan", "--optional", "--start", "--step", "--origin",  # start_capture
+    "--under", "--level", "--level-read-as",  # start_capture (tcc#199)
     "--session",                         # check_captures
     # handoff_json: `handoff --json`, sent from here since #169 N1 — the one the map's 23 left out
     "--json",
@@ -805,7 +895,8 @@ def _every_writer_with_every_option() -> list:
         (pw.handoff_json, (), {}),
         (pw.start_capture, ("49", ["m-L p1_49 (sw)"]),
          {"step": "2.9", "origin": "passat-b8-2026:49", "plan": True, "optional": ["Ws_49 (sw)"],
-          "start_method": "rta"}),
+          "start_method": "rta", "under": "v_008", "level": "-25 dB rel. max",
+          "level_read_as": "7 lamps"}),
         (pw.capture_knobs, ({"SubRC": "4/4"},), {}),
         # `round_id` sends no flag: it is read against the state under the lock (none here).
         (pw.check_captures, (), {"titles": ["m-L p1_49 (sw)"], "session": True,
