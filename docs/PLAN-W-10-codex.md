@@ -155,3 +155,27 @@ without SmartScreen.
 Found while designing (for the pool, not this build): «Fresh» still resumes on the Claude route —
 `main_window.py:5107` passes `resumed=False`, but `TuningSession.__init__` reads the registry itself and `_options`
 resumes anyway.
+
+## Learned in task 1 (acaf06d, 2026-10-14) — binding on the later tasks
+
+- **Task 9: the wheel is a folder, not one file.** Unpack all of `codex_cli_bin/` (macOS: `bin/codex`,
+  `codex-package.json`, `codex-path/rg`, `codex-resources/zsh`; Windows adds `codex-command-runner.exe` and
+  `codex-windows-sandbox-setup.exe`). Member paths in `tests/fixtures/codex/wheel-0.162.1.json`.
+- **Isolation can kill the start:** `-c mcp_servers.<name>.enabled=false` for a server NOT in the user's config makes
+  app-server exit 1 («invalid transport»). The off-list is built only from `config/read`; the client fails cleanly on
+  EOF before `initialize`.
+- **Skills off:** `features.skip_host_skill_discovery` does nothing; `-c skills.bundled.enabled=false` leaves only the
+  extra-root skill. User/repo skills untested (none on this Mac).
+- **Features `config/read` still lists as enabled** with the spike's off-switches: decided (the session, 2026-10-14) —
+  `remote_plugin` goes on the OFF list (it is the user's extras); `api_key_model_discovery`, `auth_elicitation`,
+  `mentions_v2` go on a KNOWN-HARMLESS list. The test: any enabled feature on neither list fails.
+- **`serverRequest/resolved` also arrives for requests already answered** — a withdrawal only while the request is
+  still pending.
+- **Command approvals** list `accept`, `acceptWithExecpolicyAmendment`, `cancel` as decisions; `decline` works too —
+  TCC sends `accept` / `decline`.
+- **Sign-in** uses a fixed callback port, `127.0.0.1:1455` (Windows: Defender/firewall on the VM pass).
+- The method's `session-start` takes any harness string (`rew_tool/state/process.py:9259-9261`): `codex` journals as
+  `"harness": "codex"`.
+- The stand-in: `tests/fakes/fake_codex_app_server.py` (`--scenario` / `FAKE_CODEX_*`; exit 3 with `ASSERT` on an
+  unanswered / twice-answered / answered-after-resolved request, 4 on a silent client); 13 scenarios in
+  `tests/fixtures/codex/`; re-record with `spike/codex-app-server/record_w10.py` + `cut_fixtures.py`.
