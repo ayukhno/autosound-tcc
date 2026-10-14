@@ -42,14 +42,21 @@ suite ran against the method's candidate before its release (hub #283). The guid
 - **A change of REW's level calibration between rounds is named** (tcc#198): the capture card and the strip
   say the jump against the last round («+16.65 dB (103.35 → 120.0)»), and a round with mixed offsets says so.
   Nothing is corrected yet: bringing rounds to a common base is the method's next step (hub #285).
+- **«Ask again about what I ticked»** (tcc#181): the last line of the «Ask about» menu takes back the
+  project's «don't ask again» ticks; its tip names what is ticked. Before, only editing `.tcc/tcc-project.json`
+  could.
 
 ### Changed
 
 - **The safety gate asks more often under «auto» and with a «don't ask again» tick** (tcc#181), on every route —
-  Claude, omp and Codex. A tick never lets through what cannot be undone: it still asks. Under «auto» a
-  recursive or wide delete outside the project (and outside the method's copy) asks, such as `rm -rf
-  ~/Documents` or `rm ~/*`; single files are as before. PowerShell's disk, registry, shutdown and kill-all
-  commands ask as their bash twins do. Nothing to do: you will simply see a confirmation where there was none.
+  Claude, omp and Codex. A tick never lets through what cannot be undone: it still asks, and that question
+  offers no tick. Under «auto» a delete outside the project (and outside the method's copy) asks — one file,
+  such as `rm /tmp/one.txt`, as well as `rm -rf ~/Documents` or `rm ~/*` — and so does a delete whose target
+  the line does not spell. One file inside the project is deleted without a question, by a command or by
+  Codex's own file change. PowerShell's disk, registry, shutdown and kill-all commands ask as their bash twins
+  do; its plain reads (`Get-Content`, `Select-String`, `ConvertFrom-Json` and the like) do not. Nothing to
+  do: you will simply see a confirmation where there was none.
+- **Every menu line that opens a submenu is bold**, on every level.
 - **An update installs the versions TCC was tested with** (tcc#194): from a v1.1.4 tag on, the update and
   the README's install line hold every dependency to the release's tested set instead of the newest ones. A
   release that gives no such set says so. The update into v1.1.4 itself still runs v1.1.3's code, unpinned.
@@ -68,6 +75,11 @@ suite ran against the method's candidate before its release (hub #283). The guid
 
 ### Fixed
 
+- **The confirmation bar on Windows** (tcc#181): it speaks the window's language, names PowerShell as
+  PowerShell, and shows Codex's line as it runs, not as quoted for the shell.
+- **An update on Windows waits while something runs from TCC's folder**: a Codex terminal opened from TCC
+  holds TCC's Python, and uv could not replace it («Access is denied») and left TCC broken. The Updates tab
+  and the update window now name what runs and ask to close it; uv does not start until then.
 - **omp 18.x starts again** (tcc#165): its new tool refusal is read and retried, and an omp login no longer
   draws a missing-key warning.
 - **Codex's own refusal is said in its words** (tcc#182), not as a list of models both refused.
