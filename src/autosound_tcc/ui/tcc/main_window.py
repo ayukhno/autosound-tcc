@@ -5274,12 +5274,12 @@ class MainWindow(QMainWindow):
             if checked:
                 # TCC's own list, not what Anthropic answered today (finding 48, tcc#64).
                 tip += "\n" + i18n.t("modelShippedList").format(date=checked)
-            if not choice.available:
+            if not choice.available and state.reason != availability.TOO_OLD:
                 tip += "\n" + i18n.t("modelInstallCli").format(cli=choice.harness)
             unread = model_choices.list_note(choice)
             if unread:  # a stand-in for a list its CLI did not give (the group review)
                 tip += "\n" + i18n.t("modelListNotRead").format(why=unread)
-            if state.detail:
+            if availability_view.detail(state, choice):
                 tip += "\n" + availability_view.detail(state, choice)
             if caution:
                 tip += "\n" + i18n.t("criticNotFlashTip")

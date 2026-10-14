@@ -458,6 +458,41 @@ def settled() -> tuple[Optional[Found], Optional[tuple]]:
     return found, read
 
 
+#: `standing()`'s answers: which Codex TCC would use, as the Updates tab says it (tcc#181).
+STANDING_MISSING = "missing"    # none found: TCC's install is offered
+STANDING_TOO_OLD = "too_old"    # only one known older than MIN_VERSION: TCC's own copy is offered
+STANDING_TCC = "tcc"            # TCC's own copy, at PIN: up to date
+STANDING_OWN = "own"            # the person's own Codex, new enough (or unread): theirs to update
+
+
+@dataclass(frozen=True)
+class Standing:
+    """The Codex TCC would use and its version (`version_text`; "" when none was found)."""
+
+    state: str
+    version: str = ""
+
+    @property
+    def offered(self) -> bool:
+        """Whether TCC's install is the thing to do: none found, or only an old one."""
+        return self.state in (STANDING_MISSING, STANDING_TOO_OLD)
+
+
+def standing() -> Standing:
+    """`settled()` said as one of the `STANDING_*` answers. **Worker thread only** (it reads the
+    version). TCC's own copy lives in a folder named after `PIN`, so a copy found is at `PIN`. A
+    version of the person's own Codex that could not be read is theirs all the same (the
+    Arbiter's rule: unknown is not a block)."""
+    found, read = settled()
+    if found is None:
+        return Standing(STANDING_MISSING)
+    if read is not None and read < MIN_VERSION:
+        return Standing(STANDING_TOO_OLD, version_text(read))
+    if found.source == SOURCE_TCC:
+        return Standing(STANDING_TCC, version_text(read) if read else PIN)
+    return Standing(STANDING_OWN, version_text(read))
+
+
 def probe(*, force: bool = False) -> Probe:
     """Ask Codex once — its login and its models — and remember the answer (`signed_in()`,
     `models()`). **Worker thread only.** Again only with `force` (↻)."""
@@ -598,6 +633,7 @@ def unknown_enabled_features(config_read: Mapping) -> list[str]:
 
 __all__ = [
     "Found", "Probe", "MIN_VERSION", "PIN", "SOURCE_PATH", "SOURCE_FOLDER", "SOURCE_TCC",
+    "Standing", "standing", "STANDING_MISSING", "STANDING_TOO_OLD", "STANDING_TCC", "STANDING_OWN",
     "find", "forget", "settled", "version", "known_version", "too_old", "usable", "probe", "signed_in",
     "mark_signed_out", "models",
     "supported_efforts", "efforts_in", "tcc_copy_path", "dock_folders", "tcc_tool_args",

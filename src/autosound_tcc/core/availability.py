@@ -19,15 +19,18 @@ from typing import Callable, Iterable, Optional
 from autosound_tcc.core import codex_cli
 
 NOT_INSTALLED = "not_installed"
+#: Codex found but known older than `codex_cli.MIN_VERSION`: the detail is its version (tcc#181).
+TOO_OLD = "too_old"
 SIGN_IN = "sign_in"
 LOCATION = "location"
 REFUSED = "refused"
 NOT_CHECKED = "not_checked"
-PRIORITY = (NOT_INSTALLED, SIGN_IN, LOCATION, REFUSED, NOT_CHECKED)
+PRIORITY = (NOT_INSTALLED, TOO_OLD, SIGN_IN, LOCATION, REFUSED, NOT_CHECKED)
 
 #: For the agent, in `get_tcc_state` — English, like the rest of that payload.
 PHRASES = {
     NOT_INSTALLED: "its CLI is not installed on this machine",
+    TOO_OLD: "its CLI is too old for TCC: install TCC's own copy (Settings → Install Codex)",
     SIGN_IN: "not signed in to its own account on this machine (Claude or Codex)",
     LOCATION: "not available in your region",
     REFUSED: "the last call to it was refused",
@@ -154,7 +157,7 @@ def status(choice, *, signed_in: Optional[Callable[[], Optional[bool]]] = None,
         unconfirmed = model_choices.unconfirmed
     found: list[tuple[str, str]] = []
     if not getattr(choice, "available", True):
-        found.append((NOT_INSTALLED, ""))
+        found.append(_codex_too_old() if choice.harness == "codex" else (NOT_INSTALLED, ""))
     if choice.harness == "sdk" and signed_in() is False:
         found.append((SIGN_IN, ""))
     if choice.harness == "codex" and codex_signed_in() is False:
@@ -170,6 +173,16 @@ def status(choice, *, signed_in: Optional[Callable[[], Optional[bool]]] = None,
         return Status(True)
     reason, detail = min(found, key=lambda item: PRIORITY.index(item[0]))
     return Status(False, reason, detail)
+
+
+def _codex_too_old() -> tuple[str, str]:
+    """Why a Codex row cannot run: found and known too old — with its version — or not found.
+    Cached readings only (`codex_cli.too_old`): the pickers ask on the GUI thread (tcc#181, the
+    Arbiter's Windows pass: a 0.152.0 read «not installed»)."""
+    found = codex_cli.find()
+    if codex_cli.too_old(found):
+        return TOO_OLD, codex_cli.version_text(codex_cli.known_version(found))
+    return NOT_INSTALLED, ""
 
 
 def record_reviewer_outcome(key: str, result, *, reaches=None) -> None:

@@ -200,4 +200,62 @@ STRINGS: dict[str, dict[str, str]] = {
         'pl': 'Aby uruchomić Codex z narzędziami TCC: {command}',
         'de': 'Um Codex mit den Werkzeugen von TCC zu starten: {command}',
     },
+    # The pickers' row for a Codex known too old, and its footer phrase (tcc#181, the Arbiter's
+    # Windows pass: a 0.152.0 read «not installed»). `{line}` is the menu's own words.
+    'availTooOld': {
+        'en': 'Codex {version} is too old — {line}',
+        'uk': 'Codex {version} застарий — {line}',
+        'pl': 'Codex {version} jest za stary — {line}',
+        'de': 'Codex {version} ist zu alt — {line}',
+    },
+    'availPhraseTooOld': {
+        'en': 'Codex {version} is too old',
+        'uk': 'Codex {version} застарий',
+        'pl': 'Codex {version} jest za stary',
+        'de': 'Codex {version} ist zu alt',
+    },
+    # Codex's row on the Updates tab (`codex_tool_row`).
+    'updCodexChecking': {
+        'en': 'Codex — finding which one TCC would use…',
+        'uk': 'Codex — шукаю, який з них використає TCC…',
+        'pl': 'Codex — sprawdzam, którego użyłby TCC…',
+        'de': 'Codex — ermittle, welchen TCC verwenden würde…',
+    },
+    'updCodexMissing': {
+        'en': 'Codex — not installed',
+        'uk': 'Codex — не встановлено',
+        'pl': 'Codex — nie zainstalowano',
+        'de': 'Codex — nicht installiert',
+    },
+    'updCodexTooOld': {
+        'en': "Codex {here} → {there} (TCC's own copy)",
+        'uk': 'Codex {here} → {there} (власна копія TCC)',
+        'pl': 'Codex {here} → {there} (własna kopia TCC)',
+        'de': 'Codex {here} → {there} (TCCs eigene Kopie)',
+    },
+    'updCodexOwn': {
+        'en': 'Codex {here} — your own Codex',
+        'uk': 'Codex {here} — ваш власний Codex',
+        'pl': 'Codex {here} — twój własny Codex',
+        'de': 'Codex {here} — dein eigener Codex',
+    },
+    'updCodexOwnTip': {
+        'en': 'This Codex was installed outside TCC (winget, npm, Homebrew or by hand). TCC uses '
+              "it as it is and does not update it — that is not TCC's job: update it the way you "
+              'installed it.',
+        'uk': 'Цей Codex встановлено поза TCC (winget, npm, Homebrew чи вручну). TCC користується '
+              'ним як є й не оновлює його — це не справа TCC: оновіть його так, як встановлювали.',
+        'pl': 'Ten Codex został zainstalowany poza TCC (winget, npm, Homebrew lub ręcznie). TCC '
+              'używa go w takiej postaci, w jakiej jest, i go nie aktualizuje — to nie zadanie '
+              'TCC: zaktualizuj go tak, jak go zainstalowałeś.',
+        'de': 'Dieser Codex wurde außerhalb von TCC installiert (winget, npm, Homebrew oder von '
+              'Hand). TCC verwendet ihn so, wie er ist, und aktualisiert ihn nicht — das ist nicht '
+              'die Aufgabe von TCC: Aktualisiere ihn so, wie du ihn installiert hast.',
+    },
+    'updCodexUnknown': {
+        'en': 'Codex — could not be checked: {why}',
+        'uk': 'Codex — не вдалося перевірити: {why}',
+        'pl': 'Codex — nie udało się sprawdzić: {why}',
+        'de': 'Codex — konnte nicht geprüft werden: {why}',
+    },
 }

@@ -105,8 +105,9 @@ def test_the_most_serious_reason_wins():
     availability.refused(choice.key, availability.LOCATION, "x")
     availability.begin_reading(["codex"])
     assert _status(choice, unconfirmed=True).reason == availability.NOT_INSTALLED
-    assert list(availability.PRIORITY) == [availability.NOT_INSTALLED, availability.SIGN_IN,
-                                          availability.LOCATION, availability.REFUSED,
+    # A Codex known too old ranks with «not installed»: both mean it cannot start (tcc#181).
+    assert list(availability.PRIORITY) == [availability.NOT_INSTALLED, availability.TOO_OLD,
+                                          availability.SIGN_IN, availability.LOCATION, availability.REFUSED,
                                           availability.NOT_CHECKED]
 
 

@@ -59,6 +59,7 @@ from autosound_tcc.core import (
 )
 from autosound_tcc.core.contract_check import ContractReport, stamp
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc.codex_tool_row import CodexToolRow
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
 from autosound_tcc.ui.tcc.measurement_panel import TrafficLight
 from autosound_tcc.ui.tcc.sidebar_section import clear_layout
@@ -669,6 +670,7 @@ class DiagnosticsDialog(QDialog):
         self._updates_read = True
         self._start_update_check()
         self._start_tools_check()
+        self._codex_row.check()
 
     # ---- what is installed ---------------------------------------------------
 
@@ -803,6 +805,9 @@ class DiagnosticsDialog(QDialog):
         # runs on (tcc#97).
         self._tools_title = _section_title(i18n.t("updToolsTitle"))
         grid.addWidget(self._tools_title)
+        # Codex first, and TCC's own row: the method's `upkeep` does not know it (tcc#181).
+        self._codex_row = CodexToolRow(self.parent, lambda: self._sync_tools())
+        grid.addWidget(self._codex_row)
         tools = QWidget()
         self._tools_layout = QVBoxLayout(tools)
         self._tools_layout.setContentsMargins(0, 0, 0, 0)
@@ -1129,7 +1134,8 @@ class DiagnosticsDialog(QDialog):
             if guard is not None:
                 guard.setHidden(not guarded)
         if self._tools_all_btn is not None:
-            self._tools_all_btn.setEnabled(not busy and not held and any(self._tool_offer.values()))
+            self._tools_all_btn.setEnabled(not busy and not held and (
+                any(self._tool_offer.values()) or self._codex_row.offered))
             self._tools_all_note.setText(
                 i18n.t("updToolsSessionAll").format(names=", ".join(held)))
             self._tools_all_note.setHidden(not held)
@@ -1231,7 +1237,10 @@ class DiagnosticsDialog(QDialog):
 
     def _update_offered_tools(self) -> None:
         """«Update all» is every row whose button is live — what the rows offer now, not every tool
-        present: one already updated, or current, is not touched again."""
+        present: one already updated, or current, is not touched again. Codex's install goes along
+        only while its row offers it (tcc#181)."""
+        if self._codex_row.offered:
+            self._codex_row.install()
         self._update_tools([name for name, (_label, button) in self._tool_rows.items()
                             if button.isEnabled()])
 
@@ -1812,6 +1821,7 @@ class DiagnosticsDialog(QDialog):
             elif name in self._seal_jobs:
                 mark.setText(i18n.t("updSealChecking"))
         self._tools_title.setText(i18n.t("updToolsTitle"))
+        self._codex_row.retranslate()
         for _label, button in self._tool_rows.values():
             button.setText(i18n.t("updTool"))
         if self._tools_all_btn is not None:
