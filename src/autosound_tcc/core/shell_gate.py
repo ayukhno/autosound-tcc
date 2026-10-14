@@ -563,16 +563,21 @@ def bash_is_dangerous(command: str, roots: Sequence[Path]) -> bool:
 #: (`roots[0]`, as `_read_roots_for` gives it). None when the caller named none — then only the
 #: line's text is judged, as it always was.
 _PROJECT: ContextVar[Optional[Path]] = ContextVar("shell_gate_project", default=None)
+#: Every root the line may read — the project and the method's copy (`read_roots`): what is
+#: «inside» for the Arbiter's rule on recursive and glob deletes (`_outside_roots`).
+_ROOTS: ContextVar[tuple[Path, ...]] = ContextVar("shell_gate_roots", default=())
 
 
 @contextmanager
 def _in_project(roots: Sequence[Path]) -> Iterator[None]:
     token = _PROJECT.set(Path(roots[0]) if roots else None)
+    every = _ROOTS.set(tuple(Path(root) for root in roots))
     after = _AFTER_ANOTHER.set(False)  # each line starts with nothing run before it
     try:
         yield
     finally:
         _AFTER_ANOTHER.reset(after)
+        _ROOTS.reset(every)
         _PROJECT.reset(token)
 
 
@@ -1285,7 +1290,9 @@ def _tainted(commands: list[_Command], inherited: Iterable[str] = ()) -> set[str
                     tainted.add("HOME")
                 if head in ("for", "select") and len(words) > 1:
                     if words[1].text == "HOME" or any(
-                            _runs(word, tainted) or not word.dynamic and _is_wide_target(word.text)
+                            _runs(word, tainted) or not word.dynamic and (
+                                _is_wide_target(word.text) or any(ch in word.text for ch in "*?[")
+                                and _outside_roots(word.text, ""))
                             for word in words[3:]):
                         # A loop over another command's output, or over a home or a system folder
                         # (`for f in ~/*`): what its body deletes is that (Fable's review, I1).
@@ -1422,7 +1429,7 @@ def _words_are_dangerous(words: list[_Word], command: _Command, tainted: set[str
         # cmd's `rd /s`, and PowerShell's aliases of Remove-Item: `rd -Recurse ~` (Ruling 41).
         return _reach_is_dangerous(arguments, _is_windows_switch,
                                    lambda text: "s" in _switch_letters(text), bare=False,
-                                   cwd=command.cwd, wide_alone=True
+                                   cwd=command.cwd, wide_alone=True, outside=True
                                    ) or _remove_item_is_dangerous(
                                        [a for a in arguments if not _is_windows_switch(a.text)],
                                        command.piped, command.cwd)
@@ -1595,7 +1602,7 @@ def _rsync_is_dangerous(arguments: list[_Word], cwd: Optional[str]) -> bool:
     if not operands:
         return True
     dest = operands[-1]
-    return dest.dynamic or _is_wide_here(dest.text, cwd)
+    return dest.dynamic or _is_wide_here(dest.text, cwd) or _outside_roots(dest.text, cwd)
 
 
 #: `kill`'s options that take the word after them.
@@ -1927,6 +1934,34 @@ def _lands_outside(path: str) -> bool:
     return project is not None and not _within(os.path.realpath(path), os.path.realpath(project))
 
 
+def _outside_roots(text: str, cwd: Optional[str]) -> bool:
+    """The Arbiter, 2026-10-14 («Питати поза проєктом»): whether a recursive or glob delete's or
+    overwrite's operand lies outside the project and the method's copy — the rule under `auto` is
+    inside vs outside, with no list of important folders. A glob is judged by the folder it stands
+    in (`/Users/me/Documents/*`); a place the line does not spell (an unknown `cd`) is outside, and
+    so is a Windows drive on a machine that has none. With no roots given, only the text is
+    judged, as before."""
+    roots = _ROOTS.get()
+    project = _PROJECT.get()
+    if not roots or project is None:
+        return False
+    base = _base(cwd)
+    if base is None and not _is_absolute(text):
+        return True
+    path = _resolve(text, base or str(project))
+    if path is None:
+        return True
+    fixed = re.split(r"[*?\[]", path, maxsplit=1)[0]
+    if fixed != path:
+        fixed = fixed if fixed.endswith(("/", os.sep)) else os.path.dirname(fixed)
+    fixed = os.path.normpath(fixed or os.sep)
+    for root in roots:
+        for spelled in {os.path.normpath(str(root)), os.path.realpath(root)}:
+            if _within(fixed, spelled) or _within(os.path.realpath(fixed), spelled):
+                return False
+    return True
+
+
 def _matches(path: str) -> list[str]:
     """A path, or for a glob what it matches and the folder it is in."""
     if not re.search(r"[*?\[]", path):
@@ -2078,12 +2113,13 @@ def _rm_is_dangerous(arguments: list[_Word], cwd: Optional[str] = "") -> bool:
     """`rm` is judged by its arguments rather than by its name: `rm build/tmp.json` is a Tuesday.
     With no target it is fed by `xargs` or a pipe, and deletes what is not on the line."""
     return _reach_is_dangerous(arguments, lambda text: text.startswith("-"), _is_recursive_flag,
-                               bare=True, cwd=cwd, wide_alone=True)
+                               bare=True, cwd=cwd, wide_alone=True, outside=True)
 
 
 def _reach_is_dangerous(arguments: list[_Word], is_option: Callable[[str], bool],
                         is_recursive: Callable[[str], bool], bare: bool, cwd: Optional[str] = "",
-                        mode_first: bool = False, wide_alone: bool = False) -> bool:
+                        mode_first: bool = False, wide_alone: bool = False,
+                        outside: bool = False) -> bool:
     """A recursive delete (`rm -r`, `rd /s`) or `chmod -R`, judged by what it reaches.
 
     A target the line does not spell — `"$f"` in `for f in *`, `$(cat list)` — is unknown, and a
@@ -2115,7 +2151,7 @@ def _reach_is_dangerous(arguments: list[_Word], is_option: Callable[[str], bool]
     def wide(operand: _Word) -> bool:
         if mode_first and operands and operand is operands[0]:
             return _is_wide_target(operand.text)
-        return _is_wide_here(operand.text, cwd)
+        return _is_wide_here(operand.text, cwd) or outside and _outside_roots(operand.text, cwd)
 
     if any(option.dynamic or is_recursive(option.text) for option in options):
         if not operands:
@@ -2137,7 +2173,7 @@ def _reaches_wide(operand: _Word, cwd: Optional[str]) -> bool:
     text = operand.text
     if operand.dynamic or not any(ch in text for ch in "*?["):
         return False  # one unknown file, as `rm "$tmp"` always was; a wide loop taints it instead
-    return _is_wide_here(text, cwd)
+    return _is_wide_here(text, cwd) or _outside_roots(text, cwd)
 
 
 def _is_recursive_flag(text: str) -> bool:
@@ -2531,7 +2567,8 @@ def _ps_lists_wide(words: list[_Word], cwd: Optional[str]) -> bool:
             name = word.text[1:].partition(":")[0].lower()
             if name and ("recurse".startswith(name) or len(name) > 1 and "depth".startswith(name)):
                 return True
-    return any(op.dynamic or _is_wide_here(op.text, cwd) for op in _ps_operands(arguments))
+    return any(op.dynamic or _is_wide_here(op.text, cwd) or _outside_roots(op.text, cwd)
+               for op in _ps_operands(arguments))
 
 
 def _powershell_feeds_are_dangerous(statements: list[list[_Word]], fed: list[bool],
@@ -2624,6 +2661,7 @@ def _remove_item_is_dangerous(arguments: list[_Word], piped: bool, cwd: Optional
     if not targets:
         return piped
     return any(target.dynamic or _is_wide_here(target.text, cwd)
+               or _outside_roots(target.text, cwd)
                or cwd == "" and posixpath.normpath(target.text.replace("\\", "/")) in ("*", "*.*")
                for target in targets)
 

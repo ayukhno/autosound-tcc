@@ -84,11 +84,13 @@ OMP_TABLE = [
      {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
     ("$HOME beside a skill file", "bash", "Command: rm -rf $HOME state/x.json", (),
      {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
+    # Both recursive deletes outside the project: «cannot be undone» since the Arbiter's rule of
+    # 2026-10-14 («Питати поза проєктом»), under every gate and said under `never`.
     ("a skill name inside an absolute path", "bash", "Command: rm -rf /Users/x/state/", (),
-     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
     ("a backslash path beside a skill file", "bash",
      r"Command: Remove-Item -Recurse -Force C:\Users\me process/plan.json", (),
-     {GATE_WRITES: "ask", GATE_FOREIGN: "ask", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
+     {GATE_WRITES: "ask!", GATE_FOREIGN: "ask!", GATE_AUTO: "ask!", GATE_NEVER: "pass!"}),
     # …and what the skill does in its own namespace still passes `foreign`.
     ("a skill temp removed", "bash", "Command: rm process/x.tmp", (),
      {GATE_WRITES: "ask", GATE_FOREIGN: "pass", GATE_AUTO: "pass", GATE_NEVER: "pass"}),
@@ -443,6 +445,11 @@ CHANGED_FOR_SDK.update({
     "always-allowed dangerous bash": f"writes/foreign/auto pass -> ask!: {TICK}",
     "a Codex tick, a home wipe": f"writes/foreign/auto pass -> ask!: {TICK}",
 })
+#: The Arbiter, 2026-10-14 («Питати поза проєктом»): a recursive or glob delete outside the project
+#: and the method's copy asks under `auto` — omp, Codex and the SDK route alike.
+OUTSIDE = "auto pass -> ask!: the Arbiter's rule, outside the project (2026-10-14)"
+CHANGED_FOR_SDK.update({"a skill name inside an absolute path": OUTSIDE,
+                        "a backslash path beside a skill file": OUTSIDE})
 CHANGED_FOR_OMP.update(CHANGED_FOR_SDK)
 
 
@@ -763,7 +770,9 @@ def test_a_powershell_line_read_as_bash_would_lose_its_backslash(tmp_path):
     line = r"Remove-Item -Recurse -Force C:\Users"
     roots = _read_roots_for(tmp_path)
 
-    assert judge_action("Bash", line, gate=GATE_AUTO, read_roots=roots).allowed
+    # By its text alone (no roots: the outside-the-project rule needs them) bash's reading of it
+    # is `C:Users`, which is not wide.
+    assert not shell_gate.bash_is_dangerous(line, ())
     assert not judge_action("Bash", line, gate=GATE_AUTO, read_roots=roots,
                             shell=SHELL_POWERSHELL).allowed
 
@@ -908,6 +917,21 @@ DANGER_TABLE = [
     ("code it cannot read", P, "[IO.File]::WriteAllText(\"$HOME\\.bashrc\", '')"),
     ("code it cannot read", P, "iex $cmd"),
     ("code it cannot read", P, "Invoke-Expression (Get-Content x.ps1 -Raw)"),
+    # The Arbiter, 2026-10-14 («Питати поза проєктом»): a recursive or glob delete/overwrite of
+    # anything outside the project and the method's copy asks under `auto`, tick or not.
+    ("outside the project", B, "rm -rf ~/Documents"),
+    ("outside the project", B, "rsync -a --delete /tmp/empty/ /Users/me/Documents/"),
+    ("outside the project", B, 'for f in /Users/me/Documents/*; do rm -f "$f"; done'),
+    ("outside the project", B, "rm -rf /tmp/build-cache"),
+    ("outside the project", B, "rm -f /Users/me/Documents/*.wav"),
+    ("outside the project", B, "rm -rf ../other-project"),
+    ("outside the project", B, "cd /tmp && rm -rf x"),
+    ("outside the project", B, "truncate -s 0 /Users/me/Documents/*"),
+    ("outside the project", P, r"Remove-Item -Recurse C:\Users\me\Documents"),
+    ("outside the project", P, r"rd /s /q D:\data"),
+    ("outside the project", P, r"Remove-Item D:\data\* -Force"),
+    ("outside the project", P, r"Get-ChildItem D:\data | Remove-Item"),
+    ("outside the project", P, r"Remove-Item -Recurse ..\other-project"),
     ("raw device overwrite", B, "dd if=/dev/zero of=/dev/disk2"),
     ("raw device overwrite", B, "echo x > /dev/disk2"),
     ("raw device overwrite", P, r"Set-Content -Path \\.\PhysicalDrive1 -Value 0"),
@@ -916,9 +940,17 @@ DANGER_TABLE = [
 ]
 
 
-DANGER_CLASSES = ("recursive delete", "format/wipe disk", "raw device overwrite",
+DANGER_CLASSES = ("recursive delete", "format/wipe disk", "raw device overwrite", "outside the project",
                   "wide delete or overwrite", "shutdown", "recursive permissions", "registry",
                   "kill everything", "code it cannot read")
+
+
+def _car(tmp_path):
+    """A project folder inside the tests' HOME (`conftest` puts HOME at `tmp_path`), as a real
+    project sits inside a real home: `~/Documents` is outside it."""
+    project = tmp_path / "car"
+    project.mkdir(exist_ok=True)
+    return project
 
 
 def _danger_id(row):
@@ -927,7 +959,7 @@ def _danger_id(row):
 
 @pytest.mark.parametrize("cls, shell, line", DANGER_TABLE, ids=[_danger_id(r) for r in DANGER_TABLE])
 def test_each_danger_class_asks_in_bash_and_powershell_alike(cls, shell, line, tmp_path):
-    roots = _read_roots_for(tmp_path)
+    roots = _read_roots_for(_car(tmp_path))
 
     def judged(gate, ticked=()):
         return judge_action("Bash", line, gate=gate, always_allowed=frozenset(ticked),
@@ -994,7 +1026,8 @@ BASH_CANNOT_RUN = {r"ri -r C:\Users", r"Storage\Clear-Disk -Number 1",
                    r"Set-Content -Path C:\Users\*\Desktop\* -Value ''",
                    # unquoted `\`, which bash strips before the program sees it
                    r"icacls C:\Users /reset /T /C", r"takeown /R /F C:\Users",
-                   r"reg delete HKCU\Software /f", r"cmd /c del /q C:\Users\me\*"}
+                   r"reg delete HKCU\Software /f", r"cmd /c del /q C:\Users\me\*",
+                   r"Get-ChildItem D:\data | Remove-Item", r"Remove-Item -Recurse ..\other-project"}
 
 
 def _sdk_cell(line: str, gate: str, ticked: tuple, tmp_path) -> str:
@@ -1036,6 +1069,7 @@ def test_the_sdk_route_answers_the_tick_rows_as_omp_and_codex_do(tool, detail, t
 def test_the_sdk_route_asks_about_each_danger_class(cls, shell, line, tmp_path):
     """C2's rows through the SDK route: asked under `auto`, and with a tick under every gate that
     asks; under `never` let through and said."""
+    tmp_path = _car(tmp_path)
     assert _sdk_cell(line, GATE_AUTO, (), tmp_path) == "ask!"
     for gate in (GATE_WRITES, GATE_FOREIGN, GATE_AUTO):
         assert _sdk_cell(line, gate, ("Bash",), tmp_path) == "ask!", gate
@@ -1099,3 +1133,19 @@ def test_an_unquoted_windows_path_in_a_bash_line_is_not_the_projects(tmp_path, m
     verdict = judge_action("Bash", f"rm {windows_like}", gate=GATE_FOREIGN, read_roots=roots)
 
     assert not verdict.allowed
+
+
+@pytest.mark.parametrize("line, shell", [
+    ("rm -rf process/tmp", B), ("rm -rf build", B), ("rm -f process/*.tmp", B),
+    ("rm /tmp/one-file.txt", B), ("rm -f ~/Documents/one.wav", B),
+    ('for f in process/*.tmp; do rm "$f"; done', B), ("rsync -a --delete build/ dist/", B),
+    (r"Remove-Item -Recurse .\build", P), (r"Remove-Item process\*.tmp", P),
+    (r"Remove-Item C:\Users\me\one.txt", P), ("Remove-Item -Recurse:$false ~", P),
+    ("rm -rf {skill}/rew_tool/__pycache__", B),
+])
+def test_inside_the_project_or_one_file_outside_still_passes_auto(line, shell, tmp_path):
+    """The Arbiter's rule is inside vs outside for a recursive or glob delete only: inside the
+    project (or the method's copy) as before, and a single file outside as today."""
+    roots = _read_roots_for(_car(tmp_path))
+    line = line.format(skill=Path(roots[1]).as_posix())
+    assert judge_action("Bash", line, gate=GATE_AUTO, read_roots=roots, shell=shell).allowed

@@ -299,13 +299,8 @@ def test_a_script_body_inherits_what_the_line_made_unknown(tmp_path):
     'rm "$dir/a.json" "$dir/b.json"',
     "rm -rf build",
     "rm -rf ~/.cache/autosound",
-    "rm -rf /tmp/autosound-run",
-    "rm -rf /var/folders/ab/xyz/T/tmp1234",
-    "rm -rf /Users/someone/dev/project/build",
     "rm -rf build/*/tmp",
-    "rm -rf /tmp/tcc-*/out",
     "rm -rf *.tmp",
-    "rm -rf //tmp/autosound-run",
     'chmod +x "$f"',
     "chmod -R u+w build",
     "rmdir build",
@@ -334,6 +329,17 @@ def test_the_closed_gaps_add_no_question_about_ordinary_work(command, tmp_path):
     """A gate that fires on ordinary work teaches the Arbiter to click through (finding 123): each
     gap is closed for what it reaches, not for the command's name."""
     assert bash_is_dangerous(command, [tmp_path]) is False, command
+
+
+@pytest.mark.parametrize("command", [
+    "rm -rf /tmp/autosound-run", "rm -rf /var/folders/ab/xyz/T/tmp1234",
+    "rm -rf /Users/someone/dev/project/build", "rm -rf /tmp/tcc-*/out", "rm -rf //tmp/autosound-run",
+])
+def test_a_recursive_delete_outside_the_project_asks_now(command, tmp_path):
+    """Ordinary work once (finding 123), asked about since the Arbiter's rule of 2026-10-14
+    («Питати поза проєктом»): a recursive or glob delete outside the project and the method's copy
+    asks under `auto` — inside vs outside, no list of important folders."""
+    assert bash_is_dangerous(command, [tmp_path]) is True, command
 
 
 # --- Ruling 41: the last pooled leftovers of tcc#128 -------------------------------------------
@@ -366,7 +372,7 @@ def test_a_listing_through_a_filter_that_keeps_names_is_still_a_listing(command,
 @pytest.mark.parametrize("command, asks", [
     ("rm -rf ~/[.]config", False),
     ("rm -rf ~/.config/[a]pp", False),
-    ("rm -rf /tmp/[x]yz", False),
+    ("rm -rf /tmp/[x]yz", True),  # outside the project: asks since the Arbiter's rule of 2026-10-14
     ("chmod -R 755 ~/[b]in", False),
     # Near misses: a glob that reaches every name, or a bracket that can spell a wide one.
     ("rm -rf ~/[.]*", True),
@@ -412,8 +418,8 @@ def test_a_wide_windows_delete_behind_if_in_a_cmd_line_asks(command, asks, tmp_p
     ("chmod -R 777 ..", True),
     (r"rd /s /q '..\..'", True),
     # Near misses: one climb that comes back down into a sibling, or one that is undone.
-    ("rm -rf ../build", False),
-    ("rm -rf ../tcc-build/out", False),
+    ("rm -rf ../build", True),  # outside the project: asks since the Arbiter's rule of 2026-10-14
+    ("rm -rf ../tcc-build/out", True),  # outside the project: asks since the Arbiter's rule of 2026-10-14
     ("rm -rf build/../dist", False),
 ])
 def test_a_relative_climb_out_of_the_project_is_wide(command, asks, tmp_path):
@@ -467,10 +473,10 @@ def test_a_powershell_recursive_remove_of_a_wide_target_asks(command, asks, tmp_
     ("rm -rf /Users/*/Library", True),
     ("rm -rf /home/*/x", True),
     # Near misses: deep inside a disk, a relative `mnt`, and a glob in the project.
-    ("rm -rf /Volumes/Backup/old/cache.tmp", False),
+    ("rm -rf /Volumes/Backup/old/cache.tmp", True),  # outside the project: asks since the Arbiter's rule of 2026-10-14
     ("rm -rf ./mnt/x", False),
-    ("rm -rf /media/me/USB/old", False),
-    ("rm -rf /mnt/data/x", False),
+    ("rm -rf /media/me/USB/old", True),  # outside the project: asks since the Arbiter's rule of 2026-10-14
+    ("rm -rf /mnt/data/x", True),  # outside the project: asks since the Arbiter's rule of 2026-10-14
     ("rm -rf build/*/tmp", False),
 ])
 def test_a_whole_mounted_disk_or_the_root_home_is_wide(command, asks, tmp_path):
@@ -508,7 +514,7 @@ def test_an_interpreter_option_value_that_is_another_commands_output_asks(comman
     # Near misses: a bracket the gate reads, spelling a narrow name.
     ("rm -rf ~/[.]config", False),
     ("rm -rf ~/.config/[a]pp", False),
-    ("rm -rf /tmp/[x]yz", False),
+    ("rm -rf /tmp/[x]yz", True),  # outside the project: asks since the Arbiter's rule of 2026-10-14
 ])
 def test_a_bracket_the_gate_cannot_spell_out_is_not_read_as_narrow(command, asks, tmp_path):
     """Ruling 44: bash takes `[^x]` as `[!x]` and knows `[[:alpha:]]`; the reading the gate spells a
@@ -548,8 +554,8 @@ def test_a_bracket_the_gate_cannot_spell_out_is_not_read_as_narrow(command, asks
     ('cd "$PROJECT_SUBDIR"', False),
     ('cd "$PROJECT_SUBDIR" && ls -la', False),
     ("cd ~ && rm -rf .cache", False),
-    ("cd / && rm -rf tmp/x", False),
-    ("cd /tmp && rm -rf *", False),
+    ("cd / && rm -rf tmp/x", True),  # outside the project: asks since the Arbiter's rule of 2026-10-14
+    ("cd /tmp && rm -rf *", True),  # outside the project: asks since the Arbiter's rule of 2026-10-14
     ("rm -rf *; cd /", False),
     ("echo $(cd /; pwd); rm -rf *", False),
     ("cd / | true; rm -rf *", False),
