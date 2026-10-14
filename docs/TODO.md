@@ -2082,7 +2082,7 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 
 ### F-102 — W-10: real use and earlier waves' leftovers, without superpowers — open the milestone
 
-**Статус**: open · **the milestone is open** (2026-10-14, the Arbiter's «відкривай»): `W-10 · v1.1.4` (#10), 24 issues in seven groups, all assessed, none `ok` yet — new #194–#209, and this repo's #165, #166, #167, #180, #182, #183, #184, #192; the map is in `docs/W-10-POOL-RANKED.md`; hub #246, #257, #260, #262, #268, #277 taken · held for the Arbiter's word: hub #264, #181, F-096 · was: open · written 2026-10-14 at «добраніч» · next session: `hub/bin/role tcc --no-SP` (a new conversation,
+**Статус**: open · **all `ok`** (2026-10-14, the Arbiter: «всі 4 = так») — 25 issues: the 24 below and #181 as a feasibility study only (a document, no code); hub #264 deferred to W-11's review (`bin/ticket defer`), F-096 to W-11 as decided 2026-10-06; duplicates #185–#188, #190 → #192 and #189, #191 → #184 closed; hub #242 closed superseded; the milestone tool asked of the hub as hub #279 (TCC-057, for between waves) · next: the plan by group (order, cost), the Arbiter's retest of #184, #192, #183, #165 on v1.1.3 · was: the milestone opened (2026-10-14, the Arbiter's «відкривай»): `W-10 · v1.1.4` (#10), 24 issues in seven groups, all assessed, none `ok` yet — new #194–#209, and this repo's #165, #166, #167, #180, #182, #183, #184, #192; the map is in `docs/W-10-POOL-RANKED.md`; hub #246, #257, #260, #262, #268, #277 taken · held for the Arbiter's word: hub #264, #181, F-096 · was: open · written 2026-10-14 at «добраніч» · next session: `hub/bin/role tcc --no-SP` (a new conversation,
 the engine off for the whole wave); this one continues with `hub/bin/role tcc --resume b9350366-d017-4e9a-be26-e092e6bfff29`
 
 The Arbiter's decisions, 2026-10-14:
@@ -2195,7 +2195,7 @@ restart button) · and N2 (#164, `ok`): TCC's suite on each skill candidate befo
 
 ### F-096 — the car package: bring it into the product, reviewed first (W-8)
 
-**Статус**: open · W-10: held off the milestone until the Arbiter's word (a large task) · recorded 2026-10-06 in W-8's collection; **the Arbiter, 2026-10-06: W-8's findings collection waits until after the audit's changes**, so this is built last, on the structure those changes leave · the Arbiter tested the package of 2026-09-18 (`passat-b8-2026-car-2026-09-18.zip`) and says it belongs in the product; this replaces F-064's "closed on his command", which lives only on the local branch `car-package`
+**Статус**: open · **W-11** (the Arbiter, 2026-10-14: after the audit's minimum, as decided 2026-10-06) · recorded 2026-10-06 in W-8's collection; **the Arbiter, 2026-10-06: W-8's findings collection waits until after the audit's changes**, so this is built last, on the structure those changes leave · the Arbiter tested the package of 2026-09-18 (`passat-b8-2026-car-2026-09-18.zip`) and says it belongs in the product; this replaces F-064's "closed on his command", which lives only on the local branch `car-package`
 
 - When the package source lands (W-8's end-of-branch review, M5): the picker remembers a source that raised for the same path, so a package fixed and typed again is refused without being asked again — re-ask a failed path on Browse and on Create, or forget a failure after a while.
 

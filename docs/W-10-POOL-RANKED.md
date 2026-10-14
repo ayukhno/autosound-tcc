@@ -10,19 +10,19 @@ and G7) a wave later and sends the rest to the pool, TCC's call; the Arbiter, 20
 the audit from real use, plus what earlier waves left. So finding 158 (G4 2a) and the curve window's minors (G10 M) are
 this pool's now.
 
-**On the milestone `W-10 · v1.1.4`** (opened 2026-10-14, review mode, no `ok` yet), by group:
+**On the milestone `W-10 · v1.1.4`** (opened 2026-10-14; all `ok` the same day), by group:
 
 | group | issues (rank) |
 |---|---|
 | Capture after update | #184 (1), #192, #183 (2) — each starts with «retest on v1.1.3» |
 | Install and update | #194 (158), #195 (7) |
-| AI picks | #165 (3), #196 (5: 157, 156, hub #262), #182 (5) |
+| AI picks | #165 (3), #196 (5: 157, 156, hub #262), #182 (5), #181 (20, a study only) |
 | Rounds and the bank | #197 (4), #198 (10, hub #268), #199 (11, hub #260), #200 (the re-pin to the skill's W-10 tag) |
 | Release tooling | #201 (8: hub #277 ask 1, hub #246), #202 (9) |
 | Window polish | #203 (12, hub #257), #166, #167 (14), #204 (15), #180 (19) |
 | Leftovers | #205 (6), #206 (16), #207 (17), #208 (18), #209 (the curve window's minors, F-100) |
 
-**Not on it yet** — the Arbiter's word first: #13 hub #264, #20 tcc #181, #21 F-096. **Dropped:** F-098's
+**The large three** (the Arbiter, 2026-10-14): #20 tcc #181 — on the milestone as a feasibility study only; #13 hub #264 — deferred to W-11; #21 F-096 — W-11. **All 25 `ok`** the same day. **Dropped:** F-098's
 `write_mcp_config` on `OSError` — closed in W-9 (#173, Task 19: `own_store`, the aside copy).
 
 **Scale.**
