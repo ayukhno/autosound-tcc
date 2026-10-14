@@ -19,12 +19,44 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 
 Paired with method `71a56cf331f6ee9cf5fb869a93b6381a78067b22` — the tag on that commit is **`v3.1.4`**.
 
+The wave W-10 · v1.1.4: real use and earlier waves' leftovers, reviewed group by group and once more as a
+whole branch. Codex comes in as an AI inside TCC, and the safety gate asks about more of what cannot be undone.
+
 The method moves to v3.1.4 (tcc#200), its W-10: a capture round matches its titles by the series key, each
 sweep is judged over its own range, and Codex finds the method through the project's `AGENTS.md`. TCC's
 suite ran against the method's candidate before its release (hub #283). The guide's method links follow it.
 
+### Added
+
+- **Codex as an AI inside TCC** (tcc#181): pick a Codex model in the session's picker, with your own Codex
+  account. TCC uses a Codex already installed, or ⚙ Settings → «Install Codex» puts in its own copy from
+  OpenAI's official package — a pinned version, checked before it is used, no admin rights. «Sign in to Codex»
+  opens the browser. Inside TCC your own Codex extras (plugins, hooks and the like) are off, and its approvals
+  follow TCC's own confirmation setting, as Claude and omp do. A Codex too old for TCC says so in the picker,
+  and the Updates tab has a Codex row. macOS and Windows from the first build.
+- **«Open terminal» is a submenu** (tcc#180): Terminal, Claude, Codex, Antigravity, OMP. Codex there starts
+  with TCC's tools and otherwise your own Codex settings.
+- **The Updates tab says whether a signature was checked** (tcc#195): under each installed version, whether
+  its release's signature checks out, does not, or could not be checked and why; the update window says the
+  check it made before installing.
+- **A change of REW's level calibration between rounds is named** (tcc#198): the capture card and the strip
+  say the jump against the last round («+16.65 dB (103.35 → 120.0)»), and a round with mixed offsets says so.
+  Nothing is corrected yet: bringing rounds to a common base is the method's next step (hub #285).
+
 ### Changed
 
+- **The safety gate asks more often under «auto» and with a «don't ask again» tick** (tcc#181), on every route —
+  Claude, omp and Codex. A tick never lets through what cannot be undone: it still asks. Under «auto» a
+  recursive or wide delete outside the project (and outside the method's copy) asks, such as `rm -rf
+  ~/Documents` or `rm ~/*`; single files are as before. PowerShell's disk, registry, shutdown and kill-all
+  commands ask as their bash twins do. Nothing to do: you will simply see a confirmation where there was none.
+- **An update installs the versions TCC was tested with** (tcc#194): from a v1.1.4 tag on, the update and
+  the README's install line hold every dependency to the release's tested set instead of the newest ones. A
+  release that gives no such set says so. The update into v1.1.4 itself still runs v1.1.3's code, unpinned.
+- **The model pickers show what is really there** (tcc#196, tcc#182): the Claude list is read from your own
+  Claude Code, so Sonnet 5.5 is in it, and the Codex list from your Codex; a list that could not be read says
+  why. A switch you accept lands in the selector. A reviewer on an API with no key is offered the signed-in
+  agy model, and a region refusal names the model and what agy offers.
 - **A sweep is judged over its own range by the method itself** (tcc#200, hub #247): from v3.1.4 the method
   reads the range REW holds for a sweep, so the import window, the capture card and the method's step check
   read one verdict. TCC's own patch for it (tcc#149) is gone, and with it the card's «usable over its own
@@ -36,6 +68,30 @@ suite ran against the method's candidate before its release (hub #283). The guid
 
 ### Fixed
 
+- **omp 18.x starts again** (tcc#165): its new tool refusal is read and retried, and an omp login no longer
+  draws a missing-key warning.
+- **Codex's own refusal is said in its words** (tcc#182), not as a list of models both refused.
+- **The delay bank keeps each series' own readings** (tcc#197): a series switched to and back shows its own
+  delays again, and a change not yet saved is banked under the series it was made in. Going back to v1.1.3
+  stays safe: it reads the latest reading as before.
+- **A capture round gets `under` and `level` through to the method** (tcc#199), with the method's refusals
+  in its own words; a take the round did not plan gets a verdict on the live card too.
+- **The plan panel**: a done step's box is a green tick, not an orange square (tcc#166); a long step name is
+  cut short with a «?» that shows the whole of it (tcc#167).
+- **«Compare with» shows the day each version was made** beside its number (tcc#203).
+- **The import window** (tcc#204): rows follow the zoom, no frame around a clicked cell, a red ✕ to turn down
+  a «≈» proposal, and Refresh on the card marks REW's rows and replaces what REW holds; its buttons stay off
+  on a past series.
+- **A method note on the strip is a warning, not an error** (tcc#205).
+- **A cancelled project switch never writes into the other project** (tcc#206): the window, its measurement
+  panel and the curve window keep reading and writing the project they show. A confirmation that could not
+  be shown is said as that, not taken as your «no», on every route.
+- **The curve window keeps what you set** (tcc#208, tcc#209): a theme switch keeps your level line, a new
+  selection keeps its bank notes, a driver whose bank entry cannot be read stays on screen, and Clear asks
+  for its series. The live card lists what the history does, an unasked take included.
+- **Smaller leftovers** (tcc#206, tcc#207, tcc#208, tcc#209): the server's own lines reach the log, an omp
+  restart checks the new choice before handing over, and the release tooling (tcc#201, tcc#202) is quicker
+  and steadier.
 - **A capture REW holds under two spellings asks for a rename, not a re-take** (tcc#200): the card's row and
   the strip name both titles and say to keep one — rename or delete the other in REW.
 - **A gh that does not answer is said as that** (tcc#200): «Back up to GitHub» said «gh is not signed in»
