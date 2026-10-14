@@ -1507,8 +1507,69 @@ def test_a_proposal_carries_a_red_cross(tmp_path, monkeypatch):
     assert isinstance(delegate, _TitleDelegate)
     assert dialog.has_proposal("u2")
     assert not dialog.has_proposal("u1"), "a name that already answers is no proposal"
-    assert delegate.cross_colour() == theme.current_theme().warn
+    # The token by name, not through `current_theme()` as the code reads it (#204's group review).
+    assert delegate.cross_colour() == theme.PALETTE_DARK["warn"]
     assert i18n.t("capImportProposedNo") in dialog._table.item(row, 2).toolTip()
+
+
+def test_the_cross_is_painted_on_a_proposal_row_only(tmp_path, monkeypatch):
+    """`paint` draws the cross on the proposal's row; a row with no proposal has none, counted
+    in the pixels at the same place in its cell (#204's group review)."""
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QStyleOptionViewItem
+
+    from autosound_tcc.ui.tcc import theme
+    from tests import _windows
+
+    dialog = _proposed_dialog(tmp_path)
+    _windows.theme_on(monkeypatch, dialog, "dark")
+    dialog.show()
+    try:
+        _app().processEvents()
+        table = dialog._table
+        picture = table.viewport().grab().toImage()
+        delegate = table.itemDelegateForColumn(2)
+        red = QColor(theme.PALETTE_DARK["warn"])
+
+        def reds(uuid: str) -> int:
+            option = QStyleOptionViewItem()
+            option.rect = table.visualRect(table.model().index(_row_of(dialog, uuid), 2))
+            box = delegate.cross_rect(option)
+            return sum(_near(QColor(picture.pixel(x, y)), red)
+                       for x in range(box.left(), box.right() + 1)
+                       for y in range(box.top(), box.bottom() + 1))
+
+        assert reds("u2") > 0, "the proposal's cross is drawn"
+        assert reds("u1") == 0, "no cross on a row with no proposal"
+    finally:
+        dialog.close()
+
+
+def _near(one, other, slack: int = 40) -> bool:
+    """The same colour give or take antialiasing against the cell's ground."""
+    return all(abs(a - b) <= slack for a, b in ((one.red(), other.red()),
+                                                 (one.green(), other.green()),
+                                                 (one.blue(), other.blue())))
+
+
+def test_turning_down_a_proposal_on_a_row_left_for_a_retake_leaves_it_unticked(tmp_path):
+    """`turn_down` on a row the check left for a re-take: the proposal goes, the row stays out —
+    taking that one is «Take it as it is», its own answer (tcc#21)."""
+    check, _asked = _checker({"u1": _USABLE, "u2": _unusable("flat to 0.4 dB across the band")})
+    answer = _rew(3)
+    answer["2"]["title"] = "m_2 (se)"
+    dialog = _dialog(answer, tmp_path, expected=["m_1 (sw)", "m_2 (sw)"], check=check)
+    _settle(dialog)
+    # Ticked by hand, checked, and left out for a re-take — its proposal still on it.
+    dialog._table.item(_row_of(dialog, "u2"), 0).setCheckState(Qt.CheckState.Checked)
+    _settle(dialog)
+    assert dialog.has_proposal("u2") and "u2" in dialog._to_retake()
+
+    dialog.turn_down("u2")
+    _app().processEvents()
+
+    assert not dialog.has_proposal("u2")
+    assert "u2" not in {r.uuid for r in dialog.ticked_rows()}, "a re-take stays out"
 
 
 def test_the_cross_turns_the_proposal_down_and_takes_rews_name(tmp_path):

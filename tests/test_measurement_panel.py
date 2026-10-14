@@ -2494,6 +2494,44 @@ def test_a_refresh_that_cannot_reach_rew_says_so():
     assert panel._refresh_btn.isEnabled() and panel._read_btn.isEnabled()
 
 
+def test_a_refresh_replaces_what_rew_holds_with_what_it_listed():
+    """#204's group review: Refresh only ADDED titles, so a row REW no longer holds stayed blue. A
+    Refresh that answered is the whole of what REW holds now."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._remember_titles(["w-L_1 (sw)", "gone_1 (sw)"])
+    panel._bridge = _FakeBridge({"1": {"title": "w-L_1 (sw)", "uuid": "a", "date": ""},
+                                 "2": {"title": "m-R_9 (sw)", "uuid": "b", "date": ""}})
+    changed = []
+    panel.titlesChanged.connect(lambda: changed.append(True))
+
+    panel._refresh_btn.click()
+    panel._worker.wait(2000)
+    _app().processEvents()
+
+    assert panel.rew_titles() == ["m-R_9 (sw)", "w-L_1 (sw)"], panel.rew_titles()
+    assert changed
+
+
+def test_the_refresh_button_is_off_on_a_past_series_and_stays_off_after_a_read():
+    """Refresh, like ⤓, reads for the live series only: off on a past one — and a read that ends
+    while a past series is shown does not turn either back on (#204's group review)."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    assert panel._refresh_btn.isEnabled()
+
+    panel.show_session("v9")
+    assert not panel._refresh_btn.isEnabled() and not panel._read_btn.isEnabled()
+    panel._on_refreshed({})
+    panel._on_read_failed("no REW")
+    assert not panel._refresh_btn.isEnabled() and not panel._read_btn.isEnabled()
+
+    panel.show_session("v10")
+    assert panel._refresh_btn.isEnabled() and panel._read_btn.isEnabled()
+
+
 @pytest.mark.parametrize("mode", ["dark", "light"])
 def test_a_row_rew_holds_reads_blue(monkeypatch, mode):
     """Finding 155: «the task's rows that REW already holds turn blue (the card's «в REW» colour)».

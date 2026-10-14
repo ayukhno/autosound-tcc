@@ -1268,9 +1268,22 @@ def test_the_live_card_waits_for_what_the_method_waits_for_under_another_spellin
     past = _past(project, "cap_001")
 
     for which, card in (("live", live), ("past", past)):
-        assert {i.name: i.status for g in card.groups for i in g.items} == rows, which
+        # As a list, not a dict: a row drawn twice would collapse into one in a dict (#204).
+        assert sorted((i.name, i.status) for g in card.groups for i in g.items) \
+            == sorted(rows.items()), which
     for extra in set(rows) - {_R, _L}:
         assert _item(live, extra).additional, "on the live card, a row the round did not ask"
+
+
+def test_an_unasked_take_rew_still_holds_is_one_row_done(project):
+    """The «unasked extra» with REW still holding that take (#204's group review): the take's
+    row is not drawn again as an offer beside the done one."""
+    _round(project, version=1, expected=[_R, _L], pad=False, taken=[_L, _R, "sw_1 (sw)"])
+
+    live = mv.build_session("0", 1, [_L, _R, "sw_1 (sw)"], project, taken=[])
+
+    rows = [(i.name, i.status) for g in live.groups for i in g.items]
+    assert sorted(rows) == sorted([(_R, _DONE), (_L, _DONE), ("sw_1 (sw)", _DONE)]), rows
 
 
 def test_a_padded_list_holding_the_unpadded_take_shows_one_row_of_each_name(project):

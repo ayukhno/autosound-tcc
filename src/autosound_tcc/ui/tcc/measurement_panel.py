@@ -661,6 +661,8 @@ class MeasurementPanel(QWidget):
         # that could never mark anything captured from REW, and an audit that could never back a
         # step with a measurement.
         self._known_titles: set[str] = set()
+        #: Whether the series on screen is the live one: ⤓ and Refresh read for it alone.
+        self._live = True
         self._rename_worker: "_RewRenameWorker | None" = None
         #: What the open import dialog handed over: the rows to write down, the renames to send,
         #: and the round they belong to. Held between the dialog closing and the rename returning.
@@ -1050,8 +1052,8 @@ class MeasurementPanel(QWidget):
                             + [_step_label(s) for s in session.used_in_steps])
             )
         self._version.setVisible(False)
-        self._read_btn.setEnabled(is_live)
-        self._refresh_btn.setEnabled(is_live)
+        self._live = is_live
+        self._live_buttons()
         idx = self._session_combo.findData(session_id)
         if idx >= 0 and self._session_combo.currentIndex() != idx:
             self._session_combo.blockSignals(True)
@@ -1252,9 +1254,24 @@ class MeasurementPanel(QWidget):
         if len(self._known_titles) != before:
             self.titlesChanged.emit()
 
-    def _remember_titles(self, titles) -> None:
+    def _live_buttons(self) -> None:
+        """⤓ and Refresh on for the live series only — a read that ends while a past one is shown
+        does not turn them back on (#204's group review)."""
+        self._read_btn.setEnabled(self._live)
+        self._refresh_btn.setEnabled(self._live)
+
+    def _remember_titles(self, titles, *, replace: bool = False) -> None:
+        """Add `titles` to what REW is known to hold — or, `replace`, make them the whole of it: a
+        Refresh that answered is what REW holds now, and a row it no longer holds stayed blue
+        when the list was only ever added to (#204's group review)."""
+        fresh = {t for t in titles if str(t).strip()}
+        if replace:
+            if fresh != self._known_titles:
+                self._known_titles = fresh
+                self.titlesChanged.emit()
+            return
         before = len(self._known_titles)
-        self._known_titles.update(t for t in titles if str(t).strip())
+        self._known_titles.update(fresh)
         if len(self._known_titles) != before:
             self.titlesChanged.emit()
 
@@ -1355,12 +1372,12 @@ class MeasurementPanel(QWidget):
 
     def _on_refreshed(self, measurements: dict) -> None:
         self.rewStatusChanged.emit(True)
-        self._read_btn.setEnabled(True)
-        self._refresh_btn.setEnabled(True)
+        self._live_buttons()
         self._rew_answer = dict(measurements or {})
         self._dup_titles = capture_import.duplicate_titles(self._rew_answer)
         self._set_status("measRefreshed", n=len(self._rew_answer))
-        self._remember_titles((m or {}).get("title", "") for m in self._rew_answer.values())
+        self._remember_titles([(m or {}).get("title", "") for m in self._rew_answer.values()],
+                              replace=True)
 
     def _on_import_offer(self, measurements: dict) -> None:
         """REW answered; put the answer in front of the tuner.
@@ -1371,8 +1388,7 @@ class MeasurementPanel(QWidget):
         project has taken IN, which is what the store keeps and what survives REW being closed.
         """
         self.rewStatusChanged.emit(True)
-        self._read_btn.setEnabled(True)
-        self._refresh_btn.setEnabled(True)
+        self._live_buttons()
         self._rew_answer = dict(measurements or {})
         self._dup_titles = capture_import.duplicate_titles(self._rew_answer)
         if not measurements:
@@ -1640,8 +1656,7 @@ class MeasurementPanel(QWidget):
         self._write_ledger(rows, titles)
 
     def _on_read_failed(self, message: str) -> None:
-        self._read_btn.setEnabled(True)
-        self._refresh_btn.setEnabled(True)
+        self._live_buttons()
         # Nothing is known about REW now, so nothing is said about its pairs either.
         self._rew_answer, self._dup_titles = {}, []
         self._set_status("measReadFail", error=message)
