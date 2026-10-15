@@ -3781,3 +3781,28 @@ activity line (`_add_chip` / `_tick_activity` / `_end_chip`); all three routes.
 indicator missing.
 
 **Task.** The next wave's collection.
+
+### 163. The change analysis in compare mode, carried on to the chat — and a phrase to nudge the terminal's AI
+
+**What.** The Arbiter, 2026-10-15, on SKL-078 (hub #292, PAS-014 split between the method and TCC):
+
+- «Describe the changes» shows the method's static description at once, offline: voice, instruments, overall, the
+  tracks to listen on, the risks, and a plain line for what the table cannot describe.
+- «Discuss with AI» shows the Advisor's one answer in the compare panel. The method runs it, the same in both modes.
+- A button carries the discussion on into the main chat:
+  - main mode: TCC's own session;
+  - control mode: the terminal's agent, through TCC's MCP signal bus.
+- **The nudge.** MCP lets the terminal ask and TCC answer, so TCC cannot start a turn in an idle terminal. The
+  agent takes what TCC left at its next TCC tool call. When it is needed, TCC gives the user a ready phrase to type
+  into the terminal to make the AI pick it up (one short line in the window's language, with a copy button), shown
+  when the handoff goes to a terminal that is not mid-turn.
+- Before building: check Claude Code's newer way of pushing into a running session (channels). Codex has none
+  known.
+
+**Where.** The compare mode's legend row and panel; the control mode's handoff to the terminal.
+
+**Weight.** Medium: it replaces the expectations the Arbiter has been writing by hand and taking to the car
+(PAS-014's week of examples).
+
+**Task.** W-11's collection — TCC's half of hub #264 (the buttons, the panel, the handoff, the phrase); the
+method's half is SKL-078.
