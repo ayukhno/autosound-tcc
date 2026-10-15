@@ -3806,3 +3806,19 @@ indicator missing.
 
 **Task.** W-11's collection — TCC's half of hub #264 (the buttons, the panel, the handoff, the phrase); the
 method's half is SKL-078.
+
+**The interface, the Arbiter's OK of 2026-10-15** («пробуємо і беремо в W-11», on SKL-079 hub #293):
+
+1. **One change.** Each mark in the compare legend («змінена: [250] [1000→1120]») is clickable, and so is a «?»
+   on a marked band card. Either one describes that band alone. Delay, polarity and crossover work the same way,
+   from the marked row in the channel's parameter table.
+2. **Several picked.** Cmd/Ctrl-click picks marks, and the legend's button turns from «Describe the changes»
+   (the whole diff) into «Describe the picked (N)». It is one button whose scope follows the pick.
+3. **One panel for every scope.** Its head names what is described and what it lands on («PK 345 +3 over PK
+   302 −5.1 → at 345: −1.2 dB»). Below that come voice, instruments, overall and the tracks, then «Discuss with AI»
+   and «continue in the chat».
+4. **«What if»** (a change not in any version yet): later, on both sides — the skill deferred it too. TCC's tables
+   are read-only, so it needs an input form of its own.
+
+TCC names a change to the method's verb by its channel, the row's slot in the version, and its old → new values,
+so that the method refuses a version that has moved instead of describing another change.
