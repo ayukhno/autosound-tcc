@@ -6,6 +6,7 @@ real QThread."""
 from __future__ import annotations
 
 import os
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -2268,6 +2269,35 @@ def test_nothing_in_the_head_row_overlaps_and_the_round_select_is_never_cut(monk
             app.processEvents()
             app.sendPostedEvents()
 
+    def settle_until(laid_out, what: str) -> None:
+        """Run the event loop until `laid_out()` holds -- the state the row is judged in, not a
+        number of passes. The floor reaches the window in steps: the panel's layout request says
+        its floor moved, the right column takes it, the splitter and the window's layout ask for
+        it, and a window at its own minimum is then GROWN, which the platform reports back as a
+        geometry change of its own. Four passes was enough on the Mac, where this window's
+        minimum is set by other rows and the column's floor never moves it; on the Windows runner
+        it is, and the row was judged mid-way: «panel 309 px», the select already measured at its
+        new floor (CI 37637320866, 38713248936). A floor that never lands is still a failure."""
+        deadline = time.monotonic() + 10.0
+        while not laid_out():
+            if time.monotonic() > deadline:
+                raise AssertionError(
+                    f"{lang} at {stretch}: {what} never came: panel {panel.width()} px, its floor "
+                    f"{panel.minimumSizeHint().width()}, the right column's floor "
+                    f"{window._right.minimumWidth()}, the window {window.width()} of its minimum "
+                    f"{window.minimumSizeHint().width()}")
+            app.processEvents()
+            app.sendPostedEvents()
+        settle()  # and the head row laid out in the panel's final width
+
+    def floor_applied() -> bool:
+        return window._right.minimumWidth() >= panel.minimumSizeHint().width()
+
+    def at_window_minimum() -> bool:
+        return (floor_applied() and window.width() == window.minimumSizeHint().width()
+                and panel.width() >= panel.minimumSizeHint().width()
+                and panel.layout().geometry() == panel.rect())
+
     was = QFont(app.font())
     if stretch != 100:
         font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
@@ -2282,15 +2312,20 @@ def test_nothing_in_the_head_row_overlaps_and_the_round_select_is_never_cut(monk
             window._on_language_selected(lang)
         panel = window._meas_panel
         panel.set_sessions(_rounds(shape))
+        # The window's minimum is asked once the new rounds' floor is in it, not before: asked
+        # straight after the refill, it is the minimum of the rows the select had.
+        settle_until(floor_applied, "the right column's floor")
         window.resize(window.minimumSizeHint().width(), 820)
-        settle()
+        settle_until(at_window_minimum, "the window at its minimum")
         combo, button = panel._session_combo, panel._protective_btn
         splitter = window.findChild(QSplitter)
         for where in ("the window's minimum", "the right column at its floor"):
             if where == "the right column at its floor":
                 sizes = splitter.sizes()
                 splitter.setSizes([sizes[0], sizes[1] + sizes[2], 0])
-                settle()
+                settle_until(lambda: (window._right.width() == window._right.minimumWidth()
+                                      and panel.layout().geometry() == panel.rect()),
+                             "the right column at its floor")
             row = _head_row(panel)
             said = f"{lang} at {stretch}, {where}, panel {panel.width()} px"
             assert combo in row and button in row, said
