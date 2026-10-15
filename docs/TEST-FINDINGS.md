@@ -3731,6 +3731,10 @@ installed tag's signature was checked and good.
 
 **Task.** W-10 · v1.1.4, #195.
 
+## W-11 — collection (from 2026-10-15)
+
+Opened on the Arbiter's «збираємо W-11», TCC at v1.1.4. Findings 160 and 162 were recorded for this wave during W-10's Windows pass; 161 was taken in W-10. New findings go on from 163, recorded, not diagnosed (`docs/TODO.md` F-103).
+
 ### 160. The main AI's model is not checked when picked, as the Critic's is
 
 **What.** The Arbiter, 2026-10-14, the W-10 Windows pass on the VM: the AI Critic's picker checks the model it is
