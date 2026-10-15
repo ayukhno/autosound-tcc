@@ -58,6 +58,47 @@ Wall clock: two to three more days at the session's pace, plus the PR's CI (~35 
 live Codex run and Windows VM pass (task 10). Codex usage: the spike and task 1 spent ~356k tokens on the cheapest
 model; task 10's live run is the next spend.
 
+## Cost — actual, and the two trials (2026-10-15, for hub H-022 and H-019)
+
+Measured from git (`v1.1.3..v1.1.4`) and this session's subagent transcripts (model, timestamps, usage).
+
+| | W-9 · v1.1.3 (the engine) | W-10 · v1.1.4 (no engine) |
+|---|---|---|
+| issues · tasks | 12 · 34 | 24 · 25 groups' tasks + the Codex feature's 10 |
+| commits · lines src / tests / docs | 245 · +6.1K / +16.0K / +0.9K | 222 · +10.2K / +40.7K / +0.8K |
+| agent runs (opus · sonnet · haiku · fable) | 144 (136 · 4 · 0 · 4) | 64 (56 · 3 · 4 · 1) |
+| agent-hours | 49.5 | ≈19 (16.1 counting gaps ≤ 10 min, 19.3 ≤ 1 h, 29.0 any gap) |
+| input tokens read (subagents · controller) | 2.17 B · 0.38 B | 1.28 B · 0.47 B |
+| wall clock, first commit → tag | 2026-10-07 → 10-14 (waited on the skill's v3.1.3) | 2026-10-14 08:09 → 10-15 01:32 (≈17.5 h, the Arbiter's three-round Windows pass inside) |
+| by role | the per-task loop 67 % of runs | builders and fixes 35 runs · 11.5 h; reviews and seats 24 runs · 4.1 h |
+
+**Two changes at once.** W-10 ran without the engine (H-022) and under the process weight by risk and the models by
+role (SKL-070 A and B, decided the same day). Most of the saving is the weight: W-9's per-task review loop was 67 % of
+its runs, and W-10 kept task reviews only on `Risk: high`. The arm cannot be separated from that on one wave.
+
+**What the reviews still caught before the Arbiter:** ≈5 Critical (the Windows Codex terminal on `pythonw.exe`;
+PowerShell's disk cmdlets past the gate; the gate memo on mtime; task 7's C1; Fable's C1, PowerShell recursion) and
+≈20 Important; one fix re-review on `Risk: high` found a regression the fix made (task 7: `rm -rf ../..` from a
+subfolder). **What reached him:** ≈10 findings in the Windows pass, all Windows- or Codex-on-Windows-specific (Codex
+not found or too old, the confirm bar's language, «Bash» for PowerShell, the line as quoted, a tick on what cannot be
+undone, the gate asking on PowerShell reads, the update blocked by a Codex terminal), none losing data; and ≈4 CI fix
+rounds for Windows/Ubuntu-only tests. The cost of the wave's tail is CI (~35–40 min a run) and the VM pass, not agents.
+
+**The Haiku 5.5 trial** (the Arbiter, 2026-10-14; four mechanical tasks, every test red first, no rework by the builder):
+
+| task | effort | active | tokens | defects the Opus seats found |
+|---|---|---|---|---|
+| #166 the plan's done tick | high | 5.1 min | 103k | 1 Minor |
+| #203 a date beside each version | high | 2.9 min | 112k | 2 Minor |
+| #167 a long step cut with «?» | xhigh | 2.4 min | 105k | 1 Important (a separator past 70 not cut) + 1 Minor; the brief's own slip fixed by the session |
+| #207 W-7's leftovers | xhigh | 14.9 min | 232k | none |
+
+Against Opus on the ordinary tasks of the same group (10–30 min each): #204 4 Minor, #205 1 Minor, #206 1 Important +
+2 Minor, #208 1 Critical + 2 Minor, #209 1 Minor. On mechanical work with an exact brief Haiku's defect rate is no
+worse and it is several times faster; high and xhigh did not differ on four tasks. Its one Important came from the
+brief. Not for `Risk: high` code. The 2026-10-13 failure (a mod edit stopped at a hub guard) was a brief that sent it
+outside its zone.
+
 ## The implementer's brief (every spawn)
 
 - Tree `~/dev/autosound/tcc`, branch `wave-10`. Read the issue (`gh issue view N -R ayukhno/autosound-tcc`) — it is
