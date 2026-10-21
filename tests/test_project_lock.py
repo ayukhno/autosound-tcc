@@ -281,16 +281,16 @@ def test_a_project_path_through_a_symlink_loop_raises_an_oserror_never_a_runtime
 def test_a_lock_another_process_holds_answers_busy_within_the_same_deadline(project, monkeypatch):
     """The twin with a holder PROCESS, which no thread lock here can see: the method's own lock,
     held as a bare CLI writer holds it (#218). The child is told TCC's wait and spends it, then
-    answers busy — on every platform, where TCC's flock was POSIX alone."""
+    answers busy — on every platform, where TCC's flock was POSIX alone. No clock here: starting
+    `process.py` is no part of the wait, and the wait handed to the child is pinned on its own
+    (`test_method_cli.py`)."""
     monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.3)
 
     with method_lock_held(project):
         before = _bytes_of(project / "process")
-        started = time.monotonic()
         with pytest.raises(process_writer.Busy, match="nothing was written"):
             process_writer.enter_phase(project, "1")
 
-    assert time.monotonic() - started < 5.0
     assert _bytes_of(project / "process") == before
 
 
