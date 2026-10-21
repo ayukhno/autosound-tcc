@@ -4031,11 +4031,11 @@ class MainWindow(QMainWindow):
             i18n.t("tfOffer").format(first=title_fixes.summary(fixes), n=len(fixes)), level="warn",
             action=(i18n.t("tfAction"), self._meas_panel.open_import))
 
-    def _on_capture_check_done(self, titles: list) -> None:
+    def _on_capture_check_done(self, titles: list, round_id=None) -> None:
         """Put the check's verdict on screen: one line for the captures of `titles` — what it was
-        handed — whose recorded verdict reads bad (`measurement_view.unusable_lines`, #175 TA-8),
-        each with the checker's own reasons: "silence in band" and "covers 200-2000 Hz, asked for
-        20-20000" lead to different actions at the car.
+        handed — whose verdict in `round_id`, the round it was for (`checked_round`, #218), reads bad
+        (`unusable_lines`, #175 TA-8), each with the checker's own reasons: "silence in band" and
+        "covers 200-2000 Hz, asked for 20-20000" lead to different actions at the car.
 
         One line and the rest behind a link, with a ✕ (finding 29): sixteen of them joined into the
         strip took half the window and nothing could close it. A list closed by hand stays closed
@@ -4045,7 +4045,7 @@ class MainWindow(QMainWindow):
         # warning that outlives its cause teaches people to ignore the strip.
         not_run, self._capture_check_not_run = getattr(self, "_capture_check_not_run", None), None
         self._status_strip.withdraw(getattr(not_run, "line", None))
-        round_ = process_view.capture_round(window_folder.project(self))
+        round_ = measurement_view.checked_round(window_folder.project(self), round_id)
         if round_ is None:  # it ran, and nothing it recorded can be read back: said, held (M6)
             self._capture_check_not_run = measurement_view.NotRun(i18n.t("captureCheckUnread"),
                                                                   None, tuple(titles))

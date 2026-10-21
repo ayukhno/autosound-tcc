@@ -496,6 +496,25 @@ class NotRun:
         return all(title not in pending or recorded_since(title) for title in self.asked)
 
 
+def checked_round(project_dir: Optional[Path], round_id: Optional[str]) -> Optional[dict]:
+    """The round a capture check that ran was started for (`round_id`), to read its verdicts in —
+    or None when nothing it recorded can be read back: the open round cannot be read, or the
+    journal holds no round of that id.
+
+    Not the round open when its answer arrives (#218, F-100's «Locks and rounds»): the check
+    records into `round_id` or not at all (`process_writer.check_captures`), and the session's
+    `capture-start` can close that round and open the next before the answer reaches the window.
+    Read there, A's capture was judged by B's verdict on its re-take — or by none. The rule
+    `NotRun.at` keeps for a check that did not run. The open round as `process-state.json` holds
+    it while it is still that one; else the round as the journal folds it
+    (`process_view.capture_rounds`), whose verdicts carry no reasons. No `round_id`: the open one."""
+    live = process_view.capture_round(project_dir)
+    if live is None or round_id is None or live.get("id") == round_id:
+        return live
+    return next((round_ for round_ in process_view.capture_rounds(project_dir)
+                 if round_.get("id") == round_id), None)
+
+
 def unusable_lines(round_: dict, asked, project_dir: Optional[Path] = None,
                    ambiguous: str = "") -> list[str]:
     """What the strip says after a check that ran: `<title> — <issues joined by "; ">`, in the
@@ -521,7 +540,9 @@ def unusable_lines(round_: dict, asked, project_dir: Optional[Path] = None,
             held = ambiguous_in_rew(verdict)
             said = (ambiguous.format(titles=", ".join(held)) if held and ambiguous
                     else "; ".join(str(i) for i in verdict.get("issues") or []))
-            lines.append(f"{title} — {said}")
+            # A past round's verdict carries no reasons (`process_view.capture_rounds`): the
+            # capture alone is named then, never `title — ` with nothing after it (#218).
+            lines.append(f"{title} — {said}" if said else str(title))
     return lines
 
 

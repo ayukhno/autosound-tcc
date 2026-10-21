@@ -260,10 +260,11 @@ class _CaptureCheckWorker(QThread):
     freeze for seconds while somebody is sitting in a car waiting to move the mic.
     """
 
-    #: The check ran and recorded its verdicts: the titles it was handed. The verdicts are read
-    #: back from the round (`measurement_view.unusable_lines`), not from the check's text, which
-    #: has a line for every expected title, handed or not (#175 TA-8; tcc#21, review I5).
-    result = Signal(list)
+    #: The check ran and recorded its verdicts: the titles it was handed, and the round it was
+    #: started for. The verdicts are read back from THAT round (`measurement_view.checked_round`,
+    #: #218) — the session can open the next before this reaches the window — not from the check's
+    #: text, which has a line for every expected title, handed or not (#175 TA-8; tcc#21, I5).
+    result = Signal(list, object)
     #: The check did not run, or did not finish: the strip's line saying so, and why (R-ax).
     failed = Signal(str)
 
@@ -296,7 +297,7 @@ class _CaptureCheckWorker(QThread):
         except process_writer.ProcessWriterError as exc:
             self.failed.emit(capture_check_not_run(exc))
             return
-        self.result.emit(list(self._titles or []))
+        self.result.emit(list(self._titles or []), self._round_id)
 
 
 class CodexInstallWorker(QThread):

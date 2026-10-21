@@ -6089,17 +6089,47 @@ def test_unusable_captures_are_one_line_with_the_rest_behind_a_link(monkeypatch)
                                       withdraw=lambda text: None),
         _refresh_capture_task=lambda state: None, _show_unusable=lambda lines: None)
 
-    MainWindow._on_capture_check_done(host, titles[:16])
+    round_id = process.load()["capture"]["id"]  # the round the check was started for (#218)
+    MainWindow._on_capture_check_done(host, titles[:16], round_id)
     text, said_with = said[-1]
     assert text == i18n.t("unusableSummary").format(n=16, first=f"{titles[0]} — {_SILENCE}")
     assert "<br>" not in text and said_with["level"] == "warn"
     assert said_with["action"] is not None and said_with["dismissible"]
     said_with["on_dismiss"]()
-    MainWindow._on_capture_check_done(host, titles[:16])
+    MainWindow._on_capture_check_done(host, titles[:16], round_id)
     assert len(said) == 1, "a list closed by hand does not come back until it changes"
-    MainWindow._on_capture_check_done(host, titles)
+    MainWindow._on_capture_check_done(host, titles, round_id)
     assert len(said) == 2 and said[-1][0].startswith(
         i18n.t("unusableSummary").format(n=17, first=""))
+
+
+def test_a_check_whose_round_closed_before_its_answer_is_judged_in_that_round(monkeypatch):
+    """#218, F-100's «Locks and rounds»: the check's answer carried its titles alone, and the window
+    read the verdicts in the round open WHEN THE ANSWER CAME. The check recorded into round A; the
+    session's `capture-start` then closed A and opened B before the answer reached the window, B
+    holding the same title judged fine — and A's unusable capture was never said. Judged in the
+    round the check was started for, as a «did not run» line is (`NotRun.at`); A's reasons went
+    with its state, so the line names the capture. On the real method, with a host in the window's
+    place."""
+    from tests import _rounds
+
+    typed = [_rounds.as_typed("w-L_1 (sw)")]
+    process = _rounds.write_round(config.project_dir(), version=1, expected=typed, taken=typed,
+                                  pad=False)
+    process.check_captures(typed, verifier=_Heard())  # A: silence, unusable
+    round_a = process.load()["capture"]["id"]
+    process.start_capture(1, expected=typed)  # the session moves on: A closed, B open
+    process.record_capture(typed[0])
+    process.check_captures(typed, verifier=_Heard(valid=True))  # B: the re-take is fine
+    said = []
+    host = SimpleNamespace(
+        _status_strip=SimpleNamespace(notify=lambda text, **k: said.append(text),
+                                      withdraw=lambda text: None),
+        _refresh_capture_task=lambda state: None, _show_unusable=lambda lines: None)
+
+    MainWindow._on_capture_check_done(host, typed, round_a)
+
+    assert said == [i18n.t("unusableSummary").format(n=1, first=typed[0])], said
 
 
 def test_show_all_lists_every_unusable_capture_in_the_checkers_words(monkeypatch):
@@ -6144,7 +6174,7 @@ def test_a_did_not_run_line_waiting_behind_a_report_is_taken_back_when_a_check_r
     strip.notify("a report", level="warn", sticky=True)
     MainWindow._on_capture_check_failed(host, i18n.t("captureCheckBusy"))
     assert strip.text() == "a report" and strip.waiting() == [i18n.t("captureCheckBusy")]
-    MainWindow._on_capture_check_done(host, typed)  # it ran, and found nothing bad
+    MainWindow._on_capture_check_done(host, typed, host._capture_check.round_id)  # nothing bad
     strip.linkActivated.emit("close")  # the report's ✕
 
     assert strip.text() == "", "the check ran: «did not run» does not come back"
@@ -6196,7 +6226,8 @@ def test_a_did_not_run_line_is_taken_back_when_its_cause_ends_without_tccs_check
         _refresh_capture_task=lambda state: None, _offer_title_fixes=lambda round_: None,
         _show_unusable=lambda lines: None,
         _meas_panel=SimpleNamespace(known_titles=lambda: list(typed)),
-        _on_capture_check_done=lambda titles: None, _on_capture_check_failed=lambda why: None,
+        _on_capture_check_done=lambda titles, round_id=None: None,
+        _on_capture_check_failed=lambda why: None,
         _on_capture_check_finished=lambda: None)
     host._sync_capture_ready = lambda: MainWindow._sync_capture_ready(host)
     host._on_rew_titles_changed = lambda: MainWindow._on_rew_titles_changed(host)
@@ -6293,7 +6324,8 @@ def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch)
         _capture_check=None, _closing=False, _refresh_capture_task=lambda state: None,
         _sync_capture_ready=lambda: None, _offer_title_fixes=lambda round_: None,
         _meas_panel=SimpleNamespace(known_titles=lambda: list(typed)),
-        _on_capture_check_done=lambda titles: None, _on_capture_check_failed=lambda why: None)
+        _on_capture_check_done=lambda titles, round_id=None: None,
+        _on_capture_check_failed=lambda why: None)
     host._on_rew_titles_changed = lambda: MainWindow._on_rew_titles_changed(host)
     host._on_capture_check_finished = lambda: MainWindow._on_capture_check_finished(host)
 
@@ -6336,7 +6368,8 @@ def test_the_check_is_handed_what_the_round_took_that_rew_still_holds(monkeypatc
         _capture_check=None, _refresh_capture_task=lambda state: None,
         _sync_capture_ready=lambda: None, _offer_title_fixes=lambda round_: None,
         _meas_panel=SimpleNamespace(known_titles=lambda: [typed[0], typed[2]]),  # w-R_1 is gone
-        _on_capture_check_done=lambda titles: None, _on_capture_check_failed=lambda why: None,
+        _on_capture_check_done=lambda titles, round_id=None: None,
+        _on_capture_check_failed=lambda why: None,
         _on_capture_check_finished=lambda: None)
 
     MainWindow._on_rew_titles_changed(host)
@@ -6357,13 +6390,14 @@ def test_the_capture_check_worker_hands_the_method_its_titles(monkeypatch, tmp_p
                         lambda project, titles=None, session=False, round_id=None:
                         asked.append((project, titles, round_id)) or "")
     worker = workers._CaptureCheckWorker(tmp_path, titles=["m-L_1 (sw)"], round_id="cap_001")
-    worker.result.connect(answered.append)
+    worker.result.connect(lambda titles, round_id: answered.append((titles, round_id)))
     worker.failed.connect(failed.append)
 
     worker.run()
 
     assert asked == [(tmp_path, ["m-L_1 (sw)"], "cap_001")] and worker.round_id == "cap_001"
-    assert (answered, failed) == ([["m-L_1 (sw)"]], [])
+    # The round rides on the answer (#218): its verdicts are read in THAT round, not the open one.
+    assert (answered, failed) == ([(["m-L_1 (sw)"], "cap_001")], [])
 
 
 @pytest.mark.parametrize("stopped", ["busy", "timed out", "refused", "the method's refusal",
@@ -6545,7 +6579,7 @@ def test_a_check_that_ran_over_a_round_it_cannot_read_back_says_so(monkeypatch):
     monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: None)
     monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
 
-    MainWindow._on_capture_check_done(host, typed)
+    MainWindow._on_capture_check_done(host, typed, process.load()["capture"]["id"])
     assert strip.text() == i18n.t("captureCheckUnread")
     MainWindow._sync_capture_ready(host)
     assert strip.text() == i18n.t("captureCheckUnread"), "still unread: it stands"
