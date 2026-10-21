@@ -44,6 +44,15 @@ and a capture check that judges one REW.
   panel no longer says «No plan yet» over it. A phase move the method refused, or one that did not finish (and
   may have been entered), reaches the strip, each said as what it was. A red intake gate names the file and the
   repair.
+- **Rounds on one level base** (tcc#220, with the method's v3.2.0): when REW's SPL calibration changes between
+  rounds, the round card says it in the method's own numbers — the base round, how far REW's calibration moved, and
+  the shift the method applies to bring the round to the base — and the level control's verdict (a chain change:
+  the gain knob or the mic). TCC no longer reads REW's calibration itself for such a project; one bound to an older
+  method keeps the earlier warning. The curve window still draws levels as REW shows them.
+- **An optional capture is not a gap** (tcc#220): an optional capture nobody took, and the round's level control,
+  read «optional» on the card, out of the count of what is still waiting and the import window's ticks; a level
+  control that failed counts nowhere, as the method says. With a method before v3.2.0, which still counts them,
+  the card waits on them as before.
 
 ### Changed
 
