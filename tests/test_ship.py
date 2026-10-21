@@ -1932,56 +1932,87 @@ def test_a_check_at_a_commit_without_constraints_is_refused(repo):
     assert "constraints.txt" in str(stop.value) and commit[:12] in str(stop.value)
 
 
+
 # --- a candidate that carries its release (tcc#226, hub #246 asks 1–2) -----------------------
 #
 # The release train tags each product's newest candidate's commit, the skill's first, so TCC's last
 # candidate already carries the release: the version, `## [vY]` with its `Paired with method` line
 # naming the skill tag the train will cut on the pinned commit — a tag that does not exist yet. Such
 # a candidate is held to the release's own checks, the pin's published tag aside: that is a
-# `beta-vX-rcN` of the version the line names.
+# `beta-vX-rcN` of the version the line names, while `vX` itself is not published anywhere.
 
 COMING = "v3.2.0"
 
 
+class _Carrier:
+    """A stand-in for the hub's carrier where ship asks it about the wave's pool: the real one asks
+    GitHub. Its shape is held to the real module by
+    `test_ship_asks_the_carriers_own_pool_check_by_the_names_it_has`."""
+
+    ROLE_REPO = {"tcc": "github.com/ayukhno/autosound-tcc"}
+
+    def __init__(self, verdict=OK):
+        self.verdict, self.asked = verdict, []
+
+    def check_pool_closed(self, root, repo, role, tag, at=None):
+        self.asked.append({"root": root, "repo": repo, "role": role, "tag": tag, "at": at})
+        return checks(("pool-closed", self.verdict))[0]
+
+
+@pytest.fixture
+def carrier(monkeypatch):
+    """The carrier ship loads for the pool check — a stand-in, so the suite asks no GitHub."""
+    stand_in = _Carrier()
+    monkeypatch.setattr(ship_mod, "load_carrier", lambda *_a, **_k: stand_in)
+    return stand_in
+
+
+def _on_pin(*names):
+    """The method's published tags, each on the pinned commit."""
+    return lambda _root, **_kw: {name: METHOD_SHA for name in names}
+
+
 def _carrying_candidate(repo, *, named=COMING, sha=METHOD_SHA, unreleased=False,
-                        version="0.2.0"):
-    """v0.2.0's candidate commit, published: the version and the release's own entry in it."""
+                        version="1.2.0"):
+    """v1.2.0's candidate commit, published: the version and the release's own entry in it."""
     paired = (f"Paired with method `{sha}` — the train tags that commit **`{named}`**."
               if named else f"Paired with method `{sha}`.")
     (repo / "CHANGELOG.md").write_text(
         "# Changelog\n\n"
         + ("## [Unreleased]\n\n- found during the trial\n\n" if unreleased else "")
-        + f"## [v0.2.0] — 2026-10-21 · the release the candidate carries\n\n{paired}\n\n"
+        + f"## [v1.2.0] — 2026-10-21 · the release the candidate carries\n\n{paired}\n\n"
           "- one\n- two\n\n"
           "## [v0.1.24] — 2026-08-20 · the one before\n\n- old\n- older\n", encoding="utf-8")
     (repo / "pyproject.toml").write_text(PYPROJECT.format(version=version), encoding="utf-8")
     _relock(repo)
-    git(repo, "commit", "--quiet", "-am", "v0.2.0: the candidate carries the release")
+    git(repo, "commit", "--quiet", "-am", "v1.2.0: the candidate carries the release")
     git(repo, "push", "--quiet", "origin", "main")
     return git(repo, "rev-parse", "HEAD")
 
 
-def test_a_candidate_that_carries_its_release_is_tagged_and_the_trains_check_takes_it(repo):
+def test_a_candidate_that_carries_its_release_is_tagged_and_passes_tccs_check_at_it(repo,
+                                                                                     carrier):
     """Ask 2: the line names `v3.2.0`, which does not exist yet; the pin carries the skill's
-    candidate of that version, and that is enough. Then the train's own check at that commit."""
+    candidate of that version, and that is enough. Then TCC's own check at that commit
+    (`VERSION=… AT=`, the train's `product-check`) — the hub's checks are the train's."""
     head = _carrying_candidate(repo)
     lines = []
-    skill_candidate = lambda _root, _sha, **_kw: ["beta-v3.2.0-rc2"]  # noqa: E731
 
-    plan = _run(repo, ask=channel(tag="beta-v0.2.0-rc1"), candidate="v0.2.0",
-                published=skill_candidate, say=lines.append)
+    plan = _run(repo, ask=channel(tag="beta-v1.2.0-rc1"), candidate="v1.2.0",
+                read_method_tags=_on_pin("beta-v3.2.0-rc2"), say=lines.append)
 
-    assert git(repo, "rev-parse", "beta-v0.2.0-rc1^{commit}") == head, "the tag is on HEAD"
+    assert git(repo, "rev-parse", "beta-v1.2.0-rc1^{commit}") == head, "the tag is on HEAD"
     assert git(repo, "rev-parse", "HEAD") == head, "nothing was committed"
     assert plan.method_tags == ["beta-v3.2.0-rc2"]
     said = [line for line in lines if "carries" in line]
-    assert said and "v0.2.0" in said[0] and COMING in said[0], lines
+    assert said and "v1.2.0" in said[0] and COMING in said[0], lines
 
     ready = []
-    ship_mod.ship(repo, release=False, channel=channel(), version="v0.2.0", at=head,
+    ship_mod.ship(repo, release=False, channel=channel(), version="v1.2.0", at=head,
                   read_pinned_sha=lambda _root, _at="HEAD": METHOD_SHA,
                   read_method_url=lambda _root, _sha: METHOD_URL,
-                  read_published_tags=skill_candidate, say=ready.append)
+                  read_published_tags=lambda _root, _sha, **_kw: ["beta-v3.2.0-rc2"],
+                  say=ready.append)
     assert any("READY" in line for line in ready), ready
 
 
@@ -1996,33 +2027,111 @@ def test_a_candidate_that_carries_its_release_is_tagged_and_the_trains_check_tak
     ({"named": ""}, ["beta-v3.2.0-rc2"], "names no method tag"),
     # the line's sha is not the pin
     ({"sha": "b" * 40}, ["beta-v3.2.0-rc2"], "the checkout is at"),
-    # the entry is still under Unreleased: the train's check at this commit would refuse it
+    # the entry is still under Unreleased: TCC's check at this commit would refuse it
     ({"unreleased": True}, ["beta-v3.2.0-rc2"], "rename it to"),
 ])
-def test_a_candidate_that_carries_its_release_is_held_to_its_paired_line(repo, spoil, tags,
-                                                                           expect):
+def test_a_candidate_that_carries_its_release_is_held_to_its_paired_line(repo, carrier, spoil,
+                                                                           tags, expect):
     head = _carrying_candidate(repo, **spoil)
 
     with pytest.raises(ship_mod.Stop) as stop:
-        _run(repo, ask=channel(tag="beta-v0.2.0-rc1"), candidate="v0.2.0",
-             published=lambda _root, _sha, **_kw: list(tags))
+        _run(repo, ask=channel(tag="beta-v1.2.0-rc1"), candidate="v1.2.0",
+             read_method_tags=_on_pin(*tags))
 
     assert expect in str(stop.value), str(stop.value)
-    assert git(repo, "tag", "--list", "beta-v0.2.0-rc1") == "", "nothing was tagged"
+    assert git(repo, "tag", "--list", "beta-v1.2.0-rc1") == "", "nothing was tagged"
     assert git(repo, "rev-parse", "HEAD") == head
 
 
-def test_a_candidate_whose_version_is_not_moved_yet_stays_an_ordinary_one(repo):
-    """`## [v0.2.0]` named early with pyproject still on 0.1.24: a patch's candidate may do that
+def _method_with(tmp_path, where):
+    """A bare «method» remote with two commits, A then B, and the tags `where` puts on them
+    (annotated, as the skill's are). Returns `(A, B, remote)`."""
+    src, bare = tmp_path / "method-src", tmp_path / "method.git"
+    subprocess.run(["git", "init", "--quiet", "-b", "main", str(src)], check=True)
+    git(src, "config", "user.email", "t@t")
+    git(src, "config", "user.name", "t")
+    commits = {}
+    for name in ("A", "B"):
+        git(src, "commit", "--quiet", "--allow-empty", "-m", name)
+        commits[name] = git(src, "rev-parse", "HEAD")
+    for tag, on in where.items():
+        git(src, "tag", "-a", tag, "-m", tag, commits[on])
+    subprocess.run(["git", "clone", "--quiet", "--bare", str(src), str(bare)], check=True)
+    return commits["A"], commits["B"], bare
+
+
+@pytest.mark.parametrize("where, refused", [
+    ({"beta-v3.2.0-rc1": "A"}, False),                    # v3.2.0 absent: the candidate counts
+    ({"beta-v3.2.0-rc1": "A", COMING: "A"}, False),       # v3.2.0 on the pin
+    ({"beta-v3.2.0-rc1": "A", COMING: "B"}, True),        # v3.2.0 published on another commit
+])
+def test_a_published_release_of_the_named_method_must_be_the_pin(repo, carrier, tmp_path, where,
+                                                                 refused):
+    """Asked of the method's real remote, from the checkout the way ship asks it: a candidate tag
+    on the pin is enough only while `vX` itself is not published — once it is, the pin is `vX`'s
+    commit, or the candidate pairs with a method the release is not."""
+    pin, other, bare = _method_with(tmp_path, where)
+    _carrying_candidate(repo, sha=pin)
+    subprocess.run(["git", "clone", "--quiet", str(bare), str(repo / ship_mod.METHOD_TREE)],
+                   check=True)
+
+    def cut():
+        return ship_mod.ship(repo, release=False, channel=channel(tag="beta-v1.2.0-rc1"),
+                             candidate="v1.2.0", read_method_sha=lambda _root: pin,
+                             read_pinned_sha=lambda _root, _at="HEAD": pin, say=lambda _m: None)
+
+    if not refused:
+        assert "beta-v3.2.0-rc1" in cut().method_tags
+        return
+    with pytest.raises(ship_mod.Stop) as stop:
+        cut()
+    said = str(stop.value)
+    assert COMING in said and other[:12] in said and pin[:12] in said, said
+
+
+def test_a_candidate_that_carries_its_release_asks_the_hub_about_the_waves_pool(repo, carrier):
+    """The hub's `pool-closed` runs for version tags only, so a candidate tagged with the wave's
+    items still open would be refused by the train later — the bookkeeping-after-candidate the
+    train exists to end. ship asks the carrier's own check for `vY`, before the tag."""
+    head = _carrying_candidate(repo)
+    carrier.verdict = FAIL
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, ask=channel(tag="beta-v1.2.0-rc1"), candidate="v1.2.0",
+             read_method_tags=_on_pin("beta-v3.2.0-rc2"))
+
+    assert "pool-closed" in str(stop.value), str(stop.value)
+    assert [(a["tag"], a["repo"], a["at"]) for a in carrier.asked] == [
+        ("v1.2.0", _Carrier.ROLE_REPO["tcc"], None)]
+    assert git(repo, "tag", "--list", "beta-v1.2.0-rc1") == "", "nothing was tagged"
+    assert git(repo, "rev-parse", "HEAD") == head
+
+
+def test_a_candidate_whose_version_is_not_moved_yet_stays_an_ordinary_one(repo, carrier):
+    """`## [v1.2.0]` named early with pyproject still on 0.1.24: a patch's candidate may do that
     (the bookkeeping rides in the release commit, hub RELEASE-CHANNEL.md §11.3). It is not asked
-    about the method's tags, and the plan says it does not carry the release — the train would
-    refuse it (`manifest`)."""
+    about the method's tags or the pool, and the plan says it does not carry the release — the
+    train would refuse it (`manifest`)."""
     _carrying_candidate(repo, version="0.1.24", named="")
     asked, lines = [], []
 
-    _run(repo, release=False, ask=channel(tag="beta-v0.2.0-rc1"), candidate="v0.2.0",
-         published=lambda _root, sha, **_kw: asked.append(sha) or [], say=lines.append)
+    _run(repo, release=False, ask=channel(tag="beta-v1.2.0-rc1"), candidate="v1.2.0",
+         published=lambda _root, sha, **_kw: asked.append(sha) or [],
+         read_method_tags=lambda _root, **_kw: asked.append("all") or {}, say=lines.append)
 
     assert asked == [], "an ordinary candidate answers to nobody's tag"
+    assert carrier.asked == [], "nor to the wave's pool: the hub asks that of the release"
     said = [line for line in lines if "carries" in line]
     assert said and "does not carry" in said[0] and "0.1.24" in said[0], lines
+
+
+def test_ship_asks_the_carriers_own_pool_check_by_the_names_it_has():
+    """The stand-in above, held to the real carrier: ship calls its check rather than copying it."""
+    if not ship_mod.CARRIER.is_file():
+        pytest.skip(f"the hub's carrier is not on this machine ({ship_mod.CARRIER})")
+
+    real = ship_mod.load_carrier()
+
+    asked = list(inspect.signature(real.check_pool_closed).parameters)
+    assert asked == list(inspect.signature(_Carrier.check_pool_closed).parameters)[1:], asked
+    assert real.ROLE_REPO["tcc"] == _Carrier.ROLE_REPO["tcc"]

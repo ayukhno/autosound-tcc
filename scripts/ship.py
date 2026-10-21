@@ -110,9 +110,12 @@ already says its version is such a candidate, and `CANDIDATE=` holds it to the r
 on HEAD — the ones `VERSION=… AT=` will make on that same commit: `## [vY]` on top with no
 `## [Unreleased]`, a note that says something, and `Paired with method` naming the pin's sha. Its
 pin is the skill's candidate, so the published-tag check changes: the line names the skill's
-coming tag `vX` beside the sha, and the pin must carry `vX` or a published `beta-vX-rcN` — a typo in
-the line, or a pin on another version's candidate, is refused. A candidate whose version is not
-moved yet is an ordinary one, checked as before, and the plan says it does not carry the release.
+coming tag `vX` beside the sha, and the pin must be `vX`'s commit once `vX` is published anywhere,
+or carry a published `beta-vX-rcN` while it is not — a typo in the line, a pin on another version's
+candidate, or one beside an already published `vX`, is refused. The hub's `pool-closed` runs for
+version tags only, so ship asks the carrier's own check for `vY` before such a candidate's tag —
+called, not copied. A candidate whose version is not moved yet is an ordinary one, checked as
+before, and the plan says it does not carry the release.
 
 ## The tag is signed, and checked before it leaves (tcc#102, hub #83 HUB-032)
 
@@ -395,28 +398,55 @@ def paired_method_version(changelog: str, tag: str) -> str:
     return named.group(1) if named else ""
 
 
-def check_coming_method(changelog: str, tag: str, pinned: str, tags: list) -> str:
-    """A candidate that carries its release: the pin carries the method version its line names —
-    released as `vX`, or the skill's candidate `beta-vX-rcN` (tcc#226, hub #246 ask 2).
+def check_coming_method(changelog: str, tag: str, pinned: str, published: dict) -> str:
+    """A candidate that carries its release: the pin is the method version its line names —
+    `vX`'s commit once `vX` is published, a published `beta-vX-rcN` until then (tcc#226, hub #246
+    ask 2). `published`: every tag of the method's remote and its commit (`method_tag_commits`).
 
     The train tags the skill's newest candidate's commit `vX` first, then TCC's on its own, so the
     line names a tag that does not exist yet while the candidate is tried. What can be checked
     instead is that the pin is a published candidate OF THAT version: a typo in the line, or a pin
-    on another version's candidate or on no tag at all, is refused. Which of X's candidates (the
-    newest) and the minor pairing are the hub's, at the train (`minor-pair` with `promised`).
-    The `beta-` prefix is the hub's candidate name (RELEASE-CHANNEL.md §11.1).
+    on another version's candidate or on no tag at all, is refused. The fallback holds only while
+    `vX` is absent: a `vX` published on another commit means the pin is not the release it names.
+    Which of X's candidates (the newest) and the minor pairing are the hub's, at the train
+    (`minor-pair` with `promised`). The `beta-` prefix is the hub's candidate name
+    (RELEASE-CHANNEL.md §11.1).
     """
     named = paired_method_version(changelog, tag)
     if not named:
         raise Stop(f"the `## [{tag}]` entry's `Paired with method` line names no method tag beside "
                    "the sha — a candidate that carries its release names the skill's coming tag, "
                    "`vX.Y.Z`, so it can be held to the pin")
-    if named in tags or any(re.fullmatch(rf"beta-{re.escape(named)}-rc\d+", t) for t in tags):
+    if named in published:
+        if published[named] == pinned:
+            return named
+        raise Stop(f"the `## [{tag}]` entry pairs with method `{named}`, which is published on "
+                   f"`{published[named][:12]}`, and the pin is `{pinned[:12]}` — pin `{named}`'s "
+                   "commit, or name the method the pin is")
+    on_pin = sorted(name for name, commit in published.items() if commit == pinned)
+    if any(re.fullmatch(rf"beta-{re.escape(named)}-rc\d+", name) for name in on_pin):
         return named
     raise Stop(f"the `## [{tag}]` entry pairs with method `{named}`, and the pin `{pinned[:12]}` "
-               f"carries {', '.join(tags) or 'no published tag'} — neither `{named}` nor a "
+               f"carries {', '.join(on_pin) or 'no published tag'} — neither `{named}` nor a "
                f"published `beta-{named}-rcN`. A typo in the line, or the pin is not the skill's "
                f"candidate of {named}: pin its last candidate, the commit the train tags {named}")
+
+
+def check_wave_pool(root: Path, version: str, path: Path = CARRIER):
+    """The hub's `pool-closed` for `version`, asked for a candidate that carries its release.
+
+    The carrier runs it for version tags only, so a candidate tagged with the wave's items still
+    open in `docs/TODO.md` would be refused by the train later — the bookkeeping after the candidate
+    the train exists to end (hub #246 ask 1). The hub's own check, called: ship keeps no copy of
+    the rule. Returns its `Check`; a refusal is a Stop with the carrier's own sentence.
+    """
+    carrier = load_carrier(path)
+    role = os.environ.get("HUB_ROLE") or "tcc"
+    check = carrier.check_pool_closed(root, carrier.ROLE_REPO["tcc"], role, version)
+    if check.gates:
+        raise Stop(f"the candidate carries {version}, and the hub's {check.name} refuses it — "
+                   f"{check.line}")
+    return check
 
 
 # ---------------------------------------------------------------- the writing half
@@ -591,15 +621,28 @@ def published_method_tags(root: Path, sha: str, remote: str = "") -> list[str]:
     `remote`: the method's URL, asked from `root` — a check at a commit reads it from that
     commit's `.gitmodules` (`method_url_at`); without it, the checkout's own `origin`.
     """
+    return sorted(name for name, commit in method_tag_commits(root, remote=remote).items()
+                  if commit == sha)
+
+
+def method_tag_commits(root: Path, remote: str = "") -> dict[str, str]:
+    """Every tag the method's REMOTE has published, and the commit each names — the peel for an
+    annotated tag. The questions `published_method_tags` describes are the same here, and so are
+    the answers to them; this one keeps the tags on other commits too, so a candidate can ask
+    whether its method's release is already published somewhere else (tcc#226)."""
     argv = (["git", "ls-remote", "--tags", "--", remote] if remote
             else ["git", "-C", str(root / METHOD_TREE), "ls-remote", "--tags", "origin"])
-    out = run(argv, root)
-    names = set()
-    for line in out.splitlines():
+    own, peeled = {}, {}
+    for line in run(argv, root).splitlines():
         parts = line.split()
-        if len(parts) == 2 and parts[0] == sha and parts[1].startswith("refs/tags/"):
-            names.add(parts[1][len("refs/tags/"):].removesuffix("^{}"))
-    return sorted(names)
+        if len(parts) != 2 or not parts[1].startswith("refs/tags/"):
+            continue
+        name = parts[1][len("refs/tags/"):]
+        if name.endswith("^{}"):
+            peeled[name[:-len("^{}")]] = parts[0]
+        else:
+            own[name] = parts[0]
+    return {name: peeled.get(name, commit) for name, commit in own.items()}
 
 
 def check_published_method(pinned: str, tags: list) -> None:
@@ -779,6 +822,7 @@ def ship(root: Path, release: bool, test_command=None,
          read_pinned_sha: Callable[[Path], str] = pinned_method_sha,
          read_published_tags: Callable[..., list] = published_method_tags,
          read_method_url: Callable[[Path, str], str] = method_url_at,
+         read_method_tags: Callable[..., dict] = method_tag_commits,
          relock_with: Callable[[Path], None] = relock,
          say: Callable[[str], None] = print,
          candidate: str = "", version: str = "", at: str = "") -> Plan:
@@ -851,8 +895,11 @@ def ship(root: Path, release: bool, test_command=None,
         check_published_method(pinned, plan.method_tags)
     elif carries:
         check_paired_method(changelog, plan.method_sha, candidate)
-        plan.method_tags = list(read_published_tags(root, pinned))
-        coming = check_coming_method(changelog, candidate, pinned, plan.method_tags)
+        method_tags = dict(read_method_tags(root))
+        plan.method_tags = sorted(name for name, commit in method_tags.items() if commit == pinned)
+        coming = check_coming_method(changelog, candidate, pinned, method_tags)
+        pool = check_wave_pool(root, candidate)
+        say(f"    {pool.verdict:<12} {pool.name:<34} {pool.line}")
 
     # The three lines that will actually run. The carrier builds the SAME three to put in front
     # of the hook, from its own literal — so an edit here that is not made there would leave the
