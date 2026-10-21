@@ -447,6 +447,49 @@ def test_the_rename_worker_stops_at_the_first_refusal_and_says_how_far_it_got():
     assert renamed == [("u1", "w-L")], "before the failing second call, and no further"
 
 
+@pytest.mark.parametrize("where", ["the list before the batch", "a rename"])
+def test_a_rename_rew_did_not_take_puts_the_rew_dot_to_the_state_it_met(where):
+    """The group review of #219, K: a rename batch that failed on REW — its list before the first
+    rename, or a rename itself — left the REW dot green. The worker says the state it met
+    (`rew_bridge.probe_of`), as the scan worker does, and the panel hands it to the dot. A
+    measurement gone between the list and Apply is no state of REW's: the dot is left alone."""
+    from autosound_tcc.core import rew_bridge
+
+    _app()
+    down = _method_rew().RewUnavailable("connection refused", "http://localhost:4735")
+
+    class _Down(_FakeBridge):
+        def measurements(self):
+            if where == "the list before the batch":
+                raise down
+            return super().measurements()
+
+        def rename_measurement(self, mid, title):
+            raise down
+
+    worker = _RewRenameWorker(_Down({"1": {"title": "a", "uuid": "u1"}}),
+                              [("u1", "w-L_02 (sw)"), ("gone", "w-R_02 (sw)")])
+    failures: list = []
+    worker.failed.connect(lambda msg, renamed, status: failures.append(status))
+    worker.run()
+    assert [s.state for s in failures] == [rew_bridge.UNAVAILABLE]
+
+    gone = _RewRenameWorker(_FakeBridge({"1": {"title": "a", "uuid": "u1"}}),
+                            [("gone", "w-R_02 (sw)")])
+    gone.failed.connect(lambda msg, renamed, status: failures.append(status))
+    gone.run()
+    assert failures[-1] is None
+
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    panel._taking, panel._renaming = [], [("u1", "w-L_02 (sw)")]
+    seen: list = []
+    panel.rewStatusChanged.connect(seen.append)
+    panel._on_import_rename_failed("REW is not answering", [], failures[0])
+    panel._on_import_rename_failed("w-R_02 (sw) is gone", [], None)
+    assert seen == [failures[0]], "the state it met, and nothing for a measurement gone"
+
+
 def test_only_what_carries_its_new_name_is_written_down(tmp_path, monkeypatch):
     """A measurement whose rename never happened is still called what it was called. Recording it
     under a name it does not have would put a title in the checklist that nothing in REW answers

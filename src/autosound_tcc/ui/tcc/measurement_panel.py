@@ -209,7 +209,10 @@ class _RewRenameWorker(QThread):
     much."""
 
     done = Signal(list)  # list of (uuid, new_title) actually renamed, in order
-    failed = Signal(str, list)  # error message, list of (uuid, new_title) renamed before it failed
+    #: The error message, the `(uuid, new_title)` pairs renamed before it failed, and the state of
+    #: REW's it met (`rew_bridge.RewProbe`) — None for a failure that is none of REW's: a
+    #: measurement gone between the list and Apply (the group review of #219, K).
+    failed = Signal(str, list, object)
 
     def __init__(self, bridge: RewBridge, pairs: list[tuple[str, str]]) -> None:
         super().__init__()
@@ -224,7 +227,7 @@ class _RewRenameWorker(QThread):
         try:
             live = self._bridge.measurements()
         except Exception as exc:  # noqa: BLE001 — REW went away between the list and Apply
-            self.failed.emit(f"{type(exc).__name__}: {exc}", renamed)
+            self.failed.emit(f"{type(exc).__name__}: {exc}", renamed, rew_bridge.probe_of(exc))
             return
         ordinals = capture_import.resolve_ordinals(live, [uuid for uuid, _title in self._pairs])
         for uuid, title in self._pairs:
@@ -233,12 +236,12 @@ class _RewRenameWorker(QThread):
                 # Deleted, or hidden by a filter switched on since the list was drawn. Either way
                 # there is no measurement to rename, and guessing one by position is how `m-R`
                 # data ends up under the `m-L` label.
-                self.failed.emit(i18n.t("capImportGone").format(title=title), renamed)
+                self.failed.emit(i18n.t("capImportGone").format(title=title), renamed, None)
                 return
             try:
                 self._bridge.rename_measurement(mid, title)
             except Exception as exc:  # noqa: BLE001
-                self.failed.emit(f"{type(exc).__name__}: {exc}", renamed)
+                self.failed.emit(f"{type(exc).__name__}: {exc}", renamed, rew_bridge.probe_of(exc))
                 return
             renamed.append((uuid, title))
         self.done.emit(renamed)
@@ -1726,7 +1729,13 @@ class MeasurementPanel(QWidget):
     def _on_import_renamed(self, renamed: list) -> None:
         self._finish_import(dict(renamed))
 
-    def _on_import_rename_failed(self, message: str, renamed: list) -> None:
+    def _on_import_rename_failed(self, message: str, renamed: list, status=None) -> None:
+        """A rename batch that stopped: what went through is recorded, and `status`, the state of
+        REW's the failure met (`rew_bridge.RewProbe`), goes to the dot — it stayed green over a
+        REW that did not take the rename (the group review of #219, K). None leaves the dot: a
+        measurement gone between the list and Apply is no state of REW's."""
+        if status is not None:
+            self.rewStatusChanged.emit(status)
         titles = dict(renamed)
         asked = {uuid for uuid, _title in self._renaming}
         keep = {row.uuid for row in self._taking if row.uuid in titles or row.uuid not in asked}
