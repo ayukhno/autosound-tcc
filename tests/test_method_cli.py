@@ -1305,3 +1305,30 @@ def test_the_profiles_reads_take_no_lock(monkeypatch, read):
             pass  # the stub's empty answer is no JSON; what matters is that it ran
 
     assert len(started) == 1
+
+
+@pytest.mark.parametrize("read, bound", [
+    pytest.param(lambda car: process_writer.plan(car), 20.0, id="plan"),
+    pytest.param(lambda car: process_writer.check(car), 20.0, id="check"),
+    pytest.param(lambda car: process_writer.state(car), 20.0, id="show"),
+    pytest.param(lambda car: process_writer.handoff_json(car), 30.0, id="handoff"),
+    pytest.param(lambda car: profile_writer.draft(car), 20.0, id="profile-draft"),
+    pytest.param(lambda car: project_repo.init(car), 600.0, id="project-repo"),
+])
+def test_a_child_that_takes_no_method_lock_is_bounded_by_its_work_alone(tmp_path, monkeypatch,
+                                                                       read, bound):
+    """A verb that takes no lock of the method's — a read of the journal or the draft, or
+    `project_repo.py`, which locks nothing — has no lock wait to make room for (#218 review): its
+    bound is the work alone, not the work plus a minute off the GUI thread."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 5.0)
+    car = tmp_path / "car"
+    car.mkdir()
+    bounds: list = []
+    monkeypatch.setattr(method_cli.child, "run_bounded", lambda argv, **kw: (
+        bounds.append(kw["timeout"]), subprocess.CompletedProcess(argv, 0, "{}", ""))[1])
+
+    read(car)
+
+    assert bounds == [bound]

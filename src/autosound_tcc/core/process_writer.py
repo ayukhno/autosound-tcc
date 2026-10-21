@@ -597,7 +597,8 @@ def handoff_json(project_dir: Path) -> tuple[int, str, str]:
     120 s `capture-check` would be the bug, and so would the lock's own `process/`, made in a
     project that has none.
     """
-    code, out, err = _spawn(project_dir, ["handoff", "--json"], timeout_s=30.0, lock=False)
+    code, out, err = _spawn(project_dir, ["handoff", "--json"], timeout_s=30.0, lock=False,
+                            holds=0)
     _refuse_if_too_old(project_dir, "handoff", out, err)
     return code, out, err
 
@@ -822,8 +823,9 @@ def close_capture(project_dir: Path, reason: str = "") -> str:
 
 
 def check(project_dir: Path) -> str:
-    """List done steps that carry no evidence — the skill's own план-факт reconciliation."""
-    return _run(project_dir, ["check"])
+    """List done steps that carry no evidence — the skill's own план-факт reconciliation. A read:
+    the method takes no lock for it, so its child's bound has no lock wait in it (`holds=0`)."""
+    return _run(project_dir, ["check"], holds=0)
 
 
 def plan(project_dir: Path, phase: Optional[str] = None) -> str:
@@ -831,7 +833,7 @@ def plan(project_dir: Path, phase: Optional[str] = None) -> str:
     args = ["plan"]
     if phase is not None:
         args.append(str(phase))
-    return _run(project_dir, args)
+    return _run(project_dir, args, holds=0)  # a read: no lock of the method's to wait for
 
 
 def state(project_dir: Path) -> Any:
@@ -842,7 +844,7 @@ def state(project_dir: Path) -> Any:
     """
     import json
 
-    out = _run(project_dir, ["show"])
+    out = _run(project_dir, ["show"], holds=0)  # a read: no lock of the method's to wait for
     try:
         return json.loads(out)
     except ValueError:

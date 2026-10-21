@@ -61,7 +61,8 @@ def _run(project: Path, args: list[str]) -> tuple[int, str, str]:
     for a copy older than the command, `Refused` with the binding's sentence (said in the log by
     `method_cli`), any other for a run that did not come back."""
     try:
-        return method_cli.spawn(project, _SCRIPT, args, timeout_s=_TIMEOUT_S, lock=False)
+        # `project_repo.py` takes no lock of the method's either: no lock wait in its bound.
+        return method_cli.spawn(project, _SCRIPT, args, timeout_s=_TIMEOUT_S, lock=False, holds=0)
     except method_cli.Refused:
         raise
     except method_cli.ProcessWriterError as exc:

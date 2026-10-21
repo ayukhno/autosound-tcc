@@ -309,7 +309,8 @@ def spawn(
     The child is told how long to wait for the method's lock, `METHOD_LOCK_WAIT_ENV`: the whole
     wait TCC gives its own. A self-locking child's bound is `timeout_s`, the work, plus that wait
     for each of its `holds` (`capture-close` takes the lock three times), so a child still waiting
-    for the lock answers busy rather than being cut as `TimedOut`. Never in `child_env()`: an
+    for the lock answers busy rather than being cut as `TimedOut`; a verb that takes no lock of the
+    method's — a read, `project_repo.py` — passes `holds=0`, and its bound is the work alone. Never in `child_env()`: an
     agent's session takes its environment from there. Its exit 75 is `Busy` in its own words,
     logged as TCC's own busy is; a `note:` line on stderr — a write that landed without the
     method's lock, a plan file not written — is told to the person (`_tell_notes`) on any other
