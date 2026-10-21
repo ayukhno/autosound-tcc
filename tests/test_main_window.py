@@ -5719,6 +5719,23 @@ def test_the_probe_writes_nothing_into_the_project(tmp_path, monkeypatch):
     assert list(real_project.iterdir()) == [], "the real project is untouched"
 
 
+def test_the_reviewer_probe_outlasts_the_methods_one_line_when_its_knob_is_longer(monkeypatch):
+    """Review of 85bbdc16, M3: with `AUTOSOUND_PROBE_TIMEOUT` past 180 s the method's line was cut
+    by TCC before its hang advice came back."""
+    from autosound_tcc.core import critic
+    from autosound_tcc.ui.tcc.main_window import _ReviewerProbeWorker
+
+    seen = []
+    monkeypatch.setattr(critic, "run", lambda package, **kw: seen.append(kw["timeout_s"]) or
+                        critic.CriticResult(critic.MODE_CLIPBOARD, "", None, "ask", "", 0.1, "t"))
+    monkeypatch.setenv("AUTOSOUND_PROBE_TIMEOUT", "300")
+    _ReviewerProbeWorker("agy:gemini-3.1-pro-high", config.project_dir()).run()
+    monkeypatch.setenv("AUTOSOUND_PROBE_TIMEOUT", "30")
+    _ReviewerProbeWorker("agy:gemini-3.1-pro-high", config.project_dir()).run()
+
+    assert seen == [300 + critic.METHOD_MARGIN_S, 180.0]
+
+
 def test_a_launch_failure_is_logged_and_still_reports_done(monkeypatch, caplog):
     import logging
 

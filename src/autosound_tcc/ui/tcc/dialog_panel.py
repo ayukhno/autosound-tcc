@@ -249,6 +249,16 @@ def _clock(seconds: float) -> str:
     return f"{seconds // 60}:{seconds % 60:02d}"
 
 
+def _hang_note(critique: dict) -> str:
+    """agy's hang, said as the footer's pick: the method's own advice names critic-env, which a run
+    TCC starts with `--model` does not read (review of 85bbdc16, M2). "" for any other failure."""
+    tier = critique.get("hang")
+    if tier is None:
+        return ""
+    return "<br>" + (i18n.t("criticHangTier").format(model=html.escape(str(tier))) if tier
+                     else i18n.t("criticHangOther"))
+
+
 class DialogPanel(QWidget):
     """The whole center dialog: message list, composer, and the project-param-edit chip. The
     surrounding `.panel` frame's "editing" border highlight is applied by the caller
@@ -1532,6 +1542,7 @@ class DialogPanel(QWidget):
             package = critique.get("package")
             self._add_system_message(
                 i18n.t("criticRefused").format(detail=critique.get("detail") or "?")
+                + _hang_note(critique)
                 + (f"<br><i>{i18n.t('criticPackage').format(path=package)}</i>" if package else "")
             )
         elif mode == "not_ready":
@@ -1541,7 +1552,7 @@ class DialogPanel(QWidget):
             self._add_system_message(i18n.t("criticNotReady"))
         else:
             self._add_system_message(
-                i18n.t("criticFailed").format(detail=critique.get("detail", "?"))
+                i18n.t("criticFailed").format(detail=critique.get("detail", "?")) + _hang_note(critique)
             )
         self._scroll_to_end()
 

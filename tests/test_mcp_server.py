@@ -1714,6 +1714,30 @@ def test_a_critique_reaches_the_journal_with_a_pointer_to_its_text(tmp_path, mon
     assert called["mode"] == "api"
 
 
+def test_an_agy_hang_reaches_the_bubble_with_the_tier_the_method_named(tmp_path, monkeypatch):
+    """Review of 85bbdc16, M2: the bubble says which tier to pick in the footer, in the person's
+    language; the method's own advice names critic-env, which a run TCC starts does not read."""
+    from autosound_tcc.core import critic
+
+    class _Bridge(RecordingBridge):
+        critiques: list = []
+
+        def show_critique(self, critique: dict) -> None:
+            self.critiques.append(critique)
+
+    bridge = _Bridge(allow=True)
+    mcp, _, _ = _server(tmp_path, bridge)
+    hang = ("CLI 'agy': no answer in 60 s; it printed nothing\n     → модель `g-high` не відповіла на "
+            "один рядок за 60 с; наступна сходинка — нижчий рівень тієї ж моделі: `--model g-medium` "
+            "для цього запуску (або AUTOSOUND_CRITIC_MODEL=g-medium у critic-env)")
+    monkeypatch.setattr(critic, "run", lambda *a, **k: critic.CriticResult(
+        critic.MODE_REFUSED, "", None, "ask", hang, 1.0, "2026-10-21T21:00:00+00:00"))
+
+    asyncio.run(mcp.call_tool("call_critic", {"package": "a question", "role": "ask"}))
+
+    assert bridge.critiques[-1]["hang"] == "g-medium"
+
+
 # ---- show_curves: a disagreement about a number, without a picture in it ----------------------
 
 

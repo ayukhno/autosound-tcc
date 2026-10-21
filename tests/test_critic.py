@@ -1839,6 +1839,7 @@ _METHOD_WITH_PROBE = "CLI_WAIT_MIN_S = 600\nCLI_WAIT_PER_KB_S = 25\nPROBE_WAIT_S
 _ASK_ALLOWANCE = 1024
 _TUNING_ALLOWANCE = 24 * 1024
 _WAIT_VARS = ("AUTOSOUND_CLI_TIMEOUT", "AUTOSOUND_API_TIMEOUT", "AUTOSOUND_CRITIC_VIA", "ADVISOR_MEMORY",
+              "AUTOSOUND_PROBE_TIMEOUT",
               "AUTOSOUND_DIR", "AUTOSOUND_PROJECT_DIR", "PROJECT_MIRROR", "APPDATA")
 
 
@@ -2022,3 +2023,74 @@ def test_a_sessions_tool_wait_outlasts_the_longest_review():
 
     assert omp_session.OMP_TOOL_TIMEOUT_MS > critic.LONGEST_REVIEW_S * 1000
     assert codex_session.TOOL_TIMEOUT_S > critic.LONGEST_REVIEW_S
+
+
+# ---- the method's probe knob, and what a timeout's words are (review of 85bbdc16) --------------
+
+def test_a_review_and_doctor_wait_the_probe_knob_set_in_the_environment(tmp_path, monkeypatch):
+    """I1: rc2 tells a slow start to set a longer `AUTOSOUND_PROBE_TIMEOUT`; with 300 TCC killed
+    doctor at 240 s and a review with a short `AUTOSOUND_CLI_TIMEOUT` before the line came back."""
+    review, doctor = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1,
+                                    env={"AUTOSOUND_PROBE_TIMEOUT": "300",
+                                         "AUTOSOUND_CLI_TIMEOUT": "120"})
+    assert review == 300 + 120 + 60
+    assert doctor == 60 + 300 + 60
+
+
+def test_a_review_and_doctor_wait_the_probe_knob_set_in_critic_env(tmp_path, monkeypatch):
+    car = tmp_path / "car"
+    car.mkdir()
+    (car / ".critic-env").write_text("AUTOSOUND_PROBE_TIMEOUT=300\nAUTOSOUND_CLI_TIMEOUT=120\n",
+                                     encoding="utf-8")
+    review, doctor = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1, project=car,
+                                    env={"AUTOSOUND_PROBE_TIMEOUT": "30"})
+    assert review == 300 + 120 + 60
+    assert doctor == 60 + 300 + 60
+
+
+def test_a_probe_knob_of_zero_sends_no_line(tmp_path, monkeypatch):
+    review, doctor = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1,
+                                    env={"AUTOSOUND_PROBE_TIMEOUT": "0"})
+    assert review == 600 + 60
+    assert doctor == 60 + 120 + 60
+
+
+#: What rc2 leaves of agy's timeout in its refusal block: the reason with what agy printed by then,
+#: and the hang advice naming the lower tier.
+_AGY_HANG = (
+    "CLI 'agy': no answer in 60 s; by then it printed: {\"type\":\"init\",\"trust\":\"workspace\"} "
+    "warning: permission settings.json; api key not set; model not available yet\n"
+    "     → модель `gemini-3.8-flash-high` не відповіла на один рядок за 60 с — схоже, висить "
+    "модель, а не розмір пакета (повільний старт — довший AUTOSOUND_PROBE_TIMEOUT, секунди); "
+    "наступна сходинка — нижчий рівень тієї ж моделі: `--model gemini-3.8-flash-medium` для цього "
+    "запуску (або AUTOSOUND_CRITIC_MODEL=gemini-3.8-flash-medium у critic-env); пакет не надсилано")
+
+
+def test_a_timeout_is_not_read_as_what_agy_printed_before_it(tmp_path):
+    """M1: agy's last output rides in the timeout's reason, and its words are not the failure."""
+    fix = critic.remedy(_AGY_HANG, harness="agy", project_dir=tmp_path)
+    assert "permission" not in fix and "rejected it" not in fix and "refused the model" not in fix
+    assert "gemini-3.8-flash-medium" in fix
+
+
+def test_a_hang_sends_to_the_lower_tier_in_the_footer_not_to_critic_env():
+    """M2: TCC passes `--model`, so a critic-env line does nothing for its run."""
+    assert critic.hang_tier(_AGY_HANG) == "gemini-3.8-flash-medium"
+    fix = critic.remedy(_AGY_HANG, harness="agy")
+    assert "footer" in fix and "AUTOSOUND_CRITIC_MODEL" not in fix
+
+
+def test_a_hang_with_no_lower_tier_sends_to_another_model():
+    lowest = ("CLI 'agy': no answer in 60 s; it printed nothing\n     → модель `x-low` не відповіла "
+              "на один рядок за 60 с; нижчого рівня цієї лінії agy не пропонує — вибери іншу модель "
+              "зі списку `agy models`")
+    assert critic.hang_tier(lowest) == ""
+    assert "another model" in critic.remedy(lowest, harness="agy")
+    assert critic.hang_tier("CLI 'agy': model 'x' is not available") is None
+    assert critic.hang_tier("") is None
+
+
+def test_another_clis_timeout_gets_no_word_based_remedy():
+    said = "CLI 'codex': no answer in 600 s; by then it printed: trust this folder? api key"
+    assert critic.remedy(said, harness="codex") == ""
+    assert critic.hang_tier(said) is None

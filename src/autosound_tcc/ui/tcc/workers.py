@@ -8,6 +8,7 @@ same names: a test that reaches for `main_window._CliCatalogueWorker` still find
 from __future__ import annotations
 
 import dataclasses
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -20,6 +21,7 @@ from autosound_tcc.core import (
     codex_login,
     contract_check,
     critic,
+    critic_env,
     generator_check,
     model_choices,
     process_writer,
@@ -184,13 +186,24 @@ class _CliCatalogueWorker(QThread):
 
 #: What the probe asks. Short, so the call costs as little as a real call can.
 _REVIEWER_PROBE_QUESTION = "Reply with the single word: ready."
-#: How long the probe may take: past the script's own CLI timeout (120 s), so the script gives its
-#: answer first, and far short of a real review's ten minutes.
+#: How long the probe may take at least: past the method's one line to agy (`PROBE_WAIT_S`, 60 s),
+#: so a model that hangs is named by the method's own advice, and far short of a real review's ten
+#: minutes. Not past the `ask`'s own `cli_wait` (600 s and up): a reviewer that takes the line and
+#: then stalls is cut by TCC first. A longer `AUTOSOUND_PROBE_TIMEOUT` lengthens it to the line's
+#: wait plus the margin (`_reviewer_probe_timeout`).
 _REVIEWER_PROBE_TIMEOUT_S = 180.0
 #: The stub project context the probe hands the method script, so the real project's own
 #: `rew_analitic/autosound_context.md` is never read (or overwritten) for a call that has
 #: nothing to do with it.
 _REVIEWER_PROBE_CONTEXT = "Reviewer probe: there is no project. Answer the question only.\n"
+
+
+def _reviewer_probe_timeout(project_dir: Path, extra_env: dict) -> float:
+    """`_REVIEWER_PROBE_TIMEOUT_S`, or the method's one line with the knob as it reads it plus the
+    margin when that is longer (review of 85bbdc16, M3)."""
+    seen = critic_env.as_the_method_reads({**os.environ, **extra_env}, project_dir)
+    return max(_REVIEWER_PROBE_TIMEOUT_S,
+               critic.probe_wait(critic.script_path(), seen) + critic.METHOD_MARGIN_S)
 
 
 class _ReviewerProbeWorker(QThread):
@@ -235,12 +248,12 @@ class _ReviewerProbeWorker(QThread):
                     _REVIEWER_PROBE_CONTEXT, encoding="utf-8")
                 package = scratch / "reviewer-probe.md"
                 package.write_text(_REVIEWER_PROBE_QUESTION, encoding="utf-8")
+                extra_env = {"AUTOSOUND_PROJECT_DIR": str(scratch), "PROJECT_MIRROR": str(mirror)}
                 result = critic.run(str(package), project_dir=self._project_dir, role="ask",
                                     model=model_choices.reviewer_model(reviewer),
                                     harness=reviewer.harness, provider=reviewer.provider,
-                                    timeout_s=_REVIEWER_PROBE_TIMEOUT_S,
-                                    extra_env={"AUTOSOUND_PROJECT_DIR": str(scratch),
-                                               "PROJECT_MIRROR": str(mirror)})
+                                    timeout_s=_reviewer_probe_timeout(self._project_dir, extra_env),
+                                    extra_env=extra_env)
             if result.mode == critic.MODE_ERROR:
                 app_log.logger().warning("reviewer probe could not run: %s", result.detail)
             # Without its pins: the method read no `rew_analitic/.critic-env` for the probe (its

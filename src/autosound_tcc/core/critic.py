@@ -538,6 +538,20 @@ def prompt_bytes(package_path: Path, project_dir: Path, role: str, trace_path: O
     return sum(map(_size, files)) + _TUNING_ALLOWANCE_BYTES
 
 
+def probe_wait(script: Path, env: Optional[Mapping[str, str]] = None) -> float:
+    """The method's one line to agy before a package and doctor's live call on agy, as it reads it
+    (`probe_wait`): `AUTOSOUND_PROBE_TIMEOUT` when set -- `0` sends no line -- else the copy's
+    `PROBE_WAIT_S`. rc2's own hang advice tells a slow start to set the knob (review of 85bbdc16,
+    I1). `env` is the environment as the method reads it (`critic_env.as_the_method_reads`). A value
+    the method could not read either falls back to the constant."""
+    said = ((os.environ if env is None else env).get("AUTOSOUND_PROBE_TIMEOUT") or "").strip()
+    try:
+        return float(max(0, int(said))) if said else float(
+            method_features.stated_number(script, "PROBE_WAIT_S") or 0)
+    except ValueError:
+        return float(method_features.stated_number(script, "PROBE_WAIT_S") or 0)
+
+
 def review_wait(script: Path, prompt_size: int, route: str = "",
                 env: Optional[Mapping[str, str]] = None) -> float:
     """How long TCC waits for a review: the method's own wait, from the copy's text, plus a margin,
@@ -547,7 +561,7 @@ def review_wait(script: Path, prompt_size: int, route: str = "",
     waits `cli_wait` -- `AUTOSOUND_CLI_TIMEOUT` when set; else both `max(CLI_WAIT_MIN_S,
     CLI_WAIT_PER_KB_S * KB)` of the prompt (`prompt_bytes`). `env` is the environment as the method
     reads it, critic-env lines over it (`critic_env.as_the_method_reads`). Before a package on a CLI
-    the method may send a one-line probe (`PROBE_WAIT_S`): counted on every route but `api` and
+    the method may send a one-line probe (`probe_wait`, which reads `AUTOSOUND_PROBE_TIMEOUT`): counted on every route but `api` and
     `omp`, as TCC cannot tell which CLI the method will find. A constant the copy states in a form
     this cannot read floors the wait at `DEFAULT_TIMEOUT_S`.
 
@@ -558,7 +572,7 @@ def review_wait(script: Path, prompt_size: int, route: str = "",
     route = (route or "").strip().lower()
     minimum = method_features.stated_number(script, "CLI_WAIT_MIN_S")
     per_kb = method_features.stated_number(script, "CLI_WAIT_PER_KB_S")
-    probe = 0 if route in ("api", "omp") else method_features.stated_number(script, "PROBE_WAIT_S")
+    probe = 0 if route in ("api", "omp") else probe_wait(script, environ)
     said = (environ.get("AUTOSOUND_API_TIMEOUT" if route == "api" else "AUTOSOUND_CLI_TIMEOUT")
             or "").strip()
     try:
@@ -579,11 +593,11 @@ def review_wait(script: Path, prompt_size: int, route: str = "",
     return total
 
 
-def doctor_wait(script: Path) -> float:
-    """What `doctor` is given: its own checks (60 s, as before), the live call -- `PROBE_WAIT_S` on
-    agy, a literal 120 s on any other CLI (rc1 and rc2) -- and the margin (#232)."""
-    probe = float(method_features.stated_number(script, "PROBE_WAIT_S") or 0)
-    return 60.0 + max(probe, 120.0) + METHOD_MARGIN_S
+def doctor_wait(script: Path, env: Optional[Mapping[str, str]] = None) -> float:
+    """What `doctor` is given: its own checks (60 s, as before), the live call -- `probe_wait` on
+    agy, a literal 120 s on any other CLI or with no line (rc1 and rc2) -- and the margin (#232).
+    `env` as `review_wait`'s; at most `LONGEST_REVIEW_S`."""
+    return min(60.0 + max(probe_wait(script, env), 120.0) + METHOD_MARGIN_S, LONGEST_REVIEW_S)
 
 
 def run(
@@ -976,6 +990,35 @@ def _codex_cut(detail: str) -> str:
             "model is not offered to this Codex login. " + _CODEX_PICK)
 
 
+#: The method's timeout of a CLI call (`call_cli`): «no answer in <N> s; by then it printed: <the
+#: CLI's last output>», and its advice for one -- agy's `hang_advice` (the one line or the package)
+#: and the generic `FAILURE_ADVICE['timeout']`, which survive a reason `failure_reason` cut to an
+#: `error:` line the CLI printed. Lowercased, as `_said` reads it.
+_TIMEOUT = re.compile(r"\bno answer in \d+ s\b|не відповіла на один рядок|cli не відповів вчасно")
+#: The lower tier the method's hang advice names: «`--model <tier>` для цього запуску».
+_HANG_TIER = re.compile(r"`--model ([^`\s]+)`")
+#: A refusal block's agy line: `CLI 'agy': …` (`agy.cmd` on Windows).
+_AGY_LINE = re.compile(r"\bcli 'agy(?:\.cmd|\.exe)?'")
+
+
+def hang_tier(detail: str) -> Optional[str]:
+    """For agy's timeout in the method's words: the lower tier its advice names, or "" when it names
+    none; None for any other failure (review of 85bbdc16, M2). The method's advice says to put that
+    tier in critic-env, which a run TCC starts does not read for its model -- it passes `--model`."""
+    said = _said(detail)
+    if not (_TIMEOUT.search(said) and (_AGY_LINE.search(said) or "agy models" in said
+                                       or _HANG_TIER.search(said))):
+        return None
+    named = _HANG_TIER.search(detail or "")
+    return named.group(1) if named else ""
+
+
+#: What to do about agy's hang, for the session and the tooltip; the window says it in the person's
+#: language (`criticHangTier`, `criticHangOther`).
+_HANG_NOTE = ("the reviewer model did not answer in time — it hangs, and a longer wait is no cure. "
+              "{pick} A line in critic-env does not decide this run: TCC names the model itself.")
+
+
 def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None) -> str:
     """ONE concrete thing to do, or "" when we cannot name one honestly.
 
@@ -991,6 +1034,16 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
     said = _said(detail)
     if not said.strip():
         return ""
+    if _TIMEOUT.search(said):
+        # Before everything else: the reason carries what the CLI printed before it hung -- init
+        # JSON, warnings -- and «trust», «api key», «not available» there are not the failure
+        # (review of 85bbdc16, M1). agy's hang names the next rung; any other CLI's gets none.
+        tier = hang_tier(detail)
+        if tier is None:
+            return ""
+        return _HANG_NOTE.format(pick=(
+            f"Pick `{tier}`, the lower tier the method names, in the reviewer picker in TCC's "
+            f"footer." if tier else "Pick another model in the reviewer picker in TCC's footer."))
     codex = _codex_refusal(detail)
     if codex:
         # Before the word lists: Codex's banner and the prompt it echoes say «approval», «sandbox»
@@ -1176,11 +1229,12 @@ def doctor(project_dir: Optional[Path] = None, python_executable: Optional[str] 
     # The console interpreter, not TCC's windowed one (`child.script_interpreter`).
     python_executable = python_executable or child.script_interpreter()
     project_dir = Path(project_dir or config.project_dir())
+    env = vendor_loader.child_env(**critic_bin_override())  # TCC-002, as above
+    wait = doctor_wait(script_path(), critic_env.as_the_method_reads(env, project_dir))
     try:
         proc = child.run_bounded(  # bounded on Windows too (F16-1)
-            [python_executable, str(script_path()), "doctor"], timeout=doctor_wait(script_path()),
-            cwd=str(project_dir), text=True, encoding="utf-8", errors="replace",
-            env=vendor_loader.child_env(**critic_bin_override()),  # TCC-002, as above
+            [python_executable, str(script_path()), "doctor"], timeout=wait,
+            cwd=str(project_dir), text=True, encoding="utf-8", errors="replace", env=env,
             **child.quiet(),
         )
     except (subprocess.TimeoutExpired, OSError) as exc:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QMimeData  # noqa: E402
@@ -215,6 +217,39 @@ def test_a_run_that_named_its_model_is_sent_to_the_footer_not_to_a_pin():
     assert "gemini-pro-latest" in said
     assert i18n.t("criticChooseModelFooter").split("{models}")[0] in said
     assert "AUTOSOUND_CRITIC_MODEL" not in said
+
+
+@pytest.mark.parametrize("tier, key", [("gemini-3.8-flash-medium", "criticHangTier"),
+                                       ("", "criticHangOther")])
+def test_an_agy_hang_is_sent_to_the_footers_picker_in_the_persons_language(tier, key):
+    """Review of 85bbdc16, M2: the method's hang advice says to put the lower tier in critic-env,
+    which does nothing for a run TCC starts with `--model`; the bubble names the footer's picker."""
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    panel = DialogPanel()
+    before = len(panel._bubbles)
+
+    panel.add_critique({"mode": "refused", "detail": "CLI 'agy': no answer in 60 s", "hang": tier})
+
+    said = " ".join(label.text() for bubble in panel._bubbles[before:]
+                    for label in bubble.findChildren(QLabel))
+    assert i18n.t(key).split("{model}")[0] in said
+    assert tier in said
+
+
+def test_a_refusal_that_is_no_hang_says_nothing_about_the_picker():
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    panel = DialogPanel()
+    before = len(panel._bubbles)
+
+    panel.add_critique({"mode": "refused", "detail": "CLI 'agy': quota", "hang": None})
+
+    said = " ".join(label.text() for bubble in panel._bubbles[before:]
+                    for label in bubble.findChildren(QLabel))
+    assert i18n.t("criticHangOther")[:30] not in said
 
 
 def test_a_bubble_measures_its_text_once_not_once_per_resize_pixel():

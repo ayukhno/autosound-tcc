@@ -1629,6 +1629,10 @@ def build_server(
                 # The run named its model by the method's `--model`, so a pin in critic-env does
                 # not change it: the bubble's advice for `choose_model` follows this (tcc#113).
                 "by_model_flag": result.pins_set_aside is not None,
+                # agy's hang, and the lower tier the method named ("" for none): the method says to
+                # set it in critic-env, which this run does not read for its model (review of
+                # 85bbdc16, M2); the bubble names the footer's picker instead.
+                "hang": critic.hang_tier(result.detail),
             }
         )
         detail = result.detail
