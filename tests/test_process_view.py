@@ -129,7 +129,54 @@ def test_a_state_a_newer_method_wrote_is_refused_with_the_way_to_one(project):
     said = process_view.unread(project)
 
     assert process_view.load_state(project) is None
-    assert said is not None and "schema v99" in said.why and "update the method" in said.why
+    # The method's sentence split at its « -- »: why, and the repair on its own (the group review
+    # of #219, D) — the repair landed inside `why`, with `repair` empty.
+    reads = vendor_loader.load_process().SCHEMA_VERSION
+    assert said == process_view.StateUnread(
+        f"it is schema v99; this method reads v{reads}",
+        vendor_loader.load_process()._project_io().UPDATE_THE_METHOD), said
+
+
+def _newer_by_one(text: str) -> str:
+    """`process.py`'s text reading the schema after this copy's: a copy newer than TCC's."""
+    import re
+
+    reads = vendor_loader.load_process().SCHEMA_VERSION
+    newer, n = re.subn(rf"^SCHEMA_VERSION = {reads}$", f"SCHEMA_VERSION = {reads + 1}", text,
+                       flags=re.MULTILINE)
+    assert n == 1, "one top-level SCHEMA_VERSION line expected"
+    return newer
+
+
+@pytest.mark.parametrize("bound", ["a newer copy", "a copy of TCC's schema", "TCC's own copy"])
+def test_a_newer_schema_the_projects_own_copy_reads_is_not_refused(project, tmp_path_factory,
+                                                                   bound):
+    """The group review of #219, D: the newer-schema refusal was TCC's own copy's, so a project
+    bound to an approved NEWER copy — whose children and session write that schema — was told to
+    update the method, and its plan was replaced. The copy the project runs decides: one that reads
+    the schema is not refused, and the state is read (TCC's mirror, the lenient read: TCC runs no
+    other copy's code in its own process); TCC's own copy, or one that reads no further than it,
+    keeps the refusal."""
+    from tests._method_copies import copy_of_the_method, linked_and_approved
+
+    reads = vendor_loader.load_process().SCHEMA_VERSION
+    car = project / "car"  # not `HOME` itself: its `.claude/skills` would be an install, `known`
+    if bound != "TCC's own copy":
+        changes = {"rew_tool/state/process.py": _newer_by_one} if bound == "a newer copy" else {}
+        linked_and_approved(car, copy_of_the_method(
+            tmp_path_factory.mktemp("bound-method"), changes=changes, manifest=True))
+    path = process_view.state_file(car)
+    path.parent.mkdir(parents=True)
+    path.write_text(f'{{"schema_version": {reads + 1}, "active_phase": "1"}}', encoding="utf-8")
+
+    said, state = process_view.unread(car), process_view.load_state(car)
+
+    if bound == "a newer copy":
+        assert said is None, said
+        assert state is not None and state["schema_version"] == reads + 1 \
+            and state["active_phase"] == "1", state
+    else:
+        assert state is None and said is not None and f"schema v{reads + 1}" in said.why, said
 
 
 def test_an_older_copy_without_strict_is_read_by_tccs_own_mirror(project, monkeypatch):

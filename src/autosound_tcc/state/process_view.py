@@ -18,6 +18,7 @@ from __future__ import annotations
 import copy
 import inspect
 import json
+import os
 import re
 from pathlib import Path
 from dataclasses import dataclass, replace
@@ -137,10 +138,63 @@ def _strict(process, project_dir: Optional[Path]) -> tuple[Optional[dict], Optio
         if getattr(type(exc), "is_unreadable", False):
             return None, StateUnread(f"it {exc.reason}", str(exc.repair or ""))
         if isinstance(exc, process.ProcessError):
+            # A schema newer than TCC's copy reads — the one `ProcessError` the strict read
+            # raises. Not refused when the copy the project runs reads it: its children and its
+            # session write that schema (the group review of #219, D). Read then as the lenient
+            # read reads it — TCC runs no other copy's code in its own process.
+            if _bound_copy_reads(project_dir, (read_state_text(project_dir) or {}).get(
+                    "schema_version")):
+                return process.Process(str(folder)).load(), None
             said = str(exc)
             path = str(folder / "process-state.json")
-            return None, StateUnread("it" + said[len(path):] if said.startswith(path) else said)
+            said = "it" + said[len(path):] if said.startswith(path) else said
+            # «… reads v3 -- update the method: …»: the repair after the method's « -- ».
+            why, _, repair = said.partition(" -- ")
+            return None, StateUnread(why, repair)
         raise
+
+
+def _bound_copy_reads(project_dir: Optional[Path], version) -> bool:
+    """Whether the copy of the method `project_dir` is bound to — an approved or known copy that is
+    not TCC's own (`method_binding.for_project`) — reads a state of schema `version`: its
+    `SCHEMA_VERSION`, read off its `state/process.py` as text, is `version` or above, as its strict
+    read takes a state. False for TCC's own copy, a refused binding, a `version` that is no whole
+    number, and a copy whose number cannot be read: then TCC's own refusal stands."""
+    if not isinstance(version, int) or isinstance(version, bool):
+        return False
+    from autosound_tcc.core import method_binding
+
+    binding = method_binding.for_project(Path(project_dir or config.project_dir()))
+    if binding.skill_dir is None or os.path.realpath(binding.skill_dir) == os.path.realpath(
+            method_binding.own_copy()):
+        return False
+    reads = _schema_of(binding.skill_dir / "rew_tool" / "state" / "process.py")
+    return reads is not None and reads >= version
+
+
+#: `_schema_of`'s answers by file: `{path: (mtime_ns, size, number)}`, read again once it changes.
+_SCHEMA_OF: dict[str, tuple[int, int, Optional[int]]] = {}
+
+
+def _schema_of(script: Path) -> Optional[int]:
+    """The `SCHEMA_VERSION = <n>` a copy's `process.py` says at its top level, or None: no file, or
+    no such line. Read as text, kept per file until it changes."""
+    try:
+        stat = script.stat()
+    except OSError:
+        return None
+    key = str(script)
+    held = _SCHEMA_OF.get(key)
+    if held is not None and held[:2] == (stat.st_mtime_ns, stat.st_size):
+        return held[2]
+    try:
+        found = re.search(r"^SCHEMA_VERSION = (\d+)[ \t]*$",
+                          script.read_text(encoding="utf-8"), re.MULTILINE)
+    except (OSError, UnicodeDecodeError):
+        return None
+    number = int(found.group(1)) if found else None
+    _SCHEMA_OF[key] = (stat.st_mtime_ns, stat.st_size, number)
+    return number
 
 
 #: What a top level that is no object holds, in JSON's words.
