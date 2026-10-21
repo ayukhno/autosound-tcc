@@ -3132,3 +3132,67 @@ def test_a_fix_button_is_never_the_dialogs_default(project, other_copy):
     assert config.approved_methods() == () and same_path(link, other_copy), "Enter pressed nothing"
     assert asked == []
     assert [(b.autoDefault(), b.isDefault()) for b in buttons] == [(False, False)] * 2
+
+
+# ---- the sessions tab reads its window's folder (#224) ----------------------------------------
+
+
+def _window_on_a_other_than_the_setting(monkeypatch, tmp_path):
+    """A stand-in window built on project A while the process's folder points at B — a switch
+    whose close was cancelled. Returns (window, A, B)."""
+    from PySide6.QtWidgets import QWidget
+
+    a, b = tmp_path / "A", tmp_path / "B"
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: b)
+    monkeypatch.setattr(config, "project_dir", lambda: b)
+    window = QWidget()
+    window._built_on = a
+    return window, a, b
+
+
+def test_the_sessions_list_reads_the_window_s_project(monkeypatch, tmp_path):
+    from autosound_tcc.core import session_export
+
+    _app()
+    window, a, _b = _window_on_a_other_than_the_setting(monkeypatch, tmp_path)
+    asked = []
+    monkeypatch.setattr(session_export, "sessions", lambda project, *args, **kw: asked.append(project) or [])
+    dialog = DiagnosticsDialog(window)
+
+    dialog.refresh_sessions()
+
+    assert asked == [a]
+
+
+def test_the_sessions_file_name_follows_the_window_s_project(monkeypatch, tmp_path):
+    import datetime
+
+    _app()
+    window, _a, _b = _window_on_a_other_than_the_setting(monkeypatch, tmp_path)
+    dialog = DiagnosticsDialog(window)
+    monkeypatch.setattr(dialog, "_ticked_sessions",
+                        lambda: [SimpleNamespace(when=datetime.datetime(2026, 10, 1))])
+
+    dialog._sync_sessions_name()
+
+    assert dialog._sessions_name.text().startswith("A-sessions")
+
+
+def test_the_sessions_export_is_titled_with_the_window_s_project(monkeypatch, tmp_path):
+    import datetime
+
+    from autosound_tcc.core import session_export
+
+    _app()
+    window, _a, _b = _window_on_a_other_than_the_setting(monkeypatch, tmp_path)
+    dialog = DiagnosticsDialog(window)
+    monkeypatch.setattr(dialog, "_ticked_sessions", lambda: [SimpleNamespace(when=datetime.datetime(2026, 10, 1))])
+    titles = []
+    monkeypatch.setattr(session_export, "save_one_file",
+                        lambda chosen, target, title="", **kw: titles.append(title))
+    dialog._sessions_folder.setText(str(tmp_path / "out"))
+    dialog._sessions_each.setChecked(False)
+
+    dialog._save_sessions()
+
+    assert titles == ["A"]

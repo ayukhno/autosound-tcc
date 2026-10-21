@@ -286,3 +286,19 @@ def test_the_list_wears_every_row_s_check_box_and_the_window_is_wide(catalogue):
     assert dialog.minimumWidth() >= 720
     # Every row's box since tcc#131 (the list's own went into it), this list's included.
     assert "QAbstractItemView::indicator {" in build_qss(get_theme("dark"))
+
+
+def test_the_terminal_opens_in_the_window_s_project_not_the_setting(monkeypatch, tmp_path, catalogue):
+    """A window kept through a cancelled switch is built on A while the setting says B (#224)."""
+    from PySide6.QtWidgets import QWidget
+
+    a, b = tmp_path / "A", tmp_path / "B"
+    a.mkdir()
+    b.mkdir()
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: b)
+    monkeypatch.setattr(config, "project_dir", lambda: b)
+    window = QWidget()
+    window._built_on = a
+    dialog = ModelConfigDialog([], window)
+
+    assert dialog._launch_dir(dialog) == a

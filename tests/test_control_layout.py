@@ -1611,3 +1611,24 @@ def test_control_mode_s_eq_chips_paint_what_they_say_at_the_half(tmp_path, monke
         layout.leave()
     finally:
         i18n.set_language("en")
+
+
+def test_the_monitor_feed_reads_its_window_s_journal_not_the_setting(monkeypatch, tmp_path):
+    """A window built on A while the setting points at B shows A's journal (#224)."""
+    import json
+    from types import SimpleNamespace
+
+    _app()
+    a, b = tmp_path / "A", tmp_path / "B"
+    for folder, title in ((a, "from-A"), (b, "from-B")):
+        (folder / "process").mkdir(parents=True)
+        (folder / "process" / "journal.jsonl").write_text(
+            json.dumps({"at": "2026-10-01T10:00:00", "type": "capture_taken", "title": title}),
+            encoding="utf-8")
+    monkeypatch.setattr(config, "chosen_project_dir", lambda: b)
+    monkeypatch.setattr(config, "project_dir", lambda: b)
+    feed = control_layout.MonitorFeed(window=SimpleNamespace(_built_on=a))
+
+    text = feed._feed.toPlainText()
+
+    assert "from-A" in text and "from-B" not in text

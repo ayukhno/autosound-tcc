@@ -54,8 +54,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import config
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import i18n, window_folder
 from autosound_tcc.ui.tcc.discard import drop
 from autosound_tcc.ui.tcc.detail_pane import (
     cell_width,
@@ -138,7 +137,7 @@ class MonitorFeed(QWidget):
         self.refresh()
 
     def refresh(self) -> None:
-        journal = config.project_dir() / "process" / "journal.jsonl"
+        journal = window_folder.project(self._window) / "process" / "journal.jsonl"
         try:
             lines = journal.read_text(encoding="utf-8").splitlines()[-_FEED_EVENTS:]
         except OSError:

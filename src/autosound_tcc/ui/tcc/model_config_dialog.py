@@ -31,8 +31,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from autosound_tcc.core import config, model_choices, terminal_launcher
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.core import model_choices, terminal_launcher
+from autosound_tcc.ui.tcc import i18n, window_folder
 from autosound_tcc.ui.tcc.copy_menu import enable_copy
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 
@@ -214,7 +214,7 @@ class ModelConfigDialog(QDialog):
         self._status.setVisible(True)
         try:
             # No tuning session runs in it, so no project's copy of the method is asked of it (#169).
-            terminal_launcher.launch(self._launch_dir(), cli="omp", extra=("setup",), method=False)
+            terminal_launcher.launch(self._launch_dir(self), cli="omp", extra=("setup",), method=False)
         except terminal_launcher.TerminalLaunchError as exc:
             self._status.setText(str(exc))
             return
@@ -222,12 +222,12 @@ class ModelConfigDialog(QDialog):
         self._status.setText(i18n.t("configureModelsSetupOpened"))
 
     @staticmethod
-    def _launch_dir() -> Path:
+    def _launch_dir(widget=None) -> Path:
         """Where to open the terminal. The project folder when there is a real one, the home
         folder otherwise: `omp setup` configures the machine, not the car, and a launcher that
         refuses because a project has never been chosen would be refusing for the wrong reason."""
         try:
-            here = config.project_dir()
+            here = window_folder.project(widget)
             if here.is_dir():
                 return here
         except Exception:  # noqa: BLE001 — an unconfigured install is the ordinary case here

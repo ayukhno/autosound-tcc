@@ -58,7 +58,7 @@ from autosound_tcc.core import (
     vendor_loader,
 )
 from autosound_tcc.core.contract_check import ContractReport, stamp
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import i18n, window_folder
 from autosound_tcc.ui.tcc.codex_tool_row import CodexToolRow
 from autosound_tcc.ui.tcc.feedback_dialog import FeedbackDialog
 from autosound_tcc.ui.tcc.measurement_panel import TrafficLight
@@ -1438,7 +1438,7 @@ class DiagnosticsDialog(QDialog):
     def refresh_sessions(self) -> None:
         """Re-read the list every time the tab opens: a session that ran while this window was
         open is exactly the one somebody came here for."""
-        project = config.project_dir()
+        project = window_folder.project(self)
         self._sessions_rows = session_export.sessions(project) if project else []
         self._sessions_head.setText(
             i18n.t("diagSessionsPick").format(project=Path(project).name if project else "—")
@@ -1488,7 +1488,7 @@ class DiagnosticsDialog(QDialog):
         self._sessions_btn.setEnabled(bool(chosen))
         if getattr(self, "_sessions_name_owned", False):
             return
-        project = config.project_dir()
+        project = window_folder.project(self)
         stem = session_export.default_stem(project or "project", chosen)
         each = self._sessions_each.isChecked() and len(chosen) > 1
         self._sessions_name.setText(f"{stem}{'.zip' if each else '.md'}")
@@ -1506,7 +1506,7 @@ class DiagnosticsDialog(QDialog):
             return
         folder = Path(self._sessions_folder.text() or Path.home())
         target = folder / (self._sessions_name.text().strip() or "sessions.md")
-        title = Path(config.project_dir() or "").name
+        title = Path(window_folder.project(self) or "").name
         try:
             folder.mkdir(parents=True, exist_ok=True)
             if self._sessions_each.isChecked():
