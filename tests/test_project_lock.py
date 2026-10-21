@@ -446,3 +446,21 @@ def _in_another_thread(make_hold) -> None:
     thread.join(10)
     if raised:
         raise raised[0]
+
+
+def test_a_folder_made_inside_a_hold_stays_one_lock(tmp_path):
+    """A hold begun on a folder not made yet is keyed by its path; the folder made inside the hold
+    — by the legacy flock's `mkdir`, or the method's `enter-phase -1` — has an identity from then on.
+    One folder is one key for the life of the process (#218 review): the same thread asking again
+    is still answered at once, and another thread still waits for the first."""
+    car = tmp_path / "car"  # not made yet
+
+    with project_lock.hold(car, timeout_s=0, cross_process=False):
+        car.mkdir()
+        with pytest.raises(project_lock.LockTimeout, match="this thread already holds"):
+            with project_lock.hold(car, timeout_s=0):
+                pass
+        with pytest.raises(project_lock.LockTimeout, match="thread lock"):
+            _in_another_thread(lambda: project_lock.hold(car, timeout_s=0.2, cross_process=False))
+    with project_lock.hold(car, timeout_s=0, cross_process=False):  # given back, by either key
+        pass

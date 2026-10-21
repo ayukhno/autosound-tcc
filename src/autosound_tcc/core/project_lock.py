@@ -64,7 +64,11 @@ locks_itself = method_lock.locks_itself
 _THREAD_LOCKS: dict[tuple[int, int] | Path, threading.Lock] = {}
 _THREAD_LOCKS_GUARD = threading.Lock()
 
-#: The folders this thread holds the lock on now (`hold`), by `_folder`'s key.
+#: A folder's identity -> the path it was keyed by before it was made (`_key`): a folder made while
+#: its lock was held by path keeps that key for the life of the process.
+_ALIASES: dict[tuple[int, int], Path] = {}
+
+#: The folders this thread holds the lock on now (`hold`), by `_key`'s key.
 _HELD = threading.local()
 
 
@@ -77,10 +81,40 @@ def lock_file(project_dir: Path | str) -> Path:
     return Path(project_dir) / _PROCESS_DIR / _LOCK_NAME
 
 
+def _key(project_dir: Path | str) -> tuple[int, int] | Path:
+    """The one key of `project_dir`'s folder for the life of this process: `_folder`'s answer, except
+    for a folder made while its lock was held by path — not there when the hold began, made inside
+    it by the legacy flock's `mkdir` or by the method's first write. Its identity then names the
+    path it was keyed by, so a second writer, or the same thread asking again, meets the same lock
+    (#218 review). Found by the folder's identity among the path-keyed locks held now, and kept."""
+    key = _folder(project_dir)
+    if isinstance(key, Path):
+        return key
+    with _THREAD_LOCKS_GUARD:
+        if key in _ALIASES:
+            return _ALIASES[key]
+        if key in _THREAD_LOCKS:
+            return key
+        for other, lock in _THREAD_LOCKS.items():
+            if isinstance(other, Path) and lock.locked() and _identity(other) == key:
+                _ALIASES[key] = other
+                return other
+    return key
+
+
+def _identity(path: Path) -> tuple[int, int] | None:
+    """`path`'s device and inode, or None where it has none to read."""
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    return (info.st_dev, info.st_ino) if info.st_ino else None
+
+
 def _thread_lock(project_dir: Path | str, key=None) -> threading.Lock:
     """This process's lock for one project: one per project folder, so two spellings of a project
-    share it and two projects never wait on each other. `key` is `_folder`'s, when already read."""
-    key = _folder(project_dir) if key is None else key
+    share it and two projects never wait on each other. `key` is `_key`'s, when already read."""
+    key = _key(project_dir) if key is None else key
     with _THREAD_LOCKS_GUARD:
         lock = _THREAD_LOCKS.get(key)
         if lock is None:
@@ -89,7 +123,7 @@ def _thread_lock(project_dir: Path | str, key=None) -> threading.Lock:
 
 
 def _held_here() -> set:
-    """The folders this thread holds the lock on now, by `_folder`'s key."""
+    """The folders this thread holds the lock on now, by `_key`'s key."""
     held = getattr(_HELD, "folders", None)
     if held is None:
         held = _HELD.folders = set()
@@ -143,7 +177,7 @@ def hold(project_dir: Path | str, timeout_s: float, *, cross_process: bool = Tru
     """
     project_dir = Path(project_dir)
     deadline = time.monotonic() + timeout_s
-    key = _folder(project_dir)
+    key = _key(project_dir)
     held_here = _held_here()
     if key in held_here:
         raise LockTimeout(
