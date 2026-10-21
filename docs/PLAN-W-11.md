@@ -59,13 +59,17 @@ are what the implementer reads, line numbers checked on that commit.
 1. `core/method_lock.py` (S): `BUSY_EXIT`, the wait env name, `BUSY_SAID`, `locks_itself` with a (mtime, size) text
    cache; `project_lock.locks_itself` stays as a re-export — the method's own docs name it (`write_lock.py:29`,
    `CONTRACT.md:378-380`).
-2. `method_cli.spawn` (M): probe the bound copy (`env[method_binding.SKILL_ROOT_ENV]`); a self-locking copy gets no
-   TCC lock, the full wait in the env (the W-9 `timeout_s / 4` cap goes), and a child timeout = the work + the wait ×
-   the holds (`holds=3` for `close_capture`). The legacy path keeps `project_lock.hold`.
-3. The in-process-hold guard (S–M): a thread-local flag; `spawn` refuses at once as `Busy`. Defence in depth — no
-   TCC code holds the method's lock in-process today.
+2. `method_cli.spawn` (M): probe the bound copy (`env[method_binding.SKILL_ROOT_ENV]`); a self-locking copy gets
+   **no flock** (TCC's cross-process lock on `process/.process-write.lock`) but **keeps TCC's in-process thread lock**
+   (see the decision below); the full wait in the env (the W-9 `timeout_s / 4` cap goes), and a child timeout = the
+   work + the wait × the holds (`holds=3` for `close_capture`). The legacy path keeps `project_lock.hold` whole.
+3. The in-process-hold guard (S–M): the thread lock is not re-entrant (`project_lock.py:137-138`), so a nested hold
+   waits out its deadline today; a thread-local flag makes `spawn` refuse at once as `Busy`.
 4. `Busy` kept as a type through `profile_writer`, `config_writer` (`SaveResult.busy`), `project_repo` (mapping
-   only — its script never answers 75), `car_library`, MCP `_record`/`_close` (M; these writers have no tests yet).
+   only — its script never answers 75), `car_library`, MCP `_record`/`_close` (M). `profile_writer`'s callers catch
+   `ProfileWriterError` (`core/agent_session.py:239`, `core/mcp_server.py:999`): its busy form is a subclass of
+   `ProfileWriterError`, so their failure answers hold, and both routes get a test. The launcher matrix
+   (`tests/test_method_cli.py:437`) covers these writers; what is missing is typed-`Busy` propagation — extend it.
 5. `process/` (S): with change 2 the flock runs only on the legacy path, so TCC stops making `process/` ahead of the
    method — F-100's item settled by «stop making it»; `test_process_writer.py:23-60` relies on it today.
 6. The round id after `capture-start` (S–M): from the verb's own stdout (`process.py:10113`), not the unlocked
@@ -75,15 +79,26 @@ are what the implementer reads, line numbers checked on that commit.
 8. Tests (M, the bulk): «the other writer» becomes the method's own lock held from a subprocess (the vendored
    `write_lock.hold`, both platforms); T1–T4 of `PLAN-AUDIT` §5.4.
 
-**#218 — the decision on the round check** (TCC's technical call, 2026-10-21). Today `under_lock` checks the round
-under TCC's lock; with no TCC lock around a self-locking child it runs before the child's lock. Only the lock holder
-can check without a race, so the method is asked for `--round <id>` (TCC-064, hub #297, a candidate for the skill's
-W-11). Until a copy has it: the check stays before the child — a window of one interpreter start, which
-`capture-check` already narrows by refusing a round closed while it ran. A narrow TCC lock kept for these verbs was
-rejected: it does not exclude a session writing through the bare CLI, and it brings back the 120 s hold.
+**#218 — the decision on TCC's own lock** (TCC's technical call, 2026-10-21, revised after Codex's plan review).
+TCC keeps its **in-process thread lock** around every `process.py` child and drops only the **flock** for a
+self-locking copy. Two reasons, both checked against the code:
+- The round guard (`under_lock`, `process_writer.py:745-766`) protects `capture-check`, `capture-taken` and
+  `capture-protective`; the method's verbs take the lock and then use whichever round is open (`process.py:2246`,
+  `:2351`, `:2969`). Without TCC's lock, TCC's own capture-start between the guard and the child's lock moves a
+  capture into another round — protection TCC has today between its own calls.
+- On a folder where the OS lock is not available (a network share, the Mac↔VM shared folder) the method writes
+  without a lock, with a `note:` (`write_lock.py:325`, `:383`); TCC's thread lock is then what keeps two MCP calls from
+  overwriting each other. A test: OS lock unavailable, two concurrent writes, both in the state and the journal.
+
+What the thread lock never covered — a session writing through the bare CLI — needs the method to check the round
+under its own lock: `--round <id>` is asked (TCC-064, hub #297, a candidate for the skill's W-11); when a copy has it,
+TCC passes it. The `test_process_writer.py:310` and `:368` assertions stay, their «other writer» moved to the
+method's lock held from a subprocess.
 
 **#219 — the method already has it:** REW's states as `rew_state` on the exception class (`rew_api.py:57-128`; read
-`getattr(type(exc), "rew_state", None)` — TCC's copy is namespaced, `isinstance` fails); `Process.load(strict=True)`
+`getattr(type(exc), "rew_state", None)` — TCC's copy is namespaced, `isinstance` fails), except REW answering
+4xx/5xx: that is the standard library's `urllib.error.HTTPError` with no `rew_state` (`rew_api.py:168-177`) —
+classified by `isinstance` first, before the «unknown» fallback; `Process.load(strict=True)`
 → `Unreadable` with `.reason`/`.repair`, or `ProcessError` for a newer schema; `set_filters` refuses before sending
 and reads back. TCC reads none of it today: every REW exception is «offline» or text.
 
@@ -92,8 +107,11 @@ and reads back. TCC reads none of it today: every REW exception is «offline» o
    unknown — logged, not «offline»); the ping worker's signal carries it; the contract report's `rew.state` read
    (an `error`/`protocol` state shows green today); the decision in a Qt-free module (the ratchet); tooltips ×4.
 2. The measurement panel (S–M): `rewStatusChanged` carries the state; `measReadFail` per state.
-3. The capture check (S): «REW answered an error» told from a refusal (by the method's `error:` prefix until
-   TCC-064's ask 2); `measurement_view.absent()` reads `exists is False` first, the text as fallback.
+3. The capture check (S): «REW answered an error» told from a refusal only by the two full lines the method prints
+   (`error: REW answered with an error: …`, `error: REW's measurement list was not read (…)`) — never by the generic
+   `error:` prefix, which every refusal carries (`process.py:10584`); anything unrecognised stays the refusal, shown
+   verbatim; pinned words or a code are TCC-064's ask 2. `measurement_view.absent()` reads `exists is False` first,
+   the text as fallback.
 4. The curve window (S): REW down or an HTTP error no longer greys a row as «not in REW».
 5. MCP results (S, M of test churn): a `rew_state` field in `_record`, `check_captures`, `write_rew_filters` (plus
    «may hold the write» from `rew_unchecked`/`write_mismatch`); the `error` text unchanged.
@@ -105,7 +123,8 @@ and reads back. TCC reads none of it today: every REW exception is «offline» o
 8. Texts ×4 languages (pl/de by the Advisor), CHANGELOG, `docs/guide/REFERENCE.md:106`.
 
 Risks the maps name: a refusal shown wrongly blocks a working project (keep «the last plan stays, said once per
-state»); older copies (v3.1.0–v3.1.3) lack `rew_state`/`strict` — a missing state is «unknown», never «not found»;
+state»); older copies v3.1.0–v3.1.1 lack `rew_state`/`strict` (both came in v3.1.2) — detected by capability, not
+version, and a missing state is «unknown», never «not found»;
 `main_window.py` cannot grow, and new tests build no `MainWindow(`.
 
 ## Cost (estimate, 2026-10-21; the seam's share raised after the maps)
@@ -146,4 +165,5 @@ W-11 candidate (#220, the re-pin), and the Arbiter's walk on a clean Mac and the
 
 | issue | state | implementer | commits | review | note |
 |---|---|---|---|---|---|
+| the plan | Codex's plan review (2026-10-21, `gpt-6-astra`, ~10 min; it could not reach GitHub, so the issues' text was not read): 7 findings, **7 real** after checking — HTTP errors carry no `rew_state`; the `error:` prefix is every refusal's; `rew_state`/`strict` came in v3.1.2; the writers have launcher tests, typed `Busy` is what is missing; `ProfileWriterError`'s catchers; dropping TCC's lock loses the round guard between TCC's own calls; and the unlockable-folder fallback — the last two changed #218's decision (keep the thread lock, drop the flock) | — | 83b5ad1 + this | Codex | a trial record: 0 false findings |
 | #229 | the report on the issue (Codex, 2026-10-21): 25 findings; `GroupTable`, `git_facts`, `off_convention` spot-checked dead | — | — | — | the cleanup builds from that report |
