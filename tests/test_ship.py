@@ -2089,10 +2089,12 @@ def test_a_published_release_of_the_named_method_must_be_the_pin(repo, carrier, 
     assert COMING in said and other[:12] in said and pin[:12] in said, said
 
 
-def test_a_candidate_that_carries_its_release_asks_the_hub_about_the_waves_pool(repo, carrier):
+def test_a_candidate_that_carries_its_release_asks_the_hub_about_the_waves_pool(repo, carrier,
+                                                                                monkeypatch):
     """The hub's `pool-closed` runs for version tags only, so a candidate tagged with the wave's
     items still open would be refused by the train later — the bookkeeping-after-candidate the
     train exists to end. ship asks the carrier's own check for `vY`, before the tag."""
+    monkeypatch.delenv("HUB_ROLE", raising=False)
     head = _carrying_candidate(repo)
     carrier.verdict = FAIL
 
@@ -2103,6 +2105,8 @@ def test_a_candidate_that_carries_its_release_asks_the_hub_about_the_waves_pool(
     assert "pool-closed" in str(stop.value), str(stop.value)
     assert [(a["tag"], a["repo"], a["at"]) for a in carrier.asked] == [
         ("v1.2.0", _Carrier.ROLE_REPO["tcc"], None)]
+    assert [(Path(a["root"]).resolve(), a["role"]) for a in carrier.asked] == [
+        (repo.resolve(), "tcc")], "asked about this tree, as the session's role (tcc by default)"
     assert git(repo, "tag", "--list", "beta-v1.2.0-rc1") == "", "nothing was tagged"
     assert git(repo, "rev-parse", "HEAD") == head
 

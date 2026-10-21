@@ -2893,6 +2893,7 @@ def _cmd_lines(**kw):
 
 @pytest.mark.parametrize("kw", [{}, {"constraints": True}, {"sha": _VERIFIED},
                                 {"sha": _VERIFIED, "constraints": True, "check_installed": True},
+                                {"sha": _VERIFIED, "verified": False, "peeled": False},
                                 {"unpinned_why": "v1.1.4 carries no constraints.txt"}])
 def test_every_goto_in_the_windows_script_has_its_label(kw):
     lines = _cmd_lines(**kw)
@@ -2901,6 +2902,14 @@ def test_every_goto_in_the_windows_script_has_its_label(kw):
     labels = {line[1:] for line in lines if line.startswith(":")}
 
     assert targets <= labels, targets - labels
+
+
+def test_the_windows_guard_asks_the_plain_ref_for_a_lightweight_tag():
+    lightweight = "\n".join(_cmd_lines(sha=_VERIFIED, verified=False, peeled=False))
+    annotated = "\n".join(_cmd_lines(sha=_VERIFIED))
+
+    assert "refs/tags/v1.1.4" in lightweight and "refs/tags/v1.1.4^{}" not in lightweight
+    assert "refs/tags/v1.1.4^{}" in annotated
 
 
 def test_the_windows_script_s_pinned_path_runs_in_this_order():
@@ -3135,6 +3144,9 @@ def test_the_window_says_good_signature_only_for_a_verified_tag(monkeypatch, tmp
     signed = updates.TCC_WINDOW_WORDS["signed"].replace("{tag}", "v1.1.4").replace(
         "{principal}", "author")
     assert (signed in script) is (case == "verified"), script
+    assert (updates.TCC_WINDOW_WORDS["differs"] in script) is (case == "verified"), script
+    helper = ready.script.parent / updates._INSTALLED_HELPER
+    assert helper.exists() is (case == "verified"), "the read-back helper rides with a verified tag"
     assert "--constraints" in script, "the pins stay"
     assert "refs/tags/v1.1.4^{}" in script, "the commit guard stays"
 
