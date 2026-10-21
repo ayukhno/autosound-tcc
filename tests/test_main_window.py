@@ -6103,14 +6103,17 @@ def test_unusable_captures_are_one_line_with_the_rest_behind_a_link(monkeypatch)
         i18n.t("unusableSummary").format(n=17, first=""))
 
 
-def test_a_check_whose_round_closed_before_its_answer_is_judged_in_that_round(monkeypatch):
+def test_a_check_answered_after_its_round_moved_on_says_nothing_and_takes_its_line_back(
+        monkeypatch):
     """#218, F-100's «Locks and rounds»: the check's answer carried its titles alone, and the window
-    read the verdicts in the round open WHEN THE ANSWER CAME. The check recorded into round A; the
-    session's `capture-start` then closed A and opened B before the answer reached the window, B
-    holding the same title judged fine — and A's unusable capture was never said. Judged in the
-    round the check was started for, as a «did not run» line is (`NotRun.at`); A's reasons went
-    with its state, so the line names the capture. On the real method, with a host in the window's
-    place."""
+    read the verdicts in the round open WHEN THE ANSWER CAME — the session's `capture-start` can
+    close the round the check recorded into and open the next before the answer reaches the window.
+    Read in the next round, A's titles were judged by B's verdicts; read in A as the journal folds
+    it, every bad verdict had lost its reasons, an absent capture read unusable, and A's line stood
+    over B's checklist with nothing in B to take it back. As a check that did not run (`NotRun.at`):
+    once its round is no longer the open one, the answer says nothing, and the line it said for that
+    round is taken back. On the real method, with a real strip, in a host in the window's place."""
+    from autosound_tcc.ui.tcc.status_strip import StatusStrip
     from tests import _rounds
 
     typed = [_rounds.as_typed("w-L_1 (sw)")]
@@ -6118,18 +6121,44 @@ def test_a_check_whose_round_closed_before_its_answer_is_judged_in_that_round(mo
                                   pad=False)
     process.check_captures(typed, verifier=_Heard())  # A: silence, unusable
     round_a = process.load()["capture"]["id"]
+    _app()
+    strip = StatusStrip()
+    host = SimpleNamespace(_status_strip=strip, _refresh_capture_task=lambda state: None,
+                           _show_unusable=lambda lines: None)
+    MainWindow._on_capture_check_done(host, typed, round_a)  # answered while A is open
+    assert strip.text().startswith(
+        i18n.t("unusableSummary").format(n=1, first=f"{typed[0]} — {_SILENCE}")), strip.text()
+
     process.start_capture(1, expected=typed)  # the session moves on: A closed, B open
-    process.record_capture(typed[0])
-    process.check_captures(typed, verifier=_Heard(valid=True))  # B: the re-take is fine
+    MainWindow._on_capture_check_done(host, typed, round_a)  # A's next answer comes after that
+
+    assert strip.text() == "" and strip.waiting() == [], "nothing about A over B's checklist"
+
+
+def test_a_check_judges_in_the_windows_folder_not_the_processs(tmp_path):
+    """#218's review, minor 2: the verdicts were read in the window's folder, and judged — «taken
+    as it is», the series key — in the process's (`config.project_dir()`). After a cancelled switch
+    the two differ: a capture taken as it is in the window's project read unusable again."""
+    from autosound_tcc.core import capture_import
+    from tests import _rounds
+
+    folder = tmp_path / "the-windows"
+    typed = [_rounds.as_typed("sw_7 (sw)")]
+    process = _rounds.write_round(folder, version=7, expected=typed, taken=typed, pad=False)
+    process.check_captures(typed, verifier=_Heard())
+    capture_import.record_imported([capture_import.Candidate(
+        ordinal="1", title=typed[0], uuid=f"u-{typed[0]}", date="", when=None, imported=False,
+        as_is=True)], project_dir=folder)
     said = []
     host = SimpleNamespace(
+        _built_on=folder, _refresh_capture_task=lambda state: None,
         _status_strip=SimpleNamespace(notify=lambda text, **k: said.append(text),
                                       withdraw=lambda text: None),
-        _refresh_capture_task=lambda state: None, _show_unusable=lambda lines: None)
+        _show_unusable=lambda lines: None)
 
-    MainWindow._on_capture_check_done(host, typed, round_a)
+    MainWindow._on_capture_check_done(host, typed, process.load()["capture"]["id"])
 
-    assert said == [i18n.t("unusableSummary").format(n=1, first=typed[0])], said
+    assert said == [], "taken as it is, in the window's own project"
 
 
 def test_show_all_lists_every_unusable_capture_in_the_checkers_words(monkeypatch):
@@ -6579,8 +6608,11 @@ def test_a_check_that_ran_over_a_round_it_cannot_read_back_says_so(monkeypatch):
     monkeypatch.setattr(process_view, "capture_round", lambda *a, **k: None)
     monkeypatch.setattr(process_view, "load_state", lambda *a, **k: None)
 
-    MainWindow._on_capture_check_done(host, typed, process.load()["capture"]["id"])
+    round_id = process.load()["capture"]["id"]
+    MainWindow._on_capture_check_done(host, typed, round_id)
     assert strip.text() == i18n.t("captureCheckUnread")
+    # About the round the check was for, so another round opening retires it (`NotRun.ended`).
+    assert host._capture_check_not_run.round_id == round_id
     MainWindow._sync_capture_ready(host)
     assert strip.text() == i18n.t("captureCheckUnread"), "still unread: it stands"
 

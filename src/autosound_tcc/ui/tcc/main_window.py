@@ -4032,35 +4032,36 @@ class MainWindow(QMainWindow):
             action=(i18n.t("tfAction"), self._meas_panel.open_import))
 
     def _on_capture_check_done(self, titles: list, round_id=None) -> None:
-        """Put the check's verdict on screen: one line for the captures of `titles` — what it was
-        handed — whose verdict in `round_id`, the round it was for (`checked_round`, #218), reads bad
-        (`unusable_lines`, #175 TA-8), each with the checker's own reasons: "silence in band" and
-        "covers 200-2000 Hz, asked for 20-20000" lead to different actions at the car.
+        """Put the check's verdict on screen: a line for the captures of `titles` whose verdict in
+        `round_id`, the round it was for, reads bad (`unusable_lines`, #175 TA-8), in the checker's
+        words — "silence in band" and "covers 200-2000 Hz" lead to different actions at the car —
+        and nothing once that round is no longer open, its line taken back (`checked_round`, #218).
 
-        One line and the rest behind a link, with a ✕ (finding 29): sixteen of them joined into the
-        strip took half the window and nothing could close it. A list closed by hand stays closed
-        until it CHANGES -- the same sixteen again are not news.
-        """
+        One line, the rest behind a link, with a ✕ (finding 29): sixteen joined took half the window
+        and nothing closed it. A list closed by hand stays closed until it CHANGES (not news)."""
         # It ran: a «did not run» on the strip, shown or waiting, is no longer true (R-ax), and a
         # warning that outlives its cause teaches people to ignore the strip.
         not_run, self._capture_check_not_run = getattr(self, "_capture_check_not_run", None), None
         self._status_strip.withdraw(getattr(not_run, "line", None))
-        round_ = measurement_view.checked_round(window_folder.project(self), round_id)
+        project = window_folder.project(self)
+        round_ = measurement_view.checked_round(project, round_id)
         if round_ is None:  # it ran, and nothing it recorded can be read back: said, held (M6)
             self._capture_check_not_run = measurement_view.NotRun(i18n.t("captureCheckUnread"),
-                                                                  None, tuple(titles))
+                                                                  round_id, tuple(titles))
             self._status_strip.notify(self._capture_check_not_run.line, level="warn")
-        bad = measurement_view.unusable_lines(round_ or {}, titles, ambiguous=i18n.t("measAmbiguous"))
+        elif not round_:  # its round is over: so is what was said about it
+            self._status_strip.withdraw(getattr(self, "_unusable_said", None))
+        bad = measurement_view.unusable_lines(round_ or {}, titles, project, i18n.t("measAmbiguous"))
         if bad and frozenset(bad) != getattr(self, "_unusable_dismissed", None):
+            self._unusable_said = i18n.t("unusableSummary").format(n=len(bad), first=bad[0])
             self._status_strip.notify(
-                i18n.t("unusableSummary").format(n=len(bad), first=bad[0]), level="warn",
+                self._unusable_said, level="warn",
                 action=(i18n.t("unusableShow"), lambda lines=tuple(bad): self._show_unusable(lines)),
                 dismissible=True,
                 on_dismiss=lambda lines=frozenset(bad): setattr(self, "_unusable_dismissed", lines),
             )
         # The panel reads the recorded verdict too.
-        state = process_view.load_state(window_folder.project(self))
-        if state:
+        if state := process_view.load_state(project):
             self._refresh_capture_task(state)
 
     def _on_capture_check_failed(self, why: str) -> None:
