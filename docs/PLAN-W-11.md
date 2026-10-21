@@ -14,6 +14,11 @@ takes the review seats that `hub:seam` gives to Opus and Fable; Gemini (`agy`) r
 checked against the code before it is acted on. On the first `Risk: high` group the Opus seats run beside Codex,
 to compare.
 
+**2026-10-21, 10:53: Codex hit its usage limit** (until 14:54) after the plan review and four task reviews; the
+Arbiter: «Кодекс закінчився :( перемикайся на Джеміні». From the group review of step 1 the code seats run on
+**Gemini Argon** (`agy --model gemini-4-argon-high --mode plan --sandbox -p "<prompt>"` — `-p` takes the next word as the prompt, so it goes last). Gemini fills gaps by inventing
+(`hub/docs/CRITICS-2026-10-15.md`), so every finding is checked against the code before a fix round is sent.
+
 ## Order (the Arbiter's «го», 2026-10-21)
 
 | step | group | issues | note |
