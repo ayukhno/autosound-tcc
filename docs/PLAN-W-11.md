@@ -19,6 +19,8 @@ Arbiter: «Кодекс закінчився :( перемикайся на Дж
 **Gemini Argon** (`agy --model gemini-4-argon-high --mode plan --sandbox -p "<prompt>"` — `-p` takes the next word as the prompt, so it goes last). Gemini fills gaps by inventing
 (`hub/docs/CRITICS-2026-10-15.md`), so every finding is checked against the code before a fix round is sent.
 
+**2026-10-21, ~13:10: the code seats move to Opus 5.5** (the Arbiter: «якщо Джеміні вигадує в коді — заміни його на Клод Опус 5.5»). Gemini's Session group review quoted code that is not in the tree (`GeneratorCheckView.show()`, `_on_dialog_start_requested`), though its main findings held. From here every code review — task, re-review, group, final — is Opus 5.5 (`hub:seam`'s own seats); Gemini keeps the user-facing text (`docs/guide`, CHANGELOG). The two Gemini reviews already running finish, and their findings are checked against the code before any fix.
+
 ## Order (the Arbiter's «го», 2026-10-21)
 
 | step | group | issues | note |
