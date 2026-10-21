@@ -5342,6 +5342,8 @@ def test_a_catalogue_worker_waiting_on_the_start_stops_when_asked(monkeypatch):
     Important 5)."""
     import threading
 
+    from autosound_tcc.ui.tcc import qt_shutdown
+
     _app()
     asked = []
     monkeypatch.setattr(main_window.model_choices, "refresh_cli_catalogue",
@@ -5358,7 +5360,7 @@ def test_a_catalogue_worker_waiting_on_the_start_stops_when_asked(monkeypatch):
     try:
         assert in_the_wait.wait(10), "the worker reached the wait before it was interrupted"
         worker.requestInterruption()
-        stopped = worker.wait(10000)  # generous: only stops a hung test, no speed is asserted
+        stopped = worker.wait(qt_shutdown.QUIT_WAIT_MS)  # the budget `stop_workers` gives it
     finally:
         release.set()  # releases a worker that did not listen, so no thread outlives the test
         worker.wait(5000)
@@ -8319,6 +8321,8 @@ def test_an_agent_write_rereads_the_project_without_the_full_recheck(monkeypatch
                 self.active = False
                 self._on_timeout()
 
+    real = window._agent_refresh_timer  # the real one: one shot, and a wait worth the name
+    assert real.isSingleShot() and real.interval() == main_window._AGENT_REFRESH_MS
     hand = _Hand(window._reread_after_agent)
     window._agent_refresh_timer = hand
 

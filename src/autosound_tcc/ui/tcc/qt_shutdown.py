@@ -167,6 +167,10 @@ def detached() -> frozenset:
     return frozenset(_DETACHED)
 
 
+#: How long a closing window waits for a worker that may be mid-call before handing it over.
+QUIT_WAIT_MS = 5000
+
+
 def stop_or_detach(thread: QThread | None, wait_ms: int, mute: Iterable = ()) -> bool:
     """Ask a worker to stop; hand it over here if it will not, rather than destroying it.
 

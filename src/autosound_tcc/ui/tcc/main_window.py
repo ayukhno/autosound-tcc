@@ -5751,7 +5751,7 @@ class MainWindow(QMainWindow):
         for worker in (getattr(self, "_cli_catalogue", None),
                        getattr(self, "_reviewer_probe", None)):
             if worker is not None:
-                qt_shutdown.stop_or_detach(worker, 5000, mute=(worker.done,))
+                qt_shutdown.stop_or_detach(worker, qt_shutdown.QUIT_WAIT_MS, mute=(worker.done,))
         # The wheel shows that check, and a check let go of with its `done` cut never answers:
         # nothing else would stop it, and its timer ticked on with the window gone (tcc#140).
         spinner = getattr(self, "_critic_spinner", None)
