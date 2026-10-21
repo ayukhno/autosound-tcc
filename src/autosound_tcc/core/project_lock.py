@@ -27,12 +27,13 @@ Qt-free. No other module imports `fcntl` or holds the writer lock.
 from __future__ import annotations
 
 import os
-import re
 import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+
+from autosound_tcc.core import method_lock
 
 try:  # POSIX only; Windows falls back to the thread lock alone.
     import fcntl
@@ -47,10 +48,9 @@ _LOCK_NAME = ".process-write.lock"
 # flock has no timed wait, so a held one is tried again this often until the deadline.
 _POLL_S = 0.05
 
-# The method's own writer lock, the day it has one: this file, declaring the protocol TCC speaks.
-# Read as text and never imported — importing it would run the method's code in TCC's process.
-_WRITE_LOCK = ("rew_tool", "write_lock.py")
-_PROTOCOL_1 = re.compile(r"^PROTOCOL\s*=\s*1[ \t]*(?:#.*)?$", re.MULTILINE)
+#: Whether a copy of the method takes its own writer lock: `method_lock`'s, named here too because
+#: the method's own docs name it here (its `write_lock.py`, `CONTRACT.md`).
+locks_itself = method_lock.locks_itself
 
 #: One per project folder: by its identity, `(st_dev, st_ino)`, or by its resolved path where it has
 #: none (`_folder`).
@@ -60,21 +60,6 @@ _THREAD_LOCKS_GUARD = threading.Lock()
 
 class LockTimeout(RuntimeError):
     """The project's writer lock was still held when the deadline passed. Nothing was taken."""
-
-
-def locks_itself(skill_dir: Path | str) -> bool:
-    """Whether this copy of the method takes its own writer lock: `rew_tool/write_lock.py` there,
-    declaring `PROTOCOL = 1` on a line of its own.
-
-    No copy up to v3.1.2 has the file, so there the skill's CLI, run bare, writes past `hold`;
-    v3.1.3 declares it, and `tests/test_writer_race.py` holds that a bare write and TCC's both land.
-    Never raises: a file that cannot be read as text is a copy that does not lock itself.
-    """
-    try:
-        text = Path(skill_dir, *_WRITE_LOCK).read_text(encoding="utf-8")
-    except (OSError, ValueError):  # missing, a folder, unreadable, not UTF-8
-        return False
-    return _PROTOCOL_1.search(text) is not None
 
 
 def lock_file(project_dir: Path | str) -> Path:

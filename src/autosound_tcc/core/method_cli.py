@@ -42,7 +42,9 @@ import threading
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
-from autosound_tcc.core import app_log, child, method_binding, project_lock, vendor_loader
+from autosound_tcc.core import (
+    app_log, child, method_binding, method_lock, project_lock, vendor_loader,
+)
 
 #: How long a write waits for the project's lock (`project_lock.hold`) before answering `Busy`
 #: (#171), read when the call runs. The main thread is the window, and a window frozen behind a
@@ -52,13 +54,12 @@ from autosound_tcc.core import app_log, child, method_binding, project_lock, ven
 GUI_LOCK_WAIT_S = 5.0
 LOCK_WAIT_S = 60.0
 
-#: The method's own writer lock, from v3.1.3 (its `rew_tool/write_lock.py`, `CONTRACT.md` item 8):
-#: a writer that meets another waits `AUTOSOUND_LOCK_TIMEOUT_S` seconds, read at each call, then
-#: exits 75 with one `busy:` line and nothing written.
-METHOD_LOCK_WAIT_ENV = "AUTOSOUND_LOCK_TIMEOUT_S"
-EXIT_BUSY = 75
-#: What `Busy` says when the busy write printed nothing of its own: TCC's lock past its wait.
-BUSY_SAID = "busy: another write to this project is still running — nothing was written, try again"
+#: The method's own writer lock, from v3.1.3 (`method_lock`): a writer that meets another waits
+#: `AUTOSOUND_LOCK_TIMEOUT_S` seconds, read at each call, then exits 75 with one `busy:` line and
+#: nothing written. Its names, under the ones every caller here already reads.
+METHOD_LOCK_WAIT_ENV = method_lock.WAIT_ENV
+EXIT_BUSY = method_lock.BUSY_EXIT
+BUSY_SAID = method_lock.BUSY_SAID
 
 #: The method's journal writer, relative to its `rew_tool/`: the one script whose flags are checked
 #: against its text before it starts (#169, N19).
