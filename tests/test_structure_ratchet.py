@@ -46,8 +46,10 @@ MAIN_WINDOW_MAX_LINES = 6048
 #: Full-window builds in the tests, outside comments (W-8: 223 on 2026-10-06, 218 after the menu
 #: tests became renderer tests, #161; W-9: 212 after the «settled» tests became plain tests over a
 #: recorded round, #175; 208 after the capture series' tests did, #175; 207 after the compare
-#: default's did, #179).
-WINDOW_BUILDS_MAX = 207
+#: default's did, #179; W-11: 196 after the test audit's cleanup — the duplicate terminal, reviewer-list
+#: and gate tests merged into plain-function files, and the picker, free-model, route-label,
+#: missing-CLI and language tests on a standalone combo or a stand-in host, #229).
+WINDOW_BUILDS_MAX = 196
 #: How far under its bound a measure may sit before the bound must come down with it.
 SLACK_LINES = 20
 SLACK_BUILDS = 2
