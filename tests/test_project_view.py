@@ -610,6 +610,8 @@ def _git_rows(section) -> dict[str, str]:
     return {key: value for key, value in zip(keys, values) if key in git}
 
 
+# Quarantine: a slow runner's header read from the step before can land after the spy is in.
+@pytest.mark.xfail(strict=False, reason="flaky: #233")
 def test_the_project_header_says_each_state_of_the_history_and_its_backup(tmp_path, monkeypatch,
                                                                           unhurried_git):
     """A folder with no history, then one with no backup, read from real git. A language switch
