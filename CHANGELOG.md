@@ -15,7 +15,7 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [Unreleased]
+## [v1.2.0] — 2026-10-21 · rounds on the method's level base, its lock and REW's states said as they are, the main AI checked at the pick, optional captures no gap, the guide matched to the screen, every line in four languages, the method at v3.2.0
 
 Paired with method `a9952206468573743d2083b73c4b7e7f9d10dc6d` — the method's signed candidate `beta-v3.2.0-rc2`, its
 last: the train tags that commit **`v3.2.0`**.
