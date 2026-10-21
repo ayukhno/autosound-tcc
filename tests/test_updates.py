@@ -3064,6 +3064,54 @@ def test_a_release_before_the_file_says_nothing_about_it_in_the_window(monkeypat
     assert updates.TCC_WINDOW_WORDS["nopins"] not in ready.script.read_text(encoding="utf-8")
 
 
+def _unsigned_v1_1_4(monkeypatch, tmp_path, pins: bytes | None):
+    """An UNSIGNED v1.1.4 on `_tcc_origin`, with `pins` as its `constraints.txt` or none, offered
+    under the developer's switch."""
+    _tcc_origin(monkeypatch, tmp_path)
+    origin = tmp_path / "tcc-origin"
+    if pins is not None:
+        (origin / "constraints.txt").write_bytes(pins)
+        _git_in("add", "constraints.txt", cwd=origin)
+        _git_in("commit", "-q", "-m", "pins", cwd=origin)
+    _git_in("tag", "-a", "v1.1.4", "-m", "unsigned", cwd=origin)
+    _offering(monkeypatch, "v1.1.4")
+    monkeypatch.setenv(updates.SKIP_VERIFY_VAR, "1")
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_the_developer_switch_installs_a_tag_s_pins_with_it(monkeypatch, tmp_path):
+    """tcc#227 (W-10's re-review, m1): the switch answered before the fetch, so a v1.1.4 under it
+    installed without the `constraints.txt` its tree carries. The switch skips the SIGNATURE — the
+    tag here is unsigned and still installs, the line says so — and the pins come along."""
+    _unsigned_v1_1_4(monkeypatch, tmp_path, _PINS)
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None and ready.reason == "", ready
+    assert ready.signature == (
+        f"signature NOT checked: {updates.SKIP_VERIFY_VAR}=1 is set (a developer's switch)")
+    install = next(line for line in ready.script.read_text(encoding="utf-8").splitlines()
+                   if "uv tool install --python" in line)
+    assert "--constraints" in install and "@v1.1.4" in install, install
+    assert (ready.script.parent / "constraints.txt").read_bytes() == _PINS
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_the_developer_switch_says_nopins_for_a_tag_that_carries_none(monkeypatch, tmp_path):
+    """tcc#227: under the switch a v1.1.4 without `constraints.txt` says the `nopins` line and why,
+    before uv runs — as it does without the switch."""
+    _unsigned_v1_1_4(monkeypatch, tmp_path, None)
+
+    ready = updates.prepare_tcc_update(pid=4242, platform="darwin")
+
+    assert ready.script is not None, ready
+    script = ready.script.read_text(encoding="utf-8")
+    assert "--constraints" not in script
+    said = updates.TCC_WINDOW_WORDS["nopins"]
+    assert said in script and script.index(said) < script.index("uv tool install --python")
+    assert "carries no constraints.txt" in script, script
+
+
 # ---- W-10, the Arbiter's Windows pass, round 3: a program running from TCC's folder ------------
 
 _TOOLS = r"C:\Users\me\AppData\Roaming\uv\tools"

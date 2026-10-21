@@ -1742,6 +1742,18 @@ def _fetch_tcc_tag(repo: Path, tag: str, light: bool) -> tuple[bool, str]:
     return _git(*fetch, TCC_REPO, refspec, cwd=repo, timeout=timeout)
 
 
+def _switch_still_fetches(tag: str) -> bool:
+    """The developer's switch is set and `tag` is from signing on: the switch skips the SIGNATURE,
+    not the fetch (tcc#227) — before, it answered by name, and a v1.1.4 installed without the
+    `TCC_CONSTRAINTS` its tree carries and without the window's line when it carried none.
+    Fetched, the tag gives its commit and its pins as without the switch; `_verify_tag` still
+    answers the signature with the switch's line."""
+    if os.environ.get(SKIP_VERIFY_VAR) != "1":
+        return False
+    here, first = channel_key(tag), channel_key(TCC_SIGNED_FROM)
+    return here is not None and first is not None and here[:3] >= first[:3]
+
+
 def check_tcc_tag(tag: str, *, light: bool = False
                   ) -> tuple[bool, str, str, str, Optional[bytes]]:
     """`_verify_tag`'s answer for one of TCC's own tags — `(ok, the line to show, reason key,
@@ -1755,8 +1767,9 @@ def check_tcc_tag(tag: str, *, light: bool = False
 
     TCC's first signed tag is `TCC_SIGNED_FROM`, and tags are ordered the way TCC's channel orders
     them (`channel_key`): a beta candidate is signed by the same `make ship` and checked like a
-    release. A name the check can decide on alone — the developer's switch, a release from before
-    signing — is decided without fetching anything.
+    release. A name the check can decide on alone — a release from before signing, a name that is
+    not a release — is decided without fetching anything. The developer's switch skips only the
+    signature: a tag from signing on is still fetched for its commit and pins (tcc#227).
 
     The commit comes back so the install script can hold uv to it (`tcc_install_script`): uv
     resolves the tag's NAME only after the person quits TCC. A verified tag whose commit git then
@@ -1772,7 +1785,7 @@ def check_tcc_tag(tag: str, *, light: bool = False
     (`_fetch_tcc_tag`), and no constraints read — None.
     """
     early = _verdict_by_name(tag, TCC_SIGNED_FROM, channel_key)
-    if early is not None:
+    if early is not None and not (early[0] and not light and _switch_still_fetches(tag)):
         return (*early, "", None)
     with tempfile.TemporaryDirectory(prefix="autosound-tcc-tag-", ignore_cleanup_errors=True) as tmp:
         repo = Path(tmp)
