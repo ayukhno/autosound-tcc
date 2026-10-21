@@ -15,6 +15,7 @@ that does not lock itself.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import subprocess
@@ -31,7 +32,7 @@ from autosound_tcc.core import (
 
 from tests import _intake
 from tests._lock_holders import WRITE_LOCK, method_lock_held, tccs_flock_held
-from tests._method_copies import copy_of_the_method
+from tests._method_copies import SKILL, copy_of_the_method, linked_and_approved, same_path
 
 #: The vendored method's lock module: read as text here, and run by the holder process.
 _WRITE_LOCK = WRITE_LOCK
@@ -108,10 +109,20 @@ def legacy(monkeypatch):
 
 
 def _files(folder: Path) -> dict[str, bytes]:
-    """Every file under `folder` but git's own, as {relative path: bytes}."""
+    """Every file under `folder` but git's own and the method lock's, as {relative path: bytes}.
+
+    `.autosound/` is left out of the bytes: on Windows the holder locks `write.lock` with
+    `LockFileEx`, a mandatory byte-range lock, and reading it would be a `PermissionError`, not a
+    change. Its file names are `_names`'."""
     return {path.relative_to(folder).as_posix(): path.read_bytes()
             for path in sorted(folder.rglob("*"))
-            if path.is_file() and ".git" not in path.relative_to(folder).parts}
+            if path.is_file() and not {".git", ".autosound"} & set(path.relative_to(folder).parts)}
+
+
+def _names(folder: Path) -> list[str]:
+    """The files under `folder`, by name alone: for the lock's folder, whose `write.lock` cannot
+    be read while it is held on Windows."""
+    return sorted(path.relative_to(folder).as_posix() for path in folder.rglob("*"))
 
 
 def _plan(project_dir: Path) -> list[str]:
@@ -133,10 +144,11 @@ def test_t1_a_write_the_methods_lock_holds_answers_busy_and_changes_nothing(proj
     subprocess.run(["git", "init", "-q", str(project)], check=True)
 
     with method_lock_held(project):
-        before = _files(project)
+        before, lock_folder = _files(project), _names(project / ".autosound")
         with pytest.raises(process_writer.Busy) as busy:
             process_writer.enter_phase(project, "1")
         after = _files(project)
+        assert _names(project / ".autosound") == lock_folder, "a busy write left a file by the lock"
 
     assert str(busy.value).startswith("busy: ") and "write.lock" in str(busy.value), busy.value
     assert after == before, "a busy write changed a file"
@@ -157,6 +169,106 @@ def test_a_copy_that_locks_itself_is_run_with_no_flock_of_tccs_around_it(project
         process_writer.add_step(project, "2.4", "added past an old TCC's flock")
 
     assert "2.4" in _plan(project)
+
+
+# ---- the copy the child runs is the one asked, not TCC's own -------------------------------------
+# Every legacy-path test above forces `locks_itself` alike for every copy, so `spawn` asking TCC's own
+# copy instead of the one the project is bound to went unseen (#218 group review). Here the two copies
+# disagree, and only the bound copy's answer may decide the flock and the bound.
+
+
+def _a_copy_declaring(root: Path, protocol: int) -> Path:
+    """A copy of the method whose `rew_tool/write_lock.py` declares `PROTOCOL = <protocol>`."""
+    def declare(text: str) -> str:
+        said, changed = re.subn(r"^PROTOCOL = 1$", f"PROTOCOL = {protocol}", text, flags=re.MULTILINE)
+        assert changed == 1, "the vendored write_lock.py declares PROTOCOL = 1 once"
+        return said
+
+    copy = copy_of_the_method(root, changes={"rew_tool/write_lock.py": declare})
+    assert method_lock.locks_itself(copy) is (protocol == 1)
+    return copy
+
+
+def _bind(route: str, project: Path, copy: Path, monkeypatch) -> None:
+    """The project bound to `copy`: through the skill-dir override (TCC's own copy is then `copy`
+    too), or through the project's own link, approved, beside TCC's own vendored copy."""
+    if route == "env":
+        monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, str(copy))
+    else:
+        linked_and_approved(project, copy)
+    assert same_path(method_cli.resolve(project, "state/process.py")[0].parents[2], copy)
+
+
+def _bounds_and_budgets(monkeypatch) -> tuple[list, list]:
+    """What every `spawn` is asked (its `timeout_s` and lock wait) and the bound it hands
+    `child.run_bounded`, each in order."""
+    asked, bounds = [], []
+    real_spawn, real_run = method_cli.spawn, method_cli.child.run_bounded
+
+    def spawn(*args, **kwargs):
+        on_gui = threading.current_thread() is threading.main_thread()
+        wait = kwargs.get("lock_wait_s") or (
+            method_cli.GUI_LOCK_WAIT_S if on_gui else method_cli.LOCK_WAIT_S)
+        asked.append((kwargs["timeout_s"], wait, kwargs.get("holds", 1)))
+        return real_spawn(*args, **kwargs)
+
+    def run_bounded(*args, timeout, **kwargs):
+        bounds.append(timeout)
+        return real_run(*args, timeout=timeout, **kwargs)
+
+    monkeypatch.setattr(method_cli, "spawn", spawn)
+    monkeypatch.setattr(method_cli.child, "run_bounded", run_bounded)
+    return asked, bounds
+
+
+@pytest.mark.parametrize("route", ["env", "linked"])
+def test_a_bound_copy_that_does_not_lock_itself_keeps_tccs_flock_whatever_tccs_own_says(
+        tmp_path, monkeypatch, own_copy_is_the_submodule, route):
+    """The project's copy declares `PROTOCOL = 0`; TCC's own vendored copy declares 1. The copy the
+    child runs decides: TCC's legacy lock runs whole, so another process holding TCC's flock makes
+    the write `Busy` — «nothing was written», the plan as it was — and the child's bound is the
+    work alone, `timeout_s`, with no lock wait added for a lock this copy never takes."""
+    project = _intake.planned_project(tmp_path / "car", ("2.3", "target-match"))
+    _bind(route, project, _a_copy_declaring(tmp_path / "repo", 0), monkeypatch)
+    assert method_lock.locks_itself(SKILL), "TCC's own copy locks itself: the two disagree"
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.5)
+    asked, bounds = _bounds_and_budgets(monkeypatch)
+
+    if project_lock.fcntl is not None:
+        plan = _plan(project)
+        with tccs_flock_held(project):
+            with pytest.raises(process_writer.Busy, match="nothing was written"):
+                process_writer.add_step(project, "2.4", "past another process's flock")
+        assert _plan(project) == plan
+        assert bounds == [], "a busy write started a child"
+
+    process_writer.add_step(project, "2.5", "on the bound copy's legacy path")
+    assert "2.5" in _plan(project)
+    assert bounds == [asked[-1][0]], (bounds, asked)
+
+
+@pytest.mark.parametrize("route", ["env", "linked"])
+def test_a_bound_copy_that_locks_itself_runs_with_no_flock_though_tccs_own_does_not(
+        tmp_path, monkeypatch, own_copy_is_the_submodule, route):
+    """The converse: the project's copy declares `PROTOCOL = 1`, and TCC's own vendored copy is read
+    as one that does not lock itself. The bound copy decides again: no flock of TCC's around its
+    child, so another process holding it does not stop the write, and the child's bound is the work
+    plus the method's lock wait."""
+    real = method_lock.locks_itself
+    monkeypatch.setattr(method_lock, "locks_itself",
+                        lambda skill_dir: False if same_path(skill_dir, SKILL) else real(skill_dir))
+    project = _intake.planned_project(tmp_path / "car", ("2.3", "target-match"))
+    _bind(route, project, _a_copy_declaring(tmp_path / "repo", 1), monkeypatch)
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.5)
+    asked, bounds = _bounds_and_budgets(monkeypatch)
+
+    with (tccs_flock_held(project) if project_lock.fcntl is not None
+          else contextlib.nullcontext()):
+        process_writer.add_step(project, "2.4", "past an old TCC's flock")
+
+    assert "2.4" in _plan(project)
+    (timeout_s, wait, holds), = asked
+    assert bounds == [timeout_s + wait * holds] and wait * holds > 0, (bounds, asked)
 
 
 @pytest.mark.parametrize("verb", ["add-step", "start", "decision"])
@@ -283,8 +395,17 @@ def _os_lock(fd):
 """
 
 
+def _wrote_without_the_methods_lock(project: Path, warnings: list) -> None:
+    """The test's precondition, checked: the method really wrote WITHOUT its lock, and said so — its
+    `note: <project> cannot be locked` line, told by `spawn`. Without it, a vendored method whose
+    `_os_lock` was renamed would lock as usual, and the test would prove nothing of TCC's lock."""
+    said = [record.getMessage() for record in warnings]
+    assert any(line.startswith("note: ") and f"{project.name} cannot be locked" in line
+               and "without the project lock" in line for line in said), said
+
+
 def test_on_a_folder_the_os_cannot_lock_tccs_thread_lock_keeps_two_writes_apart(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, app_log_warnings):
     """The plan's decision on TCC's own lock: where the OS lock is not available the method writes
     WITHOUT its lock, and TCC's in-process thread lock is what keeps two of its own writes — two
     MCP calls on their own threads — from saving over each other. Each `add-step` holds what it
@@ -313,6 +434,7 @@ def test_on_a_folder_the_os_cannot_lock_tccs_thread_lock_keeps_two_writes_apart(
         writer.join(60)
 
     assert failed == []
+    _wrote_without_the_methods_lock(project, app_log_warnings)
     assert {"2.4", "2.5"} <= set(_plan(project)), _plan(project)
     assert _added(project).count("2.4") == 1 and _added(project).count("2.5") == 1
 
@@ -342,7 +464,8 @@ def set_field(*args, **kwargs):
 """
 
 
-def test_on_a_folder_the_os_cannot_lock_two_profile_answers_both_land(tmp_path, monkeypatch):
+def test_on_a_folder_the_os_cannot_lock_two_profile_answers_both_land(tmp_path, monkeypatch,
+                                                                     app_log_warnings):
     """The same for the profile's writer (#218 review): it took no lock of TCC's at all, so on a
     folder the OS cannot lock two of the interview's answers, saved at once from two threads, read
     the same draft and the second saved over the first. TCC's thread lock keeps them apart."""
@@ -374,7 +497,57 @@ def test_on_a_folder_the_os_cannot_lock_two_profile_answers_both_land(tmp_path, 
         writer.join(60)
 
     assert failed == []
+    _wrote_without_the_methods_lock(project, app_log_warnings)
     draft = json.loads((project / "dsp_profile.draft.json").read_text(encoding="utf-8"))
     profile = draft.get("dsp_profile", draft)
     assert profile.get("delay", {}).get("max_ms") == 20, profile
     assert profile.get("dsp_processing_rate_hz") == 96000, profile
+
+
+# ---- busy from the method's real lock, through the project's other writers -----------------------
+# `test_method_cli.py` keeps busy as a type through every writer against a mocked exit 75. Here the
+# method's own lock is held by another process, and each writer's real child meets it.
+
+
+def _profile_answer_busy(project: Path) -> None:
+    from autosound_tcc.core import profile_writer
+
+    with pytest.raises(profile_writer.ProfileWriterError) as caught:
+        profile_writer.start(project, "Musway", "M6")
+    assert isinstance(caught.value, profile_writer.Busy), repr(caught.value)
+    assert str(caught.value).startswith("busy: "), caught.value
+
+
+def _config_save_busy(project: Path) -> None:
+    from autosound_tcc.core import config_writer
+
+    result = config_writer.save(project / "state", "v_003", "SQ-1", project_dir=project)
+    assert not result.saved and result.busy, result
+    assert result.said.startswith("busy: "), result.said
+
+
+def _car_record_busy(project: Path) -> None:
+    from autosound_tcc.core import car_library
+
+    with pytest.raises(car_library.CarLibraryError) as caught:
+        car_library.record(project, "VW", "Passat", "B8", "sedan")
+    assert isinstance(caught.value, car_library.Busy), repr(caught.value)
+    assert str(caught.value).startswith("busy: "), caught.value
+
+
+@pytest.mark.parametrize("write", [
+    pytest.param(_profile_answer_busy, id="profile_writer"),
+    pytest.param(_config_save_busy, id="config_writer"),
+    pytest.param(_car_record_busy, id="car_library"),
+])
+def test_every_other_writer_meets_the_methods_real_lock_as_its_own_busy(project, monkeypatch,
+                                                                        write):
+    """Another process holds the method's lock; each writer's real child waits the GUI's short wait
+    and exits 75, and the writer answers busy in its own kind — `profile_writer.Busy`,
+    `SaveResult.busy`, `car_library.Busy` — with every file as it was."""
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.5)
+
+    with method_lock_held(project):
+        before = _files(project)
+        write(project)
+        assert _files(project) == before, "a busy write changed a file"
