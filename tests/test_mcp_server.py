@@ -508,7 +508,7 @@ def test_rew_down_is_said_and_nothing_is_applied(tmp_path):
 
     answer = _write_rew_filters(tmp_path)
 
-    assert answer == {"applied": False, "error": f"REW: {down.value}"}
+    assert answer == {"applied": False, "error": f"REW: {down.value}", "rew_state": "unavailable"}
 
 
 @pytest.mark.parametrize("held, said", [
@@ -532,7 +532,8 @@ def test_a_title_rew_does_not_hold_once_is_said_in_the_methods_words(tmp_path, m
 
     answer = _write_rew_filters(tmp_path)
 
-    assert answer == {"applied": False, "error": refused.value.args[0]}
+    assert answer == {"applied": False, "error": refused.value.args[0],
+                      "rew_state": "not_found" if said.startswith("No") else "ambiguous"}
     assert answer["error"].startswith(said), answer
     assert written == []
 
@@ -581,7 +582,7 @@ def test_the_methods_refusal_of_a_gain_key_reaches_the_agent_as_not_applied(tmp_
 
     answer = _write_rew_filters(tmp_path, filters=[a_gain_cut])
 
-    assert answer == {"applied": False, "error": f"REW: {refused.value}"}
+    assert answer == {"applied": False, "error": f"REW: {refused.value}", "rew_state": "unknown"}
     assert answer["error"].startswith(
         "REW: filter 1 (slot 1): `gain` is not a key REW knows"), answer
 
@@ -606,6 +607,65 @@ def test_a_key_error_out_of_the_write_stays_a_tool_error(tmp_path, monkeypatch, 
     assert raised.value.__cause__ is bug
     assert [(record.getMessage(), record.exc_info[1]) for record in app_log_errors] == [
         ("tool write_rew_filters raised", bug)]
+
+
+def _http_500():
+    import urllib.error
+
+    return urllib.error.HTTPError("http://localhost:4735/eq/filters", 500, "Internal Server Error",
+                                  {}, None)
+
+
+@pytest.mark.parametrize("raised, state, may_hold", [
+    (lambda api: _http_500(), "error", False),
+    (lambda api: api.RewProtocolError("REW answered something that is not JSON"), "protocol", False),
+    (lambda api: api.RewWriteMismatch("slot 3 came back at 0 dB"), "write_mismatch", True),
+    (lambda api: api.RewReadBackUnavailable("REW stopped answering before the check"),
+     "unavailable", True),
+    (lambda api: api.RewReadBackRefused("http://localhost:4735/eq/filters", 500, "the check",
+                                        {}, None), "error", True),
+], ids=["REW's error", "unreadable", "not kept", "unchecked: REW gone", "unchecked: refused"])
+def test_a_rew_write_that_did_not_land_says_rews_state_and_whether_rew_may_hold_it(
+        tmp_path, monkeypatch, raised, state, may_hold):
+    """#219: the agent read REW's state and whether REW may hold the write off the `error`
+    sentence, or not at all — and «nothing changed» over a write REW kept a part of, or one it
+    acknowledged and nobody read back, is what the tool's description warns against. Two fields
+    beside the unchanged `error`: `rew_state`, the method's own, and `may_hold_write`."""
+    rew_api = mcp_server.vendor_loader.load_rew_api()
+    monkeypatch.setattr(rew_api, "get_measurements", lambda: {"1": {"title": "w-L_10 (sw)"}})
+    failure = raised(rew_api)
+
+    def write(mid, filters):
+        raise failure
+
+    monkeypatch.setattr(rew_api, "set_filters", write)
+
+    answer = _write_rew_filters(tmp_path)
+
+    assert answer == {"applied": False, "error": f"REW: {failure}", "rew_state": state,
+                      **({"may_hold_write": True} if may_hold else {})}
+
+
+@pytest.mark.parametrize("failure, state", [
+    (process_writer.RewUnavailable("error: REW did not answer (refused) -- nothing was recorded"),
+     "unavailable"),
+    (process_writer.RewAnswered("error: REW's measurement list was not read (HTTP Error 500) -- "
+                                "nothing was recorded"), "error"),
+    (process_writer.ProcessWriterError("error: step 2.3 has no captures"), None),
+], ids=["REW down", "REW answered an error", "a refusal"])
+def test_a_capture_check_that_did_not_run_says_rews_state(tmp_path, monkeypatch, failure, state):
+    """#219: `check_captures` said REW down and REW answering an error only in `error`'s words, as
+    a refusal; `rew_state` names which, and a refusal carries none — REW was not why."""
+    def refuse(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(process_writer, "check_captures", refuse)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    said = json.loads(_text(asyncio.run(mcp.call_tool("check_captures", {}))))
+
+    assert said == {"recorded": False, "error": str(failure), "busy": False,
+                    **({"rew_state": state} if state else {})}
 
 
 def test_the_rew_writes_description_says_what_rew_keeps_and_what_not_applied_means(tmp_path):

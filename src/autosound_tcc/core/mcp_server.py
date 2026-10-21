@@ -82,6 +82,7 @@ from autosound_tcc.core import (
     process_writer,
     profile_writer,
     project_settings,
+    rew_bridge,
     signal_bus,
     vendor_loader,
 )
@@ -1045,9 +1046,23 @@ def build_server(
     def _not_recorded(exc: process_writer.ProcessWriterError) -> str:
         """A write that did not land: its sentence, and whether it was busy — another write held
         the project, nothing was written, the same call works in a moment (#218) — as a field of
-        its own, so the model need not read that off the sentence."""
+        its own, so the model need not read that off the sentence. When REW was why (#219),
+        `rew_state` says how: "unavailable", REW did not answer; "error", REW answered and not
+        with its list. Absent when REW was not why."""
+        rew = ("unavailable" if isinstance(exc, process_writer.RewUnavailable)
+               else "error" if isinstance(exc, process_writer.RewAnswered) else None)
         return json.dumps({"recorded": False, "error": str(exc),
-                           "busy": isinstance(exc, process_writer.Busy)}, ensure_ascii=False)
+                           "busy": isinstance(exc, process_writer.Busy),
+                           **({"rew_state": rew} if rew else {})}, ensure_ascii=False)
+
+    def _rew_said(exc: BaseException) -> dict:
+        """REW's state for a REW call that failed (#219): `rew_state`, the method's own name for
+        it, "unknown" when the exception carries none; and `may_hold_write`, present and true when
+        REW may hold the write or part of it — it acknowledged it and the read-back failed, or it
+        kept only part (`rew_unchecked`, `write_mismatch`)."""
+        state = rew_bridge.method_state(exc) or rew_bridge.UNKNOWN
+        held = bool(getattr(type(exc), "rew_unchecked", False)) or state == "write_mismatch"
+        return {"rew_state": state, **({"may_hold_write": True} if held else {})}
 
     def _record(call, *args, **kwargs) -> str:
         try:
@@ -1145,7 +1160,8 @@ def build_server(
         everything the round expects; a take the round did not ask for is judged too when named
         in `titles`, its verdict on its own row (the window's check names them). `recorded: true` means the check ran and recorded its
         verdicts — which captures pass is in `said`, the method's own lines; `recorded: false`
-        means it did not run or did not finish, and `error` says why.
+        means it did not run or did not finish, and `error` says why — with `rew_state` when REW
+        was why: `unavailable`, REW did not answer; `error`, REW answered and not with its list.
 
         `session=True` adds the whole-session probe on top: every level side by side, loudest and
         quietest, ctl1->ctl3 drift. That reads the shoot as one thing rather than measurement by
@@ -1314,6 +1330,13 @@ def build_server(
         the write and the method could not read it back, or REW kept only part of it (a slot past
         the equaliser's slot count, a value clamped to its range). So before telling the Arbiter
         that nothing changed, read the filters back (the method's `rew_api.get_filters`).
+
+        A failure carries `rew_state`, the method's name for what REW did: `unavailable` (REW did
+        not answer), `error` (REW answered with an HTTP error), `protocol` (an answer that cannot be
+        read), `write_mismatch` (REW did not keep what was sent), `not_found` or `ambiguous` (the
+        title), `config` (REW's address is no address), or `unknown` (none of REW's: the method's
+        own refusal before sending, among others). `may_hold_write: true` when REW may hold the
+        write or part of it.
         """
         allowed = await _confirm(
             ConfirmRequest(
@@ -1343,12 +1366,14 @@ def build_server(
                     # REW holds none by that title, or several: the method's own words, which
                     # `str()` would put in quotes. A KeyError from the write is not about a title,
                     # so it is not caught here.
-                    return json.dumps({"applied": False, "error": exc.args[0]}, ensure_ascii=False)
+                    return json.dumps({"applied": False, "error": exc.args[0], **_rew_said(exc)},
+                                      ensure_ascii=False)
                 rew_api.set_filters(mid, filters)
             except (OSError, ValueError) as exc:
                 # REW down or answering an error (`URLError`, `HTTPError`); an answer that cannot
                 # be read, or a write REW did not keep or the method would not send (`ValueError`).
-                return json.dumps({"applied": False, "error": f"REW: {exc}"}, ensure_ascii=False)
+                return json.dumps({"applied": False, "error": f"REW: {exc}", **_rew_said(exc)},
+                                  ensure_ascii=False)
             return json.dumps({"applied": True, "measurement": measurement, "count": len(filters)},
                               ensure_ascii=False)
 
