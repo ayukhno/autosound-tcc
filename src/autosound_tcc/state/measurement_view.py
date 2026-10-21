@@ -464,15 +464,17 @@ class NotRun:
     since: str = ""
 
     @classmethod
-    def at(cls, line: str, check) -> Optional["NotRun"]:
+    def at(cls, line: str, check, project_dir: Optional[Path] = None) -> Optional["NotRun"]:
         """The line, said now, about `check` — the check that did not run: the round it was started
         for (`round_id`) and the titles it was handed (`titles`) — or None when that round is not
         the open one now (`process_view.capture_round`), its cause over before it is said: the
         session closed it, or opened the next, while the check waited on the project's lock, and
         the refresh that read it ran before the failure came (I1's residual, the re-review of the
         G6+G7 fix; «another round open», the re-review of fix B). The rule `ended` takes a line
-        back by. A round that cannot be read says the line: nothing is known then."""
-        round_ = process_view.capture_round()
+        back by. A round that cannot be read says the line: nothing is known then. Read in
+        `project_dir`, the window's folder — not `config`'s, which a cancelled switch leaves
+        another (the group review of #218, F)."""
+        round_ = process_view.capture_round(project_dir)
         if round_ is not None and (round_.get("closed") or round_.get("id") != check.round_id):
             return None
         return cls(line, check.round_id, tuple(str(t) for t in check.titles or ()),

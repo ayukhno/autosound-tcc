@@ -1911,6 +1911,22 @@ def test_a_line_is_said_only_while_the_round_its_check_was_started_for_is_open(p
     assert mv.NotRun.at("did not run", then) is None, "its round is closed"
 
 
+def test_a_line_is_judged_in_the_folder_it_is_asked_for_not_the_global_one(project):
+    """The group review of #218, F: `NotRun.at` read the round of the folder `config` answers, so a
+    window kept on its own folder through a cancelled switch dropped its check's line when the
+    global folder held another round, closed. Its round is read in the folder it is handed."""
+    car = project / "car"
+    car.mkdir()
+    process = _round(car, version=1, expected=["w-L_1 (sw)"], taken=["w-L_1 (sw)"])
+    check = SimpleNamespace(titles=[_as_typed("w-L_1 (sw)")],
+                            round_id=process.load()["capture"]["id"])
+    _round(project, version=1, expected=["w-L_1 (sw)"], taken=[]).close_capture()
+
+    held = mv.NotRun.at("did not run", check, car)
+
+    assert held is not None and held.round_id == check.round_id
+
+
 # The series the captures are named with (`capture_version`, out of the window in W-9), asked of
 # real rounds the method wrote, in a project of their own (#179): the project `config` answers is
 # another, empty folder (`conftest._isolated_project_dir`), so a round read that forgot

@@ -6319,6 +6319,51 @@ def test_a_check_refused_over_a_round_the_session_closed_is_not_said(monkeypatch
     assert host._title_fixes_said == offered, "the offer's slot was not taken"
 
 
+def test_a_did_not_run_line_is_judged_in_the_windows_folder_not_the_global_one(tmp_path):
+    """The group review of #218, F: the window's folder is not always `config`'s — a cancelled
+    switch keeps the window on the folder it was built on (`window_folder`). The «did not run» line
+    was said by the global folder's round (`NotRun.at`, no folder), and taken back by the global
+    folder's «as it is» answers (`ended`, no folder). Both read the window's folder now: a host
+    built on its own folder, while `config` answers another, whose round is closed."""
+    import dataclasses
+
+    from autosound_tcc.core import capture_import
+    from autosound_tcc.ui.tcc.status_strip import StatusStrip
+    from tests import _rounds
+
+    car = tmp_path / "car"
+    car.mkdir()
+    typed = [_rounds.as_typed("w-L_1 (sw)")]
+    process = _rounds.write_round(car, version=1, expected=typed, taken=typed, pad=False)
+    process.check_captures(typed, verifier=_Heard())  # bad, before the line
+    _rounds.write_round(config.project_dir(), version=1, expected=typed, taken=[],
+                        pad=False).close_capture()
+    assert config.chosen_project_dir() != car
+    _app()
+    strip = StatusStrip()
+    host = SimpleNamespace(
+        _built_on=car, _status_strip=strip, _title_fixes_said=None,
+        _on_rew_titles_changed=lambda: None, _offer_title_fixes=lambda round_: None,
+        _meas_panel=SimpleNamespace(known_titles=lambda: list(typed)),
+        _capture_check=SimpleNamespace(titles=list(typed),
+                                       round_id=process.load()["capture"]["id"]))
+
+    MainWindow._on_capture_check_failed(host, i18n.t("captureCheckBusy"))
+    assert i18n.t("captureCheckBusy") in strip.text(), "said: the window's round is open"
+    # Its verdict is not «since» the line: only the window's own «as it is» can end it now.
+    host._capture_check_not_run = dataclasses.replace(host._capture_check_not_run,
+                                                      since="2999-01-01T00:00:00+00:00")
+    MainWindow._sync_capture_ready(host)
+    assert i18n.t("captureCheckBusy") in strip.text(), "nothing changed: the line stands"
+
+    capture_import.record_imported([capture_import.Candidate(
+        ordinal="1", title=typed[0], uuid=f"u-{typed[0]}", date="", when=None, imported=False,
+        as_is=True)], project_dir=car)  # taken as it is, in the window's folder
+    MainWindow._sync_capture_ready(host)
+
+    assert strip.text() == "", "nothing left to check in the window's folder: taken back"
+
+
 def test_a_check_asked_for_while_one_runs_is_run_when_that_one_ends(monkeypatch):
     """Review M10 (tcc#21): the ledger write asks for a check of what it just recorded while the
     check the import itself set off is still running. "The next title change re-triggers it" held

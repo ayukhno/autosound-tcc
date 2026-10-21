@@ -4064,7 +4064,8 @@ class MainWindow(QMainWindow):
         """The check did not run, or did not finish — said, with why (R-ax), never «everything is
         bad» (`workers.capture_check_not_run`), unless its cause is over (`NotRun.at`); held till it
         ends, with the action it names (M4). It takes the title-fix offer's slot, said again (M1)."""
-        if (not_run := measurement_view.NotRun.at(why, self._capture_check)) is not None:
+        if (not_run := measurement_view.NotRun.at(why, self._capture_check,
+                                                  window_folder.project(self))) is not None:
             self._capture_check_not_run, self._title_fixes_said = not_run, None
             self._status_strip.notify(why, level="warn", action=(i18n.t("captureCheckAgain"),
                                                                  self._on_rew_titles_changed))
@@ -4072,9 +4073,9 @@ class MainWindow(QMainWindow):
     def _sync_capture_ready(self) -> None:
         """«Готово» is live while the open round has taken something (finding 31). On every process
         refresh and REW change, a «did not run» whose cause has ended is taken back (I1)."""
-        round_ = process_view.capture_round(window_folder.project(self))
-        not_run = getattr(self, "_capture_check_not_run", None)
-        if not_run is not None and not_run.ended(round_, self._meas_panel.known_titles()):
+        round_ = process_view.capture_round(folder := window_folder.project(self))
+        not_run = getattr(self, "_capture_check_not_run", None)  # its folder's rules, not `config`'s
+        if not_run is not None and not_run.ended(round_, self._meas_panel.known_titles(), folder):
             self._capture_check_not_run = None
             if self._status_strip.withdraw(not_run.line):  # its slot held the offer once (M1)
                 self._offer_title_fixes(round_)
