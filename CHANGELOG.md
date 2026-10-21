@@ -17,8 +17,8 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 
 ## [Unreleased]
 
-Paired with method `82e8e430cd975e18929b6f61802f1bc8e292bbf3` — the method's signed candidate `beta-v3.2.0-rc1` of
-the coming **`v3.2.0`**.
+Paired with method `a9952206468573743d2083b73c4b7e7f9d10dc6d` — the method's signed candidate `beta-v3.2.0-rc2`, its
+last: the train tags that commit **`v3.2.0`**.
 
 The wave W-11: the last wave before a freeze — bugs, hygiene and small clear improvements, ending with the joint
 minor release with the method (TCC v1.2.0 with the method's v3.2.0). After it, only fixes for what users report.

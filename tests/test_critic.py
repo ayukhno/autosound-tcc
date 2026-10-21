@@ -1473,6 +1473,10 @@ mod.call_gemini_api, mod.call_anthropic_api, mod.call_openai_api = (
 mod.list_gemini_models = refuse
 
 def cli(provider, binary, model, prompt, timeout=None):
+    if prompt == getattr(mod, "PROBE_PROMPT", None):
+        # The method's v3.2.0 sends agy one line before the package (skill #193): that call is
+        # not the route the package took, so it is answered and not counted.
+        return "channel works", None, None
     print(f"PROBE cli {os.path.basename(binary)}", file=sys.stderr)
     # The NAMES of the vendor keys the CLI would be started with, by the method's own `child_env`.
     keys = [var for var in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")
