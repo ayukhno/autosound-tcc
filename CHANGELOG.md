@@ -4,7 +4,7 @@ What changed in Autosound TCC, the desktop app for the
 [autosound-tuning](https://github.com/ayukhno/autosound-tuning-skill) method. The app's update
 button follows the tags below, so a version here is what somebody actually receives when they press
 it. A fresh install takes the same tags: the paired method's installer (`install.sh` and
-`install.ps1` at v3.1.4) asks for TCC's newest release by its tag and checks the tag's signature
+`install.ps1` at v3.2.0) asks for TCC's newest release by its tag and checks the tag's signature
 first; a tag that does not check is not installed, and the method is installed without the app. Only
 when the installer cannot read TCC's releases at all — no network, or no tags yet — does it fall
 back to `main`, and it says so: that copy has no signature to check.
@@ -17,8 +17,13 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 
 ## [Unreleased]
 
+Paired with method `82e8e430cd975e18929b6f61802f1bc8e292bbf3` — the train tags that commit **`v3.2.0`**; until then
+it carries the method's signed candidate `beta-v3.2.0-rc1`.
+
 The wave W-11: the last wave before a freeze — bugs, hygiene and small clear improvements, ending with the joint
 minor release with the method (TCC v1.2.0 with the method's v3.2.0). After it, only fixes for what users report.
+The method moves to its W-11 candidate: levels from different rounds brought to one base, an optional level control
+on each round, unplanned and optional captures judged as what they are, and a capture check that judges one REW.
 
 ### Added
 
@@ -58,6 +63,10 @@ minor release with the method (TCC v1.2.0 with the method's v3.2.0). After it, o
 
 ### Fixed
 
+- **A capture check REW's list moved under is not «REW is not running»** (the method's v3.2.0, skill #183): the
+  method stops a check whose takes landed, were renamed or deleted while it read REW, records nothing and exits as
+  it does for REW down. The strip said «Start REW» to somebody whose REW was answering; it now says the list changed
+  while it was read, and to check again. The AI's answer names it `rew_state: changed`.
 - **«Fresh» started a fresh conversation only on Codex and omp** (tcc#221): on the Claude route it continued the
   old one. It now starts fresh on every route; resume still resumes.
 - **The Monitor, the diagnostics' sessions tab and «Open terminal» could read another project** (tcc#224) after

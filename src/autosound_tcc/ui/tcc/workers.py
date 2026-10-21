@@ -408,6 +408,8 @@ def capture_check_not_run(exc: Exception) -> str:
         return i18n.t("captureCheckBusy")
     if isinstance(exc, process_writer.RewUnavailable):
         return i18n.t("captureCheckRewDown")
+    if isinstance(exc, process_writer.RewChanged):  # REW answered; its list moved (v3.2.0, #183)
+        return i18n.t("captureCheckRewChanged")
     if isinstance(exc, process_writer.RewAnswered):  # REW's answer, not the method's refusal (#219)
         return i18n.t("captureCheckRewError").format(why=exc.line.removeprefix("error: "))
     if isinstance(exc, process_writer.TimedOut):

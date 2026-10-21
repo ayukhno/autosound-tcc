@@ -6410,7 +6410,8 @@ def test_the_capture_check_worker_hands_the_method_its_titles(monkeypatch, tmp_p
 
 
 @pytest.mark.parametrize("stopped", ["busy", "timed out", "refused", "the method's refusal",
-                                     "REW down", "REW answered", "a crash", "the round moved on"])
+                                     "REW down", "REW answered", "REW changed", "a crash",
+                                     "the round moved on"])
 def test_a_capture_check_that_did_not_run_says_so_and_why(monkeypatch, tmp_path, stopped):
     """R-ax (the G5+G8 review's I2): Busy, a refused binding, a timeout and the method's refusal all
     came back on the same signal as a verdict, with no `UNUSABLE` line in them — and vanished. The
@@ -6447,6 +6448,13 @@ def test_a_capture_check_that_did_not_run_says_so_and_why(monkeypatch, tmp_path,
                 "error: REW did not answer (connection refused) -- nothing was recorded; start "
                 "REW and run capture-check again"),
             i18n.t("captureCheckRewDown")),
+        # The method's v3.2.0 (#183): REW answered, and its list moved under the check — never
+        # «Start REW».
+        "REW changed": (
+            process_writer.RewChanged(
+                "error: REW changed while it was read — run capture-check again (w-L_1 (sw) "
+                "moved; nothing was recorded)"),
+            i18n.t("captureCheckRewChanged")),
         "a crash": (
             process_writer.ProcessWriterError(
                 "Traceback (most recent call last):\n  File \"process.py\", line 1\n"
@@ -6501,10 +6509,11 @@ def test_a_did_not_run_line_promises_only_what_tcc_does(lang):
     capture-check again», a verb TCC has no control for. What the person can do in TCC is said:
     start REW, then the line's own «Check again»."""
     for key in ("captureCheckBusy", "captureCheckTimedOut", "captureCheckRefused",
-                "captureCheckRewDown", "captureCheckRoundGone"):
+                "captureCheckRewDown", "captureCheckRewChanged", "captureCheckRoundGone"):
         said = i18n.T[lang][key]
         assert "capture-check" not in said and "list changes" not in said, (key, said)
-    assert i18n.T[lang]["captureCheckAgain"] in i18n.T[lang]["captureCheckRewDown"]
+    for key in ("captureCheckRewDown", "captureCheckRewChanged"):
+        assert i18n.T[lang]["captureCheckAgain"] in i18n.T[lang][key], key
 
 
 def test_a_did_not_run_line_offers_the_check_again(monkeypatch):

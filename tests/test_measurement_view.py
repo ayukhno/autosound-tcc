@@ -1568,7 +1568,8 @@ class _TwoSpellings:
     _api = SimpleNamespace(get_measurements=lambda: {"1": {"title": "w-R_01 (sw)"},
                                                      "2": {"title": "w-R_1 (sw)"}})
 
-    def verify(self, wanted):
+    def verify(self, wanted, measurements=None):
+        # From v3.2.0 the check hands `verify` the listing it looked the titles up in (#183).
         assert not wanted, wanted
         return []
 

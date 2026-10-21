@@ -849,8 +849,10 @@ def _codex_refusal(detail: str) -> str:
 
 
 def _codex_cut(detail: str) -> str:
-    """The banner arrived and no reason did: said as that, not shown as the reason (tcc#182). The
-    method keeps 400 characters from a lowercase `error:` line; Codex's `ERROR:` is not one."""
+    """The banner arrived and no reason did: said as that, not shown as the reason (tcc#182). A
+    method before v3.2.0 keeps 400 characters from a lowercase `error:` line, and Codex's `ERROR:`
+    is not one; from v3.2.0 (skill #178) it keeps the banner's line and `ERROR: <reason>`, which
+    `_codex_refusal` reads, so this speaks for an older copy."""
     if not _CODEX_BANNER.search(detail or ""):
         return ""
     return ("Codex stopped before answering, and its reason did not reach TCC: the method's report "

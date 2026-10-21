@@ -651,8 +651,11 @@ def test_a_rew_write_that_did_not_land_says_rews_state_and_whether_rew_may_hold_
      "unavailable"),
     (process_writer.RewAnswered("error: REW's measurement list was not read (HTTP Error 500) -- "
                                 "nothing was recorded"), "error"),
+    # The method's v3.2.0 (#183): exit 69 for REW that changed while it was read — REW answered.
+    (process_writer.RewChanged("error: REW changed while it was read — run capture-check again "
+                               "(w-L_1 (sw) moved; nothing was recorded)"), "changed"),
     (process_writer.ProcessWriterError("error: step 2.3 has no captures"), None),
-], ids=["REW down", "REW answered an error", "a refusal"])
+], ids=["REW down", "REW answered an error", "REW changed", "a refusal"])
 def test_a_capture_check_that_did_not_run_says_rews_state(tmp_path, monkeypatch, failure, state):
     """#219: `check_captures` said REW down and REW answering an error only in `error`'s words, as
     a refusal; `rew_state` names which, and a refusal carries none — REW was not why."""
@@ -666,7 +669,7 @@ def test_a_capture_check_that_did_not_run_says_rews_state(tmp_path, monkeypatch,
 
     assert said == {"recorded": False, "error": str(failure), "busy": False,
                     "kind": {"unavailable": "rew_unavailable", "error": "rew_error",
-                             None: "refused"}[state],
+                             "changed": "rew_changed", None: "refused"}[state],
                     **({"rew_state": state} if state else {})}
 
 

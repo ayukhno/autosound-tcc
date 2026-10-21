@@ -313,6 +313,69 @@ def test_rew_answering_an_error_is_told_from_a_refusal_by_its_whole_line(monkeyp
     assert str(failed.value) == err
 
 
+#: The two lines the method's exit 69 says when REW changed while it was read (#183, v3.2.0):
+#: `capture-check`'s and `capture-close`'s.
+_REW_CHANGED_CHECK = ("error: REW changed while it was read — run capture-check again (w-L_1 (sw) "
+                      "moved from 3 to 4; nothing was recorded)")
+_REW_CHANGED_CLOSE = ("error: REW changed while it was read (w-L_1 (sw) moved from 3 to 4) -- the "
+                      "reconcile of cap_001 landed; the checks and the close did not; run "
+                      "capture-close again")
+
+
+@pytest.mark.parametrize("command, err", [
+    ("capture-check", _REW_CHANGED_CHECK), ("capture-close", _REW_CHANGED_CLOSE),
+    ("capture-check", "note: a line before it\n" + _REW_CHANGED_CHECK),
+], ids=["the check", "the close", "after a note"])
+def test_rew_that_changed_while_it_was_read_is_not_rew_down(monkeypatch, command, err):
+    """The method's v3.2.0 (#183): exit 69 is also REW that CHANGED while `capture-check`, or
+    `capture-close`'s checks, read it — REW is running, nothing was recorded, and the check is run
+    again. Read as REW down, the strip said «Start REW» to somebody whose REW was answering, and
+    the agent was told `rew_state: unavailable`. Told by the line the method begins it with, as
+    CONTRACT.md says (hub #299): `RewChanged`, `failure_kind` «rew_changed», its words kept."""
+    monkeypatch.setattr(process_writer, "_spawn",
+                        lambda project_dir, args, timeout_s=None, **_kw: (69, "", err))
+    call = (process_writer.check_captures if command == "capture-check"
+            else process_writer.close_capture)
+
+    with pytest.raises(process_writer.ProcessWriterError) as failed:
+        call(Path("car"))
+
+    assert isinstance(failed.value, process_writer.RewChanged), type(failed.value)
+    assert not isinstance(failed.value, process_writer.RewUnavailable)
+    assert process_writer.failure_kind(failed.value) == "rew_changed"
+    assert str(failed.value) == err
+
+
+def test_rew_down_is_still_rew_down_beside_rew_changed(monkeypatch):
+    """Exit 69 with REW not answering stays `RewUnavailable`: only the method's own «REW changed
+    while it was read» line, from its start, is the other."""
+    down = ("error: REW did not answer (connection refused; REW changed while it was read is not "
+            "why) -- nothing was recorded; start REW and run capture-check again")
+    monkeypatch.setattr(process_writer, "_spawn",
+                        lambda project_dir, args, timeout_s=None, **_kw: (69, "", down))
+
+    with pytest.raises(process_writer.RewUnavailable) as failed:
+        process_writer.check_captures(Path("car"))
+
+    assert not isinstance(failed.value, process_writer.RewChanged)
+    assert process_writer.failure_kind(failed.value) == "rew_unavailable"
+
+
+def test_the_line_tcc_reads_as_rew_changed_is_the_methods_own():
+    """`_REW_CHANGED` is read off the method's text, not trusted: `_RewChanged`'s sentence, which
+    `capture-check` prints after `error: ` with nothing added, and `capture-close`'s own line. A
+    method that words it otherwise fails this, not the strip at the car."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    process = (vendor_loader.rew_tool_dir() / "state" / "process.py").read_text(encoding="utf-8")
+    said = process_writer._REW_CHANGED.removeprefix("error: ")
+
+    assert f'super().__init__(f"{said} — run capture-check again ({{what}}; nothing was ' \
+           'recorded)")' in process
+    assert 'print(f"error: {exc}" + ("" if getattr(type(exc), "rew_changed", False)' in process
+    assert f'return (f"error: {said} ({{getattr(exc, \'what\'' in process
+
+
 def test_the_lines_tcc_reads_as_rew_answering_are_the_methods_own():
     """`_REW_ANSWERED`'s two prefixes are the method's text, read off it rather than trusted (the
     group review of #219, C): `_main`'s line for REW's 4xx/5xx, and the capture check's refusal

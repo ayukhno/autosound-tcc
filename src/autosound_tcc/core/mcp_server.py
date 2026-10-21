@@ -1058,10 +1058,12 @@ def build_server(
         was (`process_writer.failure_kind`): busy, timed_out, refused (the method's own), the REW
         ones, or failed; a `timed_out` one adds `may_have_written`, since a child cut halfway may
         have written (the group review, B). When REW was why (#219), `rew_state` says how:
-        "unavailable", REW did not answer; "error", REW answered and not with its list. Absent
-        when REW was not why."""
+        "unavailable", REW did not answer; "error", REW answered and not with its list; "changed",
+        REW's list changed while the check read it — run it again (the method's v3.2.0, #183).
+        Absent when REW was not why."""
         kind = process_writer.failure_kind(exc)
-        rew = {"rew_unavailable": "unavailable", "rew_error": "error"}.get(kind)
+        rew = {"rew_unavailable": "unavailable", "rew_error": "error",
+               "rew_changed": "changed"}.get(kind)
         return json.dumps({"recorded": False, "error": str(exc), "busy": kind == "busy",
                            "kind": kind,
                            **({"may_have_written": True} if kind == "timed_out" else {}),
@@ -1186,7 +1188,9 @@ def build_server(
         in `titles`, its verdict on its own row (the window's check names them). `recorded: true` means the check ran and recorded its
         verdicts — which captures pass is in `said`, the method's own lines; `recorded: false`
         means it did not run or did not finish, and `error` says why — with `rew_state` when REW
-        was why: `unavailable`, REW did not answer; `error`, REW answered and not with its list.
+        was why: `unavailable`, REW did not answer; `error`, REW answered and not with its list;
+        `changed`, REW's list changed while the check read it (a take landed, was renamed or
+        deleted) — nothing was recorded, and running the check again is the answer.
 
         `session=True` adds the whole-session probe on top: every level side by side, loudest and
         quietest, ctl1->ctl3 drift. That reads the shoot as one thing rather than measurement by

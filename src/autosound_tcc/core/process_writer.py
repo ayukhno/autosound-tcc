@@ -149,6 +149,33 @@ class RewUnavailable(ProcessWriterError):
     method's, whose advice names a command-line verb (the G6+G7 review's M4)."""
 
 
+class RewChanged(ProcessWriterError):
+    """The method's exit 69 for REW that CHANGED while `capture-check`, or `capture-close`'s
+    checks, read it (v3.2.0, #183): a take landed, was renamed or deleted between the reads. REW is
+    running, nothing was recorded, and the check is run again — never «start REW», which is what
+    `RewUnavailable`, the same exit, says. Told only by the line the method begins it with
+    (`_REW_CHANGED`, CONTRACT.md's exit 69, hub #299); `line` is that line."""
+
+    def __init__(self, said: str, line: str = "") -> None:
+        super().__init__(said)
+        self.line = line or said
+
+
+#: The start of the method's line for REW that changed while it was read (`process.py`
+#: `_RewChanged` and `capture-close`'s stop, v3.2.0 #183), the one thing that tells this exit 69
+#: from REW down. Pinned against the method's text (`test_process_writer`).
+_REW_CHANGED = "error: REW changed while it was read"
+
+
+def rew_changed(code: int, err: str) -> str:
+    """The line of `err` that says REW changed while it was read — from `_REW_CHANGED` on, whole —
+    or "" when exit `code` with `err` is anything else."""
+    if code != EXIT_REW_UNAVAILABLE:
+        return ""
+    return next((line.strip() for line in (err or "").splitlines()
+                 if line.startswith(_REW_CHANGED)), "")
+
+
 class RewAnswered(ProcessWriterError):
     """The method's exit 1 for REW answering, and not with what was asked — its list answered with
     an error or with something it cannot read (#219): REW is running, and nothing was written. A
@@ -261,6 +288,8 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
         _log_not_run(project_dir, args, code, said if crashed(err) else method_cli.tail(said))
     if line := rew_answered(code, err):
         raise RewAnswered(said, line)
+    if line := rew_changed(code, err):
+        raise RewChanged(said, line)
     raise (RewUnavailable if code == EXIT_REW_UNAVAILABLE else ProcessWriterError)(said)
 
 
@@ -598,6 +627,7 @@ def failure_kind(exc: BaseException) -> str:
     review of #218/#219, B): "busy" — another write held the project, nothing was written, the same
     call works in a moment; "timed_out" — the child was cut at its bound, and may have written;
     "rew_unavailable" — REW did not answer; "rew_error" — REW answered, and not with its list;
+    "rew_changed" — REW's list changed while the check read it, nothing recorded (v3.2.0, #183);
     "refused" — the method's own refusal, its `error:` line; "failed" — anything else: a crash, a
     copy too old for the command or missing its script, a binding TCC will not run, TCC's own
     sentence. Never read off the generic `error: ` alone where a class says more."""
@@ -609,6 +639,8 @@ def failure_kind(exc: BaseException) -> str:
         return "rew_unavailable"
     if isinstance(exc, RewAnswered):
         return "rew_error"
+    if isinstance(exc, RewChanged):
+        return "rew_changed"
     if type(exc) is ProcessWriterError and refusal(1, str(exc)):
         return "refused"
     return "failed"
