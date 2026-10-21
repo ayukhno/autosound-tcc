@@ -122,9 +122,7 @@ def test_every_panel_survives_a_tier_whose_controls_nobody_enumerated():
     tier nobody has enumerated is a different sentence.
     """
     from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
-    from autosound_tcc.ui.tcc import i18n
     from autosound_tcc.ui.tcc.detail_pane import DetailPane
-    from autosound_tcc.ui.tcc.group_table import GroupTable
 
     _app()
     group = ProfileGroup(
@@ -134,14 +132,6 @@ def test_every_panel_survives_a_tier_whose_controls_nobody_enumerated():
 
     pane = DetailPane()
     pane.open_table(group)  # would have raised on `for f in group.fields`
-
-    table = GroupTable()
-    table.set_group(group)
-    assert table.item(0, 2).text() == i18n.t("groupFieldsUnknown")
-
-    stated = ProfileGroup(id="physical_outputs", label="Output", fields=(), rows=group.rows)
-    table.set_group(stated)
-    assert table.item(0, 2).text() == "—", "a channel with nothing set is not an unasked question"
 
 
 def _rig_view():

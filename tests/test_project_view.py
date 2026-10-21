@@ -237,34 +237,6 @@ def test_a_broken_profile_is_not_an_exception(tmp_path):
     assert project_view.load_system_params(tmp_path) == ()
 
 
-def test_git_facts_are_shown_for_a_repo_and_silent_for_anything_else(tmp_path, unhurried_git):
-    """The skill makes a project a git repo on purpose — the tune's history is the point. Folders
-    that are not repos say nothing: "not a git repo" would be noise on every one of them."""
-    import subprocess
-
-    from autosound_tcc.state import project_view
-
-    assert project_view.git_facts(tmp_path) == ()
-
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    (tmp_path / "note.md").write_text("hi")
-
-    rows = dict(project_view.git_facts(tmp_path))
-
-    assert "Git" in rows                       # a branch name
-    assert rows["Git changes"] == "1"          # the untracked file
-
-
-def test_git_facts_never_raise_on_a_broken_repo(tmp_path):
-    """A missing `git`, a repo mid-rebase, a slow mount — all resolve to "say nothing" rather than
-    to a stall or a traceback in a panel."""
-    from autosound_tcc.state import project_view
-
-    (tmp_path / ".git").write_text("not a repo, just a file called .git")
-
-    assert project_view.git_facts(tmp_path) == ()
-
-
 def test_the_car_is_one_line_and_the_generation_is_not_said_twice(tmp_path):
     """Projects written before `save_car` folded the generation into the nameplate
     (`"model": "Passat B8"`), and joining the parts blindly reads `VW Passat B8 B8` (tcc#11)."""

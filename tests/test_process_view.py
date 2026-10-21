@@ -57,7 +57,6 @@ def process(project):
 def test_no_process_state_reads_as_none_so_the_mock_stays(project):
     assert process_view.has_process_state(project) is False
     assert process_view.load_state(project) is None
-    assert process_view.load_plan(project) is None
 
 
 @pytest.mark.parametrize("written", [b"{ half", b"", b"null", b"[]", b"\xff\xfe{}"],
@@ -71,7 +70,6 @@ def test_a_state_file_that_is_not_a_state_reads_as_none(project, written):
     path.write_bytes(written)
 
     assert process_view.load_state(project) is None
-    assert process_view.load_plan(project) is None
     assert process_view.read_state_text(project) is None
     assert process_view.has_process_state(project)  # there: how the window's guard tells them apart
     # And why, in the read's own words (Task 24's review M2/M3, the G6+G7 review's M5): a write cut
@@ -237,7 +235,7 @@ def test_a_state_with_a_bom_still_reads(project, process):
 def test_every_phase_appears_even_the_ones_never_entered(process, project):
     process.enter_phase("2")
 
-    plan = process_view.load_plan(project)
+    plan = process_view.to_plan(process_view.load_state(project))
 
     assert len(plan) == 7  # the skill's -1..5 skeleton, not the mock's 0..6
     assert [p.status for p in plan] == ["todo", "todo", "todo", "cur", "todo", "todo", "todo"]
@@ -247,7 +245,7 @@ def test_every_phase_appears_even_the_ones_never_entered(process, project):
 def test_phase_titles_come_from_the_skill(process, project):
     process.enter_phase("2")
 
-    plan = process_view.load_plan(project)
+    plan = process_view.to_plan(process_view.load_state(project))
     current = next(p for p in plan if p.current)
 
     assert "EQ & acoustic alignment" in current.name["en"]
@@ -265,7 +263,7 @@ def test_a_phase_title_someone_wrote_themselves_is_left_alone(process, project):
     state["phases"]["2"]["title"] = "EQ, but only above 300 Hz (see the notes)"
     process._write(state)
 
-    current = next(p for p in process_view.load_plan(project) if p.current)
+    current = next(p for p in process_view.to_plan(process_view.load_state(project)) if p.current)
 
     assert current.name["uk"] == "Фаза 2 · EQ, but only above 300 Hz (see the notes)"
 
@@ -276,7 +274,7 @@ def test_steps_land_under_their_phase(process, project):
     process.enter_phase("2")
     process.add_step("2.1", "per-driver EQ")
 
-    plan = process_view.load_plan(project)
+    plan = process_view.to_plan(process_view.load_state(project))
     by_phase = {p.name["en"].split(" · ")[0]: p for p in plan}
 
     assert [s.id for s in by_phase["Phase 1"].steps] == ["1.1"]
@@ -289,7 +287,7 @@ def test_a_skipped_step_stays_visible_and_marked(process, project):
     process.add_step("2.3", "target-match")
     process.skip_step("2.3", superseded_by="2.4")
 
-    plan = process_view.load_plan(project)
+    plan = process_view.to_plan(process_view.load_state(project))
     step = next(s for p in plan for s in p.steps if s.id == "2.3")
 
     assert step.skip is True
@@ -302,7 +300,7 @@ def test_a_redone_step_reports_its_attempt(process, project):
     process.finish_step("2.3", ["m-L_10 (rta)"])  # the method suffix is what makes it a capture
     process.start_attempt("2.3")  # redo
 
-    step = next(s for p in process_view.load_plan(project) for s in p.steps if s.id == "2.3")
+    step = next(s for p in process_view.to_plan(process_view.load_state(project)) for s in p.steps if s.id == "2.3")
 
     assert step.attempt == 2
 
@@ -314,7 +312,7 @@ def test_status_becomes_the_chip_the_panel_already_styles(process, project):
     process.start_attempt("2.1")
     process.finish_step("2.2", ["v_003"])
 
-    steps = {s.id: s for p in process_view.load_plan(project) for s in p.steps}
+    steps = {s.id: s for p in process_view.to_plan(process_view.load_state(project)) for s in p.steps}
 
     assert steps["2.1"].tag_class == "wait"
     assert steps["2.2"].tag_class == "ok"
@@ -326,7 +324,7 @@ def test_a_situational_step_keeps_its_project_source(process, project):
     process.enter_phase("1")
     process.add_step("1.4", "B-pillar rattle", source=module.SOURCE_PROJECT)
 
-    step = next(s for p in process_view.load_plan(project) for s in p.steps if s.id == "1.4")
+    step = next(s for p in process_view.to_plan(process_view.load_state(project)) for s in p.steps if s.id == "1.4")
 
     assert step.source == "project"
 
@@ -337,14 +335,14 @@ def test_real_step_names_are_plain_strings_not_fake_translations(process, projec
     process.enter_phase("2")
     process.add_step("2.1", "per-driver EQ (v4.5)")
 
-    step = next(s for p in process_view.load_plan(project) for s in p.steps if s.id == "2.1")
+    step = next(s for p in process_view.to_plan(process_view.load_state(project)) for s in p.steps if s.id == "2.1")
 
     # Since method v3.0.62 a step's name leads with its id (skill #72: one label in the text and on
     # the panel), and the panel shows the name alone, so the id is said once.
     assert step.name == "2.1 per-driver EQ (v4.5)"
 
 
-def test_done_ids_and_reviewer_are_exposed_for_the_panel_and_footer(process, project):
+def test_the_reviewer_is_exposed_for_the_footer(process, project):
     process.enter_phase("2")
     process.add_step("2.1", "a")
     process.finish_step("2.1", ["v_003"])
@@ -352,7 +350,6 @@ def test_done_ids_and_reviewer_are_exposed_for_the_panel_and_footer(process, pro
 
     state = process_view.load_state(project)
 
-    assert process_view.done_step_ids(state) == {"2.1"}
     assert process_view.reviewer(state)["model"] == "Gemini 3.1 Pro (High)"
 
 
@@ -800,18 +797,13 @@ def test_an_impact_the_parser_cannot_act_on_flags_nothing(project, process):
     """`voicing` (written by the skill's own set_target) and free prose are real impacts a human
     should read — but guessing which channels a sentence meant is how a checklist starts lying."""
     process.enter_phase("2")
-    before = len(process_view.config_changes(project))
     _record_change(project, process, "voicing")
     _record_change(project, process, "check the sub once the amp is back")
 
     assert process_view.stale_channels(project) == {}
-    # Counted as a delta: recording the target is itself a `voicing` change, so the fixture starts
-    # with one. Both of these are still visible as events, which is the point.
-    assert len(process_view.config_changes(project)) == before + 2
 
 
 def test_no_journal_reads_as_nothing_stale(project):
-    assert process_view.config_changes(project) == ()
     assert process_view.stale_channels(project) == {}
 
 

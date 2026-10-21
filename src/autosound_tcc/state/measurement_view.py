@@ -1085,20 +1085,3 @@ def _extras(naming, glossary, parsed: dict, groups_spec: list, version,
             )
         )
     return tuple(out)
-
-
-def off_convention(titles: list[str], project_dir: Optional[Path] = None) -> list[str]:
-    """Titles REW holds that aren't in the naming grammar at all.
-
-    Worth surfacing separately from "not captured yet": no analysis will ever find these by name,
-    so they are invisible to every later step rather than merely missing.
-    """
-    project = Path(project_dir or config.project_dir())
-    if not has_glossary(project):
-        return []
-    try:
-        naming = vendor_loader.load_naming()
-    except vendor_loader.VendorNotInitializedError:
-        return []
-    glossary = naming.Glossary.for_project(str(project))
-    return [t for t in titles if naming.parse_name(t, glossary) is None]

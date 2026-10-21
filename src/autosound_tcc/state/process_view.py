@@ -524,12 +524,6 @@ def steps_using(state: Optional[dict], titles) -> tuple[str, ...]:
     return tuple(out)
 
 
-def load_plan(project_dir: Optional[Path] = None) -> Optional[tuple[PlanPhase, ...]]:
-    """The real plan as `PlanPhase` tuples, or None when there is no process state to read."""
-    state = load_state(project_dir)
-    return to_plan(state) if state else None
-
-
 def to_plan(state: dict, stale: Optional[dict] = None) -> tuple[PlanPhase, ...]:
     """Map one process-state dict onto the panel's dataclasses.
 
@@ -615,15 +609,6 @@ def phase_finished(state: Optional[dict]) -> Optional[str]:
     return str(active)
 
 
-def done_step_ids(state: dict) -> set[str]:
-    """Steps the skill considers done — the panel's checkboxes should reflect these, not guess."""
-    return {
-        str(s.get("id"))
-        for s in state.get("plan", [])
-        if s.get("status") == "done"
-    }
-
-
 def reviewer(state: dict) -> Optional[dict]:
     """Last reviewer call recorded by the skill (vendor/model/when), or None."""
     return state.get("reviewer")
@@ -648,30 +633,6 @@ def session_closed(project_dir: Optional[Path] = None) -> Optional[bool]:
 
 
 # ---- what a config change invalidated (SCR-014) -----------------------------
-
-
-def config_changes(project_dir: Optional[Path] = None) -> tuple[dict, ...]:
-    """Every `config_change` event in the journal, oldest first, with its `impact` parsed.
-
-    The parse comes from the skill (`project.Project.parse_impact`), not from a regex here: the
-    field is written by the skill and a second reading of it in a consumer is how two readings
-    drift apart.
-    """
-    process = _process_module()
-    if process is None:
-        return ()
-    proc = process.Process(str(process_dir(project_dir)))
-    if not (process_dir(project_dir) / "journal.jsonl").is_file():
-        return ()
-    parse = _impact_parser()
-    out = []
-    for event in proc.events(kinds=[process.EV_CONFIG_CHANGE]):
-        event = dict(event)
-        event["impact_parsed"] = parse(event.get("impact")) if parse else {
-            "kind": "other", "codes": (), "raw": event.get("impact") or ""
-        }
-        out.append(event)
-    return tuple(out)
 
 
 #: `stale_channels`' answer, one slot per project: `{root: (key, stale)}` (#172). A slot is

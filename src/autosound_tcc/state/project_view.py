@@ -530,20 +530,6 @@ def _backup_url(remotes: str) -> str:
     return urls[name] or name
 
 
-def git_facts(project_dir_: Optional[Path] = None) -> tuple[tuple[str, str], ...]:
-    """Branch and working-tree state of the project folder, when it is a git repo — the two rows
-    it has always had; `git_status` is the whole answer."""
-    state = git_status(project_dir_)
-    if not state.repo or not state.works:
-        return ()
-    rows: list[tuple[str, str]] = []
-    if state.branch:
-        rows.append(("Git", state.branch))
-    if state.changed is not None:
-        rows.append(("Git changes", str(state.changed) if state.changed else "clean"))
-    return tuple(rows)
-
-
 def _git(project: Path, *args: str) -> Optional[str]:
     try:
         done = subprocess.run(
