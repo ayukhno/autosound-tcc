@@ -20,13 +20,15 @@ import json
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
 import pytest
 
-from autosound_tcc.core import method_cli, process_writer, project_lock, vendor_loader
+from autosound_tcc.core import method_cli, method_lock, process_writer, project_lock, vendor_loader
+from autosound_tcc.state import process_view
 
 from tests import _intake
 
@@ -216,3 +218,64 @@ def test_only_a_copy_whose_write_lock_declares_protocol_1_locks_itself(tmp_path)
     assert project_lock.locks_itself(copy) is False
     write_lock.unlink()  # every copy up to v3.1.2
     assert project_lock.locks_itself(copy) is False
+
+
+#: T2's writers, reduced from the plan's 25 + 25 to stay a test of seconds: TCC's on worker threads,
+#: the bare CLI's as processes of their own, each adding one step to phase 2.
+_T2_TCC = [f"2.{n}" for n in range(11, 16)]
+_T2_BARE = [f"2.{n}" for n in range(21, 26)]
+
+
+def test_t2_tcc_and_bare_cli_writes_race_while_a_reader_rereads(project):
+    """T2 (PLAN-AUDIT §5.4), reduced to 5 + 5: five `process_writer.add_step` calls on threads and
+    five bare `process.py add-step` children race, while a reader thread re-reads the state as the
+    GUI's refresh does — `process_view.unread` (the method's strict read) and `load_state`. The lock
+    orders the writers, not the reader, so this is what catches the method's `os.replace` meeting
+    an open read on Windows (the plan's «risk most likely to break»): the reader never raised and
+    never saw the state unreadable, «cannot be opened» among the rest, and the plan and the journal
+    hold all ten."""
+    stop, troubles, reads = threading.Event(), [], [0]
+
+    def reader() -> None:
+        while not stop.is_set():
+            try:
+                said = process_view.unread(project)
+                if said is not None:
+                    troubles.append(f"unread: {said.why} {said.repair}")
+                if process_view.load_state(project) is None:
+                    troubles.append("load_state: None")
+            except Exception as exc:  # noqa: BLE001 — every one is the finding
+                troubles.append(f"raised: {exc!r}")
+            reads[0] += 1
+
+    env = {**vendor_loader.child_env(), method_lock.WAIT_ENV: f"{method_cli.LOCK_WAIT_S:g}"}
+    looking = threading.Thread(target=reader, daemon=True)
+    looking.start()
+    pool = ThreadPoolExecutor(max_workers=len(_T2_TCC))
+    bare: list[subprocess.Popen] = []
+    try:
+        tcc = [pool.submit(process_writer.add_step, project, sid, f"TCC's {sid}") for sid in _T2_TCC]
+        bare = [subprocess.Popen(
+            [sys.executable, str(process_writer.script_path()), str(project / "process"),
+             "add-step", sid, f"the bare CLI's {sid}"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env)
+            for sid in _T2_BARE]
+        for future in tcc:
+            future.result(timeout=_TCC_RETURNS_S)  # TCC's own failure, raised as itself
+        said = [(child.args[-2], *child.communicate(timeout=_TCC_RETURNS_S)) for child in bare]
+        assert [child.returncode for child in bare] == [0] * len(bare), said
+    finally:
+        stop.set()
+        looking.join(10)
+        pool.shutdown(wait=False)
+        for child in bare:
+            if child.poll() is None:
+                child.kill()
+                child.communicate()
+
+    assert reads[0] > 0, "the reader never read"
+    assert not [t for t in troubles if "cannot be opened" in t], troubles
+    assert troubles == [], troubles
+    plan, added = _plan(project), _added(project)
+    assert [sid for sid in _T2_TCC + _T2_BARE if sid not in plan] == [], plan
+    assert all(added.count(sid) == 1 for sid in _T2_TCC + _T2_BARE), added
