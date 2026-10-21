@@ -134,6 +134,39 @@ state»); older copies v3.1.0–v3.1.1 lack `rew_state`/`strict` (both came in v
 version, and a missing state is «unknown», never «not found»;
 `main_window.py` cannot grow, and new tests build no `MainWindow(`.
 
+## #220 — rounds on the method's level base (the plan, 2026-10-21, after the skill's beta-v3.2.0-rc1)
+
+The skill's half landed (82e8e43: `levelbase.py`, #176/#177). The method's answer is a FIELD, not text:
+`capture-check` writes `capture.level_base` into `process-state.json` — `status` ok | no_base | missing |
+mixed, `base_round`, `previous_round`, `base_offset_db`, `previous_offset_db`, `offset_db` (when the round
+agrees), `titles{t: offset_db, to_base_db, to_previous_db}`, `control{verdict same_chain | chain_change |
+unattributed | not_taken | none, common_db, align_db, why, reason}`. Its stdout `LEVEL` line speaks only on
+news; TCC reads the state, never that line. (The code map: `process.py` 3461–3637, 3707–3761, 4595–4651;
+`process-schema.md` 111–148.)
+
+**Decision (the session, on the map):** swap the SOURCE of the round card's level line, keep its place.
+
+- A copy with the level base (`method_features`: `def _level_base_of(` in `state/process.py`) → the card's
+  line and the strip are built from `capture.level_base` alone, with the method's numbers as it gives them:
+  the base named (`no_base` = «this round is the level base», said neutrally), a move against the previous
+  round with the shift the method applies (`-to_base_db`; the sign never flipped), mixed, missing, and the
+  control's `chain_change` / `unattributed` (its `why` verbatim, English). No `.tcc` record, no REW reading,
+  no arithmetic. Not checked yet → nothing (no fallback to REW's listing).
+- An older bound copy (v3.1.0–v3.1.4) → W-10's own reading (`core/level_calibration.py`) unchanged.
+- The line is redrawn when the state changes (after a capture check, on a process refresh), not only on a REW
+  listing.
+- The strip speaks on news only (a move, mixed, missing, a chain change), once per (round, what, numbers).
+
+**Not in this task, said openly:** the curve window draws REW's dB as REW shows them when rounds are
+overlaid, and only the open (or last) round's `level_base` is in the state — shifting curves of past rounds
+would be TCC's own arithmetic, which the ask rules out. A method API for «a title's shift to the base» is the
+way; after the freeze, a ticket to the skill if the Arbiter wants it.
+
+**Weight:** `Risk: high` (the seam): opus · high implementer, the test first (red on the old code), an Opus task
+review, one fix round, an Opus re-review. Tests: a method-written two-round project (`tests/_rounds.write_round`
++ a `verify` stub with `stats.spl_offset_db`) for each status; an older copy (`_method_copies`, an `OLDER`-style
+change of `def _level_base_of(`) keeps W-10's line; a round not checked yet says nothing.
+
 ## Cost (estimate, 2026-10-21; the seam's share raised after the maps)
 
 | part | machine time | Claude runs | Codex runs |
