@@ -665,6 +665,8 @@ def test_a_capture_check_that_did_not_run_says_rews_state(tmp_path, monkeypatch,
     said = json.loads(_text(asyncio.run(mcp.call_tool("check_captures", {}))))
 
     assert said == {"recorded": False, "error": str(failure), "busy": False,
+                    "kind": {"unavailable": "rew_unavailable", "error": "rew_error",
+                             None: "refused"}[state],
                     **({"rew_state": state} if state else {})}
 
 
@@ -3887,11 +3889,12 @@ def test_a_phase_move_the_method_refused_reaches_the_strip(tmp_path, monkeypatch
         phase="2", why="phase 2's gate is shut: step 1.4 is not closed")] if strip else [])
 
 
-@pytest.mark.parametrize("failure, busy", [
-    (process_writer.Busy(_BUSY_LINE), True),
-    (process_writer.ProcessWriterError("error: step 2.9 is not in the plan"), False),
+@pytest.mark.parametrize("failure, busy, kind", [
+    (process_writer.Busy(_BUSY_LINE), True, "busy"),
+    (process_writer.ProcessWriterError("error: step 2.9 is not in the plan"), False, "refused"),
 ])
-def test_a_recorded_move_says_whether_its_failure_was_busy(tmp_path, monkeypatch, failure, busy):
+def test_a_recorded_move_says_whether_its_failure_was_busy(tmp_path, monkeypatch, failure, busy,
+                                                           kind):
     """A write another writer held past the wait wrote nothing and will work in a moment; a
     refusal will not. The model is told which by a field of its own, `busy`, beside the `error`
     text it already reads — never by parsing the sentence (#218)."""
@@ -3903,14 +3906,15 @@ def test_a_recorded_move_says_whether_its_failure_was_busy(tmp_path, monkeypatch
 
     said = json.loads(_text(asyncio.run(mcp.call_tool("enter_phase", {"phase": "1"}))))
 
-    assert said == {"recorded": False, "error": str(failure), "busy": busy}
+    assert said == {"recorded": False, "error": str(failure), "busy": busy, "kind": kind}
 
 
-@pytest.mark.parametrize("failure, busy", [
-    (process_writer.Busy(_BUSY_LINE), True),
-    (process_writer.ProcessWriterError("process.py timed out after 25s"), False),
+@pytest.mark.parametrize("failure, busy, kind", [
+    (process_writer.Busy(_BUSY_LINE), True, "busy"),
+    (process_writer.ProcessWriterError("process.py timed out after 25s"), False, "failed"),
 ])
-def test_a_session_close_says_whether_its_failure_was_busy(tmp_path, monkeypatch, failure, busy):
+def test_a_session_close_says_whether_its_failure_was_busy(tmp_path, monkeypatch, failure, busy,
+                                                           kind):
     """`session_close` answers outside `_record` — its exit 1 is the list of open work — and its
     failures carry the same `busy` field (#218)."""
     def refuse(*_args, **_kwargs):
@@ -3921,7 +3925,7 @@ def test_a_session_close_says_whether_its_failure_was_busy(tmp_path, monkeypatch
 
     said = json.loads(_text(asyncio.run(mcp.call_tool("session_close", {}))))
 
-    assert said == {"recorded": False, "error": str(failure), "busy": busy}
+    assert said == {"recorded": False, "error": str(failure), "busy": busy, "kind": kind}
 
 
 def test_a_busy_profile_write_is_still_a_failed_save_with_its_sentence(tmp_path, monkeypatch):
@@ -4025,3 +4029,55 @@ def test_a_profile_or_car_write_says_whether_its_failure_was_busy(tmp_path, monk
     said = json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
 
     assert said == {**failed, "error": "it failed", "busy": busy}
+
+
+# ---- a phase move that did not finish is not the method's refusal (the group review, B) --------
+
+_CRASH = ("Traceback (most recent call last):\n  File \"process.py\", line 1, in <module>\n"
+          "KeyError: 'phases'\n")
+
+
+@pytest.mark.parametrize("child, kind, line", [
+    ("refused", "refused", "mcpPhaseRefused"),
+    ("timed out", "timed_out", "mcpPhaseTimedOut"),
+    ("crashed", "failed", "mcpPhaseFailed"),
+    ("too old", "failed", "mcpPhaseFailed"),
+    ("script missing", "failed", "mcpPhaseFailed"),
+    ("busy", "busy", None),
+])
+def test_a_phase_move_that_did_not_finish_is_not_said_as_the_methods_refusal(
+        tmp_path, monkeypatch, app_log_told, child, kind, line):
+    """`enter_phase` put «refused by the method» on the strip for every failure but busy: a child
+    cut at its bound (which may have entered the phase), a crash's traceback, a copy too old or
+    missing the script. The answer names its `kind`; a timed-out one says it may have written; the
+    strip says the refusal only for the method's own `error:` line, its own line for a move that
+    did not finish, and that the move did not run for the rest. Through the real `process_writer`
+    over a child stubbed at `_spawn`."""
+    from autosound_tcc.core import method_cli, self_check
+    from autosound_tcc.ui.tcc import i18n
+
+    monkeypatch.setattr(self_check, "_translate", i18n.t)
+
+    def spawn(project_dir, args, timeout_s=None, **_kw):
+        if child == "timed out":
+            raise method_cli.TimedOut("`process.py enter-phase` ran past 25 s and was stopped", 25)
+        if child == "script missing":
+            raise method_cli.ScriptMissing("this project's method has no rew_tool/state/process.py")
+        if child == "busy":
+            raise method_cli.Busy(_BUSY_LINE)
+        return {"refused": (1, "", "note: a note first\nerror: phase 2's gate is shut: step 1.4 "
+                                   "is not closed\n"),
+                "crashed": (1, "", _CRASH),
+                "too old": (2, "", "usage: process.py [-h] {show,plan}\n")}[child]
+
+    monkeypatch.setattr(process_writer, "_spawn", spawn)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    said = json.loads(_text(asyncio.run(mcp.call_tool("enter_phase", {"phase": "2"}))))
+
+    assert said["recorded"] is False and said["kind"] == kind, said
+    assert said.get("may_have_written") is (True if kind == "timed_out" else None), said
+    why = {"refused": "phase 2's gate is shut: step 1.4 is not closed",
+           "crashed": "KeyError: 'phases'"}.get(child, str(said["error"]).splitlines()[-1])
+    assert app_log_told.warned == ([] if line is None else [
+        i18n.t(line).format(phase="2", why=why)]), app_log_told.warned

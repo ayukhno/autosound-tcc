@@ -1054,13 +1054,17 @@ def build_server(
     def _not_recorded(exc: process_writer.ProcessWriterError) -> str:
         """A write that did not land: its sentence, and whether it was busy — another write held
         the project, nothing was written, the same call works in a moment (#218) — as a field of
-        its own, so the model need not read that off the sentence. When REW was why (#219),
-        `rew_state` says how: "unavailable", REW did not answer; "error", REW answered and not
-        with its list. Absent when REW was not why."""
-        rew = ("unavailable" if isinstance(exc, process_writer.RewUnavailable)
-               else "error" if isinstance(exc, process_writer.RewAnswered) else None)
-        return json.dumps({"recorded": False, "error": str(exc),
-                           "busy": isinstance(exc, process_writer.Busy),
+        its own, so the model need not read that off the sentence. `kind` says which failure it
+        was (`process_writer.failure_kind`): busy, timed_out, refused (the method's own), the REW
+        ones, or failed; a `timed_out` one adds `may_have_written`, since a child cut halfway may
+        have written (the group review, B). When REW was why (#219), `rew_state` says how:
+        "unavailable", REW did not answer; "error", REW answered and not with its list. Absent
+        when REW was not why."""
+        kind = process_writer.failure_kind(exc)
+        rew = {"rew_unavailable": "unavailable", "rew_error": "error"}.get(kind)
+        return json.dumps({"recorded": False, "error": str(exc), "busy": kind == "busy",
+                           "kind": kind,
+                           **({"may_have_written": True} if kind == "timed_out" else {}),
                            **({"rew_state": rew} if rew else {})}, ensure_ascii=False)
 
     def _rew_said(exc: BaseException) -> dict:
@@ -1096,11 +1100,17 @@ def build_server(
         empty plan (tcc#7)."""
         answer = await _in_thread(_record, process_writer.enter_phase, phase)
         said = json.loads(answer)
-        if said.get("recorded") is False and not said.get("busy"):
-            # A gate's refusal reached the model alone (#219, T-10/T-11): the Arbiter, looking at
-            # the plan, saw nothing happen. On the strip too, in the method's words.
-            app_log.warn(self_check.translated("mcpPhaseRefused").format(
-                phase=phase, why=str(said.get("error") or "").removeprefix("error: ")))
+        kind, error = said.get("kind"), str(said.get("error") or "")
+        # A gate's refusal reached the model alone (#219, T-10/T-11): the Arbiter, looking at the
+        # plan, saw nothing happen. On the strip too — the method's refusal in its words; a move
+        # cut at its bound as one that may have been entered; any other failure as not run (the
+        # group review, B). Busy is not said: it works in a moment.
+        if said.get("recorded") is False and kind != "busy":
+            key = {"refused": "mcpPhaseRefused", "timed_out": "mcpPhaseTimedOut"}.get(
+                kind, "mcpPhaseFailed")
+            why = (process_writer.refusal(1, error).removeprefix("error: ") if kind == "refused"
+                   else process_writer.last_words(1, "", error))
+            app_log.warn(self_check.translated(key).format(phase=phase, why=why))
         return answer
 
     @tool()

@@ -588,6 +588,27 @@ def no_answer(command: str, code: int, out: str, err: str) -> ProcessWriterError
     return ProcessWriterError(sentence)
 
 
+def failure_kind(exc: BaseException) -> str:
+    """What a write that did not land was, for a caller that says each its own way (the group
+    review of #218/#219, B): "busy" — another write held the project, nothing was written, the same
+    call works in a moment; "timed_out" — the child was cut at its bound, and may have written;
+    "rew_unavailable" — REW did not answer; "rew_error" — REW answered, and not with its list;
+    "refused" — the method's own refusal, its `error:` line; "failed" — anything else: a crash, a
+    copy too old for the command or missing its script, a binding TCC will not run, TCC's own
+    sentence. Never read off the generic `error: ` alone where a class says more."""
+    if isinstance(exc, Busy):
+        return "busy"
+    if isinstance(exc, TimedOut):
+        return "timed_out"
+    if isinstance(exc, RewUnavailable):
+        return "rew_unavailable"
+    if isinstance(exc, RewAnswered):
+        return "rew_error"
+    if type(exc) is ProcessWriterError and refusal(1, str(exc)):
+        return "refused"
+    return "failed"
+
+
 def crashed(err: str) -> bool:
     """Whether a run's stderr holds Python's traceback: an exception nothing in the method caught."""
     return _TRACEBACK in err

@@ -449,6 +449,8 @@ answers the first five questions anybody would ask.",
         "intakeReady": "The intake is complete — phase 0 has everything it needs.",
         "intakeGateUnread": "Phase 0's gate stays shut: a project file is there and cannot be read — {files}",
         "mcpPhaseRefused": "The session's move to phase {phase} was refused by the method: {why}",
+        "mcpPhaseTimedOut": "The session's move to phase {phase} did not finish; it may have been entered — look at the plan.",
+        "mcpPhaseFailed": "The session's move to phase {phase} did not run: {why}",
         "intakeStartSession": "Start the session",
         "versionTip": "{dsp} — configuration {version} of preset {preset}. Entered in the DSP: {applied}; proposed, not yet entered: {proposed}; measured since: {measured}. The dot is yellow while anything is only proposed, green once all of it is entered (attest).",
         "unusableSummary": "Unusable captures: {n} — {first}",
@@ -1854,6 +1856,10 @@ Choose sweeps (sw) above to read this.",
         # #219: the English until the Advisor.
         "intakeGateUnread": "Phase 0's gate stays shut: a project file is there and cannot be read — {files}",
         "mcpPhaseRefused": "The session's move to phase {phase} was refused by the method: {why}",
+        # #219: the English until the Advisor.
+        "mcpPhaseTimedOut": "The session's move to phase {phase} did not finish; it may have been entered — look at the plan.",
+        # #219: the English until the Advisor.
+        "mcpPhaseFailed": "The session's move to phase {phase} did not run: {why}",
         "intakeStartSession": "Стартувати сесію",
         "versionTip": "{dsp} — конфігурація {version} пресету {preset}. Введено в DSP: {applied}; лише запропоновано, ще не введено: {proposed}; після того виміряно: {measured}. Крапка жовта, доки щось лише запропоновано, і зелена, коли все введено (attest).",
         "unusableSummary": "Непридатних замірів: {n} — {first}",
@@ -3207,6 +3213,10 @@ Choose sweeps (sw) above to read this.",
         # #219: the English until the Advisor.
         "intakeGateUnread": "Phase 0's gate stays shut: a project file is there and cannot be read — {files}",
         "mcpPhaseRefused": "The session's move to phase {phase} was refused by the method: {why}",
+        # #219: the English until the Advisor.
+        "mcpPhaseTimedOut": "The session's move to phase {phase} did not finish; it may have been entered — look at the plan.",
+        # #219: the English until the Advisor.
+        "mcpPhaseFailed": "The session's move to phase {phase} did not run: {why}",
         "intakeStartSession": "Rozpocznij sesję",
         "versionTip": "{dsp} — konfiguracja {version} presetu {preset}. Wprowadzone do DSP: {applied}; tylko zaproponowane, jeszcze niewprowadzone: {proposed}; zmierzone od tego czasu: {measured}. Kropka jest żółta, dopóki coś jest tylko zaproponowane, i zielona, gdy wszystko wprowadzono (attest).",
         "unusableSummary": "Pomiarów nieużytecznych: {n} — {first}",
@@ -4634,6 +4644,10 @@ Choose sweeps (sw) above to read this.",
         # #219: the English until the Advisor.
         "intakeGateUnread": "Phase 0's gate stays shut: a project file is there and cannot be read — {files}",
         "mcpPhaseRefused": "The session's move to phase {phase} was refused by the method: {why}",
+        # #219: the English until the Advisor.
+        "mcpPhaseTimedOut": "The session's move to phase {phase} did not finish; it may have been entered — look at the plan.",
+        # #219: the English until the Advisor.
+        "mcpPhaseFailed": "The session's move to phase {phase} did not run: {why}",
         "intakeStartSession": "Sitzung starten",
         "versionTip": "{dsp} — Konfiguration {version} des Presets {preset}. Im DSP eingetragen: {applied}; nur vorgeschlagen, noch nicht eingetragen: {proposed}; seitdem gemessen: {measured}. Der Punkt ist gelb, solange etwas nur vorgeschlagen ist, und grün, sobald alles eingetragen ist (attest).",
         "unusableSummary": "Unbrauchbare Messungen: {n} — {first}",
