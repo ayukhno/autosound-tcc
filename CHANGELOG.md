@@ -50,6 +50,11 @@ minor release with the method (TCC v1.2.0 with the method's v3.2.0). After it, o
 - **An import and a capture check work in the round they were started for** (tcc#218): a capture TCC imports
   goes into the round its own `capture-start` opened, even if a session opens another one a moment later; a
   check whose round has moved on says nothing rather than judging the new round's captures.
+- **The user guide matches the screen** (tcc#230): the quick guide, the reference and the house-curve page use
+  the labels the app shows today — the menu, the diagnostics tabs, Control mode, the Git backup button, the
+  curve window — and describe the REW dot's states, the main AI check and the dialog's activity line.
+- **This release's new lines are in Ukrainian, Polish and German** too: the REW dot's states, the main AI check,
+  the «busy» and «cannot be read» messages.
 
 ### Fixed
 
