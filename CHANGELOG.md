@@ -15,6 +15,59 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [Unreleased]
+
+The wave W-11: the last wave before a freeze — bugs, hygiene and small clear improvements, ending with the joint
+minor release with the method (TCC v1.2.0 with the method's v3.2.0). After it, only fixes for what users report.
+
+### Added
+
+- **The main AI's model is checked when you pick it** (tcc#222), as the AI Critic's already was: beside the
+  picker, «on this login» in green, «not on this login» in red, or «not checked» with the reason. Claude asks your
+  own `claude` for its login and model list; Codex asks Codex once; omp cannot be checked without starting a
+  session and says so honestly.
+- **Something moves while the model thinks** (tcc#223): the activity line reads «⟳ thinking · m:ss…» for the
+  whole open turn when no tool is running, and a tool takes the line over and hands it back. Before, a long think
+  without a tool looked like a stalled window. The model's thinking text is never shown.
+- **REW's state is told in three, not two** (tcc#219): the REW dot, the measurement panel, the capture check and
+  the AI's tool answers tell «REW is not running» from «REW answered with an error» and from «REW's address is
+  no address», and say which. A capture REW could not read is no longer shown as one to retake, and the curve
+  window greys a row as «not in REW» only when REW really holds no such title.
+- **The method's refusals reach the screen with its repair** (tcc#219): an unreadable `process-state.json` is
+  said with the method's own reason and what to do, in the strip, the plan panel and the AI's answer — the plan
+  panel no longer says «No plan yet» over it. A phase move the method refused, or one that did not finish (and
+  may have been entered), reaches the strip, each said as what it was. A red intake gate names the file and the
+  repair.
+
+### Changed
+
+- **TCC takes the method's write lock instead of its own** (tcc#218): since the method's v3.1.3 every method
+  writer locks the project itself; TCC no longer takes its own cross-process lock around them, keeps only its
+  in-app lock (which still keeps two of TCC's own writes apart, also on a folder the system cannot lock, such as
+  a shared VM folder), and no longer makes `process/` ahead of the method. A write that meets another one says
+  «busy, nothing written, try again» everywhere — the profile, the save dialog, the car, the AI's answers —
+  instead of «timed out» or a generic error.
+- **An import and a capture check work in the round they were started for** (tcc#218): a capture TCC imports
+  goes into the round its own `capture-start` opened, even if a session opens another one a moment later; a
+  check whose round has moved on says nothing rather than judging the new round's captures.
+
+### Fixed
+
+- **«Fresh» started a fresh conversation only on Codex and omp** (tcc#221): on the Claude route it continued the
+  old one. It now starts fresh on every route; resume still resumes.
+- **The Monitor, the diagnostics' sessions tab and «Open terminal» could read another project** (tcc#224) after
+  a project switch whose close was cancelled: each now reads its own window's project.
+- **TCC re-read the project twice after its own reviewer pick** (tcc#225).
+- **The developer's switch skipped an update's pins** (tcc#227; developers only): it now skips the signature
+  check and nothing else, and the update window no longer claims a signature it did not check.
+
+### Release tooling
+
+- **A candidate that carries its release is checked as the release** (tcc#226, hub #246): the version, the
+  `## [vY]` heading, the `Paired with method` line naming the method's coming tag (and refusing one already
+  published on another commit), and the wave's pool items — so the joint release can be tagged on that very
+  commit.
+
 ## [v1.1.4] — 2026-10-15 · Codex inside TCC, a gate that asks about what cannot be undone, updates held to the tested set, the delay bank per series, the method at v3.1.4
 
 Paired with method `71a56cf331f6ee9cf5fb869a93b6381a78067b22` — the tag on that commit is **`v3.1.4`**.
