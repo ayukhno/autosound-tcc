@@ -102,6 +102,18 @@ paired release, whose pin carries only the skill's candidate tag until the train
 tcc#201). The ref is resolved to one full sha once, and every read is of that commit. No suite, and
 nothing written — it reads git objects and asks the method's remote for its tags (`ls-remote`).
 
+## A candidate may carry its release — the release train (tcc#226, hub #246 asks 1–2)
+
+The train tags each product's newest candidate's commit, the skill's first (hub RELEASE-CHANNEL.md
+§11.6), so TCC's last candidate already carries the release. A candidate whose `pyproject.toml`
+already says its version is such a candidate, and `CANDIDATE=` holds it to the release's own checks
+on HEAD — the ones `VERSION=… AT=` will make on that same commit: `## [vY]` on top with no
+`## [Unreleased]`, a note that says something, and `Paired with method` naming the pin's sha. Its
+pin is the skill's candidate, so the published-tag check changes: the line names the skill's
+coming tag `vX` beside the sha, and the pin must carry `vX` or a published `beta-vX-rcN` — a typo in
+the line, or a pin on another version's candidate, is refused. A candidate whose version is not
+moved yet is an ordinary one, checked as before, and the plan says it does not carry the release.
+
 ## The tag is signed, and checked before it leaves (tcc#102, hub #83 HUB-032)
 
 From `v0.1.45` TCC's updater installs a release tag only when it verifies against the author's key,
@@ -331,6 +343,7 @@ def check_candidate_changelog(root: Path, version: str) -> None:
     A candidate writes nothing, so its notes may still sit under `## [Unreleased]`: the release
     commit renames them (hub RELEASE-CHANNEL.md §11.3, the skill's `tag-check.sh --candidate`). They
     must say something all the same — an empty note is a forgotten note for a candidate too.
+    A candidate that carries its release is read by `check_changelog` instead (tcc#226).
     """
     text = _read_changelog(root)
     for heading in (version, "Unreleased"):
@@ -371,6 +384,39 @@ def check_paired_method(changelog: str, method_sha: str, tag: str) -> None:
         raise Stop(f"CHANGELOG says the method is `{said}` — the start of the checkout's "
                    f"`{method_sha[:12]}`, but too short to name one commit; write at least "
                    f"{PAIRED_SHA_MIN} characters of the sha")
+
+
+def paired_method_version(changelog: str, tag: str) -> str:
+    """The method's version the `Paired with method` line of `## [tag]` names beside its sha —
+    `` **`v3.2.0`** `` — or "" when that paragraph names none."""
+    body = section(changelog, tag) or ""
+    found = re.search(r"[Pp]aired with method[^\n]*?`[^`]+`(.*?)(?:\n[ \t]*\n|\Z)", body, re.S)
+    named = re.search(r"`(v\d+\.\d+\.\d+)`", found.group(1)) if found else None
+    return named.group(1) if named else ""
+
+
+def check_coming_method(changelog: str, tag: str, pinned: str, tags: list) -> str:
+    """A candidate that carries its release: the pin carries the method version its line names —
+    released as `vX`, or the skill's candidate `beta-vX-rcN` (tcc#226, hub #246 ask 2).
+
+    The train tags the skill's newest candidate's commit `vX` first, then TCC's on its own, so the
+    line names a tag that does not exist yet while the candidate is tried. What can be checked
+    instead is that the pin is a published candidate OF THAT version: a typo in the line, or a pin
+    on another version's candidate or on no tag at all, is refused. Which of X's candidates (the
+    newest) and the minor pairing are the hub's, at the train (`minor-pair` with `promised`).
+    The `beta-` prefix is the hub's candidate name (RELEASE-CHANNEL.md §11.1).
+    """
+    named = paired_method_version(changelog, tag)
+    if not named:
+        raise Stop(f"the `## [{tag}]` entry's `Paired with method` line names no method tag beside "
+                   "the sha — a candidate that carries its release names the skill's coming tag, "
+                   "`vX.Y.Z`, so it can be held to the pin")
+    if named in tags or any(re.fullmatch(rf"beta-{re.escape(named)}-rc\d+", t) for t in tags):
+        return named
+    raise Stop(f"the `## [{tag}]` entry pairs with method `{named}`, and the pin `{pinned[:12]}` "
+               f"carries {', '.join(tags) or 'no published tag'} — neither `{named}` nor a "
+               f"published `beta-{named}-rcN`. A typo in the line, or the pin is not the skill's "
+               f"candidate of {named}: pin its last candidate, the commit the train tags {named}")
 
 
 # ---------------------------------------------------------------- the writing half
@@ -571,7 +617,8 @@ def check_published_method(pinned: str, tags: list) -> None:
 
     It is ABSOLUTE for a release, with no override to remember, because the case an override
     would serve already has a path: a candidate (`make ship CANDIDATE=…`) skips
-    `Paired with method` too, and skips this. Measured before it was written, 2026-09-19: the
+    `Paired with method` too, and skips this — unless it carries its release, and then
+    `check_coming_method` asks for the skill's candidate of the version its line names. Measured before it was written, 2026-09-19: the
     last six tcc tags all pin a tagged method commit, so nothing about how releases are cut
     changes — this only writes down what hands already do.
     """
@@ -738,8 +785,9 @@ def ship(root: Path, release: bool, test_command=None,
     """The whole thing. Reads and decides first; writes only when `release` is true.
 
     Three modes, the skill's model (hub RELEASE-CHANNEL.md §11): the next patch; a candidate for
-    `candidate`, which writes nothing and tags HEAD `beta-vX.Y.Z-rcN`; a named `version`, released
-    the way a patch is. With `at`, the named `version` is only checked against that commit by TCC's
+    `candidate`, which writes nothing and tags HEAD `beta-vX.Y.Z-rcN` — held to the release's own
+    checks when its pyproject already says that version (it carries the release, tcc#226); a
+    named `version`, released the way a patch is. With `at`, the named `version` is only checked against that commit by TCC's
     own checks — not the hub's preflight, which is the train's: dry, no suite, nothing written
     (tcc#201, hub #246).
     """
@@ -785,11 +833,14 @@ def ship(root: Path, release: bool, test_command=None,
     # Every tagging path tags HEAD's tree, or HEAD's plus the bump, which leaves the file alone —
     # so HEAD is the release commit's answer, asked before anything is written.
     check_constraints(root, run(["git", "rev-parse", "HEAD"], root))
-    if plan.mode == "candidate":
+    # A candidate whose pyproject already says its version carries the release (tcc#226): the train
+    # tags this very commit, so it is held to the release's own checks here, not on release day.
+    carries = plan.mode == "candidate" and current_version(root) == candidate.lstrip("v")
+    if plan.mode == "candidate" and not carries:
         check_candidate_changelog(root, candidate)
     else:
-        plan.version = tag.lstrip("v")
-        changelog = check_changelog(root, plan.tag)
+        plan.version = (candidate or tag).lstrip("v")
+        changelog = check_changelog(root, candidate or plan.tag)
 
     plan.method_sha = read_method_sha(root)
     pinned = read_pinned_sha(root)
@@ -798,6 +849,10 @@ def ship(root: Path, release: bool, test_command=None,
         check_paired_method(changelog, plan.method_sha, plan.tag)
         plan.method_tags = list(read_published_tags(root, pinned))
         check_published_method(pinned, plan.method_tags)
+    elif carries:
+        check_paired_method(changelog, plan.method_sha, candidate)
+        plan.method_tags = list(read_published_tags(root, pinned))
+        coming = check_coming_method(changelog, candidate, pinned, plan.method_tags)
 
     # The three lines that will actually run. The carrier builds the SAME three to put in front
     # of the hook, from its own literal — so an edit here that is not made there would leave the
@@ -814,6 +869,13 @@ def ship(root: Path, release: bool, test_command=None,
     say(f"  {plan.mode:<17}: {plan.tag}")
     published = f"  published as {', '.join(plan.method_tags)}" if plan.method_tags else ""
     say(f"  method           : {plan.method_sha[:12] or '(unknown)'}{published}")
+    if carries:
+        say(f"  carries          : the release {candidate}, paired with method {coming} — the "
+            "train tags this commit")
+    elif plan.mode == "candidate":
+        say(f"  carries          : this candidate does not carry the release — pyproject.toml "
+            f"says {current_version(root) or 'no version'}, not {candidate.lstrip('v')}; fine for "
+            "a patch's candidate, the release train refuses it")
 
     if not release:
         again = {"candidate": f" CANDIDATE={candidate}",

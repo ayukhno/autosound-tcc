@@ -1930,3 +1930,99 @@ def test_a_check_at_a_commit_without_constraints_is_refused(repo):
         _run(repo, release=False, version="v0.1.25", at=commit)
 
     assert "constraints.txt" in str(stop.value) and commit[:12] in str(stop.value)
+
+
+# --- a candidate that carries its release (tcc#226, hub #246 asks 1–2) -----------------------
+#
+# The release train tags each product's newest candidate's commit, the skill's first, so TCC's last
+# candidate already carries the release: the version, `## [vY]` with its `Paired with method` line
+# naming the skill tag the train will cut on the pinned commit — a tag that does not exist yet. Such
+# a candidate is held to the release's own checks, the pin's published tag aside: that is a
+# `beta-vX-rcN` of the version the line names.
+
+COMING = "v3.2.0"
+
+
+def _carrying_candidate(repo, *, named=COMING, sha=METHOD_SHA, unreleased=False,
+                        version="0.2.0"):
+    """v0.2.0's candidate commit, published: the version and the release's own entry in it."""
+    paired = (f"Paired with method `{sha}` — the train tags that commit **`{named}`**."
+              if named else f"Paired with method `{sha}`.")
+    (repo / "CHANGELOG.md").write_text(
+        "# Changelog\n\n"
+        + ("## [Unreleased]\n\n- found during the trial\n\n" if unreleased else "")
+        + f"## [v0.2.0] — 2026-10-21 · the release the candidate carries\n\n{paired}\n\n"
+          "- one\n- two\n\n"
+          "## [v0.1.24] — 2026-08-20 · the one before\n\n- old\n- older\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(PYPROJECT.format(version=version), encoding="utf-8")
+    _relock(repo)
+    git(repo, "commit", "--quiet", "-am", "v0.2.0: the candidate carries the release")
+    git(repo, "push", "--quiet", "origin", "main")
+    return git(repo, "rev-parse", "HEAD")
+
+
+def test_a_candidate_that_carries_its_release_is_tagged_and_the_trains_check_takes_it(repo):
+    """Ask 2: the line names `v3.2.0`, which does not exist yet; the pin carries the skill's
+    candidate of that version, and that is enough. Then the train's own check at that commit."""
+    head = _carrying_candidate(repo)
+    lines = []
+    skill_candidate = lambda _root, _sha, **_kw: ["beta-v3.2.0-rc2"]  # noqa: E731
+
+    plan = _run(repo, ask=channel(tag="beta-v0.2.0-rc1"), candidate="v0.2.0",
+                published=skill_candidate, say=lines.append)
+
+    assert git(repo, "rev-parse", "beta-v0.2.0-rc1^{commit}") == head, "the tag is on HEAD"
+    assert git(repo, "rev-parse", "HEAD") == head, "nothing was committed"
+    assert plan.method_tags == ["beta-v3.2.0-rc2"]
+    said = [line for line in lines if "carries" in line]
+    assert said and "v0.2.0" in said[0] and COMING in said[0], lines
+
+    ready = []
+    ship_mod.ship(repo, release=False, channel=channel(), version="v0.2.0", at=head,
+                  read_pinned_sha=lambda _root, _at="HEAD": METHOD_SHA,
+                  read_method_url=lambda _root, _sha: METHOD_URL,
+                  read_published_tags=skill_candidate, say=ready.append)
+    assert any("READY" in line for line in ready), ready
+
+
+@pytest.mark.parametrize("spoil, tags, expect", [
+    # a typo in the line: no tag of that version anywhere on the pin
+    ({"named": "v3.2.1"}, ["beta-v3.2.0-rc2"], "`v3.2.1`"),
+    # the wrong pin: the skill's candidate of another version
+    ({}, ["beta-v3.1.0-rc2"], "beta-v3.1.0-rc2"),
+    # a pin on no published tag at all
+    ({}, [], "no published tag"),
+    # the line names no method version beside the sha
+    ({"named": ""}, ["beta-v3.2.0-rc2"], "names no method tag"),
+    # the line's sha is not the pin
+    ({"sha": "b" * 40}, ["beta-v3.2.0-rc2"], "the checkout is at"),
+    # the entry is still under Unreleased: the train's check at this commit would refuse it
+    ({"unreleased": True}, ["beta-v3.2.0-rc2"], "rename it to"),
+])
+def test_a_candidate_that_carries_its_release_is_held_to_its_paired_line(repo, spoil, tags,
+                                                                           expect):
+    head = _carrying_candidate(repo, **spoil)
+
+    with pytest.raises(ship_mod.Stop) as stop:
+        _run(repo, ask=channel(tag="beta-v0.2.0-rc1"), candidate="v0.2.0",
+             published=lambda _root, _sha, **_kw: list(tags))
+
+    assert expect in str(stop.value), str(stop.value)
+    assert git(repo, "tag", "--list", "beta-v0.2.0-rc1") == "", "nothing was tagged"
+    assert git(repo, "rev-parse", "HEAD") == head
+
+
+def test_a_candidate_whose_version_is_not_moved_yet_stays_an_ordinary_one(repo):
+    """`## [v0.2.0]` named early with pyproject still on 0.1.24: a patch's candidate may do that
+    (the bookkeeping rides in the release commit, hub RELEASE-CHANNEL.md §11.3). It is not asked
+    about the method's tags, and the plan says it does not carry the release — the train would
+    refuse it (`manifest`)."""
+    _carrying_candidate(repo, version="0.1.24", named="")
+    asked, lines = [], []
+
+    _run(repo, release=False, ask=channel(tag="beta-v0.2.0-rc1"), candidate="v0.2.0",
+         published=lambda _root, sha, **_kw: asked.append(sha) or [], say=lines.append)
+
+    assert asked == [], "an ordinary candidate answers to nobody's tag"
+    said = [line for line in lines if "carries" in line]
+    assert said and "does not carry" in said[0] and "0.1.24" in said[0], lines
