@@ -36,15 +36,16 @@ BARE_STEP = ("2.7", "added by the bare CLI")
 
 #: Only where the method locks itself: when the held bare writer is let go. Such a method holds its
 #: lock across load → write → append, so TCC's write cannot land while the bare one is held, and
-#: waiting for it would wait out the lock. Half the wait TCC gives the method's lock on a worker
-#: (`method_cli.spawn`: a quarter of the write's bound, 5 s), so TCC's child is still waiting when
-#: the bare one is let go, and never answers busy first.
-TCC_LANDS_S = min(method_cli.LOCK_WAIT_S, process_writer.DEFAULT_TIMEOUT_S / 4) / 2
+#: waiting for it would wait out the lock. Well inside the wait TCC gives the method's lock on a
+#: worker (`method_cli.LOCK_WAIT_S`, whole since #218), so TCC's child is still waiting when the
+#: bare one is let go, and never answers busy first.
+TCC_LANDS_S = min(method_cli.LOCK_WAIT_S, 5.0) / 2
 
-#: TCC's write is bounded on its own: the lock wait off the GUI thread, then the child's timeout.
-#: One that has not returned by this point never will, and the test fails saying so instead of
-#: letting the bare writer go first.
-_TCC_RETURNS_S = method_cli.LOCK_WAIT_S + process_writer.DEFAULT_TIMEOUT_S + 10.0
+#: TCC's write is bounded on its own: the lock wait off the GUI thread, then the child's bound — the
+#: work and, for a copy that locks itself, the method's lock wait once more. One that has not
+#: returned by this point never will, and the test fails saying so instead of letting the bare
+#: writer go first.
+_TCC_RETURNS_S = 2 * method_cli.LOCK_WAIT_S + process_writer.DEFAULT_TIMEOUT_S + 10.0
 
 #: The bare CLI as a person or another agent runs it — `python process.py <process-dir> add-step
 #: <id> <name>`, from the copy TCC runs — held at the one point that decides the race: the load

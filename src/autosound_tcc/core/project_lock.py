@@ -1,5 +1,5 @@
 """One write to a project at a time — from any thread here and from any other process — under ONE
-deadline (#171, G8 phase 0).
+deadline (#171, G8 phase 0; #218, G8 phase 1).
 
 `process.py` is a read-modify-write over a single JSON file, and nothing used to serialise it. That
 was not theoretical: omp starts tool calls concurrently, and a real run fired `enter_phase` and two
@@ -10,16 +10,23 @@ right.
 Two locks, taken in this order. The project's thread lock, for this process's own threads; then, on
 POSIX, a flock on `process/.process-write.lock`, because the other front-end is a separate process:
 the user's own CLI can be driving the same project through the same skill (that is what
-`signal_bus` exists for), and a lock only TCC's threads respect would not see it. The skill's own
-CLI does not take this lock, so this narrows the window rather than closing it — closing it belongs
-in the method (G8 phase 1, W-11), and `locks_itself` reads whether a copy has. Windows has no flock
-here, and the thread lock is all there is.
+`signal_bus` exists for), and a lock only TCC's threads respect would not see it. Windows has no
+flock here, and the thread lock is all there is.
+
+From v3.1.3 the method locks itself (`method_lock`): every writer of it holds
+`<project>/.autosound/write.lock`, the bare CLI's included, which closes what the flock only
+narrowed. Around a child of such a copy `method_cli.spawn` asks for the thread lock alone
+(`cross_process=False`): no flock, and so no `process/` made ahead of the method. The thread lock
+stays — it keeps TCC's own round guard and its own writes apart, and on a folder the OS cannot lock
+the method writes without its lock. The flock is the legacy half, for a copy that does not lock
+itself.
 
 ONE deadline over both. The thread lock used to wait without bound, so a write queued behind a
 120 s `capture-check` — or `close_session` at quit, behind a queue of them — waited for all of it,
 and the flock's only deadline was the child's own `timeout_s`. Now the wait has one budget, spent
 across both locks; past it `hold` raises `LockTimeout` having taken nothing, and the caller answers
-«busy» instead of freezing a window.
+«busy» instead of freezing a window. A thread that asks again while it holds the lock is answered
+at once (`_held_here`): the lock is not re-entrant, and that wait could only end at its deadline.
 
 Qt-free. No other module imports `fcntl` or holds the writer lock.
 """
@@ -57,6 +64,9 @@ locks_itself = method_lock.locks_itself
 _THREAD_LOCKS: dict[tuple[int, int] | Path, threading.Lock] = {}
 _THREAD_LOCKS_GUARD = threading.Lock()
 
+#: The folders this thread holds the lock on now (`hold`), by `_folder`'s key.
+_HELD = threading.local()
+
 
 class LockTimeout(RuntimeError):
     """The project's writer lock was still held when the deadline passed. Nothing was taken."""
@@ -67,15 +77,23 @@ def lock_file(project_dir: Path | str) -> Path:
     return Path(project_dir) / _PROCESS_DIR / _LOCK_NAME
 
 
-def _thread_lock(project_dir: Path | str) -> threading.Lock:
+def _thread_lock(project_dir: Path | str, key=None) -> threading.Lock:
     """This process's lock for one project: one per project folder, so two spellings of a project
-    share it and two projects never wait on each other."""
-    key = _folder(project_dir)
+    share it and two projects never wait on each other. `key` is `_folder`'s, when already read."""
+    key = _folder(project_dir) if key is None else key
     with _THREAD_LOCKS_GUARD:
         lock = _THREAD_LOCKS.get(key)
         if lock is None:
             lock = _THREAD_LOCKS[key] = threading.Lock()
         return lock
+
+
+def _held_here() -> set:
+    """The folders this thread holds the lock on now, by `_folder`'s key."""
+    held = getattr(_HELD, "folders", None)
+    if held is None:
+        held = _HELD.folders = set()
+    return held
 
 
 def _left(deadline: float) -> float:
@@ -107,7 +125,7 @@ def _folder(project_dir: Path | str) -> tuple[int, int] | Path:
 
 
 @contextmanager
-def hold(project_dir: Path | str, timeout_s: float) -> Iterator[None]:
+def hold(project_dir: Path | str, timeout_s: float, *, cross_process: bool = True) -> Iterator[None]:
     """Hold the project's writer lock for the block, or raise `LockTimeout` once `timeout_s` is out.
 
     The thread lock first, then (POSIX) the flock, under one deadline: what the first wait spent
@@ -117,20 +135,36 @@ def hold(project_dir: Path | str, timeout_s: float) -> Iterator[None]:
     only, both answered by `method_cli.spawn`: `LockTimeout`, and the `OSError` itself of a lock the
     filesystem cannot take or a `process/` that cannot be made — the thread lock given back.
 
-    Not re-entrant: a thread that holds it and asks again waits out its own deadline.
+    `cross_process=False` is the thread lock alone: no flock, nothing made. What `spawn` asks around
+    a child that takes the method's own lock (#218).
+
+    Not re-entrant, and so a thread that holds it and asks again is answered `LockTimeout` at once,
+    having waited for nothing: that wait could only end at its own deadline (#218, T3).
     """
     project_dir = Path(project_dir)
     deadline = time.monotonic() + timeout_s
-    thread_lock = _thread_lock(project_dir)
+    key = _folder(project_dir)
+    held_here = _held_here()
+    if key in held_here:
+        raise LockTimeout(
+            f"this thread already holds the lock for {project_dir}: a write asked inside another "
+            "write would wait for itself"
+        )
+    thread_lock = _thread_lock(project_dir, key)
     if not thread_lock.acquire(timeout=_left(deadline)):
         raise LockTimeout(
             f"this process's thread lock for {project_dir} was still held after {timeout_s:g}s "
             "(another write from this app)"
         )
+    held_here.add(key)
     try:
-        with _flock(project_dir, deadline, timeout_s):
+        if cross_process:
+            with _flock(project_dir, deadline, timeout_s):
+                yield
+        else:
             yield
     finally:
+        held_here.discard(key)
         thread_lock.release()
 
 

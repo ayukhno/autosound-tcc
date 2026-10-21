@@ -22,9 +22,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from autosound_tcc.core import method_cli, process_writer, project_lock
+from autosound_tcc.core import method_cli, method_lock, process_writer, project_lock
 
 from tests import _intake
+from tests._lock_holders import method_lock_held
 
 #: Windows has no flock in phase 0: the thread lock is all `hold` takes there, so a holder in
 #: another process is a POSIX-only scene.
@@ -277,21 +278,19 @@ def test_a_project_path_through_a_symlink_loop_raises_an_oserror_never_a_runtime
     assert project_lock._folder(car) == Path(os.path.abspath(car))
 
 
-@posix_only
-def test_a_lock_another_process_holds_answers_busy_within_the_same_deadline(
-    project, holder_process, monkeypatch
-):
-    """The twin with a holder PROCESS, which no thread lock here can see. The flock used to wait
-    out the child's own `timeout_s` (20 s for `enter_phase`); now it spends the same deadline the
-    thread lock does."""
+def test_a_lock_another_process_holds_answers_busy_within_the_same_deadline(project, monkeypatch):
+    """The twin with a holder PROCESS, which no thread lock here can see: the method's own lock,
+    held as a bare CLI writer holds it (#218). The child is told TCC's wait and spends it, then
+    answers busy — on every platform, where TCC's flock was POSIX alone."""
     monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.3)
-    before = _bytes_of(project / "process")
 
-    started = time.monotonic()
-    with pytest.raises(process_writer.Busy, match="nothing was written"):
-        process_writer.enter_phase(project, "1")
+    with method_lock_held(project):
+        before = _bytes_of(project / "process")
+        started = time.monotonic()
+        with pytest.raises(process_writer.Busy, match="nothing was written"):
+            process_writer.enter_phase(project, "1")
 
-    assert time.monotonic() - started < 2.0
+    assert time.monotonic() - started < 5.0
     assert _bytes_of(project / "process") == before
 
 
@@ -322,7 +321,8 @@ def test_a_busy_answer_behind_another_process_names_the_flock_file(
     project, holder_process, monkeypatch, app_log_warnings
 ):
     """The same one warning when the holder is another PROCESS: the stage it names is the flock,
-    on the file that process holds."""
+    on the file that process holds — on the legacy path, a copy that does not lock itself (#218)."""
+    monkeypatch.setattr(method_lock, "locks_itself", lambda _skill_dir: False)
     monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.2)
     app_log_warnings.clear()
 
@@ -402,3 +402,47 @@ def test_one_deadline_covers_both_locks_rather_than_one_each(tmp_path, holder_pr
     frees.join(5)
 
     assert elapsed < 2.8, f"{elapsed:.2f}s on a 2 s deadline: one deadline per lock"
+
+
+def test_the_thread_lock_alone_makes_nothing_and_still_keeps_threads_apart(tmp_path):
+    """`cross_process=False` — what `spawn` asks around a child that takes the method's own lock
+    (#218): no flock, so neither `process/` nor its lock file is made, and another thread of this
+    process still waits on it."""
+    with project_lock.hold(tmp_path, timeout_s=0, cross_process=False):
+        assert not (tmp_path / "process").exists()
+        with pytest.raises(project_lock.LockTimeout):
+            _in_another_thread(lambda: project_lock.hold(tmp_path, timeout_s=0.1))
+
+
+def test_a_thread_asking_again_for_a_lock_it_holds_is_answered_at_once(tmp_path):
+    """The lock is not re-entrant, so a thread asking again for a project it holds could only wait
+    out its own deadline (#218, T3): it is answered at once, saying why. Another project, held at
+    the same time, is no such case."""
+    other = tmp_path / "other"
+    other.mkdir()
+    with project_lock.hold(tmp_path, timeout_s=5):
+        with pytest.raises(project_lock.LockTimeout, match="this thread already holds"):
+            with project_lock.hold(tmp_path, timeout_s=0):
+                pass
+        with project_lock.hold(other, timeout_s=0):
+            pass
+    with project_lock.hold(tmp_path, timeout_s=0):  # and once let go, it is this thread's again
+        pass
+
+
+def _in_another_thread(make_hold) -> None:
+    """Enter and leave `make_hold()` on another thread; what it raises is raised here."""
+    raised: list = []
+
+    def enter():
+        try:
+            with make_hold():
+                pass
+        except BaseException as exc:  # noqa: BLE001 — handed to the asking thread whole
+            raised.append(exc)
+
+    thread = threading.Thread(target=enter)
+    thread.start()
+    thread.join(10)
+    if raised:
+        raise raised[0]

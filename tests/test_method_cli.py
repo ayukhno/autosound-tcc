@@ -25,7 +25,7 @@ import pytest
 
 from autosound_tcc.core import (
     car_library, config, config_writer, contract_check, intake_form, method_binding, method_cli,
-    process_writer, profile_writer, project_lock, project_repo, vendor_loader,
+    method_lock, process_writer, profile_writer, project_lock, project_repo, vendor_loader,
 )
 
 from tests._method_copies import copy_of_the_method, entry as _entry
@@ -62,11 +62,12 @@ def test_process_writer_raises_and_catches_the_same_classes():
 
 
 def test_a_child_past_its_timeout_is_cut_and_answered_timed_out_not_busy(tmp_path, method_copy):
-    """`timeout_s` bounds the child alone. A child cut at its timeout may have written half of
-    something, so its answer is a failure that says it timed out — not «busy», whose whole
-    promise is that nothing was written and the same call will work in a moment. A class of its own,
-    with the bound it ran past, so a caller says it in its own words without reading the sentence
-    (R-ax: the capture check's strip line)."""
+    """A child cut at its bound may have written half of something, so its answer is a failure
+    that says it timed out — not «busy», whose whole promise is that nothing was written and the
+    same call will work in a moment. A class of its own, with the bound it ran past, so a caller
+    says it in its own words without reading the sentence (R-ax: the capture check's strip line).
+    For a copy that locks itself the bound is the work and the method's lock wait (#218), and that
+    total is what it says."""
     (method_copy / "rew_tool" / "state" / "process.py").write_text(
         "import time\ntime.sleep(60)\n", encoding="utf-8")
     car = tmp_path / "car"
@@ -74,11 +75,12 @@ def test_a_child_past_its_timeout_is_cut_and_answered_timed_out_not_busy(tmp_pat
 
     started = time.monotonic()
     with pytest.raises(method_cli.ProcessWriterError) as cut:
-        method_cli.spawn(car, "state/process.py", [str(car / "process"), "show"], timeout_s=0.5)
+        method_cli.spawn(car, "state/process.py", [str(car / "process"), "show"], timeout_s=0.5,
+                         lock_wait_s=0.25)
     elapsed = time.monotonic() - started
 
     assert type(cut.value) is method_cli.TimedOut, f"answered {cut.value!r}"
-    assert "timed out" in str(cut.value) and cut.value.seconds == 0.5, str(cut.value)
+    assert str(cut.value) == "process.py timed out after 0.75s" and cut.value.seconds == 0.75
     assert elapsed < 10, f"{elapsed:.1f}s: the child was waited out, not cut at 0.5 s"
 
 
@@ -136,6 +138,12 @@ def test_a_refused_binding_leaves_one_warning_naming_the_command_and_the_sentenc
     assert said[0] == f"refused: `session-close` on {car} was not run: {reason}", said[0]
 
 
+def _legacy(monkeypatch) -> None:
+    """Every copy read as one that does not lock itself: TCC's whole legacy lock, flock included,
+    runs around its child (#218)."""
+    monkeypatch.setattr(method_lock, "locks_itself", lambda _skill_dir: False)
+
+
 def _flock_cannot_lock(monkeypatch) -> None:
     """A filesystem whose flock answers ENOLCK — a network share — for every exclusive lock."""
     real = project_lock.fcntl.flock
@@ -176,12 +184,14 @@ def test_a_timeout_or_a_run_that_could_not_start_leaves_one_warning_in_the_busy_
             raise OSError(errno.ENOEXEC, "Exec format error")
         monkeypatch.setattr(method_cli.child, "run_bounded", run)
     else:
+        _legacy(monkeypatch)  # TCC's flock is taken around a copy that does not lock itself alone
         _flock_cannot_lock(monkeypatch)
         _no_child(monkeypatch)
     app_log_warnings.clear()
 
     with pytest.raises(method_cli.ProcessWriterError) as failed:
-        method_cli.spawn(car, "state/process.py", [str(car / "process"), "show"], timeout_s=0.5)
+        method_cli.spawn(car, "state/process.py", [str(car / "process"), "show"], timeout_s=0.5,
+                         lock_wait_s=0.25)
 
     assert type(failed.value) is (method_cli.TimedOut if fails == "timed out"
                                   else method_cli.ProcessWriterError), repr(failed.value)
@@ -189,7 +199,7 @@ def test_a_timeout_or_a_run_that_could_not_start_leaves_one_warning_in_the_busy_
     assert len(said) == 1 and app_log_warnings[0].levelno == logging.WARNING, said
     tail = "\n".join(_STDERR.splitlines()[-8:])
     assert said[0] == {
-        "timed out": f"timed out: `show` on {car} after 0.5s: {tail}",
+        "timed out": f"timed out: `show` on {car} after 0.75s: {tail}",
         "could not start": f"failed: `show` on {car} was not run: [Errno {errno.ENOEXEC}] Exec "
                            f"format error",
         "could not lock": f"failed: `show` on {car} was not run (taking the lock "
@@ -209,6 +219,7 @@ def test_an_oserror_giving_the_lock_back_after_the_child_ran_keeps_its_answer(
         pytest.skip("skill submodule not checked out")
     if project_lock.fcntl is None:
         pytest.skip("POSIX flock: with none, giving the lock back cannot fail")
+    _legacy(monkeypatch)  # the flock is the legacy path's alone (#218)
     car = tmp_path / "car"
     car.mkdir()
     real = project_lock.fcntl.flock
@@ -486,8 +497,9 @@ def test_every_other_launcher_answers_a_refused_binding_with_its_sentence_and_st
 def test_spawn_runs_what_resolve_answers(tmp_path, monkeypatch):
     """`spawn` takes its script and its environment from `resolve` — the resolver `contract_check`
     and `intake_form` ask for theirs — so a launcher that keeps a `Popen` of its own cannot run
-    another copy than `spawn` would (#169). `spawn` adds one thing, the method's own lock wait,
-    to a copy: what `resolve` answered stays as it was."""
+    another copy than `spawn` would (#169). `spawn` adds one thing, the method's own lock wait —
+    the whole of the thread's, the GUI thread's here — to a copy: what `resolve` answered stays as
+    it was."""
     script = tmp_path / "copy" / "rew_tool" / "contract.py"
     script.parent.mkdir(parents=True)
     script.write_text("", encoding="utf-8")
@@ -509,7 +521,7 @@ def test_spawn_runs_what_resolve_answers(tmp_path, monkeypatch):
 
     assert asked == [(car, "contract.py", ["check", str(car)])]
     assert started == [([str(script), "check", str(car)],
-                        {"FROM": "resolve", method_cli.METHOD_LOCK_WAIT_ENV: "1.25"})]
+                        {"FROM": "resolve", method_cli.METHOD_LOCK_WAIT_ENV: "5"})]
 
 
 # ---- the one door, as a rule (#169) -------------------------------------------------------------
@@ -1035,31 +1047,55 @@ def test_the_method_s_exit_75_is_busy_in_its_own_words(tmp_path, monkeypatch, ap
         f"busy: `add-step` on {car}, the method's own lock: {said}"]
 
 
-@pytest.mark.parametrize("lock_wait_s, timeout_s, sent", [
-    (5.0, 20, "5"),     # the GUI thread's own wait
-    (60.0, 20, "5"),    # a worker's, cut to a quarter of the child's bound
-    (60.0, 120, "30"),  # the capture check's longer bound
-    (0.2, 20, "0.2"),   # a caller that names its wait
-    (0.0, 20, "0"),     # try once
+@pytest.mark.parametrize("lock_wait_s, timeout_s, holds, sent, bound", [
+    (5.0, 20, 1, "5", 25.0),       # the GUI thread's own wait
+    (60.0, 20, 1, "60", 80.0),     # a worker's, whole: no longer cut to a quarter of the bound
+    (60.0, 120, 3, "60", 300.0),   # capture-close: three holds of the method's lock
+    (0.2, 20, 1, "0.2", 20.2),     # a caller that names its wait
+    (0.0, 20, 1, "0", 20.0),       # try once
 ])
-def test_the_method_s_lock_wait_is_set_per_call_within_the_child_s_bound(
-        tmp_path, monkeypatch, lock_wait_s, timeout_s, sent):
-    """`AUTOSOUND_LOCK_TIMEOUT_S`, on every call: the wait TCC gives its own lock, but never more
-    than a quarter of the child's bound — a child waits that long per hold, and one cut at its
-    bound is `TimedOut`, never the `busy` the method would have said. Never in `child_env()`: an agent's session takes its environment from there, and its own
-    writers would inherit TCC's short wait."""
+def test_the_method_s_lock_wait_is_set_per_call_and_the_child_s_bound_makes_room_for_it(
+        tmp_path, monkeypatch, lock_wait_s, timeout_s, holds, sent, bound):
+    """`AUTOSOUND_LOCK_TIMEOUT_S`, on every call: the whole wait TCC gives its own lock (#218).
+    W-9 cut it to a quarter of the child's bound, so one bound covered both the work and the wait;
+    now the bound is the work plus the wait for each hold the child takes, and a child still
+    waiting for the lock says busy instead of being cut. Never in `child_env()`: an agent's session
+    takes its environment from there, and its own writers would inherit TCC's short wait."""
     if not process_writer.is_available():
         pytest.skip("skill submodule not checked out")
     monkeypatch.delenv(method_cli.METHOD_LOCK_WAIT_ENV, raising=False)
     car = tmp_path / "car"
     car.mkdir()
+    bounds: list = []
     envs = _a_child_that_exits(monkeypatch, 0)
+    run = method_cli.child.run_bounded
+    monkeypatch.setattr(method_cli.child, "run_bounded",
+                        lambda argv, **kw: (bounds.append(kw["timeout"]), run(argv, **kw))[1])
 
     method_cli.spawn(car, "state/process.py", [str(car / "process"), "show"],
-                     timeout_s=timeout_s, lock_wait_s=lock_wait_s)
+                     timeout_s=timeout_s, lock_wait_s=lock_wait_s, holds=holds)
 
     assert envs[0][method_cli.METHOD_LOCK_WAIT_ENV] == sent
+    assert bounds == [pytest.approx(bound)]
     assert method_cli.METHOD_LOCK_WAIT_ENV not in vendor_loader.child_env()
+
+
+def test_a_copy_that_does_not_lock_itself_keeps_the_work_s_bound_alone(tmp_path, monkeypatch):
+    """The legacy path (#218): TCC's own lock is taken before the child starts, so its wait is
+    spent there and the child's bound is the work alone."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    _legacy(monkeypatch)
+    car = tmp_path / "car"
+    car.mkdir()
+    bounds: list = []
+    monkeypatch.setattr(method_cli.child, "run_bounded", lambda argv, **kw: (
+        bounds.append(kw["timeout"]), subprocess.CompletedProcess(argv, 0, "", ""))[1])
+
+    method_cli.spawn(car, "state/process.py", [str(car / "process"), "show"], timeout_s=20,
+                     lock_wait_s=60, holds=3)
+
+    assert bounds == [20]
 
 
 @pytest.mark.parametrize("code", [0, 1])
@@ -1109,14 +1145,20 @@ def test_a_busy_answer_carries_its_note_and_does_not_tell_it_apart(tmp_path, mon
     assert app_log_told == []
 
 
-def test_capture_close_has_room_for_three_holds_of_the_method_s_lock(tmp_path, monkeypatch):
+@pytest.mark.parametrize("call, holds", [
+    (lambda car: process_writer.close_capture(car), 3),
+    (lambda car: process_writer.check_captures(car), 1),
+])
+def test_capture_close_has_room_for_three_holds_of_the_method_s_lock(tmp_path, monkeypatch,
+                                                                     call, holds):
     """`capture-close` takes the method's lock three times — the reconcile, the checks, the close —
-    and reads REW between them, as `capture-check` does. Its bound is the check's, so the waits a
-    quarter of it allows leave the REW reads room: at the default 20 s, three contended holds used
-    15 s and the child was cut as `TimedOut`, which may have written, where the method would have
-    said what landed."""
+    and reads REW between them, as `capture-check` does. Its bound is the check's work plus the
+    lock wait three times over (#218): at W-9's quarter of 120 s, three contended holds could still
+    leave the REW reads no room and the child was cut as `TimedOut`, which may have written, where
+    the method would have said what landed. The check holds once."""
     if not process_writer.is_available():
         pytest.skip("skill submodule not checked out")
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 5.0)
     car = tmp_path / "car"
     car.mkdir()
     bounds: list = []
@@ -1127,6 +1169,6 @@ def test_capture_close_has_room_for_three_holds_of_the_method_s_lock(tmp_path, m
 
     monkeypatch.setattr(method_cli.child, "run_bounded", run)
 
-    process_writer.close_capture(car)
+    call(car)
 
-    assert bounds == [120.0]
+    assert bounds == [120.0 + 5.0 * holds]

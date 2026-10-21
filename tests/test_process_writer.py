@@ -57,12 +57,15 @@ def test_concurrent_writes_do_not_corrupt_the_process_state(tmp_path):
         thread.join()
 
     # What the lock guarantees is that no write lands on top of another. It does NOT decide the
-    # order, and it must not: an `add_step` that wins the race against `enter_phase` has no phase
-    # to name, and since the phase validation landed the skill REFUSES it (2026-08-12). That
-    # refusal is the writer working, so it is allowed here — a traceback or a mangled file is not.
-    # Asserting `errors == []` made this test fail about one run in twelve on ordering alone.
+    # order, and it must not: an `add_step` that wins the race against `enter_phase` finds no
+    # project there yet, and the skill REFUSES it — «not a project yet» since TCC stopped making
+    # `process/` ahead of a method that locks itself (#218, every OS alike); «names phase None»
+    # where `process/` is there with no phase (2026-08-12). That refusal is the writer working, so
+    # it is allowed here — a traceback or a mangled file is not. Asserting `errors == []` made this
+    # test fail about one run in twelve on ordering alone.
     for error in errors:
-        assert "names phase None" in error, f"a refusal is fine; this is not: {error}"
+        assert "not a project yet" in error or "names phase None" in error, \
+            f"a refusal is fine; this is not: {error}"
     state = json.loads((tmp_path / "process" / "process-state.json").read_text())
     assert state["active_phase"] == "-1"
     landed = {step["id"] for step in state["plan"]}
@@ -325,9 +328,9 @@ def test_tccs_own_check_runs_over_the_round_it_was_asked_for_or_not_at_all(
     heard = app_log_heard(logging.INFO)
     at_the_lock, hold = threading.Event(), project_lock.hold
 
-    def hold_once_said(project_dir, timeout_s):
+    def hold_once_said(project_dir, timeout_s, **kw):
         at_the_lock.set()  # whatever the call read before the lock, it has read by now
-        return hold(project_dir, timeout_s)
+        return hold(project_dir, timeout_s, **kw)
 
     monkeypatch.setattr(project_lock, "hold", hold_once_said)
     answered: list[Exception] = []
@@ -383,9 +386,9 @@ def test_tccs_own_import_records_into_the_round_it_was_asked_for_or_not_at_all(
     heard = app_log_heard(logging.INFO)
     at_the_lock, hold = threading.Event(), project_lock.hold
 
-    def hold_once_said(project_dir, timeout_s):
+    def hold_once_said(project_dir, timeout_s, **kw):
         at_the_lock.set()  # whatever the call read before the lock, it has read by now
-        return hold(project_dir, timeout_s)
+        return hold(project_dir, timeout_s, **kw)
 
     monkeypatch.setattr(project_lock, "hold", hold_once_said)
     answered: list = []

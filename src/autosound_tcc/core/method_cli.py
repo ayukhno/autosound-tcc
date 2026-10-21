@@ -20,11 +20,12 @@ update's `scripts/upkeep.py`, taken from the tag being applied (`updates`).
 
 A write to the process journal takes the lock (`project_lock.hold`) and, past the wait, answers
 `Busy` having started nothing. A read takes none (`lock=False`): it has nothing to guard, and a read
-on the GUI thread waiting behind a 120 s `capture-check` — or the lock's own `process/`, made in a
-project that has none — would be the bug. Nor does a write the lock does not guard: the profile
-draft, `slots.json`, a folder being made a repository. `timeout_s` bounds the child alone, under
-`child.run_bounded`: the child's whole tree is killed at the timeout, and the wait for its pipes
-after that is bounded too.
+on the GUI thread waiting behind a 120 s `capture-check` — or the legacy lock's own `process/`, made
+in a project that has none — would be the bug. Nor does a write the lock does not guard: the profile
+draft, `slots.json`, a folder being made a repository. From v3.1.3 the method locks every writer
+itself (`method_lock`), and around such a child TCC holds its thread lock alone (#218). The child
+runs under `child.run_bounded`: its whole tree is killed at its bound — `timeout_s`, plus the
+method's lock wait for a copy that takes it — and the wait for its pipes after that is bounded too.
 
 Which copy of the method runs, and in what environment, is `resolve`'s alone: the copy the
 project is bound to (`method_binding`), or `Refused` with the binding's sentence and nothing
@@ -228,6 +229,14 @@ def _missing(project_dir: Path, script: Path) -> str:
     return f"{script.name} not found at {script}. Run: git submodule update --init --recursive"
 
 
+def _skill_folder(script: Path, script_rel: str, env: dict[str, str]) -> Path:
+    """The skill folder of the copy `script` belongs to: the one `resolve` names to the child
+    (`AUTOSOUND_SKILL_ROOT`), or — where nothing named it — the folder `rew_tool/<script_rel>` hangs
+    from."""
+    named = env.get(method_binding.SKILL_ROOT_ENV)
+    return Path(named) if named else script.parents[len(Path(script_rel).parts)]
+
+
 def tail(text, lines: int = 8) -> str:
     """The last `lines` lines of what a child printed, for a log line: where a traceback ends in
     the exception, and where a stuck child last said something. Bytes are decoded as UTF-8."""
@@ -254,6 +263,7 @@ def spawn(
     lock: bool = True,
     lock_wait_s: Optional[float] = None,
     under_lock: Optional[Callable[[], None]] = None,
+    holds: int = 1,
 ) -> tuple[int, str, str]:
     """Run `rew_tool/<script_rel> *args` of the project's bound copy and return `(exit code,
     stdout, stderr)`, both stripped.
@@ -269,9 +279,10 @@ def spawn(
 
     `lock` holds the project's writer lock around the child, and `lock_wait_s` is how long to wait
     for it — by default `GUI_LOCK_WAIT_S` on the main thread and `LOCK_WAIT_S` on any other, read
-    now. Past it the answer is `Busy`, with nothing started. Past `timeout_s` the child's tree is
-    killed and the answer is `TimedOut`, a `ProcessWriterError` saying so — never `Busy`, because a
-    child cut halfway may have written. An `OSError` — no interpreter, a lock the filesystem cannot
+    now. Past it the answer is `Busy`, with nothing started; so is a write asked on a thread that
+    already holds the lock, at once — it could only wait for itself. Past its bound the child's tree
+    is killed and the answer is `TimedOut`, a `ProcessWriterError` saying so with the bound —
+    never `Busy`, because a child cut halfway may have written. An `OSError` — no interpreter, a lock the filesystem cannot
     take — is a `ProcessWriterError` in its words. Each of these is logged once, as a refusal is.
     One raised giving the lock back, after the child ran, is logged too, and the child's answer
     handed back: it ran, and may have written (MA2).
@@ -282,14 +293,22 @@ def spawn(
     change the project while this one waits (`process_writer.check_captures`, the round asked for).
 
     From v3.1.3 the method takes a lock of its own, which a bare CLI writer holds too (an agent's
-    session in a terminal). The child is told how long to wait for it, `METHOD_LOCK_WAIT_ENV`: the
-    wait TCC gives its own, at most a quarter of `timeout_s`, since a child waits that long per
-    hold and one cut at its bound is `TimedOut`, never the busy it would have said (`capture-close`
-    holds three times, and so runs under the capture check's longer bound). Never in
-    `child_env()`: an agent's session takes its environment from there. Its exit 75 is `Busy` in
-    its own words, logged as TCC's own busy is; a `note:` line on stderr — a write that landed
-    without the method's lock, a plan file not written — is told to the person (`_tell_notes`) on
-    any other exit. Older copies print neither.
+    session in a terminal), and a copy that declares it (`method_lock.locks_itself`, asked of the
+    copy the child runs) is run with TCC's thread lock alone around it (#218): no flock on
+    `process/.process-write.lock`, which would either wait on its own parent or bring back the long
+    waits behind another file, and so no `process/` made ahead of the method. The thread lock stays:
+    it keeps TCC's own writes, and its round guard (`under_lock`), apart, and on a folder the OS
+    cannot lock the method writes without its lock. A copy that does not lock itself keeps
+    `project_lock.hold` whole.
+
+    The child is told how long to wait for the method's lock, `METHOD_LOCK_WAIT_ENV`: the whole
+    wait TCC gives its own. A self-locking child's bound is `timeout_s`, the work, plus that wait
+    for each of its `holds` (`capture-close` takes the lock three times), so a child still waiting
+    for the lock answers busy rather than being cut as `TimedOut`. Never in `child_env()`: an
+    agent's session takes its environment from there. Its exit 75 is `Busy` in its own words,
+    logged as TCC's own busy is; a `note:` line on stderr — a write that landed without the
+    method's lock, a plan file not written — is told to the person (`_tell_notes`) on any other
+    exit. Older copies print neither.
     """
     project_dir = Path(project_dir)
     args = [str(arg) for arg in args]
@@ -308,8 +327,12 @@ def spawn(
     if lock_wait_s is None:
         on_gui_thread = threading.current_thread() is threading.main_thread()
         lock_wait_s = GUI_LOCK_WAIT_S if on_gui_thread else LOCK_WAIT_S
-    env = {**env, METHOD_LOCK_WAIT_ENV: f"{min(lock_wait_s, timeout_s / 4):g}"}
-    held = project_lock.hold(project_dir, lock_wait_s) if lock else contextlib.nullcontext()
+    env = {**env, METHOD_LOCK_WAIT_ENV: f"{lock_wait_s:g}"}
+    # The copy the child runs, not TCC's own: a project may be bound to an older one (#218).
+    self_locking = method_lock.locks_itself(_skill_folder(script, script_rel, env))
+    bound = timeout_s + lock_wait_s * holds if self_locking else timeout_s
+    held = (project_lock.hold(project_dir, lock_wait_s, cross_process=not self_locking) if lock
+            else contextlib.nullcontext())
     locking = lock  # until the lock is held: an OSError before that is the lock's
     proc = None  # once the child has come back: an OSError after that is the lock's release
     try:
@@ -322,7 +345,7 @@ def spawn(
                 # `pythonw.exe`, which has no console — and the git this script runs then opens
                 # its own window. Every flash the user saw while saving was this line (TCC-006).
                 [child.script_interpreter(), str(script), *args],
-                timeout=timeout_s,
+                timeout=bound,
                 text=True,
                 # NOT the locale's, which is what `text=True` alone means. The skill writes UTF-8
                 # to disk on every platform and folds only what a CONSOLE cannot draw, so its
@@ -347,8 +370,8 @@ def spawn(
         # said on stderr goes nowhere else (#169 review I6).
         app_log.logger().warning(
             "timed out: `%s` on %s after %gs: %s", _named(script, args, project_dir), project_dir,
-            timeout_s, tail(exc.stderr) or "(nothing on stderr)")
-        raise TimedOut(f"{script.name} timed out after {timeout_s:g}s", timeout_s) from None
+            bound, tail(exc.stderr) or "(nothing on stderr)")
+        raise TimedOut(f"{script.name} timed out after {bound:g}s", bound) from None
     except OSError as exc:
         if proc is None:
             # An interpreter that would not start, or a lock this filesystem cannot take (ENOLCK on

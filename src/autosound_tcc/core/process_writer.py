@@ -186,7 +186,8 @@ def _spawn(
     project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S, **kw
 ) -> tuple[int, str, str]:
     """`process.py <process-dir> <command> …` through `method_cli.spawn`, which holds the lock,
-    bounds the child and gives it its environment. `kw` is spawn's own: `lock=`, `lock_wait_s=`."""
+    bounds the child and gives it its environment. `kw` is spawn's own: `lock=`, `lock_wait_s=`,
+    `holds=`."""
     return method_cli.spawn(
         project_dir, _SCRIPT, [str(_process_dir(project_dir)), *args], timeout_s=timeout_s, **kw
     )
@@ -203,7 +204,7 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
     traceback whole — for a caller whose only other trace of it is a line somebody can close
     (`check_captures`, the G6+G7 review's M2); a method too old for the command (`TooOld`) with
     TCC's sentence beside them. Not what `spawn` raises: it logs its own busy, timed-out, refused
-    and failed-to-start answers. `kw` is spawn's own (`under_lock=`)."""
+    and failed-to-start answers. `kw` is spawn's own (`under_lock=`, `holds=`)."""
     try:
         code, out, err = _spawn(project_dir, args, timeout_s, **kw)
     except UnknownFlag as unknown:
@@ -794,12 +795,12 @@ def close_capture(project_dir: Path, reason: str = "") -> str:
     """Close the open round. What is neither taken nor skipped is named as outstanding.
 
     The capture check's bound, not the default: from v3.1.3 the close reads REW as the check does,
-    and takes the method's lock three times — the reconcile, the checks, the close — each wait up
-    to a quarter of the bound (`method_cli.spawn`)."""
+    and takes the method's lock three times — the reconcile, the checks, the close — so its child
+    is given the lock wait three times over beside the work (`method_cli.spawn`'s `holds`, #218)."""
     args = ["capture-close"]
     if reason:
         args.append(reason)
-    return _run(project_dir, args, timeout_s=max(DEFAULT_TIMEOUT_S, 120.0))
+    return _run(project_dir, args, timeout_s=max(DEFAULT_TIMEOUT_S, 120.0), holds=3)
 
 
 def check(project_dir: Path) -> str:
