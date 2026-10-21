@@ -92,22 +92,26 @@ class RewProbe:
     detail: str = ""
 
 
-#: The state TCC last learned of REW (`probe_of`, `RewBridge.probe`), so an unknown failure is
-#: logged once per change of state: the ping asks every 30 s (the group review of #219, H).
-_last_state: Optional[str] = None
+#: The failure TCC last met asking REW, as (state, exception type), and None once REW's list
+#: answered (`RewBridge.measurements`): an unknown failure is logged once per change, since the
+#: ping asks every 30 s (the group review of #219, H). The type is part of it: the scan, an import
+#: and a rename ask REW too, and an unknown failure of another kind after the ping's went unlogged
+#: until a ping succeeded — which it does only while the window has focus (W-11's final review, M2).
+_last_failure: Optional[tuple[str, str]] = None
 
 
 def probe_of(exc: BaseException) -> RewProbe:
     """`exc`, met asking REW, as a `RewProbe`. One TCC cannot place goes to the log whole, with
-    its traceback, when REW's state becomes unknown — not again on every ping while it stays so:
-    the dot says only that the state is not known."""
-    global _last_state
+    its traceback, when it is new — not again on every ping while the same failure stays: the dot
+    says only that the state is not known."""
+    global _last_failure
     state = status_of(exc)
     detail = f"{type(exc).__name__}: {exc}"
-    if state == UNKNOWN and _last_state != UNKNOWN:
+    failure = (state, type(exc).__name__)
+    if state == UNKNOWN and failure != _last_failure:
         app_log.logger().warning("REW's state is not known: asking it failed with %s", detail,
                                  exc_info=exc)
-    _last_state = state
+    _last_failure = failure
     return RewProbe(state, detail)
 
 
@@ -153,18 +157,21 @@ class RewBridge:
         """The REW dot's probe: REW's list asked for, the answer dropped — `ONLINE`, or the state
         the failure is (`probe_of`). It said «offline» for any failure (#219): REW answering an
         error read as REW not running. Call off the GUI thread."""
-        global _last_state
         try:
             self.measurements()
         except Exception as exc:  # noqa: BLE001 — every failure is a state, said or logged
             return probe_of(exc)
-        _last_state = ONLINE
         return RewProbe(ONLINE)
 
     # -- measurements --
     def measurements(self) -> dict:
-        """All measurements, keyed by REW's (unstable) ordinal id."""
-        return self.api.get_measurements()
+        """All measurements, keyed by REW's (unstable) ordinal id. An answer makes REW's state
+        known again, whichever reader asked — the ping or the scan — so the next unknown failure
+        is logged (`probe_of`)."""
+        global _last_failure
+        found = self.api.get_measurements()
+        _last_failure = None
+        return found
 
     def measurement(self, mid) -> dict:
         return self.api.get_measurement(mid)

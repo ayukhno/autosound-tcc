@@ -225,6 +225,17 @@ class StatusStrip(QFrame):
             return True
         return False
 
+    def keep(self, said: Optional[str], text: Optional[str], level: Level = "warn") -> Optional[str]:
+        """A caller's line about a cause that lasts: said when it changes, taken back when it ends.
+        `said` is what the caller's last call returned, and the return is the next call's `said`.
+        A warning has no clock, so a line nobody takes back outlived the file it named, said again
+        over every other warning while it stood (W-11's final review, M1)."""
+        if text != said:
+            self.withdraw(said)
+            if text:
+                self.notify(text, level=level)
+        return text
+
     def waiting(self) -> list[str]:
         """The lines behind the one shown, in the order its ✕ brings them — for the test, and for
         anybody wondering what the count beside it counts."""

@@ -62,7 +62,7 @@ class _Host:
     def _generator_choice(self):
         return self.pick
 
-    def _reload_model_choices(self) -> None:
+    def _reload_model_choices(self, offer: bool = True) -> None:
         self.reloads += 1
 
     def _refresh_main_warning(self) -> None:
@@ -293,6 +293,9 @@ def test_a_pick_the_login_does_not_list_keeps_saying_so_after_the_pickers_reload
     assert host._ai_main_combo.currentData() == LUNA.key, "the missing row keeps the pick"
     assert _said(host._gen_check) == "not on this login"
     assert "is-missing" in _frame(host)
+    # A modal from a background answer, seconds after the pick, offering a machine-wide alias for
+    # a model only this login lacks (W-11's final review, I1): the launch and ↻ offer it instead.
+    assert host.offered == [], "the check's own reload opens no «model gone» dialog"
 
 
 def test_a_pick_the_login_does_not_list_frames_the_picker_red_even_when_a_row_still_offers_it(

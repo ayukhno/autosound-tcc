@@ -2538,11 +2538,12 @@ class MainWindow(QMainWindow):
 
     def _on_gate_result(self, report) -> None:
         """Offer the session once per green; a red gate re-arms the offer. Red says nothing here —
-        the page itself shows what is missing — but a file that does not read, with its repair."""
+        the page shows what is missing — but a file that does not read, for as long as it does not."""
+        said = "; ".join(f"{row.get('file')} {row.get('issue')}" for row in report.unreadable)
+        self._gate_unread = self._status_strip.keep(getattr(self, "_gate_unread", None), said and
+                                                    i18n.t("intakeGateUnread").format(files=said))
         if not report.available or not report.complete:
             self._gate_offered = False
-            if said := "; ".join(f"{row.get('file')} {row.get('issue')}" for row in report.unreadable):
-                self._status_strip.notify(i18n.t("intakeGateUnread").format(files=said), level="warn")
             return
         if getattr(self, "_gate_offered", False) or getattr(self, "_agent_worker", None) is not None:
             return
@@ -5131,14 +5132,13 @@ class MainWindow(QMainWindow):
         if hasattr(session, "always_allowed"):
             session.always_allowed = self._always_allowed()
 
-    def _reload_model_choices(self) -> None:
+    def _reload_model_choices(self, offer: bool = True) -> None:
         """Refill both pickers from one registry, keeping selections that survived.
 
         A stored choice that no longer exists is the case this whole path is built around: models
         retire, and the name in a project's settings outlives them. It must not resolve to silence
         (a Start button that does nothing) or to the first row (a reviewer nobody picked) — see
-        `_offer_replacement`.
-        """
+        `_offer_replacement`, never from a background answer (`offer=False`, tcc#222)."""
         active = self._active_omp()
         self._model_choices = model_choices.choices(active)
         self._critic_choices = model_choices.critic_choices(active)
@@ -5158,7 +5158,7 @@ class MainWindow(QMainWindow):
         blocked = self._ai_effort_combo.blockSignals(True)
         self._ai_effort_combo.setCurrentIndex(max(0, self._ai_effort_combo.findData(level)))
         self._ai_effort_combo.blockSignals(blocked)
-        for setting, key, entries in plan.offers:
+        for setting, key, entries in plan.offers if offer else ():
             self._offer_replacement(key, entries, setting)
         self._refresh_main_warning()
         self._refresh_critic_warning()

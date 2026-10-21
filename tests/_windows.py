@@ -63,6 +63,12 @@ def quiet(window) -> None:
         worker = getattr(window, name, None)
         if isinstance(worker, QThread) and worker in qt_shutdown.live():
             qt_shutdown.stop_or_detach(worker, 5000, mute=(worker.done,))
+    # And the main AI's check (tcc#222), as a real close stops it: its answer came in the next
+    # test's events, after that test's patches were undone, and reloaded a finished window's
+    # pickers there — the «model gone» box that test met (W-11's final review, I2).
+    check = getattr(window, "_gen_check", None)
+    if check is not None and hasattr(check, "stop"):
+        check.stop()
 
 
 class _StandIn:

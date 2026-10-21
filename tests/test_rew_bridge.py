@@ -14,10 +14,10 @@ from autosound_tcc.core.rew_bridge import RewBridge
 @pytest.fixture(autouse=True)
 def _rews_state_not_learned_yet(monkeypatch):
     """Each test starts with nothing learned of REW: an unknown failure is logged once per change
-    of state (`probe_of`), and the state another test left would decide this one's log."""
+    (`probe_of`), and the failure another test left would decide this one's log."""
     from autosound_tcc.core import rew_bridge
 
-    monkeypatch.setattr(rew_bridge, "_last_state", None)
+    monkeypatch.setattr(rew_bridge, "_last_failure", None)
 
 
 class _FakeApi:
@@ -110,6 +110,27 @@ def test_an_unknown_failure_is_logged_once_per_change_of_state(caplog):
         unknown.probe()
     said = [r for r in caplog.records if "a bug in the reader" in r.getMessage()]
     assert len(said) == 2, [r.getMessage() for r in said]
+
+
+def test_an_unknown_failure_of_another_kind_is_logged_and_a_scan_s_answer_resets(caplog):
+    """W-11's final review, M2: the scan, an import and a rename ask REW too. After one unknown
+    failure, another of a different kind went unlogged until a ping succeeded — and a scan that
+    REW answered did not count as REW answering."""
+    import logging
+
+    from autosound_tcc.core import rew_bridge
+
+    def met(exc):
+        rew_bridge.probe_of(exc)  # as the scan, import and rename workers hand a failure on
+
+    with caplog.at_level(logging.WARNING):
+        met(RuntimeError("a bug in the reader"))
+        met(ValueError("a bug in the import"))
+        RewBridge(api=_FakeApi(measurements={})).measurements()  # the scan, answered
+        met(ValueError("a bug in the import"))
+    said = [r.getMessage() for r in caplog.records if "not known" in r.getMessage()]
+    assert len(said) == 3, said
+    assert "a bug in the import" in said[1]
 
 
 def test_a_missing_state_is_unknown_never_not_found():

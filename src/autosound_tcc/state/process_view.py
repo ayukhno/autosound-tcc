@@ -128,6 +128,10 @@ def method_refuses(project_dir: Optional[Path] = None) -> bool:
     version = state["schema_version"]
     if not isinstance(version, int) or isinstance(version, bool):
         return True
+    # TODO before the method's next schema bump: this is TCC's own copy's schema, not the bound
+    # copy's. Every copy from v3.1.0 to v3.2.0 is schema 3, so the two agree today; once they can
+    # differ, a project on an older copy is refused here for a schema its own copy reads (W-11's
+    # final review, M3).
     reads = getattr(_process_module(), "SCHEMA_VERSION", None)
     return isinstance(reads, int) and version < reads
 

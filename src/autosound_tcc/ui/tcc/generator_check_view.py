@@ -3,8 +3,8 @@
 
 Out of `main_window` (the structure ratchet, G13): the window holds one of these and tells it of a
 pick. The host gives `_generator_choice()` (the pick on screen), `_ai_main_combo` (the picker,
-whose key outlives a pick the registry lost), `_reload_model_choices()` (the lists the check read,
-into the pickers) and `_refresh_main_warning()` (the picker's own tint, which asks `tint()`).
+whose key outlives a pick the registry lost), `_reload_model_choices(offer=)` (the lists the check
+read, into the pickers) and `_refresh_main_warning()` (the picker's own tint, which asks `tint()`).
 """
 from __future__ import annotations
 
@@ -62,8 +62,11 @@ class GeneratorCheckView:
         pick = self._pick()
         if self.checks.answered(result, pick.key if pick is not None else None):
             # The lists and logins it read are the pickers' own: a model gone from this login's
-            # list turns red there as well.
-            self._host._reload_model_choices()
+            # list turns red there as well. With no «gone» dialog: an answer that comes on its own
+            # seconds after a pick opened a modal from a callback, inviting a machine-wide alias
+            # for a model only this login lacks — the line and the frame already say it (W-11's
+            # final review, I1). The launch and ↻ still offer one.
+            self._host._reload_model_choices(offer=False)
         self.show()
 
     def _ended(self) -> None:

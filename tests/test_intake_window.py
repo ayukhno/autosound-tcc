@@ -319,16 +319,28 @@ def test_a_red_gate_over_a_file_that_does_not_read_names_it_and_its_repair():
     from types import SimpleNamespace
 
     from autosound_tcc.ui.tcc.main_window import MainWindow
+    from autosound_tcc.ui.tcc.status_strip import StatusStrip
 
-    told = []
-    host = SimpleNamespace(_gate_offered=True, _status_strip=SimpleNamespace(
-        notify=lambda text, level="info", **_kw: told.append((text, level))))
+    _app()
+    strip = StatusStrip()
+    host = SimpleNamespace(_gate_offered=True, _status_strip=strip)
     row = {"file": "project.json",
            "issue": "is not valid JSON (x) -- restore the last committed copy: git checkout"}
+    red = ContractReport(ok=False, project_dir="/p", unreadable=(row,))
+    said = i18n.t("intakeGateUnread").format(files=f"{row['file']} {row['issue']}")
 
-    MainWindow._on_gate_result(host, ContractReport(ok=False, project_dir="/p", unreadable=(row,)))
-    MainWindow._on_gate_result(host, ContractReport(ok=True, project_dir="/p"))
-
-    assert told == [(i18n.t("intakeGateUnread").format(
-        files=f"{row['file']} {row['issue']}"), "warn")]
+    MainWindow._on_gate_result(host, red)
+    assert strip.text() == said
     assert host._gate_offered is False
+
+    # Taken back once the file reads: a warning has no clock, and it stood over the repaired file
+    # until something replaced it (W-11's final review, M1).
+    MainWindow._on_gate_result(host, ContractReport(ok=False, project_dir="/p"))
+    assert strip.text() == ""
+
+    # And said once: a red gate runs again on every return to the form, and its line went over
+    # whatever warning came after it each time.
+    MainWindow._on_gate_result(host, red)
+    strip.notify("another warning", level="warn")
+    MainWindow._on_gate_result(host, red)
+    assert strip.text() == "another warning"

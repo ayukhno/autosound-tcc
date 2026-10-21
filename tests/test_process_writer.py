@@ -717,6 +717,20 @@ def test_a_round_can_say_which_project_its_measurements_came_from(tmp_path):
     assert round_["origin"] == {"project": "passat-b8-2026", "series": "49"}
 
 
+def test_the_round_capture_start_opens_is_named_in_its_own_answer(tmp_path):
+    """`opened_round` reads the verb's first line (#218). Every panel test feeds it a stand-in
+    line, so a method that reworded it would stop every capture import at «capRoundUnread» with
+    the suite green; this asks the bound copy itself (W-11's final review, M4)."""
+    from autosound_tcc.core import process_writer, vendor_loader
+
+    (tmp_path / "project.json").write_text('{"schema_version": 3, "project_rev": 1}',
+                                           encoding="utf-8")
+    said = process_writer.start_capture(tmp_path, "49", ["m-L_49 (sw)"])
+
+    opened = vendor_loader.load_process().Process(str(tmp_path / "process")).load()["capture"]
+    assert process_writer.opened_round(said) == opened["id"]
+
+
 def test_a_closed_rounds_protective_record_can_be_corrected_with_a_reason(tmp_path):
     """Skill `#48` / S-036, method `v3.0.59`: the round most likely to need a correction is the one
     somebody has already read, and `set_protective` needs an OPEN round.
