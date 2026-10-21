@@ -1184,8 +1184,11 @@ def build_server(
         step's gate reads what it recorded.
 
         A step that asked for captures will not close until they pass. `titles` defaults to
-        everything the round expects; a take the round did not ask for is judged too when named
-        in `titles`, its verdict on its own row (the window's check names them). `recorded: true` means the check ran and recorded its
+        everything the round expects. The round's unplanned takes are judged too, each on its own
+        row marked `unplanned` and outside the totals (a method before v3.2.0 judges one only when
+        named in `titles`). An optional capture or the round's level control not taken is no gap
+        (`OPTIONAL` / `CONTROL` lines); a `LEVEL` line, when there is news, says how REW's SPL
+        calibration moved and which round's level the method brings this one to. `recorded: true` means the check ran and recorded its
         verdicts — which captures pass is in `said`, the method's own lines; `recorded: false`
         means it did not run or did not finish, and `error` says why — with `rew_state` when REW
         was why: `unavailable`, REW did not answer; `error`, REW answered and not with its list;
