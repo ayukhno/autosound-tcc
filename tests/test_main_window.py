@@ -74,14 +74,22 @@ def _control_only_widgets(window: MainWindow) -> list:
 
 
 def test_main_window_builds_five_regions():
+    """What is on screen: three regions side by side, each with room, left to right."""
     _app()
     window = MainWindow()
-    splitter = window.findChild(QSplitter)
-    assert splitter is not None
-    assert splitter.count() == 3  # left, center, right
-    assert window._left is not None
-    assert window._center is not None
-    assert window._right is not None
+    window.resize(1500, 900)
+    window.show()
+    QApplication.processEvents()
+    try:
+        splitter = window.findChild(QSplitter)
+        assert splitter is not None
+        regions = [splitter.widget(i) for i in range(splitter.count())]
+        assert len(regions) == 3  # left, centre, right
+        assert all(region.isVisible() and region.width() > 0 for region in regions)
+        lefts = [region.mapTo(window, region.rect().topLeft()).x() for region in regions]
+        assert lefts == sorted(lefts) and len(set(lefts)) == 3
+    finally:
+        window.close()
 
 
 def test_theme_toggle_switches_and_persists_in_memory(monkeypatch):
@@ -2144,11 +2152,20 @@ def test_a_project_write_reloads_rather_than_rebuilding_per_file(tmp_path, monke
     _app()
     monkeypatch.setattr(config, "chosen_project_dir", lambda: tmp_path)
     window = MainWindow()
+    reloads: list = []
+    monkeypatch.setattr(window, "_safe_load_project", lambda: reloads.append(1))
+    window._project_reload.setInterval(0)  # the settlement is the next turn of the loop, not a wait
 
     window._on_project_file_changed()
     window._on_project_file_changed()
+    assert reloads == [], "nothing is rebuilt inside the burst"
 
-    assert window._project_reload.isActive()  # one pending reload, not two rebuilds
+    for _ in range(50):  # event-loop turns, counted: the settled reload arrives within them
+        QApplication.processEvents()
+        if reloads:
+            break
+    QApplication.processEvents()
+    assert reloads == [1], "one reload for the two writes"
 
 
 def test_a_decision_that_was_never_written_down_reaches_the_strip(tmp_path, monkeypatch):
@@ -8276,16 +8293,40 @@ def test_an_agent_write_rereads_the_project_without_the_full_recheck(monkeypatch
                         lambda self, force=False: catalogues.append(force))
     monkeypatch.setattr(main_window.availability, "forget_refusals", lambda: forgets.append(1))
 
-    import time as clock
+    # The debounce timer in the test's hand: it is the window's own attribute, read where the write
+    # lands, so each `start()` is seen and it runs out only when told (the closing test below keeps
+    # the real timer's connection under the event loop).
+    class _Hand:
+        def __init__(self, on_timeout):
+            self.starts, self.active, self._on_timeout = 0, False, on_timeout
 
-    for _ in range(5):  # 80 ms apart with no events run, so the timer cannot fire, only its clock
-        window._bridge.refresh_from_disk()  # moves: each write must restart it (the G2 review;
-        assert window._agent_refresh_timer.remainingTime() > 250  # a throttle reads ~220 here)
-        clock.sleep(0.08)
+        def start(self, *_ms):
+            self.starts += 1
+            self.active = True
+
+        def stop(self):
+            self.active = False
+
+        def isActive(self):
+            return self.active
+
+        def run_out(self):
+            if self.active:
+                self.active = False
+                self._on_timeout()
+
+    hand = _Hand(window._reread_after_agent)
+    window._agent_refresh_timer = hand
+
+    for write in range(1, 6):
+        window._bridge.refresh_from_disk()
+        assert hand.starts == write, "each write restarts the wait (a throttle would not)"
+        assert hand.isActive()
     assert loads == [], "nothing is re-read while the writes keep coming"
 
-    assert _pump_until(lambda: bool(loads), seconds=5), "the re-read comes once the writes settle"
-    _pump_until(lambda: False, seconds=0.6)  # and no second one after it
+    hand.run_out()  # the writes settle
+    assert loads == [1] and checks == [1], "the re-read comes once"
+    hand.run_out()  # and no second one after it
     assert loads == [1] and checks == [1]
     assert pings == [] and catalogues == [] and forgets == []
 
