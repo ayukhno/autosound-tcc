@@ -165,8 +165,13 @@ class RewAnswered(ProcessWriterError):
 
 #: The lines the method prints, from their start, when REW answered and not with its list: from
 #: `_main` for REW's 4xx/5xx, and from `capture-check` for a list REW answered with an error or
-#: with something it cannot read (`process.py`, #134). Pinned words or a code are TCC-064's ask 2.
-_REW_ANSWERED = ("error: REW answered with an error: ", "error: REW's measurement list was not read (")
+#: with something it cannot read (`process.py`, #134) — `verify._unreached`'s issue inside its
+#: brackets. The same «list was not read (» line with the address's own sentence inside is a
+#: `REW_API_URL` that is no address: REW was never asked, so it is not here (the group review, C).
+#: Pinned against the method's text (`test_process_writer`); pinned words or a code are TCC-064's
+#: ask 2.
+_REW_ANSWERED = ("error: REW answered with an error: ",
+                 "error: REW's measurement list was not read (REW answered an error: ")
 
 
 def rew_answered(code: int, err: str) -> str:

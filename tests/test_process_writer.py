@@ -291,7 +291,12 @@ def test_a_capture_check_that_did_not_run_is_raised_in_its_own_words(monkeypatch
     ("error: step 2.3 has no captures -- REW answered with an error is not why", False),
     ("error: finish 2.3 first: REW's measurement list was not read (by the step)", False),
     ("error: process-state.json is empty -- a write was cut off", False),
-], ids=["list not read", "REW's error", "a refusal naming it", "inside another line", "a refusal"])
+    # REW was never asked: its address is none (`verify._unreached`, state `config`, H I-5).
+    ("error: REW's measurement list was not read (REW_API_URL 'not-a-url' is not an address: no "
+     "http:// or https:// — set it right, or unset it for REW's own port) -- nothing was recorded",
+     False),
+], ids=["list not read", "REW's error", "a refusal naming it", "inside another line", "a refusal",
+        "an address that is none"])
 def test_rew_answering_an_error_is_told_from_a_refusal_by_its_whole_line(monkeypatch, err,
                                                                          answered):
     """#219: the method's capture check exits 1 both when REW answered its list with an error and
@@ -306,6 +311,81 @@ def test_rew_answering_an_error_is_told_from_a_refusal_by_its_whole_line(monkeyp
 
     assert isinstance(failed.value, process_writer.RewAnswered) == answered
     assert str(failed.value) == err
+
+
+def test_the_lines_tcc_reads_as_rew_answering_are_the_methods_own():
+    """`_REW_ANSWERED`'s two prefixes are the method's text, read off it rather than trusted (the
+    group review of #219, C): `_main`'s line for REW's 4xx/5xx, and the capture check's refusal
+    over a list REW answered with an error or with something it cannot read — `verify._unreached`'s
+    issue inside it. An address that is none is the same refusal with the address's own sentence
+    inside, and it is not REW answering: REW was never asked."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    rew_tool = vendor_loader.rew_tool_dir()
+    process = (rew_tool / "state" / "process.py").read_text(encoding="utf-8")
+    verify = (rew_tool / "verify.py").read_text(encoding="utf-8")
+    error_line, list_line = process_writer._REW_ANSWERED
+
+    assert 'print(f"error: {exc}", file=sys.stderr)' in process  # a ProcessError's line
+    assert f'print(f"{error_line}{{exc}}{{after}}", file=sys.stderr)' in process
+    unread, answered = list_line.removeprefix("error: ").split("(", 1)
+    assert f'raise ProcessError(f"{unread}({{(unread.get(\'issues\')' in process
+    assert f'reachable, issue = True, f"{answered}{{exc}}"' in verify
+    assert 'elif state == "config":\n        reachable, issue = None, str(exc)' in verify
+
+
+def _rew_answering(status: int):
+    """A local HTTP server answering every GET with `status`; its address, and its stop."""
+    import http.server
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 — the standard library's name
+            body = b'{"message": "boom"}'
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{server.server_address[1]}", server.shutdown
+
+
+@pytest.mark.parametrize("rew", ["answers 500", "no address"])
+def test_rew_answering_an_error_is_told_by_the_real_method(tmp_path, monkeypatch, rew):
+    """The seam itself (the group review of #219, C): the real `check_captures` over the vendored
+    method. REW answering its list with HTTP 500 is `RewAnswered`; `REW_API_URL` mistyped prints the
+    same «list was not read (…)» line with the address's sentence inside, and REW was never asked:
+    the plain refusal, never «REW is running, but did not give its list»."""
+    from tests import _rounds
+
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    _rounds.write_round(tmp_path, version=1, expected=["w-L_1 (sw)"], taken=["w-L_1 (sw)"])
+    stop = None
+    if rew == "answers 500":
+        url, stop = _rew_answering(500)
+    else:
+        url = "not-a-url"
+    monkeypatch.setenv("REW_API_URL", url)
+    try:
+        with pytest.raises(process_writer.ProcessWriterError) as failed:
+            process_writer.check_captures(tmp_path, [_rounds.as_typed("w-L_1 (sw)")])
+    finally:
+        if stop is not None:
+            stop()
+
+    said = str(failed.value)
+    assert "REW's measurement list was not read" in said, said
+    if rew == "answers 500":
+        assert isinstance(failed.value, process_writer.RewAnswered), said
+    else:
+        assert not isinstance(failed.value, process_writer.RewAnswered), said
+        assert process_writer.failure_kind(failed.value) == "refused", said
 
 
 def test_tccs_own_check_on_a_method_too_old_for_it_is_logged_once(project, monkeypatch,
