@@ -918,6 +918,11 @@ class DialogPanel(QWidget):
         worker.chunk.connect(self._on_chunk)
         worker.turn_done.connect(self._on_turn_done)
         worker.failed.connect(self._on_failed)
+        # A session attached over a turn still open — a handoff that timed out — starts its own:
+        # the old tool's count, its parked question and its clock are not this one's (#223's review).
+        self._chip_tool, self._chip_count, self._activity_label = "", 0, ""
+        self._pending_question, self._pending_question_text = None, ""
+        self._set_busy(False)
         self._set_busy(True)
         # The first turn is slow -- the model reads the skill and the project's state before it
         # says anything, and omp additionally waits for its own tools to come up. Without a line
@@ -1116,6 +1121,8 @@ class DialogPanel(QWidget):
                 discard.drop(self._question_widgets)
                 self._question_widgets = None
             self._refresh_placeholder()
+            self._sub_label.setText(i18n.t("agentThinking"))
+            self._unpark()
             self._add_system_message(i18n.t("questionCancelled"))
             if self._worker is not None and hasattr(self._worker, "cancel_question"):
                 self._worker.cancel_question(question_id)
@@ -1133,6 +1140,8 @@ class DialogPanel(QWidget):
         if isinstance(item, TextDelta):
             if self._thinking:
                 self._chip_started = time.monotonic()  # the think's clock counts from the last word
+            elif getattr(self, "_busy", False) and item.text:
+                self._think()  # the model writes only once its tool returned, as with `Thinking`
             self._append_live_text(item.text)
         elif isinstance(item, Thinking):
             # The route saw the model reasoning. It cannot be while its tool still runs, so a
@@ -1256,8 +1265,7 @@ class DialogPanel(QWidget):
         # "Working…" while the harness is blocked waiting for the human is the window blaming the
         # model for its own silence. Say who is being waited on.
         self._sub_label.setText(i18n.t("questionWaiting"))
-        if self._thinking:
-            self._tick_activity()  # the line goes while the turn waits on the Arbiter
+        self._tick_activity()  # the line goes while the turn waits on the Arbiter — a tool's too
         self._end_live_bubble()
         self._scroll_to_end()
 
@@ -1275,14 +1283,13 @@ class DialogPanel(QWidget):
             self._question_widgets = None
         self._refresh_placeholder()
         self._sub_label.setText(i18n.t("agentThinking"))
-        if self._thinking:
-            self._tick_activity()  # the model's again: the line comes back
+        self._unpark()
         self._add_system_message(i18n.t("questionWithdrawn"))
 
     def _tick_activity(self) -> None:
         # A turn parked on the Arbiter's question waits on him, not on the model: the header says
         # so, and «thinking» moving under the card would say the opposite.
-        parked = self._thinking and self._pending_question is not None
+        parked = self._pending_question is not None
         self._activity.setHidden(parked)
         if parked:
             return
@@ -1313,6 +1320,13 @@ class DialogPanel(QWidget):
             took = _clock(time.monotonic() - self._chip_started) if self._chip_started else ""
             self._activity.setText(f"· {self._activity_label}" + (f" · {took}" if took else ""))
 
+    def _unpark(self) -> None:
+        """The parked question is answered, withdrawn or stopped: the turn is the model's again,
+        and whatever ran when it was asked, the line says «thinking» (#223's review)."""
+        if getattr(self, "_busy", False):
+            self._thinking = False
+            self._think()
+
     def _think(self) -> None:
         """No tool is running in the open turn: the line says «thinking» and moves, with its own
         clock (finding 162, #223). Already thinking — nothing changes, the clock keeps counting."""
@@ -1334,8 +1348,7 @@ class DialogPanel(QWidget):
             self._question_widgets = None
         self._refresh_placeholder()
         self._sub_label.setText(i18n.t("agentThinking"))  # the turn is ours to wait on again
-        if self._thinking:
-            self._tick_activity()  # the model's again: the line comes back
+        self._unpark()
         self._follow_again()  # answering is the user's own hand, same as sending (F-008)
         self._add_bubble("user", "Arbiter · you", _markdown(value), value)
         self._scroll_to_end()

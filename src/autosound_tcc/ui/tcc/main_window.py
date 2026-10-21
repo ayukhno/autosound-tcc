@@ -4682,9 +4682,9 @@ class MainWindow(QMainWindow):
         """The Arbiter typed the first message instead of clicking start — same intent."""
         if self._generator_choice() is None:
             self._dialog._add_system_message(i18n.t("startSessionNoModel"))
-            self._dialog._set_busy(False)
-            return
-        self._start_tuning_session(opening=text)
+        else:
+            self._start_tuning_session(opening=text)
+        self._dialog._set_busy(self._dialog.has_agent())  # refused before a session: not busy (#223)
 
     def _adopt_choices_from_new_project(self, dialog) -> None:
         """Carry the new-project dialog's model choice into the project it just made.

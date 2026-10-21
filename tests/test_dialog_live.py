@@ -1706,3 +1706,70 @@ def test_a_parked_question_does_not_claim_the_model_is_thinking(tmp_path):
     worker.chunk.emit(QuestionWithdrawn(id="q1"))
     assert not panel._activity.isHidden()
     assert panel._activity.text().startswith(f"⟳ {i18n.t('activityThinking')}")
+
+
+# ---- #223's group review: the line under a question, and a session replaced mid-turn ---------------
+
+
+def _thinking(panel) -> bool:
+    return (not panel._activity.isHidden()
+            and panel._activity.text().startswith(f"⟳ {i18n.t('activityThinking')}"))
+
+
+def test_a_question_hides_the_line_even_over_a_tool_whose_end_never_came(tmp_path):
+    """omp's `ask` is a tool call: its card arrives with the tool open, and the line went on
+    spinning «⟳ ask» under it — saying the model works while it waits on the Arbiter."""
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(ToolCall(name="ask"))
+
+    worker.chunk.emit(Question(id="q1", question="Reference seat?",
+                               options=(QuestionOption("Driver"),)))
+    panel._tick_activity()  # the line's own timer, ticking under the card
+
+    assert panel._activity.isHidden()
+    panel._answer_question("Driver")
+    assert _thinking(panel), "answered: the turn is the model's again"
+
+
+def test_stopping_a_parked_question_brings_thinking_back(tmp_path):
+    """Stop answers a parked question «cancelled» and the turn goes on: the line comes back."""
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(Question(id="q1", question="Reference seat?",
+                               options=(QuestionOption("Driver"),)))
+    assert panel._activity.isHidden()
+
+    panel._on_stop()
+
+    assert _thinking(panel)
+
+
+def test_text_after_a_tool_whose_end_never_came_gives_the_line_back(tmp_path):
+    """The model writes only once its tool returned, as it reasons only then (`Thinking`)."""
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(ToolCall(name="read"))
+
+    worker.chunk.emit(TextDelta("The delay is set."))
+
+    assert _thinking(panel)
+
+
+def test_a_session_attached_mid_turn_starts_clean(tmp_path):
+    """A handoff that timed out launches the next session with the old turn still open: its tool,
+    its parked question and its clock were carried in — and typing answered a question the new
+    session never asked."""
+    panel, old, bus = _attached(tmp_path)
+    old.chunk.emit(ToolCall(name="glob"))
+    old.chunk.emit(ToolCall(name="glob"))
+    old.chunk.emit(Question(id="q1", question="Reference seat?", options=()))
+    panel._turn_started -= 600  # ten minutes into the old turn
+
+    new = FakeWorker()
+    panel.attach_agent(new, bus)
+
+    assert _thinking(panel)
+    assert "1:00" not in panel._activity.text() and "10:0" not in panel._sub_label.text()
+    new.chunk.emit(ToolCall(name="glob"))
+    assert panel._activity_label == "glob", "not «glob ×3»: the count was the old session's"
+    panel._input.setText("hello")
+    panel._on_send()
+    assert panel._queued == ["hello"], "a message for the new session, not an answer to q1"

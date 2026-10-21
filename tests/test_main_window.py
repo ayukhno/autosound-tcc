@@ -8719,6 +8719,8 @@ def _window_half(**attrs):
         _take_critic = MainWindow._take_critic
         _start_tuning_session = MainWindow._start_tuning_session
         _offer_replacement = MainWindow._offer_replacement
+        _on_dialog_start_requested = MainWindow._on_dialog_start_requested
+        _launch_session = MainWindow._launch_session
 
     _app()
     half = _Half()
@@ -8761,6 +8763,32 @@ def test_taking_a_reviewer_no_longer_listed_says_so(monkeypatch):
     half._take_critic("agy:gone")
 
     assert half.said and "agy:gone" in half.said[0][0] and half.said[0][1] == "warn"
+
+
+@pytest.mark.parametrize("refused_by", ["layout", "mcp"])
+def test_a_first_message_refused_before_a_session_stops_saying_thinking(monkeypatch, refused_by):
+    """#223's review: the composer's first message makes the turn busy — «⟳ thinking» — and asks
+    for a session. Refused before one exists (the control layout, the MCP server down; a route
+    `session_routes.blocker` refuses returns the same way) the line spun under the refusal."""
+    from autosound_tcc.core import model_choices
+    from autosound_tcc.ui.tcc.dialog_panel import DialogPanel
+
+    class _Layout:
+        active = refused_by == "layout"
+
+    half = _window_half(_control_layout=_Layout(), _mcp_server=None, _mcp_error="port in use")
+    half._dialog = DialogPanel()
+    _KEEP_WINDOWS.append(half._dialog)
+    pick = model_choices.Choice(harness="codex", model="gpt-6-luna", label="GPT-6-Luna")
+    monkeypatch.setattr(half, "_generator_choice", lambda: pick, raising=False)
+    half._dialog.startRequested.connect(half._on_dialog_start_requested)
+
+    half._dialog._input.setText("hello")
+    half._dialog._on_send()
+
+    assert half._dialog._worker is None, "no session was started"
+    assert half._dialog._activity.isHidden()
+    assert half._dialog._stop_btn.isHidden()
 
 
 def test_a_restart_with_no_model_picked_says_so(monkeypatch):
