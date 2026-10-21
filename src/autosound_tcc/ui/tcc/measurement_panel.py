@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import (app_log, capture_import, level_calibration, process_writer,
                                 protective, title_fixes)
+from autosound_tcc.core import rew_bridge
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc import discard, i18n, qt_shutdown, window_folder
@@ -151,6 +152,10 @@ _LEGEND = (
 )
 
 
+#: A failed read's line per REW state (#219); a state not known keeps `measReadFail`.
+_READ_FAIL = {rew_bridge.UNAVAILABLE: "measReadFailDown", rew_bridge.ANSWERED_ERROR: "measReadFailError"}
+
+
 class _RewScanWorker(QThread):
     """One read-only `measurements()` pull, off the GUI thread — `rew_api`'s HTTP is synchronous.
 
@@ -168,7 +173,8 @@ class _RewScanWorker(QThread):
     worth making when N is the whole list."""
 
     done = Signal(dict)
-    failed = Signal(str)
+    #: The failure in its words, and the state of REW's it is (`rew_bridge.RewProbe`, #219).
+    failed = Signal(str, object)
 
     def __init__(self, bridge: RewBridge) -> None:
         super().__init__()
@@ -181,7 +187,7 @@ class _RewScanWorker(QThread):
         try:
             self.done.emit(self._bridge.measurements())
         except Exception as exc:  # noqa: BLE001
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
+            self.failed.emit(f"{type(exc).__name__}: {exc}", rew_bridge.probe_of(exc))
 
 
 class _RewRenameWorker(QThread):
@@ -655,8 +661,9 @@ class MeasurementPanel(QWidget):
     """The card's own yellow-tinted border is applied by the caller (main_window.py) — this widget is just the content that goes inside it."""
 
     # A real Read/Scan call is the freshest possible signal of whether REW is actually reachable --
-    # main_window.py's REW-online dot listens to this rather than polling on its own.
-    rewStatusChanged = Signal(bool)
+    # main_window.py's REW-online dot listens to this rather than polling on its own. It carries
+    # the state the read met (`rew_bridge.RewProbe`, #219): down, answering an error, or not known.
+    rewStatusChanged = Signal(object)
     # REW's own list of titles changed (a scan, or a read that named one). The window rebuilds the
     # checklist off this and runs the capture check; the panel itself decides nothing about them.
     titlesChanged = Signal()
@@ -1436,7 +1443,7 @@ class MeasurementPanel(QWidget):
         self._worker.start()
 
     def _on_refreshed(self, measurements: dict) -> None:
-        self.rewStatusChanged.emit(True)
+        self.rewStatusChanged.emit(rew_bridge.RewProbe(rew_bridge.ONLINE))
         self._live_buttons()
         self._rew_answer = dict(measurements or {})
         self._dup_titles = capture_import.duplicate_titles(self._rew_answer)
@@ -1453,7 +1460,7 @@ class MeasurementPanel(QWidget):
         panel that question. What the tick decides is a different thing — which measurements this
         project has taken IN, which is what the store keeps and what survives REW being closed.
         """
-        self.rewStatusChanged.emit(True)
+        self.rewStatusChanged.emit(rew_bridge.RewProbe(rew_bridge.ONLINE))
         self._live_buttons()
         self._rew_answer = dict(measurements or {})
         self._dup_titles = capture_import.duplicate_titles(self._rew_answer)
@@ -1742,12 +1749,16 @@ class MeasurementPanel(QWidget):
         # to now. What did not is untouched and comes back on the next ⤓.
         self._write_ledger(rows, titles)
 
-    def _on_read_failed(self, message: str) -> None:
+    def _on_read_failed(self, message: str, status=None) -> None:
+        """A read that failed, `status` the state of REW's it met (`rew_bridge.RewProbe`); None is
+        a state not known. Said by that state (#219): REW down is mended by starting REW, an error
+        REW answered with is not, and one TCC cannot place is said as it was."""
+        status = status or rew_bridge.RewProbe(rew_bridge.UNKNOWN, message)
         self._live_buttons()
         # Nothing is known about REW now, so nothing is said about its pairs either.
         self._rew_answer, self._dup_titles = {}, []
-        self._set_status("measReadFail", error=message)
-        # The dot goes out with it. This signal only ever carried the good news, so a REW that was
+        self._set_status(_READ_FAIL.get(status.state, "measReadFail"), error=message)
+        # The dot goes with it. This signal only ever carried the good news, so a REW that was
         # reachable at launch and has since been closed left a green dot over a failed read
         # (user, 2026-09-06).
-        self.rewStatusChanged.emit(False)
+        self.rewStatusChanged.emit(status)

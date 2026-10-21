@@ -1381,18 +1381,73 @@ def test_the_status_line_names_protection_the_round_did_not_keep():
     assert i18n.t("protNotInRecord").format(channels="m-L") in said
 
 
+def _read_through(panel, raised):
+    """A ↻ read whose bridge raises `raised`, run to its end."""
+    panel._bridge = _FakeBridge({}, raises=raised)
+    panel._refresh_btn.click()
+    panel._worker.wait(2000)
+    _app().processEvents()
+
+
+def _method_rew():
+    from autosound_tcc.core import vendor_loader
+
+    return vendor_loader.load_rew_api()
+
+
 def test_a_failed_read_puts_the_rew_dot_out(tmp_path, monkeypatch):
     """The signal only ever carried the good news, so a REW closed since launch left a green dot
-    over a failed read — and only a restart of TCC put it right (user, 2026-09-06)."""
+    over a failed read — and only a restart of TCC put it right (user, 2026-09-06). It carries the
+    state the read met now (#219): REW down is down."""
+    from autosound_tcc.core import rew_bridge
+
     _app()
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)
     seen: list = []
     panel.rewStatusChanged.connect(seen.append)
 
-    panel._on_read_failed("ConnectionRefusedError: no REW")
+    _read_through(panel, _method_rew().RewUnavailable("connection refused", "http://localhost:4735"))
 
-    assert seen == [False]
+    assert [s.state for s in seen] == [rew_bridge.UNAVAILABLE]
+
+
+def test_a_read_rew_answered_with_an_error_is_not_said_as_rew_down():
+    """#219: REW answering its list with an error was «Could not read from REW» and a dot put out,
+    as for REW not running — and «start REW» mends nothing there. The line says REW answered, the
+    dot carries the state, and a read that answers carries REW answering."""
+    import urllib.error
+
+    from autosound_tcc.core import rew_bridge
+
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    seen: list = []
+    panel.rewStatusChanged.connect(seen.append)
+    answered = urllib.error.HTTPError("http://localhost:4735/measurements", 500,
+                                      "Internal Server Error", {}, None)
+
+    _read_through(panel, answered)
+
+    assert [s.state for s in seen] == [rew_bridge.ANSWERED_ERROR]
+    assert panel._status_label.text() == i18n.t("measReadFailError").format(
+        error=f"HTTPError: {answered}")
+    panel._on_refreshed({})
+    assert seen[-1] == rew_bridge.RewProbe(rew_bridge.ONLINE)
+
+
+def test_a_read_rew_did_not_answer_says_start_rew():
+    """REW down has its own line: what mends it is starting REW."""
+    _app()
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    down = _method_rew().RewUnavailable("connection refused", "http://localhost:4735")
+
+    _read_through(panel, down)
+
+    assert panel._status_label.text() == i18n.t("measReadFailDown").format(
+        error=f"RewUnavailable: {down}")
 
 
 def _fake_ledger(monkeypatch) -> dict:
