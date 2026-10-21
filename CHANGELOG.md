@@ -17,8 +17,7 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 
 ## [v1.2.0] — 2026-10-21 · rounds on the method's level base, its lock and REW's states said as they are, the main AI checked at the pick, optional captures no gap, the guide matched to the screen, every line in four languages, the method at v3.2.0
 
-Paired with method `a9952206468573743d2083b73c4b7e7f9d10dc6d` — the method's signed candidate `beta-v3.2.0-rc2`, its
-last: the train tags that commit **`v3.2.0`**.
+Paired with method `a9952206468573743d2083b73c4b7e7f9d10dc6d` — the tag on that commit is **`v3.2.0`**.
 
 The wave W-11: the last wave before a freeze — bugs, hygiene and small clear improvements, ending with the joint
 minor release with the method (TCC v1.2.0 with the method's v3.2.0). After it, only fixes for what users report.
