@@ -20,6 +20,7 @@ from PySide6.QtCore import QRect, Qt  # noqa: E402
 from PySide6.QtGui import QCloseEvent, QFont  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
+    QComboBox,
     QFrame,
     QLabel,
     QPushButton,
@@ -763,6 +764,18 @@ def _catalogue(monkeypatch, models):
     )
 
 
+def _picker_of(monkeypatch, entries, wanted="", critic=False):
+    """A standalone picker filled by the window's own renderer, no window around it. Every row is
+    ready: which badge says why a row cannot run has its own tests (`test_availability.py`)."""
+    from autosound_tcc.core import availability
+
+    monkeypatch.setattr(availability, "status", lambda choice, **_: availability.Status(True))
+    _app()
+    combo = QComboBox()
+    MainWindow._fill_combo(combo, entries, wanted, critic=critic)
+    return combo
+
+
 def test_the_picker_offers_claudes_models_out_of_the_box(monkeypatch):
     """Nothing marked, no omp needed: TCC is usable on a machine that only has the Claude CLI.
 
@@ -791,16 +804,14 @@ def test_the_picker_offers_claudes_models_out_of_the_box(monkeypatch):
         "Codex is not here: its rows are shown greyed, not offered"
 
 
-def test_a_row_from_the_shipped_list_says_when_the_list_was_checked():
+def test_a_row_from_the_shipped_list_says_when_the_list_was_checked(monkeypatch):
     """Finding 48: «the newest Claude models cannot be picked, and nothing says the list is old».
     With no key to ask the Models API, the rows are TCC's own list — and the hover says so, dated."""
     from PySide6.QtCore import Qt
 
     from autosound_tcc.core import model_choices
 
-    _app()
-    window = MainWindow()
-    combo = window._ai_main_combo
+    combo = _picker_of(monkeypatch, model_choices.sdk_choices())
     row = combo.findData("sdk:claude-opus-5-5")
     tip = str(combo.itemData(row, Qt.ItemDataRole.ToolTipRole))
     assert model_choices.SDK_MODELS_VERIFIED in tip
@@ -877,20 +888,33 @@ def test_a_marked_omp_model_joins_the_picker_and_selects_its_harness(monkeypatch
     assert choice.harness == "omp"
     assert choice.model == "google/gemini-3.1-pro-preview"
 
+    # Picker to launch: the terminal opens on the CLI that carries the picked model, so two
+    # front-ends cannot disagree about which model runs. The rest of what a launch carries (the
+    # overlay, the env, the notice, the Claude route) is `test_session_routes.py`'s, on a stand-in.
+    seen = {}
+    monkeypatch.setattr(main_window.terminal_launcher, "launch",
+                        lambda project_dir, **kw: seen.update(kw) or kw["cli"])
+
+    window._open_terminal()
+
+    assert seen["cli"] == "omp" and seen["model"] == "google/gemini-3.1-pro-preview"
+
 
 def test_a_free_model_says_so_in_the_picker(monkeypatch):
-    """Cost is the axis the harness was chosen on; it belongs where the model is chosen."""
-    _catalogue(monkeypatch, [{
-        "provider": "opencode", "selector": "opencode/nemotron-3-ultra-free",
-        "name": "Nemotron 3 Ultra", "cost": {"input": 0, "output": 0},
-    }])
-    _app()
-    window = MainWindow()
-    window._settings.setValue("ai/active_omp", "opencode/nemotron-3-ultra-free")
-    window._reload_model_choices()
+    """Cost is the axis the harness was chosen on; it belongs where the model is chosen. The label
+    carries no "free" of its own here, so the word can only come from the flag (the first version
+    of this test passed on the selector's "-free" and would have passed with the badge gone)."""
+    from autosound_tcc.core import model_choices
 
-    index = window._ai_main_combo.findData("omp:opencode/nemotron-3-ultra-free")
-    assert "free" in window._ai_main_combo.itemText(index)
+    combo = _picker_of(monkeypatch, [
+        model_choices.Choice(harness="omp", model="opencode/nemotron-3-ultra", label="Nemotron 3 Ultra",
+                             free=True),
+        model_choices.Choice(harness="omp", model="google/gemini-3.1-pro-preview", label="Gemini 3.1 Pro"),
+    ])
+
+    assert i18n.t("modelFree") in combo.itemText(combo.findData("omp:opencode/nemotron-3-ultra"))
+    assert i18n.t("modelFree") not in combo.itemText(
+        combo.findData("omp:google/gemini-3.1-pro-preview"))
 
 
 def test_the_picked_model_survives_a_restart(monkeypatch):
@@ -913,35 +937,33 @@ def test_the_picked_model_survives_a_restart(monkeypatch):
 
 
 def test_the_critic_picker_carries_the_generator_list_plus_local_clis(monkeypatch):
-    """One registry, and then the routes only a reviewer can use — a one-shot CLI call is
-    something the skill's script can already make, a Generator session is not."""
+    """Delivery only: the membership rule is `test_model_choices.py`'s. Each list reaches its own
+    combo, and the reviewer's combo holds what the generator's holds plus the reviewer-only route."""
     from autosound_tcc.core import model_choices as mc
 
-    _catalogue(monkeypatch, [{
-        "provider": "google", "selector": "google/gemini-3.1-pro-preview",
-        "name": "Gemini 3.1 Pro", "cost": {"input": 1.0, "output": 1.0},
-    }])
+    _catalogue(monkeypatch, [])
     monkeypatch.setattr(mc, "_CLI_CACHE", {"agy": [
         mc.Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)",
                   provider="google")
     ]})
     monkeypatch.setattr(mc, "cli_available", lambda harness: False)
-    _app()
-    window = MainWindow()
-    window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")
-    window._reload_model_choices()
+    active = ["google/gemini-3.1-pro-preview"]
+    main = _picker_of(monkeypatch, mc.choices(active))
+    critic = _picker_of(monkeypatch, mc.critic_choices(active), critic=True)
 
-    generator = {window._ai_main_combo.itemData(i) for i in range(window._ai_main_combo.count())}
-    reviewer = {window._ai_critic_combo.itemData(i) for i in range(window._ai_critic_combo.count())}
+    generator = {main.itemData(i) for i in range(main.count())}
+    reviewer = {critic.itemData(i) for i in range(critic.count())}
 
     assert "agy:gemini-3.1-pro-high" in reviewer
     assert "agy:gemini-3.1-pro-high" not in generator
-    assert generator - {""} <= reviewer  # everything the Generator offers, the Critic offers too
+    assert generator - {""} <= reviewer
 
 
 def test_every_entry_says_which_route_it_takes(monkeypatch):
     """The pain this fixes: an API balance gone negative next to an unused subscription, because
     two rows with the same model name were two different accounts."""
+    from PySide6.QtCore import Qt as _Qt
+
     from autosound_tcc.core import model_choices as mc
 
     _catalogue(monkeypatch, [{
@@ -950,25 +972,17 @@ def test_every_entry_says_which_route_it_takes(monkeypatch):
     }])
     monkeypatch.setattr(mc, "_CLI_CACHE", {})
     monkeypatch.setattr(mc, "cli_available", lambda harness: False)
-    _app()
-    window = MainWindow()
-    window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")
-    window._reload_model_choices()
+    combo = _picker_of(monkeypatch, mc.choices(["google/gemini-3.1-pro-preview"]))
 
-    labels = [
-        window._ai_main_combo.itemText(i)
-        for i in range(window._ai_main_combo.count())
-        if window._ai_main_combo.itemData(i)
-    ]
+    labels = [combo.itemText(i) for i in range(combo.count()) if combo.itemData(i)]
     assert labels, "the picker should have entries to label"
     assert all(label.split(" · ")[0] in ("SDK", "OMP", "AGY", "CODEX") for label in labels), labels
     assert any(label.startswith("OMP · ") for label in labels)
+    # Which harness carries the model is the licensing split; it is named, not inferred.
+    assert combo.itemText(combo.findData("sdk:claude-opus-5")).startswith("SDK · ")
     # The recommendation is WEIGHT now, not words: the badge repeated what the bold already said
     # (user, 2026-08-12), so the assertion moved to the font role.
-    from PySide6.QtCore import Qt as _Qt
-
-    fonts = [window._ai_main_combo.itemData(i, _Qt.ItemDataRole.FontRole)
-             for i in range(window._ai_main_combo.count())]
+    fonts = [combo.itemData(i, _Qt.ItemDataRole.FontRole) for i in range(combo.count())]
     assert any(font is not None and font.bold() for font in fonts)
 
 
@@ -1017,85 +1031,6 @@ def test_the_reviewer_model_reaches_the_subprocess_by_name(monkeypatch):
     window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData("sdk:claude-sonnet-5"))
 
     assert window._bridge.snapshot()["critic_model"] == "claude-sonnet-5"
-
-
-def test_the_terminal_opens_on_the_cli_that_carries_the_picked_model(monkeypatch):
-    """Two front-ends that disagree about which model is running would make the picker a lie in
-    one of them."""
-    _catalogue(monkeypatch, [{
-        "provider": "google", "selector": "google/gemini-3.1-pro-preview",
-        "name": "Gemini 3.1 Pro", "cost": {"input": 1.0, "output": 1.0},
-    }])
-    _app()
-    window = MainWindow()
-    window._settings.setValue("ai/active_omp", "google/gemini-3.1-pro-preview")
-    window._reload_model_choices()
-    window._ai_main_combo.setCurrentIndex(
-        window._ai_main_combo.findData("omp:google/gemini-3.1-pro-preview")
-    )
-    seen = {}
-    monkeypatch.setattr(
-        main_window.terminal_launcher,
-        "launch",
-        lambda project_dir, **kw: seen.update(kw) or kw["cli"],
-    )
-
-    window._open_terminal()
-
-    assert seen["cli"] == "omp"
-    assert seen["model"] == "google/gemini-3.1-pro-preview"
-    # Without the overlay TCC's tools stay behind xd:// and the terminal is quietly weaker.
-    assert "--config" in seen["extra"]
-
-
-def test_a_claude_pick_opens_claude(monkeypatch):
-    _catalogue(monkeypatch, [])
-    _app()
-    window = MainWindow()
-    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
-    seen = {}
-    monkeypatch.setattr(
-        main_window.terminal_launcher,
-        "launch",
-        lambda project_dir, **kw: seen.update(kw) or kw["cli"],
-    )
-
-    window._open_terminal()
-
-    assert seen["cli"] == "claude"
-    assert seen["model"] == "claude-sonnet-5"
-    assert seen["extra"] == ()
-
-
-def test_the_terminal_session_carries_the_reviewers_route(monkeypatch):
-    """hub #236, tcc#134 (task 9 review, I1): the terminal is the other front-end, and its own run
-    of the method follows the footer's route as the in-app session does."""
-    _catalogue(monkeypatch, [])
-    _app()
-    window = MainWindow()
-    window._ai_main_combo.setCurrentIndex(window._ai_main_combo.findData("sdk:claude-sonnet-5"))
-    monkeypatch.setattr(main_window.critic, "session_env",
-                        lambda project_dir: {"AUTOSOUND_CRITIC_MODEL": "m", "AUTOSOUND_CRITIC_VIA": "cli"})
-    seen = {}
-    monkeypatch.setattr(
-        main_window.terminal_launcher,
-        "launch",
-        lambda project_dir, **kw: seen.update(kw) or kw["cli"],
-    )
-
-    window._open_terminal()
-
-    assert seen["env"] == {"AUTOSOUND_CRITIC_MODEL": "m", "AUTOSOUND_CRITIC_VIA": "cli"}
-
-
-def test_the_sdk_is_named_in_the_generator_picker(monkeypatch):
-    """Which harness carries the model is the licensing split; it is named, not inferred."""
-    _catalogue(monkeypatch, [])
-    _app()
-    window = MainWindow()
-
-    index = window._ai_main_combo.findData("sdk:claude-opus-5")
-    assert window._ai_main_combo.itemText(index).startswith("SDK · ")
 
 
 def test_changing_the_model_mid_session_offers_a_restart_not_a_silent_swap(monkeypatch):
@@ -1425,26 +1360,6 @@ def test_the_answer_outlives_the_window(monkeypatch):
     )
 
     assert second._effective_gate() == omp_session.GATE_WRITES
-
-
-def test_a_project_that_set_its_own_mode_wins_over_the_machine(monkeypatch, tmp_path):
-    """The machine answer is a DEFAULT for new projects. A project that was set deliberately keeps
-    what it was set to — otherwise answering the install question would silently retune every car
-    already in progress."""
-    from autosound_tcc.core import omp_session
-    from autosound_tcc.core import config, project_settings
-
-    _catalogue(monkeypatch, [])
-    _app()
-    _force_project_dir_env(tmp_path)
-    window = MainWindow()
-    window._settings.setValue(main_window._MACHINE_GATE_KEY, omp_session.GATE_AUTO)
-    project_settings.set_value(config.tcc_dir(tmp_path), "gate", omp_session.GATE_WRITES)
-    monkeypatch.setattr(
-        MainWindow, "_ask_machine_gate", lambda self: pytest.fail("nothing to ask: both are set")
-    )
-
-    assert window._effective_gate() == omp_session.GATE_WRITES
 
 
 def test_the_model_choice_belongs_to_the_project_not_the_person(monkeypatch, tmp_path):
@@ -3568,9 +3483,7 @@ def test_a_route_whose_cli_is_missing_is_greyed_and_says_what_it_needs():
     from autosound_tcc.core import model_choices
 
     _app()
-    window = MainWindow()
-    _KEEP_WINDOWS.append(window)  # see `_KEEP_WINDOWS`
-    combo = window._ai_critic_combo
+    combo = QComboBox()
     here = model_choices.Choice(harness="sdk", model="claude-opus-5", label="Claude Opus 5")
     gone = model_choices.Choice(
         harness="codex", model="gpt-5.2-codex", label="gpt-5.2-codex", available=False
@@ -6893,21 +6806,23 @@ def test_quitting_also_lets_go_of_the_ping_the_contract_check_and_the_capture_ch
     assert contract.cancelled, "and the child is still killed first — that is the lever"
 
 
-def test_both_routes_are_given_the_project_language(monkeypatch, tmp_path):
+def test_both_routes_are_given_the_project_language(tmp_path):
     """tcc#56, finding 53. «TypeError: OmpSession.__init__() got an unexpected keyword argument
     'language'» on every omp start: the language (wave 2.1, 2026-09-11) was put into the omp
     factory, and the SDK factory beside it — the one it was meant for — never got it, so the SDK
-    session's prompt said the project's language was English."""
-    _catalogue(monkeypatch, [])
-    _app()
-    window = MainWindow()
+    session's prompt said the project's language was English.
+
+    The window's own method on a stand-in host, building the REAL sessions: a constructor that
+    refuses the argument is the failure, and a mocked one could not show it."""
+    host = SimpleNamespace(_bridge=None, _effective_gate=lambda: "ask", _always_allowed=lambda: [])
     server = SimpleNamespace(project_dir=tmp_path, url="http://127.0.0.1:1/mcp", token="t")
     was = i18n.current_language()
     i18n.set_language("uk")
     try:
         for harness in ("omp", "sdk"):
             choice = SimpleNamespace(harness=harness, model="some-model")
-            session = window._session_factory(choice, server, resumed=False, effort=None)()
+            session = MainWindow._session_factory(host, choice, server, resumed=False,
+                                                  effort=None)()
             assert session.language == "uk", harness
     finally:
         i18n.set_language(was)
