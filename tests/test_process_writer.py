@@ -287,6 +287,10 @@ def test_a_capture_check_that_did_not_run_is_raised_in_its_own_words(monkeypatch
      "was recorded", True),
     ("error: REW answered with an error: HTTP Error 500: Internal Server Error -- nothing was "
      "written", True),
+    # The method's v3.2.0 reads REW's list once more after the curves (skill #183); REW answering
+    # that read with an error is REW's answer too (the re-pin's review, M2).
+    ("error: REW's measurement list was not read again after the curves (HTTP Error 500: "
+     "Internal Server Error) -- nothing was recorded", True),
     # Every refusal carries `error: `, and naming REW is not REW answering.
     ("error: step 2.3 has no captures -- REW answered with an error is not why", False),
     ("error: finish 2.3 first: REW's measurement list was not read (by the step)", False),
@@ -295,8 +299,8 @@ def test_a_capture_check_that_did_not_run_is_raised_in_its_own_words(monkeypatch
     ("error: REW's measurement list was not read (REW_API_URL 'not-a-url' is not an address: no "
      "http:// or https:// — set it right, or unset it for REW's own port) -- nothing was recorded",
      False),
-], ids=["list not read", "REW's error", "a refusal naming it", "inside another line", "a refusal",
-        "an address that is none"])
+], ids=["list not read", "REW's error", "list not read again", "a refusal naming it",
+        "inside another line", "a refusal", "an address that is none"])
 def test_rew_answering_an_error_is_told_from_a_refusal_by_its_whole_line(monkeypatch, err,
                                                                          answered):
     """#219: the method's capture check exits 1 both when REW answered its list with an error and
@@ -387,7 +391,7 @@ def test_the_lines_tcc_reads_as_rew_answering_are_the_methods_own():
     rew_tool = vendor_loader.rew_tool_dir()
     process = (rew_tool / "state" / "process.py").read_text(encoding="utf-8")
     verify = (rew_tool / "verify.py").read_text(encoding="utf-8")
-    error_line, list_line = process_writer._REW_ANSWERED
+    error_line, list_line, again_line = process_writer._REW_ANSWERED
 
     assert 'print(f"error: {exc}", file=sys.stderr)' in process  # a ProcessError's line
     assert f'print(f"{error_line}{{exc}}{{after}}", file=sys.stderr)' in process
@@ -395,6 +399,11 @@ def test_the_lines_tcc_reads_as_rew_answering_are_the_methods_own():
     assert f'raise ProcessError(f"{unread}({{(unread.get(\'issues\')' in process
     assert f'reachable, issue = True, f"{answered}{{exc}}"' in verify
     assert 'elif state == "config":\n        reachable, issue = None, str(exc)' in verify
+    # The read after the curves: the same refusal with " again after the curves" after the verb.
+    unread_again, _ = again_line.removeprefix("error: ").split(" (", 1)
+    verb, again = unread_again.split(" again", 1)
+    assert 'raise ProcessError(f"' + verb + '{again} ({detail}) -- nothing was recorded")' in process
+    assert '_refuse_rew_state(verifier, exc, " again' + again + '")' in process
 
 
 def _rew_answering(status: int):

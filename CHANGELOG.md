@@ -17,13 +17,14 @@ tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches o
 
 ## [Unreleased]
 
-Paired with method `82e8e430cd975e18929b6f61802f1bc8e292bbf3` — the train tags that commit **`v3.2.0`**; until then
-it carries the method's signed candidate `beta-v3.2.0-rc1`.
+Paired with method `82e8e430cd975e18929b6f61802f1bc8e292bbf3` — the method's signed candidate `beta-v3.2.0-rc1` of
+the coming **`v3.2.0`**.
 
 The wave W-11: the last wave before a freeze — bugs, hygiene and small clear improvements, ending with the joint
 minor release with the method (TCC v1.2.0 with the method's v3.2.0). After it, only fixes for what users report.
 The method moves to its W-11 candidate: levels from different rounds brought to one base, an optional level control
-on each round, unplanned and optional captures judged as what they are, and a capture check that judges one REW.
+on a series round where a combo holds an active channel, unplanned and optional captures judged as what they are,
+and a capture check that judges one REW.
 
 ### Added
 

@@ -196,9 +196,12 @@ class RewAnswered(ProcessWriterError):
 #: brackets. The same «list was not read (» line with the address's own sentence inside is a
 #: `REW_API_URL` that is no address: REW was never asked, so it is not here (the group review, C).
 #: Pinned against the method's text (`test_process_writer`); pinned words or a code are TCC-064's
-#: ask 2.
+#: ask 2. The third is the method's v3.2.0 reading REW's list once more after the curves (skill
+#: #183): REW answering that read with an error was read as the method refusing (the re-pin's
+#: review, M2).
 _REW_ANSWERED = ("error: REW answered with an error: ",
-                 "error: REW's measurement list was not read (REW answered an error: ")
+                 "error: REW's measurement list was not read (REW answered an error: ",
+                 "error: REW's measurement list was not read again after the curves (")
 
 
 def rew_answered(code: int, err: str) -> str:
