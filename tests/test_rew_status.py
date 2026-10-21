@@ -148,4 +148,3 @@ def test_the_ping_carries_the_state_it_met():
     worker.result.connect(heard.append)
     worker.run()
     assert heard == [_ERROR]
-

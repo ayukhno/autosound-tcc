@@ -103,8 +103,10 @@ has not answered yet.
 ![System params: car, REW port, DSP, amplifiers, source, channel counts](img/left-system.webp)
 
 The rig: the car, the port REW's API listens on, the processor, the amplifiers, the source, and
-how many channels are in use. The dot next to the port is yellow until REW has been checked, green
-when REW answers, and red when it does not.
+how many channels are in use. The dot next to the port is yellow until REW has been asked, green
+when REW answers, and red when it does not answer or answers with an error. Hover over it to see
+which, with REW's own words for an error. A failure TCC cannot place keeps the dot yellow: the
+hover says the state is not known, and the log has the failure in full.
 
 ### Car audio analysis
 
