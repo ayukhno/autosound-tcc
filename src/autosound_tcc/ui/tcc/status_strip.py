@@ -233,10 +233,6 @@ class StatusStrip(QFrame):
         rest = [line.text for line in self._standing[1:]]
         return rest + ([self._line.text] if self._line is not None else [])
 
-    def timer_is_running(self) -> bool:
-        """For the test, and for anybody wondering whether this line is on a clock."""
-        return self._timer.isActive()
-
     def _expire(self) -> None:
         """The latest line's clock ran out. Nothing else changed, so nothing else is touched."""
         self._line = None

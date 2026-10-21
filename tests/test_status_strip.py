@@ -6,8 +6,10 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from autosound_tcc.ui.tcc import status_strip  # noqa: E402
 from autosound_tcc.ui.tcc.status_strip import StatusStrip  # noqa: E402
 
 
@@ -15,7 +17,63 @@ def _app() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
-def test_a_fact_that_has_passed_lets_go_of_the_strip():
+class _Signal:
+    def __init__(self):
+        self._slots = []
+
+    def connect(self, slot):
+        self._slots.append(slot)
+
+    def emit(self):
+        for slot in self._slots:
+            slot()
+
+
+class _ManualTimer:
+    """A single-shot timer that runs out when the test says so, not when the wall clock does."""
+
+    made: list = []
+
+    def __init__(self, parent=None):
+        self.timeout = _Signal()
+        self._active = False
+        _ManualTimer.made.append(self)
+
+    def setSingleShot(self, _single):
+        pass
+
+    def start(self, _ms):
+        self._active = True
+
+    def stop(self):
+        self._active = False
+
+    def isActive(self):
+        return self._active
+
+    def run_out(self):
+        if self._active:  # a stopped timer never fires, as a real one does not
+            self._active = False
+            self.timeout.emit()
+
+
+class _Clock:
+    @staticmethod
+    def run_out():
+        """Let every running clock run out -- the strip's own is the only one."""
+        for timer in list(_ManualTimer.made):
+            timer.run_out()
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """The strip's clock in the test's hand: what expires, expires at `clock.run_out()`."""
+    _ManualTimer.made = []
+    monkeypatch.setattr(status_strip, "QTimer", _ManualTimer)
+    return _Clock()
+
+
+def test_a_fact_that_has_passed_lets_go_of_the_strip(clock):
     """"Opened a terminal running claude" is an EVENT: it was true for a second and then it was
     just words on the screen, under the next thing the person did (user, 2026-09-09 — the line
     was still there long after the terminal had been used and answered).
@@ -28,12 +86,12 @@ def test_a_fact_that_has_passed_lets_go_of_the_strip():
     strip.notify("Opened a terminal running claude in the project folder.")
     assert strip.isVisible() or strip.text()
 
-    strip._expire()
+    clock.run_out()
 
     assert strip.text() == ""
 
 
-def test_a_warning_stays_until_something_replaces_it():
+def test_a_warning_stays_until_something_replaces_it(clock):
     """A warning names a condition, not an event: "the MCP config could not be written" is as
     true a minute later. Timing it out would hide a problem that is still there."""
     _app()
@@ -41,12 +99,13 @@ def test_a_warning_stays_until_something_replaces_it():
 
     strip.notify("journal: could not write", level="warn")
 
-    assert strip.timer_is_running() is False
+    clock.run_out()
+
     assert strip.text().startswith("journal: could not write")
     assert strip.can_close(), "and the Arbiter can close it (2026-09-23)"
 
 
-def test_a_second_fact_replaces_the_first_and_restarts_the_clock():
+def test_a_second_fact_replaces_the_first_and_restarts_the_clock(clock):
     _app()
     strip = StatusStrip()
 
@@ -54,16 +113,18 @@ def test_a_second_fact_replaces_the_first_and_restarts_the_clock():
     strip.notify("second")
 
     assert strip.text() == "second"
-    assert strip.timer_is_running() is True
+    clock.run_out()
+    assert strip.text() == "", "and the second is on a clock too"
 
 
-def test_an_action_is_a_link_that_runs_once_and_clears_the_line():
+def test_an_action_is_a_link_that_runs_once_and_clears_the_line(clock):
     _app()
     strip = StatusStrip()
     calls = []
     strip.notify("Intake ready", action=("Start the session", lambda: calls.append(1)))
     assert "Start the session" in strip.text() and "<a " in strip.text()
-    assert not strip.timer_is_running(), "an offer waits for the click, it does not expire"
+    clock.run_out()
+    assert "Start the session" in strip.text(), "an offer waits for the click, it does not expire"
     strip.linkActivated.emit("action")
     assert calls == [1]
     assert not strip.isVisible()
@@ -71,13 +132,14 @@ def test_an_action_is_a_link_that_runs_once_and_clears_the_line():
     assert calls == [1], "a cleared offer cannot be taken twice"
 
 
-def test_a_plain_message_after_an_offer_has_no_link():
+def test_a_plain_message_after_an_offer_has_no_link(clock):
     _app()
     strip = StatusStrip()
     strip.notify("Intake ready", action=("Start", lambda: None))
     strip.notify("a <b>fact</b> & nothing else")
     assert "<a " not in strip.text()
-    assert strip.timer_is_running()
+    clock.run_out()
+    assert strip.text() == "", "a plain fact is back on its clock"
 
 
 def test_a_dismissible_message_carries_a_close_button_that_clears_it():
@@ -174,7 +236,7 @@ def test_sticky_lines_stand_in_the_order_they_came_and_the_same_one_once():
     assert strip.text() == "" and strip.isHidden()
 
 
-def test_a_fact_waiting_behind_a_sticky_line_starts_its_clock_when_it_is_shown():
+def test_a_fact_waiting_behind_a_sticky_line_starts_its_clock_when_it_is_shown(clock):
     """The re-review, N2: the clock ran while the line waited, so a fact said once — «Not written
     down: …» is said once per fact, and only here — ran out its thirty seconds behind the standing
     report and was never seen. Its clock starts when it is shown: not while it waits, and in full
@@ -184,17 +246,19 @@ def test_a_fact_waiting_behind_a_sticky_line_starts_its_clock_when_it_is_shown()
     strip.notify("the store could not be read", level="warn", sticky=True)
     strip.notify("Not written down: the target curve")
 
-    assert not strip.timer_is_running(), "waiting, it is not on its clock"
+    clock.run_out()
+    assert strip.waiting() == ["Not written down: the target curve"], "waiting, it is not on its clock"
     strip._close.click()
-    assert strip.text() == "Not written down: the target curve" and strip.timer_is_running()
+    assert strip.text() == "Not written down: the target curve"
 
     strip.notify("a second report", level="warn", sticky=True)
-    assert not strip.timer_is_running(), "covered, its clock stops"
+    clock.run_out()
+    assert strip.text() == "a second report", "covered, its clock stops"
     assert strip.waiting() == ["Not written down: the target curve"]
     strip._close.click()
-    assert strip.timer_is_running(), "shown again, on its clock again"
-    strip._expire()
-    assert strip.text() == "" and strip.isHidden()
+    assert strip.text() == "Not written down: the target curve"
+    clock.run_out()
+    assert strip.text() == "" and strip.isHidden(), "shown again, on its clock again"
 
 
 def test_a_line_taken_back_goes_whether_it_is_shown_or_waiting_and_no_other_does():

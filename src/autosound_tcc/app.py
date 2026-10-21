@@ -130,26 +130,6 @@ def _wait_until_painted(is_painted, pump, budget_s: float, now) -> None:
         pump()
 
 
-def _stray_windows(widgets, known=()) -> list:
-    """Visible top-level widgets that nobody meant to be windows — `(class, size)` for each.
-
-    A widget shown before it has a parent becomes a TOP-LEVEL WINDOW in Qt: it gets a frame, and
-    a title Windows fills in with the application's name. Narrow and tall, because nothing has
-    laid it out yet. That is what was caught on video over the painted main window (2026-09-09),
-    and what the earlier reports called "a narrow tall window like the left panel".
-
-    Marked `known` are the ones that are supposed to be windows — the main window and the splash.
-    Everything else visible at this point is a finding, and naming its CLASS is the whole value:
-    4 400 lines of window code is too much to search by reading.
-    """
-    ours = {id(w) for w in known if w is not None}
-    return [
-        (w.metaObject().className(), f"{w.width()}x{w.height()}")
-        for w in widgets
-        if w.isVisible() and id(w) not in ours and not getattr(w, "known", False)
-    ]
-
-
 #: State for the stray-window watch, module level because the two things that can pump the event
 #: queue during startup — `_say` and the timer — are in different places and must share one
 #: "already reported" set.

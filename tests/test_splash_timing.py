@@ -64,23 +64,63 @@ class _W:
         return _M()
 
 
-def test_it_names_a_stray_top_level_window():
+class _Log:
+    def __init__(self):
+        self.lines = []
+
+    def info(self, fmt, *args):
+        self.lines.append(fmt % args)
+
+
+class _App:
+    def __init__(self, *widgets):
+        self._widgets = widgets
+
+    def topLevelWidgets(self):
+        return list(self._widgets)
+
+
+def _watch(monkeypatch, known):
+    from autosound_tcc import app as app_module
+
+    log = _Log()
+    monkeypatch.setitem(app_module._STRAY, "log", log)
+    monkeypatch.setitem(app_module._STRAY, "known", known)
+    monkeypatch.setitem(app_module._STRAY, "seen", set())
+    return app_module._note_strays, log
+
+
+def test_it_names_a_stray_top_level_window(monkeypatch):
     """Caught on video, 2026-09-09: a narrow tall window with a title bar and the app's name
     appears OVER the painted main window and vanishes. A frame means it is not the splash; the
     name means Qt supplied it, i.e. a widget of ours was shown before it had a parent — which Qt
     turns into a top-level window.
 
     4 400 lines of window code is too many to find that by reading, so it names itself."""
-    from autosound_tcc.app import _stray_windows
-
     main = _W("MainWindow", True)
-    stray = _stray_windows([main, _W("QLabel", True)], known=[main])
+    note, log = _watch(monkeypatch, [main])
 
-    assert [name for name, _ in stray] == ["QLabel"]
+    note(_App(main, _W("QLabel", True, title="Autosound TCC")))
+
+    window_lines = [line for line in log.lines if " window: " in line]
+    assert [line.split(" window: ")[0] for line in window_lines] == ["own", "stray"]
+    assert "QLabel 200x800 'Autosound TCC'" in window_lines[1]
 
 
-def test_it_says_nothing_about_windows_that_are_meant_to_be_there():
-    from autosound_tcc.app import _stray_windows
-
+def test_it_says_nothing_about_windows_that_are_not_shown(monkeypatch):
     main = _W("MainWindow", True)
-    assert _stray_windows([main, _W("QDialog", False)], known=[main]) == []
+    note, log = _watch(monkeypatch, [main])
+
+    note(_App(_W("QDialog", False)))
+
+    assert [line for line in log.lines if " window: " in line] == []
+
+
+def test_it_reports_each_shape_once(monkeypatch):
+    note, log = _watch(monkeypatch, [])
+    app = _App(_W("QLabel", True))
+
+    note(app)
+    note(app)
+
+    assert len([line for line in log.lines if line.startswith("stray window: ")]) == 1
