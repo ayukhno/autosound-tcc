@@ -267,12 +267,12 @@ def test_coming_back_from_the_configurator_reads_the_catalogue_again_once(catalo
     assert len(reads) == 1, "not again on every activation"
 
 
-def test_the_terminal_opens_in_the_home_folder_when_there_is_no_project(monkeypatch):
+def test_the_terminal_opens_in_the_home_folder_when_there_is_no_project(monkeypatch, catalogue):
     """`omp setup` configures the machine, not the car. A launcher that refused because a project
     has never been chosen would be refusing for the wrong reason."""
     monkeypatch.setattr(config, "project_dir", lambda: Path("/nope/not/a/folder"))
 
-    assert ModelConfigDialog._launch_dir() == Path.home()
+    assert ModelConfigDialog([])._launch_dir() == Path.home()
 
 
 def test_the_list_wears_every_row_s_check_box_and_the_window_is_wide(catalogue):
@@ -299,6 +299,13 @@ def test_the_terminal_opens_in_the_window_s_project_not_the_setting(monkeypatch,
     monkeypatch.setattr(config, "project_dir", lambda: b)
     window = QWidget()
     window._built_on = a
+    calls = []
+    monkeypatch.setattr(
+        terminal_launcher, "launch",
+        lambda project_dir, **kw: calls.append(project_dir) or "omp",
+    )
     dialog = ModelConfigDialog([], window)
 
-    assert dialog._launch_dir(dialog) == a
+    dialog._setup_btn.click()
+
+    assert calls == [a], "the button itself, not the helper, hands over the window's folder"

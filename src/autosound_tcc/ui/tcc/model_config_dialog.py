@@ -214,20 +214,19 @@ class ModelConfigDialog(QDialog):
         self._status.setVisible(True)
         try:
             # No tuning session runs in it, so no project's copy of the method is asked of it (#169).
-            terminal_launcher.launch(self._launch_dir(self), cli="omp", extra=("setup",), method=False)
+            terminal_launcher.launch(self._launch_dir(), cli="omp", extra=("setup",), method=False)
         except terminal_launcher.TerminalLaunchError as exc:
             self._status.setText(str(exc))
             return
         self._setup_launched = True
         self._status.setText(i18n.t("configureModelsSetupOpened"))
 
-    @staticmethod
-    def _launch_dir(widget=None) -> Path:
+    def _launch_dir(self) -> Path:
         """Where to open the terminal. The project folder when there is a real one, the home
         folder otherwise: `omp setup` configures the machine, not the car, and a launcher that
         refuses because a project has never been chosen would be refusing for the wrong reason."""
         try:
-            here = window_folder.project(widget)
+            here = window_folder.project(self)
             if here.is_dir():
                 return here
         except Exception:  # noqa: BLE001 — an unconfigured install is the ordinary case here
