@@ -1736,6 +1736,7 @@ def test_an_agy_hang_reaches_the_bubble_with_the_tier_the_method_named(tmp_path,
     asyncio.run(mcp.call_tool("call_critic", {"package": "a question", "role": "ask"}))
 
     assert bridge.critiques[-1]["hang"] == "g-medium"
+    assert bridge.critiques[-1]["hang_line"] is True  # re-review of 267ac87f, 2
 
 
 # ---- show_curves: a disagreement about a number, without a picture in it ----------------------

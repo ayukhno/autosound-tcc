@@ -251,12 +251,15 @@ def _clock(seconds: float) -> str:
 
 def _hang_note(critique: dict) -> str:
     """agy's hang, said as the footer's pick: the method's own advice names critic-env, which a run
-    TCC starts with `--model` does not read (review of 85bbdc16, M2). "" for any other failure."""
+    TCC starts with `--model` does not read (review of 85bbdc16, M2). "" for any other failure.
+    «A longer wait will not help» only after the one line (`hang_line`); after a package a longer
+    `AUTOSOUND_CLI_TIMEOUT` may (re-review of 267ac87f, 2)."""
     tier = critique.get("hang")
     if tier is None:
         return ""
-    return "<br>" + (i18n.t("criticHangTier").format(model=html.escape(str(tier))) if tier
-                     else i18n.t("criticHangOther"))
+    kind = "criticHang" if critique.get("hang_line") else "criticWait"
+    return "<br>" + (i18n.t(kind + "Tier").format(model=html.escape(str(tier))) if tier
+                     else i18n.t(kind + "Other"))
 
 
 class DialogPanel(QWidget):

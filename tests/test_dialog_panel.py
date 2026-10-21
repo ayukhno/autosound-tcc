@@ -219,9 +219,11 @@ def test_a_run_that_named_its_model_is_sent_to_the_footer_not_to_a_pin():
     assert "AUTOSOUND_CRITIC_MODEL" not in said
 
 
-@pytest.mark.parametrize("tier, key", [("gemini-3.8-flash-medium", "criticHangTier"),
-                                       ("", "criticHangOther")])
-def test_an_agy_hang_is_sent_to_the_footers_picker_in_the_persons_language(tier, key):
+@pytest.mark.parametrize("tier, line, key", [("gemini-3.8-flash-medium", True, "criticHangTier"),
+                                             ("", True, "criticHangOther"),
+                                             ("gemini-3.8-flash-medium", False, "criticWaitTier"),
+                                             ("", False, "criticWaitOther")])
+def test_an_agy_hang_is_sent_to_the_footers_picker_in_the_persons_language(tier, line, key):
     """Review of 85bbdc16, M2: the method's hang advice says to put the lower tier in critic-env,
     which does nothing for a run TCC starts with `--model`; the bubble names the footer's picker."""
     from autosound_tcc.ui.tcc import i18n
@@ -230,12 +232,16 @@ def test_an_agy_hang_is_sent_to_the_footers_picker_in_the_persons_language(tier,
     panel = DialogPanel()
     before = len(panel._bubbles)
 
-    panel.add_critique({"mode": "refused", "detail": "CLI 'agy': no answer in 60 s", "hang": tier})
+    panel.add_critique({"mode": "refused", "detail": "CLI 'agy': no answer in 60 s", "hang": tier,
+                        "hang_line": line})
 
     said = " ".join(label.text() for bubble in panel._bubbles[before:]
                     for label in bubble.findChildren(QLabel))
     assert i18n.t(key).split("{model}")[0] in said
     assert tier in said
+    # Re-review of 267ac87f, 2: «a longer wait will not help» only after the one line's silence;
+    # after a package rc2 says a longer AUTOSOUND_CLI_TIMEOUT may.
+    assert ("AUTOSOUND_CLI_TIMEOUT" in said) is not line
 
 
 def test_a_refusal_that_is_no_hang_says_nothing_about_the_picker():

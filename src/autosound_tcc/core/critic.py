@@ -995,28 +995,105 @@ def _codex_cut(detail: str) -> str:
 #: and the generic `FAILURE_ADVICE['timeout']`, which survive a reason `failure_reason` cut to an
 #: `error:` line the CLI printed. Lowercased, as `_said` reads it.
 _TIMEOUT = re.compile(r"\bno answer in \d+ s\b|не відповіла на один рядок|cli не відповів вчасно")
-#: The lower tier the method's hang advice names: «`--model <tier>` для цього запуску».
-_HANG_TIER = re.compile(r"`--model ([^`\s]+)`")
-#: A refusal block's agy line: `CLI 'agy': …` (`agy.cmd` on Windows).
-_AGY_LINE = re.compile(r"\bcli 'agy(?:\.cmd|\.exe)?'")
+#: A refusal block's rung line, `· CLI '<cli>': …` (the doctor's `✗ …` has no name), and the CLI.
+_CLI_RUNG = re.compile(r"^\s*(?:·\s*)?cli '([^']+)'")
+#: The lower tier the method's own hang advice names (`hang_advice`): «наступна сходинка — нижчий
+#: рівень тієї ж моделі: `--model <tier>` для цього запуску». Read in its `→` advice only: agy's last
+#: output rides on the line before it and may say `--model` too (re-review of 267ac87f, 3).
+_HANG_TIER = re.compile(r"нижчий рівень тієї ж моделі: `--model ([^`\s]+)` для цього запуску")
+#: What only agy's hang advice says (`hang_advice`): the one line's silence, and each of its three
+#: offers. The generic `FAILURE_ADVICE['timeout']` is every CLI's.
+_AGY_ADVICE = ("не відповіла на один рядок", "нижчий рівень тієї ж моделі",
+               "нижчого рівня цієї лінії agy", "список моделей agy")
+#: rc2's hang after the one line (`hang_advice(model, one_line=True)`): the model hangs. After a
+#: package the line let through it says a longer `AUTOSOUND_CLI_TIMEOUT` may cure it.
+_ONE_LINE = "не відповіла на один рядок"
+
+
+def _timeouts(detail: str) -> tuple[list[tuple[str, str]], str]:
+    """The method's CLI timeouts in `detail` as `(rung, advice)` -- the `CLI '…': no answer in …`
+    line and its `→` advice (one line in doctor's form) -- and the rest of `detail` without them.
+    A refusal block lists every rung, so an API's rejected key and a CLI's timeout come together,
+    and only the timeout's own lines are its (re-review of 267ac87f, 1)."""
+    found: list[tuple[str, str]] = []
+    rest: list[str] = []
+    lines = (detail or "").splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        advice_line = line.lstrip().startswith("→")
+        if not _TIMEOUT.search(_said(line)):
+            rest.append(line)
+            i += 1
+            continue
+        if advice_line:
+            # The advice survived and the rung line said no «no answer»: the rung is the line before.
+            rung = rest.pop() if rest and _CLI_RUNG.search(rest[-1].lower()) else ""
+            advice = [line]
+        else:
+            rung, _, after = line.partition("→")
+            advice = [after] if after else []
+        i += 1
+        while i < len(lines) and lines[i].lstrip().startswith("→"):
+            advice.append(lines[i])
+            i += 1
+        found.append((rung, "\n".join(advice)))
+    return found, "\n".join(rest)
+
+
+def _agy_hang(detail: str) -> Optional[tuple[str, str]]:
+    """agy's timeout among the method's, as `(rung, advice)`, or None: told by the rung's CLI name or
+    by the advice only agy's hang gets -- never by a `--model` agy printed (re-review of 267ac87f,
+    3)."""
+    for rung, advice in _timeouts(detail)[0]:
+        named = _CLI_RUNG.search(rung.lower())
+        if (re.fullmatch(r"agy(?:\.cmd|\.exe)?", named.group(1)) if named
+                else any(word in advice.lower() for word in _AGY_ADVICE)):
+            return rung, advice
+    return None
 
 
 def hang_tier(detail: str) -> Optional[str]:
     """For agy's timeout in the method's words: the lower tier its advice names, or "" when it names
     none; None for any other failure (review of 85bbdc16, M2). The method's advice says to put that
     tier in critic-env, which a run TCC starts does not read for its model -- it passes `--model`."""
-    said = _said(detail)
-    if not (_TIMEOUT.search(said) and (_AGY_LINE.search(said) or "agy models" in said
-                                       or _HANG_TIER.search(said))):
+    hang = _agy_hang(detail)
+    if hang is None:
         return None
-    named = _HANG_TIER.search(detail or "")
+    named = _HANG_TIER.search(hang[1])
     return named.group(1) if named else ""
 
 
+def hang_on_line(detail: str) -> bool:
+    """agy's timeout was the method's one line -- the model hangs, and a longer wait is no cure --
+    not the package after it, which a longer `AUTOSOUND_CLI_TIMEOUT` may cure (re-review of
+    267ac87f, 2)."""
+    hang = _agy_hang(detail)
+    return bool(hang) and _ONE_LINE in hang[1].lower()
+
+
 #: What to do about agy's hang, for the session and the tooltip; the window says it in the person's
-#: language (`criticHangTier`, `criticHangOther`).
+#: language (`criticHangTier`/`criticHangOther` after the one line, `criticWaitTier`/
+#: `criticWaitOther` after a package).
 _HANG_NOTE = ("the reviewer model did not answer in time — it hangs, and a longer wait is no cure. "
               "{pick} A line in critic-env does not decide this run: TCC names the model itself.")
+_WAIT_NOTE = ("the reviewer model did not answer in time — the package may just need longer. Either "
+              "set a longer AUTOSOUND_CLI_TIMEOUT (seconds) in critic-env, or {pick} A model line in "
+              "critic-env does not decide this run: TCC names the model itself.")
+
+
+def _hang_remedy(detail: str) -> str:
+    """agy's hang said as the footer's pick, or "" for any other CLI's timeout."""
+    tier = hang_tier(detail)
+    if tier is None:
+        return ""
+    if hang_on_line(detail):
+        return _HANG_NOTE.format(pick=(
+            f"Pick `{tier}`, the lower tier the method names, in the reviewer picker in TCC's "
+            f"footer." if tier else "Pick another model in the reviewer picker in TCC's footer."))
+    return _WAIT_NOTE.format(pick=(
+        f"pick `{tier}`, the lower tier the method names, in the reviewer picker in TCC's footer."
+        if tier else "pick another model in the reviewer picker in TCC's footer."))
 
 
 def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None) -> str:
@@ -1031,19 +1108,22 @@ def remedy(detail: str, *, harness: str = "", project_dir: Optional[Path] = None
     that explains a failure without naming the next action is the same dead end as `mode:
     clipboard` with nothing in it — one step further along, and still nowhere.
     """
+    timeouts, rest = _timeouts(detail)
+    if timeouts:
+        # A timeout's own lines are not read for words: its reason carries what the CLI printed
+        # before it hung -- init JSON, warnings -- and «trust», «api key», «not available» there are
+        # not the failure (review of 85bbdc16, M1). The block's other rungs are, first: an API's
+        # rejected key beside it is still the key (re-review of 267ac87f, 1). agy's hang names the
+        # next rung; any other CLI's gets none.
+        return _remedy_by_words(rest, harness=harness, project_dir=project_dir) or _hang_remedy(detail)
+    return _remedy_by_words(detail, harness=harness, project_dir=project_dir)
+
+
+def _remedy_by_words(detail: str, *, harness: str, project_dir: Optional[Path]) -> str:
+    """`remedy`'s reading of a failure's words, with no CLI timeout among them."""
     said = _said(detail)
     if not said.strip():
         return ""
-    if _TIMEOUT.search(said):
-        # Before everything else: the reason carries what the CLI printed before it hung -- init
-        # JSON, warnings -- and «trust», «api key», «not available» there are not the failure
-        # (review of 85bbdc16, M1). agy's hang names the next rung; any other CLI's gets none.
-        tier = hang_tier(detail)
-        if tier is None:
-            return ""
-        return _HANG_NOTE.format(pick=(
-            f"Pick `{tier}`, the lower tier the method names, in the reviewer picker in TCC's "
-            f"footer." if tier else "Pick another model in the reviewer picker in TCC's footer."))
     codex = _codex_refusal(detail)
     if codex:
         # Before the word lists: Codex's banner and the prompt it echoes say «approval», «sandbox»

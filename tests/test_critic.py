@@ -2094,3 +2094,54 @@ def test_another_clis_timeout_gets_no_word_based_remedy():
     said = "CLI 'codex': no answer in 600 s; by then it printed: trust this folder? api key"
     assert critic.remedy(said, harness="codex") == ""
     assert critic.hang_tier(said) is None
+
+
+# ---- a timeout's own lines only (re-review of 267ac87f) ----------------------------------------
+
+#: rc2's package timeout on agy (`hang_advice(model, one_line=False)`): the line was answered, so a
+#: longer wait may cure it; agy's tail names a `--model` of its own before the method's advice.
+_AGY_PACKAGE_HANG = (
+    "   · CLI 'agy': no answer in 600 s; by then it printed: retry with `--model foo` later\n"
+    "     → CLI не відповів вчасно — повтори з довшим AUTOSOUND_CLI_TIMEOUT (секунди), або бери "
+    "буфер обміну; наступна сходинка — нижчий рівень тієї ж моделі: `--model g-medium` для цього "
+    "запуску (або AUTOSOUND_CRITIC_MODEL=g-medium у critic-env)")
+
+
+@pytest.mark.parametrize("cli_line", [
+    _AGY_PACKAGE_HANG,
+    "   · CLI 'codex': no answer in 600 s; it printed nothing\n     → CLI не відповів вчасно. У "
+    "середовищі є ключ API — повтори з `--via api` (для цього запуску; конфігурацію не змінює)",
+])
+def test_a_key_refusal_in_the_same_block_as_a_timeout_keeps_the_key_note(cli_line):
+    """Re-review of 267ac87f, 1: the timeout was searched across the whole refusal block, and the
+    API's rejected key on the line before it was never named."""
+    block = ("⛔ РЕЦЕНЗІЇ НЕ ОТРИМАНО — нічого не збережено як рецензію:\n"
+             "   · API google: Помилка запиту до Gemini API: 400 API key not valid. Please pass a "
+             "valid API key.\n" + cli_line + "\n   Наступна сходинка — буфер обміну (нижче); з "
+             "ключем API — `--via api` для цього запуску (setup-critic-channel.md §7).")
+    fix = critic.remedy(block, harness="agy" if "'agy'" in cli_line else "codex")
+    assert "GEMINI_API_KEY" in fix and "rejected it" in fix
+
+
+def test_a_package_timeout_offers_a_longer_wait_and_the_lower_tier():
+    """Re-review of 267ac87f, 2: only the one line's silence means the model hangs; after a package
+    rc2 says a longer `AUTOSOUND_CLI_TIMEOUT` may cure it."""
+    fix = critic.remedy(_AGY_PACKAGE_HANG, harness="agy")
+    assert "AUTOSOUND_CLI_TIMEOUT" in fix and "g-medium" in fix and "footer" in fix
+    assert "no cure" not in fix and "hangs" not in fix
+    assert critic.hang_on_line(_AGY_PACKAGE_HANG) is False
+    assert critic.hang_on_line(_AGY_HANG) is True
+    assert "no cure" in critic.remedy(_AGY_HANG, harness="agy")
+
+
+def test_a_hang_tier_is_the_methods_not_one_agy_printed():
+    """Re-review of 267ac87f, 3: agy's last output comes before the method's advice."""
+    assert critic.hang_tier(_AGY_PACKAGE_HANG) == "g-medium"
+
+
+def test_a_codex_timeout_naming_a_model_is_no_agy_hang():
+    said = ("   · CLI 'codex': no answer in 600 s; by then it printed: try `--model gpt-x`\n"
+            "     → CLI не відповів вчасно — повтори з довшим AUTOSOUND_CLI_TIMEOUT (секунди), або "
+            "бери буфер обміну")
+    assert critic.hang_tier(said) is None
+    assert critic.hang_on_line(said) is False

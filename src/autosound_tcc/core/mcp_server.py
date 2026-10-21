@@ -1633,6 +1633,9 @@ def build_server(
                 # set it in critic-env, which this run does not read for its model (review of
                 # 85bbdc16, M2); the bubble names the footer's picker instead.
                 "hang": critic.hang_tier(result.detail),
+                # The one line's silence (the model hangs) or a package's (a longer wait may cure
+                # it): the bubble says which (re-review of 267ac87f, 2).
+                "hang_line": critic.hang_on_line(result.detail),
             }
         )
         detail = result.detail
