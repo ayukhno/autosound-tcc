@@ -111,13 +111,15 @@ def test_the_car_goes_to_the_method_s_set_car_as_four_parts_and_a_year(tmp_path,
     """`record` composes the call and the method writes (#169, N9): `intake.py set-car <project>
     <make> <model> <generation> <body> [--year Y]` of the copy the project is bound to. The four
     parts go as they were given — blank ones too, since refusing them is the method's — and the
-    year as text, only when there is one. No lock: `project.json` is not the journal the lock
-    guards, and taking it would make the lock's `process/` in a project still being described."""
+    year as text, only when there is one. TCC's thread lock and never the legacy flock (#218
+    review): `project.json` is not the journal the flock guards, and taking it would make the
+    flock's `process/` in a project still being described."""
     folder = _project(tmp_path, "new", {})
     calls = []
 
     def spawn(project_dir, script_rel, args, **kwargs):
-        calls.append((Path(project_dir), script_rel, list(args), kwargs.get("lock")))
+        calls.append((Path(project_dir), script_rel, list(args),
+                      (kwargs.get("lock", True), kwargs.get("cross_process", True))))
         return 0, "", ""
 
     monkeypatch.setattr(method_cli, "spawn", spawn)
@@ -127,8 +129,8 @@ def test_the_car_goes_to_the_method_s_set_car_as_four_parts_and_a_year(tmp_path,
 
     assert calls == [
         (folder, "intake.py",
-         ["set-car", str(folder), "VW", "Passat", "B8", "sedan", "--year", "2018"], False),
-        (folder, "intake.py", ["set-car", str(folder), "VW", "Passat", "B8", ""], False),
+         ["set-car", str(folder), "VW", "Passat", "B8", "sedan", "--year", "2018"], (True, False)),
+        (folder, "intake.py", ["set-car", str(folder), "VW", "Passat", "B8", ""], (True, False)),
     ]
 
 

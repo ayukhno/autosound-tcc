@@ -315,3 +315,66 @@ def test_on_a_folder_the_os_cannot_lock_tccs_thread_lock_keeps_two_writes_apart(
     assert failed == []
     assert {"2.4", "2.5"} <= set(_plan(project)), _plan(project)
     assert _added(project).count("2.4") == 1 and _added(project).count("2.5") == 1
+
+
+#: Inserted into a copy's `dsp_profile.py`: `set-field`'s read of the draft holds what it read for a
+#: second before handing it back — the window in which a second writer that is not kept out reads
+#: the same draft and saves over the first.
+_A_WINDOW_IN_SET_FIELD = """
+import time as _tcc_time
+
+_tcc_real_set_field, _tcc_real_load_draft = set_field, load_draft
+
+
+def _tcc_load_draft_then_wait(*args, **kwargs):
+    global load_draft
+    data = _tcc_real_load_draft(*args, **kwargs)
+    load_draft = _tcc_real_load_draft
+    _tcc_time.sleep(1.0)
+    return data
+
+
+def set_field(*args, **kwargs):
+    global load_draft
+    load_draft = _tcc_load_draft_then_wait
+    return _tcc_real_set_field(*args, **kwargs)
+
+"""
+
+
+def test_on_a_folder_the_os_cannot_lock_two_profile_answers_both_land(tmp_path, monkeypatch):
+    """The same for the profile's writer (#218 review): it took no lock of TCC's at all, so on a
+    folder the OS cannot lock two of the interview's answers, saved at once from two threads, read
+    the same draft and the second saved over the first. TCC's thread lock keeps them apart."""
+    from autosound_tcc.core import profile_writer
+
+    _vendored()
+    project = tmp_path / "car"
+    project.mkdir()
+    guard = '\nif __name__ == "__main__":'
+    copy = copy_of_the_method(tmp_path / "repo", changes={
+        "rew_tool/dsp_profile.py": lambda text: text.replace(guard, _A_WINDOW_IN_SET_FIELD + guard),
+        "rew_tool/write_lock.py": lambda text: text + _NO_OS_LOCK,
+    })
+    monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, str(copy))
+    profile_writer.start(project, "Musway", "M6")
+    failed: list = []
+
+    def answer(field: str, value: int) -> None:
+        try:
+            profile_writer.set_field(project, field, value)
+        except profile_writer.ProfileWriterError as exc:
+            failed.append(exc)
+
+    writers = [threading.Thread(target=answer, args=("delay.max_ms", 20)),
+               threading.Thread(target=answer, args=("dsp_processing_rate_hz", 96000))]
+    for writer in writers:
+        writer.start()
+    for writer in writers:
+        writer.join(60)
+
+    assert failed == []
+    draft = json.loads((project / "dsp_profile.draft.json").read_text(encoding="utf-8"))
+    profile = draft.get("dsp_profile", draft)
+    assert profile.get("delay", {}).get("max_ms") == 20, profile
+    assert profile.get("dsp_processing_rate_hz") == 96000, profile

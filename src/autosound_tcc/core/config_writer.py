@@ -52,8 +52,9 @@ def save(state_root: Path, version: str, name: str, *, slot: Optional[str] = Non
     `project_dir` is the project whose copy of the method runs the save (#169) — the current one
     (`config.project_dir()`) when it is not given, which is the save dialog's case: its
     `state_root` is that project's `state/`. Under `AUTOSOUND_STATE_ROOT` the ledger may lie
-    elsewhere; the copy is still the current project's. No lock: `slots.json` is not the journal
-    the project's lock guards.
+    elsewhere; the copy is still the current project's. TCC's thread lock for the project, never the
+    legacy flock — `slots.json` is not the journal it guards (#218 review): on a folder the OS
+    cannot lock, or a copy older than v3.1.3, nothing else keeps two of TCC's saves apart.
     """
     args = ["--root", str(state_root), "config", "save", version, name]
     if slot:
@@ -64,7 +65,8 @@ def save(state_root: Path, version: str, name: str, *, slot: Optional[str] = Non
         args += ["--purpose", purpose]
     project = Path(project_dir) if project_dir is not None else config.project_dir()
     try:
-        code, out, err = method_cli.spawn(project, _SCRIPT, args, timeout_s=_TIMEOUT_S, lock=False)
+        code, out, err = method_cli.spawn(project, _SCRIPT, args, timeout_s=_TIMEOUT_S,
+                                          cross_process=False)
     except method_cli.Busy as exc:
         return SaveResult(False, str(exc), busy=True)
     except method_cli.ProcessWriterError as exc:

@@ -1223,3 +1223,85 @@ def test_every_writer_launcher_keeps_the_methods_busy_as_busy(monkeypatch, busy_
     _a_child_that_exits(monkeypatch, method_cli.EXIT_BUSY, _BUSY_LINE)
 
     assert busy_answer(config.project_dir()) == (True, _BUSY_LINE)
+
+
+# ---- the project's other writers take TCC's thread lock (#218 review) ----------------------------
+# `profile_writer`'s writes, `config_writer.save` and `car_library.record` ran with no lock of TCC's:
+# on a folder the OS cannot lock (the method then writes without its lock) or on a copy older than
+# v3.1.3, nothing kept two of TCC's own writes to the draft, `slots.json` or `project.json` apart.
+# They take the thread lock now, and never the legacy flock — that is the journal's, and would make
+# `process/` in a project that has none. The profile's reads take none.
+
+_PROJECT_WRITES = [
+    pytest.param(lambda project: profile_writer.start(project, "Musway", "M6"), id="profile-start"),
+    pytest.param(lambda project: profile_writer.set_field(project, "x", 1), id="profile-set-field"),
+    pytest.param(lambda project: profile_writer.reset_field(project, "x"), id="profile-reset-field"),
+    pytest.param(lambda project: profile_writer.finalize(project), id="profile-finalize"),
+    pytest.param(lambda project: config_writer.save(config.state_root(), "v_001", "SQ-1"),
+                 id="config-save"),
+    pytest.param(lambda project: car_library.record(project, "VW", "Passat", "B8", "sedan"),
+                 id="car-record"),
+]
+
+
+def _answered_busy(call) -> bool:
+    """Whether `call` answered busy, in its writer's own kind of answer."""
+    try:
+        result = call()
+    except (profile_writer.ProfileWriterError, car_library.CarLibraryError) as exc:
+        return isinstance(exc, method_cli.Busy)
+    return bool(getattr(result, "busy", False))
+
+
+@pytest.mark.parametrize("write", _PROJECT_WRITES)
+def test_every_project_writer_waits_on_tccs_thread_lock_and_never_takes_the_flock(
+        monkeypatch, write):
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    _legacy(monkeypatch)  # where TCC's flock would be taken around a journal write
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.2)
+    started = _a_child_that_answers(monkeypatch)
+    project = config.project_dir()
+
+    held, release = threading.Event(), threading.Event()
+
+    def holder():
+        with project_lock.hold(project, timeout_s=5, cross_process=False):
+            held.set()
+            release.wait(5)
+
+    thread = threading.Thread(target=holder, daemon=True)
+    thread.start()
+    assert held.wait(5)
+    try:
+        assert _answered_busy(lambda: write(project)), "it wrote past TCC's lock"
+    finally:
+        release.set()
+        thread.join(5)
+    assert started == [], "a child started under another write's lock"
+
+    _answered_busy(lambda: write(project))  # the lock free: its child runs
+    assert len(started) == 1
+    assert not (project / "process").exists(), "a project writer made the journal's lock folder"
+
+
+@pytest.mark.parametrize("read", [
+    pytest.param(lambda project: profile_writer.draft(project), id="profile-draft"),
+    pytest.param(lambda project: profile_writer.find_bundled("VW", "X", Path("/lib"),
+                                                             project_dir=project),
+                 id="profile-find-bundled"),
+])
+def test_the_profiles_reads_take_no_lock(monkeypatch, read):
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    monkeypatch.setattr(method_cli, "GUI_LOCK_WAIT_S", 0.2)
+    started = _a_child_that_answers(monkeypatch)
+    project = config.project_dir()
+
+    with project_lock.hold(project, timeout_s=5, cross_process=False):
+        try:
+            read(project)
+        except profile_writer.ProfileWriterError:
+            pass  # the stub's empty answer is no JSON; what matters is that it ran
+
+    assert len(started) == 1

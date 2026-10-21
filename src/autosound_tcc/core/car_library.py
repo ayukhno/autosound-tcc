@@ -165,13 +165,15 @@ def record(
     `Project`, which dropped a blank part and wrote the rest: the refusal skipped one floor up.
 
     `year` describes this car and takes no part in identity; it travels as text and is kept as
-    the method keeps it. No lock: `project.json` is not the journal the project's lock guards.
+    the method keeps it. TCC's thread lock for the project, never the legacy flock — `project.json`
+    is not the journal it guards (#218 review): on a folder the OS cannot lock, or a copy older than
+    v3.1.3, nothing else keeps two of TCC's writes to it apart.
     """
     args = ["set-car", str(project_dir), make, model, generation, body,
             *(["--year", str(year)] if year is not None else [])]
     try:
         code, out, err = method_cli.spawn(project_dir, _WRITER, args, timeout_s=_TIMEOUT_S,
-                                          lock=False)
+                                          cross_process=False)
     except method_cli.Busy as exc:
         raise Busy(str(exc)) from exc
     except method_cli.ProcessWriterError as exc:

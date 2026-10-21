@@ -32,6 +32,10 @@ DEFAULT_TIMEOUT_S = 20.0
 #: The writer, relative to the method's `rew_tool/`.
 _SCRIPT = "dsp_profile.py"
 
+#: Its commands that write nothing: they take no lock of TCC's, and the method takes none of its own,
+#: so their child's bound has no lock wait in it (#218 review).
+_READS = frozenset({"draft", "find-bundled"})
+
 
 class ProfileWriterError(RuntimeError):
     """The skill's writer refused or could not run. Carries its own message verbatim.
@@ -60,13 +64,18 @@ def is_available() -> bool:
 
 def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
     """`dsp_profile.py *args` of the copy `project_dir` is bound to, through `method_cli.spawn`:
-    bounded, in that copy's environment, and with no lock — the draft is the writer's own file,
-    not the journal the project's lock guards. Every failure is a `ProfileWriterError` with its own
-    sentence: a copy TCC will not run (`method_cli.Refused`, verbatim), a script not there, a
-    timeout, and a non-zero exit's own words — and the method's busy, its exit 75, a `Busy`."""
+    bounded, in that copy's environment. A write — `start`, `set-field`, `reset-field`, `finalize`
+    — holds TCC's thread lock for the project and never the legacy flock (#218 review): on a folder
+    the OS cannot lock, or a copy older than v3.1.3, nothing else keeps two of TCC's own answers
+    from reading the same draft and saving over each other. A read (`_READS`) takes none. Every
+    failure is a `ProfileWriterError` with its own sentence: a copy TCC will not run
+    (`method_cli.Refused`, verbatim), a script not there, a timeout, and a non-zero exit's own
+    words — and busy, the method's exit 75 or TCC's lock past its wait, a `Busy`."""
+    read = args[0] in _READS
     try:
         code, out, err = method_cli.spawn(project_dir, _SCRIPT, args, timeout_s=timeout_s,
-                                          lock=False)
+                                          lock=not read, cross_process=False,
+                                          holds=0 if read else 1)
     except method_cli.Busy as exc:
         raise Busy(str(exc)) from exc
     except method_cli.ProcessWriterError as exc:

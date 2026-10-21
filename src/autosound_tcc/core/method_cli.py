@@ -264,6 +264,7 @@ def spawn(
     lock_wait_s: Optional[float] = None,
     under_lock: Optional[Callable[[], None]] = None,
     holds: int = 1,
+    cross_process: bool = True,
 ) -> tuple[int, str, str]:
     """Run `rew_tool/<script_rel> *args` of the project's bound copy and return `(exit code,
     stdout, stderr)`, both stripped.
@@ -286,6 +287,10 @@ def spawn(
     take — is a `ProcessWriterError` in its words. Each of these is logged once, as a refusal is.
     One raised giving the lock back, after the child ran, is logged too, and the child's answer
     handed back: it ran, and may have written (MA2).
+
+    `cross_process=False` keeps the legacy flock out whatever the copy: the thread lock alone, for
+    a writer of the project whose file is not the journal the flock guards — the profile draft,
+    `slots.json`, `project.json` — and which must not make `process/` (#218 review).
 
     `under_lock` is asked under the lock, once it is held and before the child starts: what it
     raises is the answer, with nothing started — the caller's own question about the project as
@@ -331,7 +336,8 @@ def spawn(
     # The copy the child runs, not TCC's own: a project may be bound to an older one (#218).
     self_locking = method_lock.locks_itself(_skill_folder(script, script_rel, env))
     bound = timeout_s + lock_wait_s * holds if self_locking else timeout_s
-    held = (project_lock.hold(project_dir, lock_wait_s, cross_process=not self_locking) if lock
+    held = (project_lock.hold(project_dir, lock_wait_s,
+                              cross_process=cross_process and not self_locking) if lock
             else contextlib.nullcontext())
     locking = lock  # until the lock is held: an OSError before that is the lock's
     proc = None  # once the child has come back: an OSError after that is the lock's release
