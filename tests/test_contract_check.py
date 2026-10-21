@@ -264,3 +264,28 @@ def test_checks_begun_inside_one_step_of_the_clock_are_still_ordered(tmp_path, m
     between = contract_check.stamp()
     built = contract_check.ContractReport(ok=True, project_dir=str(project))
     assert second.started < between < built.started, "a fix's stamp and a report built by hand"
+
+
+def test_a_project_json_that_does_not_read_is_named_with_its_repair_by_a_real_run(tmp_path):
+    """#219 (T-10/T-11): the method names a `project.json` that is there and cannot be read in its
+    report's top-level `unreadable`, `{file, issue}`, the issue ending in the repair — and TCC read
+    nothing of it. The real checker, over a file cut off mid-write."""
+    (tmp_path / "project.json").write_text("{ half", encoding="utf-8")
+
+    report = contract_check.run(tmp_path, skip_rew=True)
+
+    assert report.available, report.error
+    [said] = report.unreadable
+    assert said["file"] == "project.json" and "Fix or move the file" in said["issue"], said
+
+
+def test_unreadable_is_read_and_a_method_that_does_not_say_it_reads_as_none():
+    """`unreadable` is «planned» in the method's CONTRACT §3: absent, the report reads as before;
+    a field of the wrong shape reads as empty AND is said (`report_from_json`'s rule)."""
+    row = {"file": "state/slots.json", "issue": "is not valid JSON -- restore it"}
+    said = contract_check.report_from_json({"ok": False, "unreadable": [row, "x"]}, "/p", "t", 0.1)
+    older = contract_check.report_from_json({"ok": True}, "/p", "t", 0.1)
+    wrong = contract_check.report_from_json({"ok": True, "unreadable": "x"}, "/p", "t", 0.1)
+
+    assert said.unreadable == (row,) and older.unreadable == ()
+    assert wrong.unreadable == () and "`unreadable` as str" in wrong.error and not wrong.ok

@@ -2563,10 +2563,12 @@ class MainWindow(QMainWindow):
         self._gate_worker.start()
 
     def _on_gate_result(self, report) -> None:
-        """Offer the session once per green; a red gate re-arms the offer. Red says nothing here:
-        the page itself shows what is missing."""
+        """Offer the session once per green; a red gate re-arms the offer. Red says nothing here —
+        the page itself shows what is missing — but a file that does not read, with its repair."""
         if not report.available or not report.complete:
             self._gate_offered = False
+            if said := "; ".join(f"{row.get('file')} {row.get('issue')}" for row in report.unreadable):
+                self._status_strip.notify(i18n.t("intakeGateUnread").format(files=said), level="warn")
             return
         if getattr(self, "_gate_offered", False) or getattr(self, "_agent_worker", None) is not None:
             return

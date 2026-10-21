@@ -3856,6 +3856,37 @@ _BUSY_LINE = ("busy: /car/.autosound/write.lock is held by another writer -- not
               "safe to retry")
 
 
+@pytest.mark.parametrize("failure, strip", [
+    (process_writer.ProcessWriterError("error: phase 2's gate is shut: step 1.4 is not closed"),
+     True),
+    (process_writer.Busy(_BUSY_LINE), False),
+    (None, False),
+], ids=["refused", "busy", "recorded"])
+def test_a_phase_move_the_method_refused_reaches_the_strip(tmp_path, monkeypatch, app_log_told,
+                                                           failure, strip):
+    """#219 (T-10/T-11): a session's `enter_phase` refused at the method's gate answered the model
+    alone, and the Arbiter, looking at the plan, saw nothing happen. The refusal is said on the
+    strip too, in the method's words; a busy write (it works in a moment) and a move recorded are
+    not."""
+    from autosound_tcc.core import self_check
+    from autosound_tcc.ui.tcc import i18n
+
+    monkeypatch.setattr(self_check, "_translate", i18n.t)
+
+    def move(*_args, **_kwargs):
+        if failure is not None:
+            raise failure
+        return "phase 2 is current"
+
+    monkeypatch.setattr(process_writer, "enter_phase", move)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    asyncio.run(mcp.call_tool("enter_phase", {"phase": "2"}))
+
+    assert app_log_told.warned == ([i18n.t("mcpPhaseRefused").format(
+        phase="2", why="phase 2's gate is shut: step 1.4 is not closed")] if strip else [])
+
+
 @pytest.mark.parametrize("failure, busy", [
     (process_writer.Busy(_BUSY_LINE), True),
     (process_writer.ProcessWriterError("error: step 2.9 is not in the plan"), False),

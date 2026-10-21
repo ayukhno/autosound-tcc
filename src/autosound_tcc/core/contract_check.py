@@ -88,6 +88,11 @@ class ContractReport:
     #: report begun after the fix (#169) — the check that was running when it was pressed reports
     #: the old state. A report built by hand is begun when it is built.
     started: int = field(default_factory=stamp, compare=False)
+    #: The files that are there and cannot be read — a `project.json`, a standalone
+    #: `glossary.json`, `state/slots.json` — `{file, issue}` each, the issue ending in the method's
+    #: repair; what both gates name first and exit 1 over (CONTRACT §3, #134; read since #219).
+    #: Empty from a method that does not say.
+    unreadable: tuple[dict, ...] = ()
 
     @property
     def available(self) -> bool:
@@ -296,7 +301,7 @@ def report_from_json(report: Any, project_dir, checked_at: str, duration_s: floa
         return tuple(row for row in value if isinstance(row, dict)) if isinstance(value, list) else ()
 
     shapes = {"ok": bool, "complete": bool, "files": list, "inherited": list,
-              "cross_checks": dict, "sources_gone": list, "project_dir": str}
+              "cross_checks": dict, "sources_gone": list, "project_dir": str, "unreadable": list}
     wrong = [f"`{key}` as {type(report[key]).__name__}" for key, kind in shapes.items()
              if report.get(key) is not None and not isinstance(report[key], kind)]
     error = ("contract.py's report has " + ", ".join(wrong)) if wrong else ""
@@ -315,4 +320,5 @@ def report_from_json(report: Any, project_dir, checked_at: str, duration_s: floa
         inherited=rows("inherited"),
         sources_gone=tuple(str(path) for path in gone) if isinstance(gone, list) else (),
         complete=report.get("complete") is True and not wrong,
+        unreadable=rows("unreadable"),
     )

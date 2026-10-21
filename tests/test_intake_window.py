@@ -309,3 +309,26 @@ def test_a_reviewer_refused_by_region_turns_the_closed_picker_red(tmp_path, monk
                         lambda c, reviewer=False: availability.Status(False, availability.NOT_CHECKED))
     main_window._mark_missing(combo, [choice])
     assert "is-missing" not in combo.property("class"), "not checked is not refused"
+
+
+def test_a_red_gate_over_a_file_that_does_not_read_names_it_and_its_repair():
+    """#219 (T-10/T-11): the phase −1 gate after the intake form stayed red and said nothing — «the
+    page itself shows what is missing» — and a `project.json` that does not read is not missing:
+    the page cannot show it. The strip names the file and the method's repair; a red gate with
+    nothing unreadable says nothing, as before."""
+    from types import SimpleNamespace
+
+    from autosound_tcc.ui.tcc.main_window import MainWindow
+
+    told = []
+    host = SimpleNamespace(_gate_offered=True, _status_strip=SimpleNamespace(
+        notify=lambda text, level="info", **_kw: told.append((text, level))))
+    row = {"file": "project.json",
+           "issue": "is not valid JSON (x) -- restore the last committed copy: git checkout"}
+
+    MainWindow._on_gate_result(host, ContractReport(ok=False, project_dir="/p", unreadable=(row,)))
+    MainWindow._on_gate_result(host, ContractReport(ok=True, project_dir="/p"))
+
+    assert told == [(i18n.t("intakeGateUnread").format(
+        files=f"{row['file']} {row['issue']}"), "warn")]
+    assert host._gate_offered is False

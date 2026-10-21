@@ -82,6 +82,7 @@ from autosound_tcc.core import (
     profile_writer,
     project_settings,
     rew_bridge,
+    self_check,
     signal_bus,
     vendor_loader,
 )
@@ -1084,7 +1085,14 @@ def build_server(
         you do not invent phases. Steps are added separately with `add_step`: entering a phase
         instantiates NOTHING, and a session that believed otherwise worked a whole phase with an
         empty plan (tcc#7)."""
-        return await _in_thread(_record, process_writer.enter_phase, phase)
+        answer = await _in_thread(_record, process_writer.enter_phase, phase)
+        said = json.loads(answer)
+        if said.get("recorded") is False and not said.get("busy"):
+            # A gate's refusal reached the model alone (#219, T-10/T-11): the Arbiter, looking at
+            # the plan, saw nothing happen. On the strip too, in the method's words.
+            app_log.warn(self_check.translated("mcpPhaseRefused").format(
+                phase=phase, why=str(said.get("error") or "").removeprefix("error: ")))
+        return answer
 
     @tool()
     async def add_step(step_id: str, name: str, situational: bool = False) -> str:
