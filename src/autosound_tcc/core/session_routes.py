@@ -80,6 +80,7 @@ def factory(choice, *, project_dir: Path, bridge, mcp_url: Optional[str],
         always_allowed=always_allowed(),
         effort=effort,
         language=language,
+        resume=resumed,
     )
 
 

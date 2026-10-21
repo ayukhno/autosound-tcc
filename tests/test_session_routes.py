@@ -79,7 +79,7 @@ def test_an_sdk_pick_gets_the_sdk_session_with_the_servers_url_and_token(tmp_pat
     assert built == [(TuningSession, dict(
         project_dir=tmp_path, mcp_url="http://127.0.0.1:1/mcp", mcp_token="tok",
         bridge=host._bridge, model="claude-opus-5", gate="writes",
-        always_allowed=frozenset({"Bash"}), effort="high", language="uk"))]
+        always_allowed=frozenset({"Bash"}), effort="high", language="uk", resume=True))]
 
 
 def test_an_omp_pick_gets_omp_with_resume_and_no_url_or_token(tmp_path, built, language):
@@ -273,7 +273,8 @@ def test_factory_builds_each_routes_session(tmp_path, built):
     assert built == [
         (TuningSession, dict(project_dir=tmp_path, mcp_url="http://u", mcp_token="tok",
                              bridge="the-bridge", model="claude-opus-5", gate="writes",
-                             always_allowed=frozenset({"Bash"}), effort="max", language="de")),
+                             always_allowed=frozenset({"Bash"}), effort="max", language="de",
+                             resume=False)),
         (OmpSession, dict(project_dir=tmp_path, bridge="the-bridge", model="google/gemini",
                           resume=True, gate="writes", always_allowed=frozenset({"Bash"}),
                           effort="max", language="de")),
@@ -506,3 +507,51 @@ def test_no_journalled_start_no_worker_no_close(closes):
     MainWindow._record_session_stop(host)
 
     assert closes == []
+
+
+# ---- «Fresh» opens a new conversation on every route (#221) -------------------------------------
+
+
+def _with_a_resumable_conversation(tmp_path, session_id, route="sdk"):
+    """A phase with a live conversation on `route` — what «Fresh» must NOT continue."""
+    from autosound_tcc.core import config
+    registry = SessionRegistry(config.tcc_dir(tmp_path))
+    registry.sync_phase("2")
+    registry.bind_session("2", session_id, route=route)
+
+
+@pytest.mark.parametrize("resumed, expected", [(False, None), (True, "sess-claude")])
+def test_the_sdk_route_resumes_the_registrys_conversation_only_on_resume(tmp_path, resumed,
+                                                                         expected):
+    """#221: the window passed `resumed=False` for «Fresh», and `TuningSession` read the registry
+    itself and opened with `resume=` anyway — Fresh continued the old Claude conversation."""
+    _with_a_resumable_conversation(tmp_path, "sess-claude")
+    session = _made(SimpleNamespace(harness="sdk", model="m"), tmp_path, resumed=resumed)()
+
+    assert session.resumed_from == expected
+
+
+@pytest.mark.parametrize("resumed", [False, True])
+def test_the_omp_route_continues_only_on_resume(tmp_path, resumed):
+    _with_a_resumable_conversation(tmp_path, "sess-omp")
+    session = _made(SimpleNamespace(harness="omp", model="m"), tmp_path, resumed=resumed)()
+
+    assert ("--continue" in session._argv()) is resumed
+
+
+@pytest.mark.parametrize("resumed, method", [(False, "thread/start"), (True, "thread/resume")])
+def test_the_codex_route_resumes_its_thread_only_on_resume(tmp_path, resumed, method):
+    import asyncio
+    _with_a_resumable_conversation(tmp_path, "thread-codex", route="codex")
+    session = _made(SimpleNamespace(harness="codex", model="gpt-a"), tmp_path, resumed=resumed)()
+    sent: list[tuple[str, dict]] = []
+
+    async def request(name, params):
+        sent.append((name, params))
+        return {"thread": {"id": "t-new"}}
+
+    session._request = request
+    asyncio.run(session._open_thread())
+
+    assert [name for name, _ in sent] == [method]
+    assert sent[0][1].get("threadId") == ("thread-codex" if resumed else None)

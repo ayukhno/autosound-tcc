@@ -247,6 +247,7 @@ class TuningSession:
         always_allowed: Optional[frozenset[str]] = None,
         effort: Optional[str] = None,
         language: str = "en",
+        resume: bool = True,
     ) -> None:
         self.project_dir = Path(project_dir or config.project_dir())
         self.registry = SessionRegistry(config.tcc_dir(self.project_dir))
@@ -267,7 +268,12 @@ class TuningSession:
         self.always_allowed = always_allowed or frozenset()
         self.session_id: Optional[str] = None
         self._read_roots = _read_roots_for(self.project_dir)
-        self.resumed_from: Optional[str] = self.registry.resumable_session(route=SDK_ROUTE)
+        # The registry's conversation is continued only when the launch asks to resume: «Fresh»
+        # passes `resume=False`, and a session that read the registry anyway continued the old
+        # conversation under a «fresh» label (#221). True by default for the headless CLI, which
+        # has always continued the phase's conversation.
+        self.resumed_from: Optional[str] = (
+            self.registry.resumable_session(route=SDK_ROUTE) if resume else None)
         self._phase_at_start = self.registry.current_phase()
         self._mcp_servers: dict[str, Any] = {}
         if mcp_url:
