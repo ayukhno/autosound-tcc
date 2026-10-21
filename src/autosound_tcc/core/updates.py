@@ -149,7 +149,7 @@ TCC_WINDOW_WORDS = {
              "nothing was installed. Start TCC and press «Update TCC» again.",
     "unpinned": "This uv cannot hold the update to the tested versions (that needs uv 0.5.6 or "
                 "newer) — installing without them, so uv chooses the versions. This uv:",
-    # Said only when the tag's signature WAS verified — the script has a `sha` (#195).
+    # Said only when the tag's signature WAS verified — `verified`, not merely a `sha` (#195, #227).
     "signed": "The signature of {tag} was checked before this update: good ({principal}).",
     # Before uv, when a release that should carry the tested versions gave none (the group
     # review of #194/#195); the reason follows on its own line, in git's words.
@@ -268,7 +268,8 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                        words: Optional[dict] = None, platform: Optional[str] = None,
                        sha: str = "", folder: Optional[Path] = None,
                        constraints: bool = False, check_installed: bool = False,
-                       unpinned_why: str = "") -> str:
+                       unpinned_why: str = "", verified: bool = True,
+                       peeled: bool = True) -> str:
     """The update as the text of a script: the person's lines, the wait, the install, the result.
 
     **A script run by name, and its first act is to clear the window** (hub #221 ask 3, skill
@@ -295,15 +296,23 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     tag is checked before this script is written at all (`prepare_tcc_update`, tcc#102): a tag
     that does not verify gets no script.
 
-    **`sha` is the commit that check verified, and the script holds uv to it** (review of
+    **`sha` is the commit the fetched tag names, and the script holds uv to it** (review of
     tcc#102). The check runs when the button is pressed; uv resolves the tag NAME only after the
     person has quit TCC, which may be much later. So, right before uv, the script asks the remote
     what the tag's peeled `^{}` line names now, and installs nothing unless it is that commit — a
     tag moved since, a lightweight tag put in its place (no `^{}` line), or no answer all end in
     the `moved` line. uv itself is not pinned to the sha: the tag name is what
     `install_report.requested_revision` reads back — the shown version, the channel, the guide
-    link. No `sha` (a release from before signing, the developer's switch): nothing was verified,
-    so there is nothing to hold uv to.
+    link. No `sha` (a release from before signing): nothing was fetched, so there is nothing to
+    hold uv to.
+
+    **`verified`: that commit's tag passed the signature check** — False under the developer's
+    switch, which fetches the tag for its commit and pins and checks no signature (tcc#227). The
+    commit guard and the pins stay; what is said of the signature (`signed`) and the read-back
+    against it (`differs`) are the verified tag's only. **`peeled`: the tag is annotated**, and the
+    guard asks its `^{}` line; False for a lightweight tag the switch let through, which the
+    remote advertises by its own ref alone — asked as `refs/tags/<tag>`, or it would end in
+    `moved` every time. A verified tag is always annotated.
 
     **That question cannot wait for a person or a silent server** (tcc#123). Every door git could
     stop at is closed, the update check's own (`_NO_PROMPTING`): Git Credential Manager's window
@@ -341,16 +350,16 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     would put an untested set on the machine and blame the file for it (the re-review of #194).
 
     **The check's answer is said in the window, once the tag is found still naming the commit it
-    verified and before uv runs** (#195, finding 159): the `signed` line. Only with a `sha` —
-    the one thing `check_tcc_tag` hands back after a real verification; a release from before
-    signing and the developer's switch reach here without one, and get no such line.
+    verified and before uv runs** (#195, finding 159): the `signed` line. Only with a `sha` that
+    is `verified`; a release from before signing reaches here without a `sha`, and the developer's
+    switch with an unverified one, and neither gets the line (tcc#227).
 
     **`check_installed`: after uv, the commit it installed is read back** (`_INSTALLED_HELPER`
     beside the script, run by the installed TCC's own Python under `uv tool dir`) and, when it is
     not the verified `sha`, the `differs` line and that commit stand where «done» would — so
     «checked: good» is not left over a build it did not cover. Nothing read (an older uv, a
     different tool folder) says nothing either way: the line before uv was about the check, and
-    stays true. Only with a `sha`.
+    stays true. Only with a `verified` `sha`.
 
     **`unpinned_why`: a release that should have held uv to its tested set and gave none**
     (`_tag_constraints`): the `nopins` line and the reason before the plain install — the update
@@ -371,8 +380,11 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     held = tcc_install_command(tag, TCC_CONSTRAINTS if windows else '"$tcc_pins"')
     # `replace`, not `format`: a stray brace in a translation must not cost the update.
     signed = (said["signed"].replace("{tag}", tag).replace("{principal}", TCC_SIGNING_PRINCIPAL)
-              if sha else "")
-    readback = bool(sha and check_installed)
+              if sha and verified else "")
+    readback = bool(sha and verified and check_installed)
+    # What the remote advertises the commit under: an annotated tag's peeled line, a lightweight
+    # tag's own ref (only the switch lets one through, tcc#227).
+    ref = f"refs/tags/{tag}^{{}}" if peeled else f"refs/tags/{tag}"
     why = " / ".join(part.strip() for part in unpinned_why.splitlines() if part.strip())
     nopins = bool(why and not constraints)
     if windows:
@@ -392,7 +404,7 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
             f"set GIT_HTTP_LOW_SPEED_TIME={_GUARD_TIMEOUT_S}",
             'set "tcc_now="',
             f"for /f \"tokens=1\" %%a in ('git ls-remote \"{TCC_REPO}\" "
-            f"\"refs/tags/{tag}^{{}}\" 2^>nul') do set \"tcc_now=%%a\"",
+            f"\"{ref}\" 2^>nul') do set \"tcc_now=%%a\"",
             f'if not "%tcc_now%"=="{sha}" goto moved',
         ] if sha else []
         # Every exit reaches `:end`. cmd reads a batch file line by line as it runs it, so the
@@ -471,7 +483,7 @@ def tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
         guard = [
             "answer=$(",
             f"  {doors} git ls-remote {shlex.quote(TCC_REPO)} "
-            f"{shlex.quote(f'refs/tags/{tag}^{{}}')} 2>/dev/null &",
+            f"{shlex.quote(ref)} 2>/dev/null &",
             "  ask=$! waited=0",
             f'  while kill -0 "$ask" 2>/dev/null && [ "$waited" -lt {_GUARD_TIMEOUT_S} ]; do',
             "    sleep 1; waited=$((waited + 1))",
@@ -542,7 +554,8 @@ def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
                              words: Optional[dict] = None, folder: Optional[Path] = None,
                              platform: Optional[str] = None, sha: str = "",
                              constraints: Optional[bytes] = None,
-                             unpinned_why: str = "") -> Path:
+                             unpinned_why: str = "", verified: bool = True,
+                             peeled: bool = True) -> Path:
     """`tcc_install_script` in a file, for `terminal_launcher.run_script` to run by name.
 
     A fresh folder of this user's each time (`mkdtemp`, mode 0700): nobody else's file can be
@@ -553,6 +566,9 @@ def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     `constraints` are the release's `TCC_CONSTRAINTS` bytes, written beside the script as they are
     for its uv to be held to (tcc#194); None writes none, and uv resolves as it always did —
     after the `nopins` line when `unpinned_why` says why a release that should carry them gave none.
+
+    `verified` and `peeled` are `tcc_install_script`'s: the read-back's helper is written only for
+    a verified `sha`.
     """
     windows = _is_windows(platform)
     made = None if folder else Path(tempfile.mkdtemp(prefix=_UPDATE_FOLDER_PREFIX))
@@ -560,11 +576,13 @@ def write_tcc_install_script(pid: Optional[int] = None, tag: str = "", *,
     path = folder / ("tcc-update.cmd" if windows else "tcc-update.sh")
     if constraints is not None:
         (folder / TCC_CONSTRAINTS).write_bytes(constraints)
-    if sha:
+    if sha and verified:
         (folder / _INSTALLED_HELPER).write_text(_INSTALLED_HELPER_TEXT, encoding="utf-8")
     path.write_text(tcc_install_script(pid, tag, words=words, platform=platform, sha=sha,
                                        folder=made, constraints=constraints is not None,
-                                       check_installed=bool(sha), unpinned_why=unpinned_why),
+                                       check_installed=bool(sha and verified),
+                                       unpinned_why=unpinned_why, verified=verified,
+                                       peeled=peeled),
                     encoding="utf-8", newline="\r\n" if windows else "\n")
     return path
 
@@ -1686,6 +1704,21 @@ class _PinsMissing(str):
     there instead — as the text it is; told apart from the file's bytes by its type."""
 
 
+class _TagCommit(str):
+    """The commit a fetched tag names, as the text it is, with what the fetch learnt beside it
+    (tcc#227): `verified` — its signature was checked good, False under the developer's switch;
+    `peeled` — an annotated tag, advertised by the remote as `refs/tags/<tag>^{}`, False for a
+    lightweight one (only the switch lets one through)."""
+
+    verified: bool
+    peeled: bool
+
+    def __new__(cls, sha: str, *, verified: bool, peeled: bool):
+        made = super().__new__(cls, sha)
+        made.verified, made.peeled = verified, peeled
+        return made
+
+
 def _tag_constraints(repo: Path, tag: str):
     """The verified tag's `TCC_CONSTRAINTS` as bytes; or, for a release that should carry it
     (`TCC_CONSTRAINTS_FROM`), `_PinsMissing` with why it gave none — absent from the tree, a git
@@ -1757,8 +1790,10 @@ def _switch_still_fetches(tag: str) -> bool:
 def check_tcc_tag(tag: str, *, light: bool = False
                   ) -> tuple[bool, str, str, str, Optional[bytes]]:
     """`_verify_tag`'s answer for one of TCC's own tags — `(ok, the line to show, reason key,
-    the commit the verified tag names, the tag's constraints)`, that commit "" when nothing was
-    verified.
+    the commit the fetched tag names, the tag's constraints)`, that commit "" when nothing was
+    fetched. The commit is a `_TagCommit`: whether a signature was VERIFIED is its `verified`,
+    not whether there is a commit — under the developer's switch the tag is fetched and its
+    signature is not checked (tcc#227).
 
     `uv tool install … @<tag>` checks no signature, so the tag object is fetched first into a
     temporary BARE repository — TCC has no clone of itself to fetch into — and verified there
@@ -1782,11 +1817,14 @@ def check_tcc_tag(tag: str, *, light: bool = False
     `str`) with why when a release that should carry it gave none (`_tag_constraints`).
 
     `light` (the seal of the installed TCC, #195): the tag without its files
-    (`_fetch_tcc_tag`), and no constraints read — None.
+    (`_fetch_tcc_tag`), and no constraints read — None. The switch does not fetch for it: the
+    seal says «skipped» by name (`_seal_by_name`), and a light check answers by name too.
     """
     early = _verdict_by_name(tag, TCC_SIGNED_FROM, channel_key)
     if early is not None and not (early[0] and not light and _switch_still_fetches(tag)):
         return (*early, "", None)
+    verified = early is None  # past an early answer only under the switch, unchecked
+    peeled = True
     with tempfile.TemporaryDirectory(prefix="autosound-tcc-tag-", ignore_cleanup_errors=True) as tmp:
         repo = Path(tmp)
         ok, said = _git("init", "--quiet", "--bare", str(repo))
@@ -1801,6 +1839,12 @@ def check_tcc_tag(tag: str, *, light: bool = False
             return False, line, why, "", None
         named, sha = _git("rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}", cwd=repo)
         valid = named and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha)
+        if valid and not verified:
+            # A verified tag is a tag object; one the switch let through may be lightweight, and
+            # the script's guard must ask the remote for the ref it is advertised under. git that
+            # cannot say keeps the annotated guard: it fails closed, in `moved`.
+            typed, kind = _git("cat-file", "-t", f"refs/tags/{tag}", cwd=repo)
+            peeled = not (typed and kind == "commit")
         pins = _tag_constraints(repo, tag) if valid and not light else None
     if isinstance(sha, _DidNotRun):
         # A good signature, and git did not run to name its commit: nothing to pin the install
@@ -1809,7 +1853,7 @@ def check_tcc_tag(tag: str, *, light: bool = False
     if not valid:
         return (False, f"{tag}: git names no commit for the verified tag ({sha})", "bad_signature",
                 "", None)
-    return True, line, "", sha, pins
+    return True, line, "", _TagCommit(sha, verified=verified, peeled=peeled), pins
 
 
 @dataclass(frozen=True)
@@ -1867,8 +1911,12 @@ def prepare_tcc_update(channel: str = STABLE, *, pid: Optional[int] = None,
         # should have carried it says so in the window too (`unpinned_why`).
         _log.warning("tcc tag %s: no %s held — uv resolves the dependencies afresh, not the set "
                      "uv.lock holds and CI ran", tag, TCC_CONSTRAINTS)
+    # A plain commit is the contract before tcc#227 — a verified, annotated tag.
+    verified, peeled = ((sha.verified, sha.peeled) if isinstance(sha, _TagCommit)
+                        else (True, True))
     script = write_tcc_install_script(pid, tag, words=words, platform=platform, sha=sha,
-                                      constraints=pins, unpinned_why=unpinned_why)
+                                      constraints=pins, unpinned_why=unpinned_why,
+                                      verified=verified, peeled=peeled)
     return TccUpdate(script, signature=line, tag=tag)
 
 

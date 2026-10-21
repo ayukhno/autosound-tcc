@@ -3112,6 +3112,56 @@ def test_the_developer_switch_says_nopins_for_a_tag_that_carries_none(monkeypatc
     assert "carries no constraints.txt" in script, script
 
 
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+@pytest.mark.parametrize("case", ["switch", "verified"])
+def test_the_window_says_good_signature_only_for_a_verified_tag(monkeypatch, tmp_path, platform,
+                                                                case):
+    """tcc#227's review, Important 1: under the switch the tag is fetched for its commit and pins,
+    and the script printed «checked: good» for any commit — an unsigned tag read as a good
+    signature in the window while the row said NOT checked. The `signed` line is the verified
+    tag's only; the commit guard and the pins stay in both."""
+    if case == "switch":
+        _unsigned_v1_1_4(monkeypatch, tmp_path, _PINS)
+    else:
+        _tcc_origin(monkeypatch, tmp_path)
+        _tcc_tag_with_constraints(tmp_path, tag="v1.1.4")
+        _offering(monkeypatch, "v1.1.4")
+
+    ready = updates.prepare_tcc_update(pid=4242, platform=platform)
+
+    assert ready.script is not None and ready.reason == "", ready
+    script = ready.script.read_text(encoding="utf-8")
+    signed = updates.TCC_WINDOW_WORDS["signed"].replace("{tag}", "v1.1.4").replace(
+        "{principal}", "author")
+    assert (signed in script) is (case == "verified"), script
+    assert "--constraints" in script, "the pins stay"
+    assert "refs/tags/v1.1.4^{}" in script, "the commit guard stays"
+
+
+@pytest.mark.skipif(__import__("shutil").which("ssh-keygen") is None, reason="needs ssh-keygen")
+def test_the_developer_switch_installs_a_lightweight_tag_through_the_guard(monkeypatch, tmp_path):
+    """tcc#227's review, Important 2: under the switch a lightweight tag (v0.1.48 here) is fetched
+    and its commit named, but the guard asked the remote for `refs/tags/<tag>^{}`, which only an
+    annotated tag has — always `moved`, and uv never ran; before the fetch the switch installed
+    it. Run for real against the origin: the guard asks the tag's own ref and uv runs."""
+    _tcc_origin(monkeypatch, tmp_path)
+    _offering(monkeypatch, "v0.1.48")
+    monkeypatch.setenv(updates.SKIP_VERIFY_VAR, "1")
+    ready = updates.prepare_tcc_update(pid=_gone_pid(), platform=sys.platform)
+    assert ready.script is not None and ready.reason == "", ready
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    seen = tmp_path / "seen.txt"
+    _recording_uv(bindir, seen)
+
+    out, err = _run_update(ready.script, bindir)
+
+    assert updates.TCC_WINDOW_WORDS["moved"] not in out, (out, err)
+    installs = (tmp_path / "seen.txt.args").read_text(encoding="utf-8")
+    assert "@v0.1.48" in installs, (installs, out, err)
+
+
 # ---- W-10, the Arbiter's Windows pass, round 3: a program running from TCC's folder ------------
 
 _TOOLS = r"C:\Users\me\AppData\Roaming\uv\tools"
