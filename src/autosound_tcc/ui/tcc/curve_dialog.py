@@ -349,7 +349,10 @@ class _CurveWorker(QThread):
     per batch, so one curve REW cannot produce does not take the others off the screen with it.
     """
 
-    done = Signal(list)  # list[Trace]
+    #: The traces that came back, and what failed beside them, "; "-joined — "" when nothing did:
+    #: said in the read's note, in the quiet colour, since the plot does answer (the group review
+    #: of #219, I). A title REW does not hold is not in it: `unreadable` carries that one.
+    done = Signal(list, str)  # list[Trace], str
     failed = Signal(str)
     #: Titles REW holds no measurement under, as a fact rather than a sentence (finding 38).
     #: Separate from `failed`, which only fires when NOTHING came back: a read where four of six
@@ -383,6 +386,7 @@ class _CurveWorker(QThread):
     def run(self) -> None:
         traces: list[Trace] = []
         problems: list[str] = []
+        unread: list[str] = []  # the problems but a title REW does not hold, and the notes
         missing: list[str] = []
         twice: list[str] = []
         for title in self._titles:
@@ -461,6 +465,7 @@ class _CurveWorker(QThread):
                 else:
                     app_log.logger().warning("curve window: %s could not be read", title,
                                              exc_info=True)
+                    unread.append(f"{title}: {type(exc).__name__}: {exc}")
                 problems.append(f"{title}: {type(exc).__name__}: {exc}")
         if twice:
             self.heldTwice.emit(twice)
@@ -470,7 +475,7 @@ class _CurveWorker(QThread):
             # Empty when the only refusals were pairs: the dialog says those in its own words.
             self.failed.emit("; ".join(problems) or ("" if twice else "no curves"))
             return
-        self.done.emit(traces)
+        self.done.emit(traces, "; ".join(unread))
 
     def _spectrum(self, mid, legs=None, title: str = "") -> dict:
         """The frequency-domain half of an impulse capture, for the sum's strip under the plot.
@@ -1967,12 +1972,14 @@ class CurveDialog(QDialog):
         self._worker.heldTwice.connect(self._on_held_twice)
         self._worker.start()
 
-    def _on_curves(self, traces: list) -> None:
+    def _on_curves(self, traces: list, problems: str = "") -> None:
         # Red is a state, not a stain: a read that works takes it off again. The status line ends
         # up carrying the other notes, if there are any, and disappears when there are not —
         # drawn after the curves, because a note about what is drawn stands only while something
-        # is (R3).
-        self._read_note, self._read_bad = "", False
+        # is (R3). What failed beside the curves that came back is said, in the quiet colour: it
+        # was dropped, a curve missing with nothing saying why (the group review of #219, I).
+        self._read_note = i18n.t("curveFailed").format(error=problems) if problems else ""
+        self._read_bad = False
         if [t.name for t in self._view._traces] != [t.name for t in traces]:
             # A new selection: the view puts every driver back at nothing, so what was drawn for
             # a driver the bank could not be read for, and what the person set on it since, is

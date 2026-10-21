@@ -516,10 +516,47 @@ def test_one_curve_rew_cannot_produce_does_not_take_the_other_off_the_screen():
 
     worker = _CurveWorker(_HalfBroken(), ["w-L_01 (sw)", "w-R_01 (rta)"], "impulse")
     got = []
-    worker.done.connect(got.append)
+    worker.done.connect(lambda traces, _problems: got.append(traces))
     worker.run()
 
     assert [t.name for t in got[-1]] == ["w-L_01 (sw)"]
+
+
+def test_what_could_not_be_read_beside_curves_that_came_back_is_said_quietly():
+    """The group review of #219, I: when some curves came back, what failed beside them — REW
+    answering an error, a reader's bug — was dropped, and the read's note cleared: a curve missing
+    from the plot with nothing saying why. It comes with `done` and stands in the read's note, in
+    the quiet colour: the plot does answer. A title REW does not hold is not among it: the picker
+    greys that one out (`unreadable`)."""
+    _app()
+
+    class _Partly(_FakeBridge):
+        def by_name(self, name, exact: bool = True):
+            if name.startswith("m-"):
+                raise KeyError(f"No measurement titled {name!r} (REW holds 3)")
+            return super().by_name(name, exact=exact)
+
+        def impulse_response(self, mid):
+            if "rta" in mid:
+                raise RuntimeError("HTTP Error 500: Internal Server Error")
+            return super().impulse_response(mid)
+
+    worker = _CurveWorker(_Partly(), ["w-L_01 (sw)", "w-R_01 (rta)", "m-L_01 (sw)"], "impulse")
+    got: list = []
+    worker.done.connect(lambda traces, problems: got.append((traces, problems)))
+    worker.run()
+
+    [(traces, problems)] = got
+    assert [t.name for t in traces] == ["w-L_01 (sw)"]
+    assert problems == "w-R_01 (rta): RuntimeError: HTTP Error 500: Internal Server Error"
+
+    dialog = _dialog(["w-L_01 (sw)"], bridge=_FakeBridge())
+    dialog._worker.wait(4000)
+    dialog._on_curves(traces, problems)
+    assert i18n.t("curveFailed").format(error=problems) in dialog._status.text()
+    assert "curve-status-bad" not in str(dialog._status.property("class")), "the quiet colour"
+    dialog._on_curves(traces)
+    assert problems not in dialog._status.text(), "a read with nothing failed takes it back"
 
 
 def test_a_curve_rew_cannot_produce_is_said_with_its_message_and_logged_with_its_traceback(
@@ -579,7 +616,7 @@ def test_a_spectrum_rew_cannot_give_is_logged_and_the_impulse_still_plots(monkey
 
     worker = _CurveWorker(_NoSpectrum(), ["w-L_01 (sw)"], "impulse")
     got: list = []
-    worker.done.connect(got.append)
+    worker.done.connect(lambda traces, _problems: got.append(traces))
     monkeypatch.setattr(app_log.logger(), "propagate", True)  # caplog listens on the root
     with caplog.at_level(logging.WARNING, logger=app_log.LOGGER_NAME):
         worker.run()
@@ -2034,7 +2071,7 @@ def test_the_worker_keeps_the_magnitude_and_the_phase_from_the_one_call_that_ret
 
     worker = _CurveWorker(_FrBridge(), ["w-L_01 (sw)"], "phase")
     got: list = []
-    worker.done.connect(got.append)
+    worker.done.connect(lambda traces, _problems: got.append(traces))
     worker.run()
 
     trace = got[-1][0]
@@ -2050,7 +2087,7 @@ def test_a_trace_carries_the_facts_the_summability_rule_is_written_against():
 
     worker = _CurveWorker(_FrBridge(), ["w-L_01 (sw)"], "fr")
     got: list = []
-    worker.done.connect(got.append)
+    worker.done.connect(lambda traces, _problems: got.append(traces))
     worker.run()
 
     trace = got[-1][0]
@@ -2063,7 +2100,7 @@ def test_an_impulse_carries_no_magnitude_or_phase_because_it_has_none():
 
     worker = _CurveWorker(_FakeBridge(), ["w-L_01 (sw)"], "impulse")
     got: list = []
-    worker.done.connect(got.append)
+    worker.done.connect(lambda traces, _problems: got.append(traces))
     worker.run()
 
     trace = got[-1][0]
@@ -3027,7 +3064,7 @@ def test_the_worker_brings_the_spectrum_back_with_the_impulse():
 
     worker = _CurveWorker(_FrBridge(), ["w-L_01 (sw)"], "impulse")
     got: list = []
-    worker.done.connect(got.append)
+    worker.done.connect(lambda traces, _problems: got.append(traces))
     worker.run()
 
     trace = got[-1][0]
@@ -3043,7 +3080,7 @@ def test_an_impulse_still_plots_when_rew_has_no_response_for_it():
 
     worker = _CurveWorker(_FakeBridge(), ["w-L_01 (sw)"], "impulse")  # no `frequency_response`
     got: list = []
-    worker.done.connect(got.append)
+    worker.done.connect(lambda traces, _problems: got.append(traces))
     worker.run()
 
     trace = got[-1][0]
