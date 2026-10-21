@@ -71,6 +71,12 @@ and a capture check that judges one REW.
 - **This release's new lines are in Ukrainian, Polish and German** too: the REW dot's states, the main AI check,
   the «busy» and «cannot be read» messages.
 
+- **The reviewer TCC recommends under Google Cloud's ADC is Gemini 3.8 Flash (Medium)** (tcc#232, with the method's
+  v3.2.0): the High tier stays silent for minutes under ADC. A pick of High is kept, marked with a caution and no
+  longer recommended. A review waits as long as the method itself does — its one-line check first, then a time that
+  grows with what it sends, and the `AUTOSOUND_CLI_TIMEOUT` written in critic-env — so the method's own «no answer»
+  and its advice reach the screen instead of TCC cutting it off at ten minutes.
+
 ### Fixed
 
 - **A capture check REW's list moved under is not «REW is not running»** (the method's v3.2.0, skill #183): the
