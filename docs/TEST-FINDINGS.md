@@ -3852,3 +3852,9 @@ mojibake. Cosmetic.
 ### 167. «Phase 1's desk engine: absent: no SHA256SUMS on beta-v3.2.0-rc2 (HTTP 404)»
 The candidate tag carries no `SHA256SUMS`, so the engine is not fetched («builds from the .NET SDK when there is
 one»). **Whose:** the method's release assets — to check whether a beta candidate is meant to carry them.
+
+### 168. Claude cannot be signed in on the UTM VM; TCC starts and says no model is available
+After the install, `claude auth login` still did not sign in on the UTM VM (as 164). TCC started from its
+Desktop shortcut and said that no model is available — what it should say with no sign-in.
+**The Arbiter, 2026-10-21: the walk counts as passed** («тест рахуємо пройденим»). The sign-in is the VM's
+network or Claude Code's own login, not TCC's; no session was started in this walk.
