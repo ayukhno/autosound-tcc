@@ -79,9 +79,14 @@ def has(feature: tuple[str, str], project_dir: Optional[Path | str] = None) -> b
 
 def stated_number(script: Path, name: str) -> Optional[int]:
     """The integer a script's text assigns to the module constant `name` (`PROBE_WAIT_S = 60`), or
-    None: a copy that does not state it, or cannot be read (#232)."""
+    None: a copy that does not state it, or cannot be read (#232).
+
+    The whole statement or nothing: an optional type hint, digits with `_` between them, an optional
+    trailing comment. `10 * 60` or `600.5` is a number this cannot read, not the 10 or 600 it starts
+    with -- read so, `CLI_WAIT_MIN_S = 10 * 60` gave a review 185 s against the method's 600."""
     text = _text(script)
-    found = re.search(rf"^{re.escape(name)}\s*=\s*(\d+)\b", text or "", re.MULTILINE)
+    found = re.search(rf"^{re.escape(name)}[ \t]*(?::[^=\n]*)?=[ \t]*([0-9](?:_?[0-9])*)[ \t]*(?:#.*)?$",
+                      text or "", re.MULTILINE)
     return int(found.group(1)) if found else None
 
 

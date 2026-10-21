@@ -34,7 +34,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Mapping, Optional
 
 from autosound_tcc.core import app_log, child, codex_cli
-from autosound_tcc.core import config, method_features, vendor_loader
+from autosound_tcc.core import config, critic_env, method_features, vendor_loader
 
 DEFAULT_TIMEOUT_S = 600.0
 #: TCC waits this much longer than the method does, so the method's own timeout message and advice
@@ -484,31 +484,106 @@ def via_of(harness: str) -> str:
     return "cli" if route in _LOGIN_ROUTES else ""
 
 
-def review_wait(script: Path, package_bytes: int, harness: str = "",
-                env: Optional[Mapping[str, str]] = None) -> float:
-    """How long TCC waits for a review: the method's own wait, from the copy's text, plus a margin (#232).
+#: What a tuning prompt carries beyond the files TCC can find: the LEDGER HEAD (up to the method's
+#: 60 lines of the ledger's render) and the section headings. An allowance, not a measure (#232).
+_TUNING_ALLOWANCE_BYTES = 24 * 1024
+#: The section headings around an `ask`, which carries no ledger.
+_ASK_ALLOWANCE_BYTES = 1024
 
-    The method waits `PROBE_WAIT_S` for a one-line probe before an agy package, then `cli_wait`:
-    `AUTOSOUND_CLI_TIMEOUT` when set, else `max(CLI_WAIT_MIN_S, CLI_WAIT_PER_KB_S * KB)`. A copy that
-    states none of it (no probe: 0) keeps `DEFAULT_TIMEOUT_S`, as before."""
+
+def _size(path: Optional[Path]) -> int:
+    try:
+        return path.stat().st_size if path is not None and path.is_file() else 0
+    except OSError:
+        return 0
+
+
+def _method_context(project_dir: Path, run_env: Mapping[str, str],
+                    seen: Mapping[str, str]) -> Optional[Path]:
+    """The `autosound_context.md` the method reads (`find_file`): the project root, the mirror, the
+    root's `rew_analitic/`, `$AUTOSOUND_DIR`, the skill's `assets/`. The mirror is chosen from the
+    run's environment, before any critic-env loads; the rest from what the method sees after."""
+    mirror = project_dir / (run_env.get("PROJECT_MIRROR")
+                            or os.path.join(run_env.get("AUTOSOUND_PROJECT_DIR") or str(project_dir),
+                                            "rew_analitic"))
+    stated = seen.get("AUTOSOUND_PROJECT_DIR")
+    root = project_dir / stated if stated else (mirror.parent if mirror.name == "rew_analitic"
+                                                else project_dir)
+    folders = [root, mirror, root / "rew_analitic"]
+    if seen.get("AUTOSOUND_DIR"):
+        folders.append(project_dir / seen["AUTOSOUND_DIR"])
+    folders.append(script_path().parent.parent / "assets")
+    return next((folder / "autosound_context.md" for folder in folders
+                 if (folder / "autosound_context.md").is_file()), None)
+
+
+def prompt_bytes(package_path: Path, project_dir: Path, role: str, trace_path: Optional[str],
+                 run_env: Mapping[str, str], seen: Mapping[str, str]) -> int:
+    """About the size of the prompt the method's `compile_prompt` builds for this run, which is what
+    it sizes its wait by -- not the package alone (#232): the interaction contract and the task's own
+    file in the copy that runs; for a tuning task the tuning rules, the data contract, the reviewer
+    memory and an allowance for the LEDGER HEAD; the project's context, which `ask` takes too as
+    background; the trace; the package. `seen` is the environment as the method reads it."""
+    scripts = script_path().parent
+    assets = scripts.parent / "assets"
+    files = [assets / "interaction-contract.md", scripts / f"reviewer-task-{role}.txt",
+             _method_context(project_dir, run_env, seen), package_path]
+    if trace_path:
+        files.append(project_dir / trace_path)
+    if role == ASK:
+        return sum(map(_size, files)) + _ASK_ALLOWANCE_BYTES
+    mirror = project_dir / (run_env.get("PROJECT_MIRROR") or "rew_analitic")
+    memory = project_dir / (seen.get("ADVISOR_MEMORY") or mirror / "depth-advisor-memory.md")
+    files += [scripts / "reviewer-tuning.txt", assets / "data-contract-template.md", memory]
+    return sum(map(_size, files)) + _TUNING_ALLOWANCE_BYTES
+
+
+def review_wait(script: Path, prompt_size: int, route: str = "",
+                env: Optional[Mapping[str, str]] = None) -> float:
+    """How long TCC waits for a review: the method's own wait, from the copy's text, plus a margin,
+    at most `LONGEST_REVIEW_S` (#232).
+
+    `route` is the run's: `api` waits `api_wait` -- `AUTOSOUND_API_TIMEOUT` when set; any other
+    waits `cli_wait` -- `AUTOSOUND_CLI_TIMEOUT` when set; else both `max(CLI_WAIT_MIN_S,
+    CLI_WAIT_PER_KB_S * KB)` of the prompt (`prompt_bytes`). `env` is the environment as the method
+    reads it, critic-env lines over it (`critic_env.as_the_method_reads`). Before a package on a CLI
+    the method may send a one-line probe (`PROBE_WAIT_S`): counted on every route but `api` and
+    `omp`, as TCC cannot tell which CLI the method will find. A constant the copy states in a form
+    this cannot read floors the wait at `DEFAULT_TIMEOUT_S`.
+
+    Not covered, and bounded by the clamp alone: a run with no route named, where the method tries
+    the API (`api_wait`) and then the CLI (`cli_wait`) in one run; and `call_cli`'s one repeat of a
+    stream cut mid-answer, which may wait `cli_wait` twice."""
+    environ = os.environ if env is None else env
+    route = (route or "").strip().lower()
     minimum = method_features.stated_number(script, "CLI_WAIT_MIN_S")
     per_kb = method_features.stated_number(script, "CLI_WAIT_PER_KB_S")
-    probe = method_features.stated_number(script, "PROBE_WAIT_S") if harness == "agy" else None
-    said = ((env if env is not None else os.environ).get("AUTOSOUND_CLI_TIMEOUT") or "").strip()
+    probe = 0 if route in ("api", "omp") else method_features.stated_number(script, "PROBE_WAIT_S")
+    said = (environ.get("AUTOSOUND_API_TIMEOUT" if route == "api" else "AUTOSOUND_CLI_TIMEOUT")
+            or "").strip()
     try:
-        fixed = float(int(said)) if said else None
+        wait = float(int(said)) if said else None
     except ValueError:
-        fixed = None
-    if fixed is None and minimum is None and per_kb is None:
-        return DEFAULT_TIMEOUT_S
-    if fixed is None:
-        fixed = max(float(minimum or 0), float(per_kb or 0) * package_bytes / 1024)
-    return float(probe or 0) + fixed + METHOD_MARGIN_S
+        wait = None
+    if wait is None:
+        wait = max(float(minimum or 0), float(per_kb or 0) * prompt_size / 1024)
+        if minimum is None or per_kb is None:
+            wait = max(wait, DEFAULT_TIMEOUT_S)
+    total = float(probe or 0) + wait + METHOD_MARGIN_S
+    if total > LONGEST_REVIEW_S:
+        app_log.logger().info(
+            "critic: the method's wait (%.0f s with the probe and margin) is past the longest review "
+            "TCC waits for; waiting %.0f s (LONGEST_REVIEW_S), so TCC's own timeout lands before the "
+            "session's tool call is cut", total, LONGEST_REVIEW_S)
+        total = LONGEST_REVIEW_S
+    return total
 
 
 def doctor_wait(script: Path) -> float:
-    """What `doctor` is given: its own checks (60 s, as before) plus the live call's `PROBE_WAIT_S`."""
-    return 60.0 + float(method_features.stated_number(script, "PROBE_WAIT_S") or 0)
+    """What `doctor` is given: its own checks (60 s, as before), the live call -- `PROBE_WAIT_S` on
+    agy, a literal 120 s on any other CLI (rc1 and rc2) -- and the margin (#232)."""
+    probe = float(method_features.stated_number(script, "PROBE_WAIT_S") or 0)
+    return 60.0 + max(probe, 120.0) + METHOD_MARGIN_S
 
 
 def run(
@@ -625,11 +700,11 @@ def run(
         "--model" if by_flag else "GEMINI_CRITIC_MODEL" if model else "none sent",
         harness, os.environ.get("GEMINI_BIN"))
     if timeout_s is None:
-        try:
-            size = package_path.stat().st_size
-        except OSError:
-            size = len(package.encode("utf-8"))
-        timeout_s = review_wait(script_path(), size, harness, env)
+        seen = critic_env.as_the_method_reads(env, project_dir)
+        route = via if via in VIA_ROUTES else (seen.get("AUTOSOUND_CRITIC_VIA") or "").strip().lower()
+        timeout_s = review_wait(script_path(),
+                                prompt_bytes(package_path, project_dir, role, trace_path, env, seen),
+                                route, seen)
     try:
         # Bounded on Windows too: `subprocess.run` there waits with no bound for pipes a
         # grandchild holds after the kill (tcc#132, F16-1).

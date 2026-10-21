@@ -1831,14 +1831,28 @@ def test_a_codex_refusal_that_does_not_name_the_model_does_not_send_to_another_m
 # ---- TCC waits as long as the method does (tcc#232) --------------------------------------------
 
 _METHOD_WITH_PROBE = "CLI_WAIT_MIN_S = 600\nCLI_WAIT_PER_KB_S = 25\nPROBE_WAIT_S = 60\n"
+#: The section headings an `ask` carries around its files; a tuning task adds the LEDGER HEAD.
+_ASK_ALLOWANCE = 1024
+_TUNING_ALLOWANCE = 24 * 1024
+_WAIT_VARS = ("AUTOSOUND_CLI_TIMEOUT", "AUTOSOUND_API_TIMEOUT", "AUTOSOUND_CRITIC_VIA", "ADVISOR_MEMORY",
+              "AUTOSOUND_DIR", "AUTOSOUND_PROJECT_DIR", "PROJECT_MIRROR", "APPDATA")
 
 
-def _timeouts_seen(monkeypatch, tmp_path, script_text, size_kb, harness="agy", env=None):
+def _timeouts_seen(monkeypatch, tmp_path, script_text, size_kb, harness="agy", env=None, role="ask",
+                   project=None, via="", trace_path=None):
+    """The timeouts `run` and then `doctor` hand the child. The script lives in a copy of the method's
+    own layout (`<skill>/scripts/autosound_ai.py`, `<skill>/assets/`), the project beside it."""
     critic = _reviewer_ready(monkeypatch, tmp_path)
-    (tmp_path / "autosound_ai.py").write_text(script_text, encoding="utf-8")
-    monkeypatch.delenv("AUTOSOUND_CLI_TIMEOUT", raising=False)
+    script = tmp_path / "skill" / "scripts" / "autosound_ai.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(script_text, encoding="utf-8")
+    monkeypatch.setattr(critic, "script_path", lambda: script)
+    for key in _WAIT_VARS:
+        monkeypatch.delenv(key, raising=False)
     for key, value in (env or {}).items():
         monkeypatch.setenv(key, value)
+    project = project or tmp_path / "car"
+    project.mkdir(exist_ok=True)
     seen = []
 
     def capture(_argv, **kwargs):
@@ -1846,21 +1860,72 @@ def _timeouts_seen(monkeypatch, tmp_path, script_text, size_kb, harness="agy", e
         raise OSError("not running the reviewer in a test")
 
     monkeypatch.setattr(critic.child, "run_bounded", capture)
-    critic.run("x" * int(size_kb * 1024), project_dir=tmp_path, role="ask", harness=harness)
-    critic.doctor(tmp_path, python_executable="python")
+    critic.run("x" * int(size_kb * 1024), project_dir=project, role=role, harness=harness, via=via,
+               trace_path=trace_path)
+    critic.doctor(project, python_executable="python")
     return seen
+
+
+def _write(path, size):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("y" * size, encoding="utf-8")
+    return size
 
 
 def test_a_review_waits_for_the_methods_probe_and_cli_wait_and_a_margin(tmp_path, monkeypatch):
     small, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1)
     big, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 40)
     assert small == 60 + 600 + 60      # probe + cli_wait's floor + margin
-    assert big == 60 + 25 * 40 + 60    # probe + 25 s per KB + margin
+    assert big == pytest.approx(60 + 25 * (40 + _ASK_ALLOWANCE / 1024) + 60)
 
 
-def test_a_review_not_through_agy_has_no_probe_in_its_wait(tmp_path, monkeypatch):
-    seen, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1, harness="codex")
-    assert seen == 600 + 60
+def test_a_tuning_reviews_wait_follows_the_whole_prompt_not_the_package(tmp_path, monkeypatch):
+    """C1: the method sizes `cli_wait` from the prompt `compile_prompt` builds -- the method's contract
+    files, the project's context, the reviewer memory, the trace and the ledger head around the package."""
+    skill = tmp_path / "skill"
+    car = tmp_path / "car"
+    layers = (_write(skill / "assets" / "interaction-contract.md", 1895)
+              + _write(skill / "scripts" / "reviewer-tuning.txt", 893)
+              + _write(skill / "scripts" / "reviewer-task-critic.txt", 288)
+              + _write(skill / "assets" / "data-contract-template.md", 9581)
+              + _write(car / "autosound_context.md", 33 * 1024)
+              + _write(car / "rew_analitic" / "depth-advisor-memory.md", 3 * 1024)
+              + _write(car / "trace.csv", 10 * 1024))
+    _write(skill / "scripts" / "reviewer-task-advisor.txt", 50 * 1024)  # another task's: not sent
+
+    review, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1, role="critic",
+                               project=car, trace_path="trace.csv")
+
+    prompt_kb = (1024 + layers + _TUNING_ALLOWANCE) / 1024
+    assert review == pytest.approx(60 + 25 * prompt_kb + 60)
+    assert review > 60 + 600 + 60       # the package alone is under the floor
+
+
+def test_an_asks_wait_counts_the_context_but_not_the_tuning_layers(tmp_path, monkeypatch):
+    skill = tmp_path / "skill"
+    car = tmp_path / "car"
+    layers = (_write(skill / "assets" / "interaction-contract.md", 1895)
+              + _write(skill / "scripts" / "reviewer-task-ask.txt", 270)
+              + _write(car / "autosound_context.md", 33 * 1024))
+    _write(skill / "scripts" / "reviewer-tuning.txt", 40 * 1024)
+    _write(car / "rew_analitic" / "depth-advisor-memory.md", 40 * 1024)
+
+    review, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 2, project=car)
+
+    assert review == pytest.approx(60 + 25 * (2048 + layers + _ASK_ALLOWANCE) / 1024 + 60)
+
+
+def test_a_review_through_the_api_or_omp_has_no_probe_in_its_wait(tmp_path, monkeypatch):
+    api, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1, harness="api")
+    omp, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1, harness="omp")
+    assert api == omp == 600 + 60
+
+
+def test_a_cli_run_of_an_api_pick_waits_for_the_probe_too(tmp_path, monkeypatch):
+    """An MCP `via="cli"` on an API pick of a Google model goes to agy, and agy is probed first."""
+    seen, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1, harness="api", via="cli")
+    codex, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1, harness="codex")
+    assert seen == codex == 60 + 600 + 60
 
 
 def test_a_review_honours_the_methods_cli_timeout_variable(tmp_path, monkeypatch):
@@ -1869,15 +1934,83 @@ def test_a_review_honours_the_methods_cli_timeout_variable(tmp_path, monkeypatch
     assert seen == 60 + 900 + 60
 
 
-def test_a_copy_that_states_no_waits_keeps_todays_review_and_doctor_wait(tmp_path, monkeypatch):
-    review, doctor = _timeouts_seen(monkeypatch, tmp_path, "# an older copy\n", 40)
-    assert review == critic.DEFAULT_TIMEOUT_S == 600.0
-    assert doctor == 60
+def test_the_cli_timeout_is_read_from_critic_env_in_the_methods_order(tmp_path, monkeypatch):
+    """I1: `load_env_file` writes the machine, mirror and project files over the environment, the
+    last one winning."""
+    car = tmp_path / "car"
+    machine = Path(os.environ["XDG_CONFIG_HOME"]) / "autosound" / "critic-env"
+    machine.parent.mkdir(parents=True, exist_ok=True)
+    machine.write_text("AUTOSOUND_CLI_TIMEOUT=1200\n", encoding="utf-8")
+    alone, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1,
+                              env={"AUTOSOUND_CLI_TIMEOUT": "900"}, project=car)
+    (car / "rew_analitic").mkdir(parents=True, exist_ok=True)
+    (car / "rew_analitic" / ".critic-env").write_text("AUTOSOUND_CLI_TIMEOUT=1300\n", encoding="utf-8")
+    (car / ".critic-env").write_text("export AUTOSOUND_CLI_TIMEOUT='1500'\n", encoding="utf-8")
+    project, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1,
+                                env={"AUTOSOUND_CLI_TIMEOUT": "900"}, project=car)
+    assert alone == 60 + 1200 + 60
+    assert project == 60 + 1500 + 60
 
 
-def test_doctor_waits_for_the_methods_probe_by_itself(tmp_path, monkeypatch):
+def test_the_api_route_waits_the_methods_api_timeout(tmp_path, monkeypatch):
+    seen, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1, harness="api",
+                             env={"AUTOSOUND_API_TIMEOUT": "700", "AUTOSOUND_CLI_TIMEOUT": "1500"})
+    named, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1, harness="agy", via="api",
+                              env={"AUTOSOUND_API_TIMEOUT": "700", "AUTOSOUND_CLI_TIMEOUT": "1500"})
+    assert seen == named == 700 + 60
+
+
+def test_a_reviews_wait_stops_at_the_longest_review_and_says_so(tmp_path, monkeypatch):
+    """I2: past `LONGEST_REVIEW_S` the session's MCP transport would cut first, with no message."""
+    said = []
+
+    class _Log:
+        def info(self, msg, *args):
+            said.append(msg % args if args else msg)
+
+        warning = info
+
+    monkeypatch.setattr(critic.app_log, "logger", lambda: _Log())
+    seen, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1,
+                             env={"AUTOSOUND_CLI_TIMEOUT": "99999"})
+    assert seen == critic.LONGEST_REVIEW_S
+    assert sum("LONGEST_REVIEW_S" in line or "longest review" in line for line in said) == 1
+
+
+@pytest.mark.parametrize("text, value", [
+    ("CLI_WAIT_MIN_S = 600\n", 600),
+    ("CLI_WAIT_MIN_S: int = 600\n", 600),
+    ("CLI_WAIT_MIN_S = 1_200  # twenty minutes\n", 1200),
+    ("CLI_WAIT_MIN_S = 10 * 60\n", None),
+    ("CLI_WAIT_MIN_S = 600.5\n", None),
+    ("CLI_WAIT_MIN_S == 600\n", None),
+])
+def test_a_stated_number_is_the_whole_statement_or_nothing(tmp_path, text, value):
+    from autosound_tcc.core import method_features
+
+    script = tmp_path / "autosound_ai.py"
+    script.write_text(text, encoding="utf-8")
+    assert method_features.stated_number(script, "CLI_WAIT_MIN_S") == value
+
+
+def test_an_unreadable_wait_constant_floors_the_wait_at_the_default(tmp_path, monkeypatch):
+    """I3: `CLI_WAIT_MIN_S = 10 * 60` read as 10 gave a 1 KB review 185 s."""
+    seen, _ = _timeouts_seen(monkeypatch, tmp_path,
+                             "CLI_WAIT_MIN_S = 10 * 60\nCLI_WAIT_PER_KB_S = 25\nPROBE_WAIT_S = 60\n", 1)
+    assert seen == 60 + critic.DEFAULT_TIMEOUT_S + 60
+
+
+def test_a_copy_that_states_no_waits_keeps_the_default_and_doctor_its_smoke(tmp_path, monkeypatch):
+    review, doctor = _timeouts_seen(monkeypatch, tmp_path, "# an older copy\n", 1)
+    assert review == critic.DEFAULT_TIMEOUT_S + 60
+    assert doctor == 60 + 120 + 60      # a CLI smoke waits a literal 120 s
+
+
+def test_doctor_waits_for_its_checks_the_live_call_and_a_margin(tmp_path, monkeypatch):
     _, doctor = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1)
-    assert doctor >= 60 + 60
+    _, long_probe = _timeouts_seen(monkeypatch, tmp_path, "PROBE_WAIT_S = 300\n", 1)
+    assert doctor == 60 + 120 + 60      # rc2's smoke on a non-agy CLI is 120 s, agy's 60
+    assert long_probe == 60 + 300 + 60
 
 
 def test_a_sessions_tool_wait_outlasts_the_longest_review():

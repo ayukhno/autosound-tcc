@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Mapping
 
 #: Parsed once per version of the file: `(path, mtime, size)` and what it said. A picker asks this
 #: per model on every repaint, so a stat stands in for a read; an edit made while TCC runs -- the
@@ -35,13 +36,15 @@ from pathlib import Path
 _CACHE: tuple[tuple, dict[str, str]] | None = None
 
 
-def machine_config_path() -> Path:
-    """The machine file, resolved the way `autosound_ai.machine_config_path` resolves it."""
-    if os.name == "nt" or os.environ.get("APPDATA"):
-        appdata = os.environ.get("APPDATA")
+def machine_config_path(environ: Mapping[str, str] | None = None) -> Path:
+    """The machine file, resolved the way `autosound_ai.machine_config_path` resolves it — in
+    `environ`, the child's environment, when given."""
+    environ = os.environ if environ is None else environ
+    if os.name == "nt" or environ.get("APPDATA"):
+        appdata = environ.get("APPDATA")
         if appdata:
             return Path(appdata) / "autosound" / "critic-env"
-    xdg = os.environ.get("XDG_CONFIG_HOME")
+    xdg = environ.get("XDG_CONFIG_HOME")
     base = Path(xdg) if xdg else Path(os.path.expanduser("~")) / ".config"
     return base / "autosound" / "critic-env"
 
@@ -93,6 +96,31 @@ def values() -> dict[str, str]:
     if _CACHE is None or _CACHE[0] != version:
         _CACHE = (version, _parse(path))
     return dict(_CACHE[1])
+
+
+def method_files(environ: Mapping[str, str], cwd: Path) -> list[Path]:
+    """The critic-env files `autosound_ai.load_env_file` reads for a run started in `cwd` with
+    `environ`, in its order: the machine file, the mirror's, the project's, the project's
+    `scripts/` (#232). The project is `cwd` unless `AUTOSOUND_PROJECT_DIR` names another folder;
+    the mirror is `PROJECT_MIRROR`, else `<project>/rew_analitic`, chosen before any file loads."""
+    cwd = Path(cwd)
+    stated = environ.get("AUTOSOUND_PROJECT_DIR")
+    here = cwd
+    if stated and os.path.normcase(os.path.realpath(stated)) != os.path.normcase(os.path.realpath(cwd)):
+        here = cwd / stated
+    mirror = cwd / (environ.get("PROJECT_MIRROR") or os.path.join(stated or str(cwd), "rew_analitic"))
+    return [machine_config_path(environ), mirror / ".critic-env", here / ".critic-env",
+            here / "scripts" / ".critic-env"]
+
+
+def as_the_method_reads(environ: Mapping[str, str], cwd: Path) -> dict[str, str]:
+    """`environ` with every critic-env line the method writes over it, the last file winning — what
+    `os.environ` holds inside `autosound_ai.py` once `load_env_file` has run (#232)."""
+    seen = dict(environ)
+    for path in method_files(environ, cwd):
+        if path.is_file():
+            seen.update(_parse(path))
+    return seen
 
 
 def forget() -> None:
