@@ -14,7 +14,7 @@ takes the review seats that `hub:seam` gives to Opus and Fable; Gemini (`agy`) r
 checked against the code before it is acted on. On the first `Risk: high` group the Opus seats run beside Codex,
 to compare.
 
-## Order
+## Order (the Arbiter's «го», 2026-10-21)
 
 | step | group | issues | note |
 |---|---|---|---|
