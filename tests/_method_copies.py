@@ -36,6 +36,15 @@ from autosound_tcc.core import method_binding, vendor_loader
 SKILL = vendor_loader._SUBMODULE_DIR
 
 
+#: What the skill's v3.2.0 added for tcc#220, taken out of a copy's text: `capture-check` writing
+#: `capture.level_base` (the skill's #176). A copy as v3.1.x shipped it, for the level line: W-10's
+#: reading (tcc#198). A change for `copy_of_the_method`.
+NO_LEVEL_BASE = {
+    "rew_tool/state/process.py":
+        lambda text: text.replace("def _level_base_of(", "def _no_level_base_("),
+}
+
+
 def checked_out() -> bool:
     """Whether the vendored method is there to copy."""
     return vendor_loader._looks_like_the_skill(SKILL)

@@ -408,6 +408,10 @@ def capture_rounds(project_dir: Optional[Path] = None) -> list[dict]:
             round_["issued"] = event.get("at")
             round_["step"] = event.get("step")
             round_["expected"] = [str(t) for t in (event.get("expected") or [])]
+            # What the list holds as optional, and the method's level control (tcc#220): no gap
+            # when not taken, the control none when taken and unusable (`no_gap`).
+            round_["optional"] = [str(t) for t in (event.get("optional") or [])]
+            round_["control"] = event.get("control")
         elif kind == "capture_taken":
             round_["taken"][str(event.get("title"))] = {
                 "at": event.get("at"),
@@ -468,6 +472,42 @@ def capture_rounds(project_dir: Optional[Path] = None) -> list[dict]:
 
     return [rounds[rid] for rid in reversed(order)]
 
+
+
+def control_exempt(round_: Optional[dict], title: str) -> bool:
+    """Whether `title` is the round's level control AND the method put it on the list: the
+    method's `_control_exempt` (the skill's #176, tcc#220). Only then is it no gap whatever stands
+    for it — taken and unusable, it «counts nowhere»; one the plan asked for stays required. A round
+    with no `control_added` — written by the first build, or folded from the journal, whose issuing
+    line names `control` and `optional` only — reads it from `optional`, as the method does."""
+    round_ = round_ or {}
+    if not title or title != round_.get("control"):
+        return False
+    return bool(round_.get("control_added", title in (round_.get("optional") or [])))
+
+
+def optional_not_taken(round_: Optional[dict], title: str,
+                       project_dir: Optional[Path] = None) -> bool:
+    """Whether `title` is on the round's `optional` list, not taken (`taken_as`, by the bound
+    copy's rule) and found by no check REW holding it: the method's `_optional_not_taken` (#191,
+    skill #80) — «optional: not taken; not a gap» (tcc#220)."""
+    round_ = round_ or {}
+    if title not in (round_.get("optional") or []):
+        return False
+    key = title_key(project_dir)
+    if taken_as(round_, title, key) is not None:
+        return False
+    checks = round_.get("checks") if isinstance(round_.get("checks"), dict) else {}
+    wanted = key(title)
+    seen = checks.get(title) if title in checks else next(
+        (check for name, check in checks.items() if key(str(name)) == wanted), None)
+    return not (isinstance(seen, dict) and seen.get("exists") is True)
+
+
+def no_gap(round_: Optional[dict], title: str, project_dir: Optional[Path] = None) -> bool:
+    """Whether `title`, on the round's list, is no gap whatever stands for it: the method's
+    `_no_gap` — its own level control, or an optional capture it did not take (tcc#220)."""
+    return control_exempt(round_, title) or optional_not_taken(round_, title, project_dir)
 
 def _as_it_closed(round_: dict, event: dict) -> None:
     """A past round as its closing event says it ended — the one line that is the whole truth for a

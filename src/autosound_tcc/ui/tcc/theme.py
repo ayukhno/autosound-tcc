@@ -1528,6 +1528,9 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
        this is work that will not happen -- and until the skill recorded the decision the two were
        the same colour, so the next session proposed it again. */
     QLabel[class~="tl-skip"] {{ background: {t.off}; }}
+    /* Optional and not taken, or the method's own level control taken and unusable (tcc#220): no
+       gap, so neither yellow nor red -- a ring in the skip's grey, the row saying «optional». */
+    QLabel[class~="tl-optional"] {{ background: transparent; border: 1px solid {t.off}; }}
     /* The flaw map's verdicts (SCR-015). Two answers matter more than six colours: `done` = this
        one you may correct, `bad` = the boost this map exists to forbid, `off` = a fact of the car,
        `info` = the fix exists but is not EQ. */
@@ -1552,6 +1555,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QLabel[class~="open-q"] {{ color: {t.accent}; }}
     QLabel[class~="mn-bad"] {{ color: {t.warn}; }}
     QLabel[class~="mn-wait"] {{ color: {t.muted}; }}
+    QLabel[class~="mn-optional"] {{ color: {t.muted}; }}
     QLabel[class~="mn-done"] {{ color: {t.text}; }}
     /* In REW, not taken in yet: the name in the legend dot's own blue, so what REW holds reads
     off the list after «Refresh» (finding 155). */

@@ -1387,11 +1387,12 @@ def test_a_title_checked_but_never_taken_is_waiting_in_history_not_unusable(proj
     assert _live_extra(project, wr) == mv.STATUS_FOUND
 
 
-def test_an_optional_capture_nobody_took_is_waiting_in_history_not_done(project):
+def test_an_optional_capture_nobody_took_is_optional_in_history_not_done(project):
     """The G6+G7 tests review's G1: an optional capture (skill #80) sits in `expected`, and the
     close lists it untaken under `outstanding_optional`, apart from `outstanding`. Read as neither,
     `_as_it_closed` marked it taken by the read against REW: the past card said «done» for a
-    capture the method says nobody took, and the live card «done» for a curve REW shows under it."""
+    capture the method says nobody took, and the live card «done» for a curve REW shows under it.
+    Not «waiting» either (tcc#220): the method says «optional: not taken; not a gap»."""
     process = _round(project, version=1, expected=["w-L_1 (sw)"], optional=["w-R_1 (sw)"],
                      taken=["w-L_1 (sw)"])
     wl, wr = _as_typed("w-L_1 (sw)"), _as_typed("w-R_1 (sw)")
@@ -1401,7 +1402,7 @@ def test_an_optional_capture_nobody_took_is_waiting_in_history_not_done(project)
 
     past = _past(project, "cap_001")
 
-    assert (_item(past, wr).status, _item(past, wl).status) == (mv.STATUS_WAIT, mv.STATUS_DONE)
+    assert (_item(past, wr).status, _item(past, wl).status) == (mv.STATUS_OPTIONAL, mv.STATUS_DONE)
     assert wr not in process_view.standing(_folded(project, "cap_001"))
     assert _live_extra(project, wr) == mv.STATUS_FOUND
 
@@ -2003,3 +2004,83 @@ def test_a_superseded_typo_names_no_series(project):
     assert mv.highest_series(project) == 1
     assert mv.capture_version({"active_phase": "0", "plan": []}) == 1
     assert [mv._round_is_at(round_, n, naming, glossary) for n in (1, 9)] == [True, False]
+
+
+# ---- tcc#220, B: the round's optional captures and the method's level control ------------------
+# `capture-start` puts an optional level control on most rounds (the skill's #176: `ALL_N (rta)`
+# for a glossary whose combo plays). The method: an optional capture not taken is «optional: not
+# taken; not a gap», out of `N/M придатні`; its own control, taken and unusable, «counts nowhere».
+
+CONTROL_GLOSSARY = {
+    "schema_version": 1,
+    "channels": [{"code": code, "active": True} for code in ("sw", "w-L", "w-R")],
+    "pairs": {"Ws": ["w-L", "w-R"]},
+    "combos": {"ALL": ["sw", "w-L", "w-R"]},
+}
+
+
+@pytest.fixture
+def with_control(tmp_path, monkeypatch):
+    """A project whose glossary names a combo that plays: the method adds a level control."""
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    (tmp_path / "glossary.json").write_text(json.dumps(CONTROL_GLOSSARY), encoding="utf-8")
+    return tmp_path
+
+
+def _no_gap_as_the_method_says(round_: dict) -> None:
+    module = vendor_loader.load_process()
+    for title in round_.get("expected") or []:
+        assert process_view.no_gap(round_, title) == module._no_gap(round_, title), title
+
+
+def test_an_optional_capture_not_taken_is_optional_on_the_card_not_waiting(with_control):
+    process = _round(with_control, version=1, expected=["w-L_1 (sw)"], optional=["w-R_1 (sw)"],
+                     taken=["w-L_1 (sw)"])
+    round_ = process.load()["capture"]
+    control = round_["control"]
+    assert round_["control_added"] and control in round_["optional"], round_
+    _no_gap_as_the_method_says(round_)
+
+    session = mv.build_session("0", 1, [], with_control, taken=[])
+
+    assert _item(session, "w-R_1 (sw)").status == mv.STATUS_OPTIONAL
+    assert _item(session, control).status == mv.STATUS_OPTIONAL
+    assert _item(session, "w-L_1 (sw)").status == mv.STATUS_DONE
+
+    shown = mv.build_session("0", 1, [control], with_control, taken=[])
+    assert _item(shown, control).status == mv.STATUS_FOUND, "in REW: there to be taken in"
+
+
+def test_the_methods_control_taken_and_unusable_counts_nowhere(with_control):
+    """Not red as a gap on the card, and not one of the strip's unusable captures; a listed
+    capture the check found unusable still is both."""
+    process = _round(with_control, version=1, expected=["w-L_1 (sw)"], taken=["w-L_1 (sw)"])
+    control = process.load()["capture"]["control"]
+    process.record_capture(control)
+    process.check_captures(verifier=_Silent())
+    round_ = process_view.capture_round(with_control)
+    _no_gap_as_the_method_says(round_)
+    wl = _as_typed("w-L_1 (sw)")
+
+    session = mv.build_session("0", 1, [], with_control, taken=[])
+
+    assert _item(session, control).status == mv.STATUS_OPTIONAL
+    assert _item(session, "w-L_1 (sw)").status == mv.STATUS_STALE
+    assert mv.unusable_lines(round_, [wl, control], with_control) == [
+        f"{wl} — in-band mean -94.0 dB — silence, not a sweep"]
+
+
+def test_an_optional_capture_taken_and_unusable_still_gates(with_control):
+    """The method: an optional capture TAKEN is judged as any — the person chose to take it."""
+    process = _round(with_control, version=1, expected=["w-L_1 (sw)"], optional=["w-R_1 (sw)"],
+                     taken=["w-L_1 (sw)", "w-R_1 (sw)"])
+    process.check_captures(verifier=_Silent())
+    round_ = process_view.capture_round(with_control)
+    _no_gap_as_the_method_says(round_)
+    wr = _as_typed("w-R_1 (sw)")
+
+    session = mv.build_session("0", 1, [], with_control, taken=[])
+
+    assert _item(session, "w-R_1 (sw)").status == mv.STATUS_STALE
+    assert mv.unusable_lines(round_, [wr], with_control) == [
+        f"{wr} — in-band mean -94.0 dB — silence, not a sweep"]

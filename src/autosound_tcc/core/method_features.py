@@ -27,6 +27,10 @@ from autosound_tcc.core import app_log, config, method_binding
 TITLE_KEY = ("state/process.py", "def title_key(")       # #153: a round's titles by the series key
 OWN_RANGE = ("verify.py", "band_source")                  # #154: a sweep judged over its own range
 AGENTS_SETUP = ("project.py", "agents-setup")             # #149: the AGENTS.md Codex reads
+#: From v3.2.0 (the skill's #176, tcc#220): `capture-check` writes `capture.level_base`, the round on
+#: the project's level base. Not one of v3.1.4's: a copy without it is not «older», it keeps W-10's
+#: reading of REW's listing (`level_calibration`), and nothing is said of it.
+LEVEL_BASE = ("state/process.py", "def _level_base_of(")
 
 #: path -> (st_mtime_ns, st_size, text): one read per file until it changes.
 _TEXT: dict[str, tuple[int, int, str]] = {}

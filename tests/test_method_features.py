@@ -12,7 +12,7 @@ import pytest
 
 from autosound_tcc.core import app_log, method_features
 from autosound_tcc.state import process_view
-from tests._method_copies import copy_of_the_method, linked_and_approved
+from tests._method_copies import NO_LEVEL_BASE, copy_of_the_method, linked_and_approved
 
 #: What v3.1.4 added, taken out of a copy's text: a copy as v3.1.3 shipped it, for these readers.
 OLDER = {
@@ -107,3 +107,21 @@ def test_a_series_key_tcc_cannot_load_falls_back_to_raw_titles_and_says_so_once(
     assert first("w-R_01 (sw)") != first("w-R_1 (sw)"), "raw titles"
     said = [r.getMessage() for r in caplog.records if "series key" in r.getMessage()]
     assert len(said) == 1 and "SyntaxError" in said[0], said
+
+
+
+def test_the_level_base_is_a_capability_of_the_bound_copy_and_no_older_warning(
+        tmp_path, tmp_path_factory, own_copy_is_the_submodule, told):
+    """tcc#220: a copy that writes `capture.level_base` is read by it; one that does not keeps
+    W-10's reading. Lacking it is not «older than v3.1.4»: v3.1.4 to v3.1.x lack it too, and no
+    warning goes out for it."""
+    assert method_features.has(method_features.LEVEL_BASE, tmp_path)
+
+    without = copy_of_the_method(tmp_path_factory.mktemp("no-level-base"), changes=NO_LEVEL_BASE)
+    project = tmp_path / "car"
+    project.mkdir()
+    linked_and_approved(project, without)
+
+    assert not method_features.has(method_features.LEVEL_BASE, project)
+    assert not method_features.older_than_v314(project)
+    assert method_features.say_if_older(project) is False and told == []

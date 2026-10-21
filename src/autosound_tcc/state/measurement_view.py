@@ -39,6 +39,10 @@ STATUS_SKIPPED = "skip"
 #: blue for 'it is there, but has to be loaded explicitly'". Yellow stays for what REW does not
 #: hold either.
 STATUS_FOUND = "found"
+#: On the round's list as optional and not taken — or the method's own level control, taken and
+#: unusable (tcc#220): the method's «optional: not taken; not a gap», a capture that «counts
+#: nowhere». Neither waited for nor unusable (`process_view.no_gap`).
+STATUS_OPTIONAL = "optional"
 
 
 def glossary_path(project_dir: Optional[Path] = None) -> Path:
@@ -547,6 +551,8 @@ def unusable_lines(round_: dict, asked, project_dir: Optional[Path] = None,
     key = process_view.title_key(project_dir)
     lines = []
     for title in asked or ():
+        if process_view.control_exempt(round_, str(title)):
+            continue  # the method's own control counts nowhere (tcc#220): no unusable capture
         row = process_view.taken_as(round_, str(title), key)
         verdict = (taken.get(row) or {}).get("verified") if row is not None else None
         if verdict and verdict_state(verdict, str(title), as_is) == VERDICT_BAD:
@@ -697,6 +703,15 @@ def build_session(
     waiting = ({spelling for t in process_view.outstanding(round_, project)
                 for spelling in (_canonical(naming, glossary, t), str(t))}
                if round_open else set())
+    # What the method says is no gap (tcc#220): an optional capture not taken, and its own level
+    # control, which counts nowhere when taken and unusable — both spelled as `waiting` is.
+    optional_left = ({spelling for t in round_.get("optional") or []
+                      if process_view.optional_not_taken(round_, str(t), project)
+                      for spelling in (_canonical(naming, glossary, t), str(t))}
+                     if round_open else set())
+    control = str(round_.get("control") or "")
+    counts_nowhere = ({_canonical(naming, glossary, control), control}
+                      if round_open and process_view.control_exempt(round_, control) else set())
     # A skip and a verdict are keyed the same way "taken" is — BY KEY, not by the string. The
     # round records the title as somebody typed it in REW (`sw_01 (sw)`); the checklist derives
     # `sw_1 (sw)`. The taken half was corrected on the live project; these two are the same fault
@@ -787,8 +802,14 @@ def build_session(
 
     def listed_status(name: str) -> str:
         """A row the open round asks for waits while the method waits for it (`waiting`) —
-        whatever another spelling of it took, skipped or was judged — as on the past card."""
-        return not_taken(_key(name)) if name in waiting else status_for(name)
+        whatever another spelling of it took, skipped or was judged — as on the past card. One the
+        method says is no gap is optional instead (tcc#220): not taken and not in REW, or the
+        method's control taken and unusable; in REW, it is there to be taken in, blue."""
+        if name in waiting:
+            status = not_taken(_key(name))
+            return STATUS_OPTIONAL if status == STATUS_WAIT and name in optional_left else status
+        status = status_for(name)
+        return STATUS_OPTIONAL if status == STATUS_STALE and name in counts_nowhere else status
 
     def issues_for(name: str) -> Optional[str]:
         """Why a capture is unusable, in the checker's own words — the panel shows it on hover.
@@ -987,11 +1008,17 @@ def _session_for_round(round_: dict, state: Optional[dict], as_is: Optional[dict
         if skip_of(name) is not None:
             return STATUS_SKIPPED
         if name in waiting:
-            return STATUS_WAIT  # asked for, never taken, and the round closed anyway
+            # Asked for, never taken, and the round closed anyway — unless it was optional: no gap
+            # to the method (tcc#220).
+            return (STATUS_OPTIONAL if process_view.optional_not_taken(round_, name, project_dir)
+                    else STATUS_WAIT)
         state = state_for(name)
         if state == VERDICT_ABSENT:
             return STATUS_WAIT
-        return STATUS_STALE if state == VERDICT_BAD else STATUS_DONE
+        if state == VERDICT_BAD:
+            # The method's own control counts nowhere (tcc#220).
+            return STATUS_OPTIONAL if process_view.control_exempt(round_, name) else STATUS_STALE
+        return STATUS_DONE
 
     def issues_for(name: str) -> Optional[str]:
         # The skip reason comes first, and the order is the point: a skipped capture is ALSO

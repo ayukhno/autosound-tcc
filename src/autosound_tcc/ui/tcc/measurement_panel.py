@@ -36,8 +36,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autosound_tcc.core import (app_log, capture_import, level_calibration, process_writer,
-                                protective, title_fixes)
+from autosound_tcc.core import (app_log, capture_import, level_base, level_calibration,
+                                process_writer, protective, title_fixes)
 from autosound_tcc.core import rew_bridge
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.state import process_view
@@ -594,6 +594,8 @@ class _MeasRow(QWidget):
             extra = i18n.t("measAmbiguous").format(titles=", ".join(self._ambiguous))
         if self._as_is:  # the import window's own words for the answer
             extra = " · ".join(part for part in (extra, i18n.t("capCheckAsIsDone")) if part)
+        if self._status == "optional":  # no gap to the method (tcc#220): said, before its words
+            extra = " · ".join(part for part in (i18n.t("measOptional"), extra) if part)
         # Class first, text second: the class carries the font (`.mn` is the monospace face), and
         # eliding against the font the label had a moment ago cuts at the wrong character.
         self._name_label.setProperty("class", f"mn mn-{self._status}")
@@ -953,22 +955,41 @@ class MeasurementPanel(QWidget):
         self._dup_label.setHidden(not self._dup_titles)
         self._level_label.setText(" ".join(self._level_sentence(n) for n in self._level_notes))
         self._level_label.setHidden(not self._level_notes)
+        # In the stopper's orange while it warns; the base named, and the control's quiet verdicts,
+        # are facts — said in the card's quiet grey (tcc#220).
+        calm = all(note.key in level_base.QUIET for note in self._level_notes)
+        wanted = "phead-sub" if calm else "caution-line"
+        if self._level_label.property("class") != wanted:
+            self._level_label.setProperty("class", wanted)
+            self._level_label.style().unpolish(self._level_label)
+            self._level_label.style().polish(self._level_label)
 
     @staticmethod
     def _level_sentence(note) -> str:
         return i18n.t(note.key).format(**note.values)
 
-    def _say_level_calibration(self) -> None:
-        """What REW's last answer and TCC's own record say about the round's level calibration
-        (tcc#198): on this card while it holds, and on the strip once. Nothing is corrected — the
-        common base is the method's (hub #285).
+    def _say_level_calibration(self, *, state_changed: bool = False) -> None:
+        """The round's level line: on this card while it holds, and its news on the strip once.
+
+        A bound copy that writes `capture.level_base` (tcc#220): the method's field, read from the
+        state — on a read of REW and on every change of the state alike (`state_changed`, from
+        `set_sessions`), REW's listing never read. An older copy: what REW's last answer and TCC's
+        own record say about the round's level calibration (tcc#198), on a read of REW only.
+        Nothing is corrected — the common base is the method's (hub #285).
 
         Never in the way of what called it — the import's window, the checklist's redraw: anything
         it raises is logged and said once, and the card carries no line (the Rounds review)."""
         project = self._project()
         try:
-            self._level_notes = level_calibration.notes(project, self._rew_answer)
-            level_calibration.tell(project, self._level_notes, self._level_sentence)
+            if level_base.applies(project):
+                self._level_notes = level_base.notes(process_view.capture_round(project))
+                level_calibration.tell(project, level_base.news(self._level_notes),
+                                       self._level_sentence)
+            elif state_changed:
+                return  # W-10's line follows REW's listing, as it did (tcc#198)
+            else:
+                self._level_notes = level_calibration.notes(project, self._rew_answer)
+                level_calibration.tell(project, self._level_notes, self._level_sentence)
         except Exception as exc:  # noqa: BLE001 — a comparison is never worth the import
             app_log.logger().exception("REW's level calibration could not be compared")
             self._level_notes = []
@@ -1011,6 +1032,7 @@ class MeasurementPanel(QWidget):
         self.set_no_project(i18n.t("measSeriesUnknown"))
         self._capture_version = None
         self._read_btn.setVisible(True)
+        self._say_level_calibration(state_changed=True)  # the round's level base (tcc#220)
 
     def _show_content(self) -> None:
         for widget in (
@@ -1038,7 +1060,11 @@ class MeasurementPanel(QWidget):
         `version` is the series `_N` the checklist was derived at — the window asks
         `measurement_view.capture_version` for it — and the panel needs it to OPEN a capture round
         when the tuner takes measurements without a session having opened one (2026-09-06).
+
+        The window hands the panel its task on every change of the state and after every capture
+        check (`_refresh_capture_task`), so the level line is redrawn here too (tcc#220).
         """
+        self._say_level_calibration(state_changed=True)
         if version is not None:
             self._capture_version = version
         if not sessions:
@@ -1312,7 +1338,8 @@ class MeasurementPanel(QWidget):
         What the import window opens ticked on. Extras are left out on purpose: they are graphs
         REW holds that this checklist never asked for. «bad» is in: a capture taken and found
         unusable is still waited for — the method's `unusable_captures` counts it so — and a
-        re-take under its name should open ticked (tcc#21).
+        re-take under its name should open ticked (tcc#21). An «optional» row is out (tcc#220):
+        no gap to the method, so nothing the round waits for — in REW, it is «found» and in.
         """
         return [with_method(row.item_name, row.method_suffix) for row in self._rows
                 if row.status in ("wait", "found", "bad") and not row.additional]

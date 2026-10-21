@@ -2692,6 +2692,41 @@ def test_the_rows_the_panel_waits_on_are_the_methods_outstanding_after_a_superse
     assert len(waiting) == len(process.capture_outstanding()) == 2, waiting
 
 
+def test_the_card_does_not_wait_on_an_optional_capture_nobody_took(tmp_path, monkeypatch):
+    """tcc#220, B: the method's level control (`ALL_1 (rta)`, added by `capture-start`) and an
+    optional capture are «optional: not taken; not a gap». The card says «optional» on their rows,
+    and the import window does not wait on them: they are not what the round still waits for."""
+    import json
+
+    from autosound_tcc.core import vendor_loader
+    from autosound_tcc.state import measurement_view
+
+    from tests import _rounds
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _app()
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    (tmp_path / "glossary.json").write_text(json.dumps({
+        "schema_version": 1,
+        "channels": [{"code": code, "active": True} for code in ("sw", "w-L", "w-R")],
+        "pairs": {"Ws": ["w-L", "w-R"]}, "combos": {"ALL": ["sw", "w-L", "w-R"]}}),
+        encoding="utf-8")
+    process = _rounds.write_round(tmp_path, version=1, expected=["w-L_1 (sw)", "sw_1 (sw)"],
+                                  optional=["w-R_1 (sw)"], taken=["sw_1 (sw)"])
+    control = process.load()["capture"]["control"]
+    assert control, "the method added a level control"
+    panel = MeasurementPanel()
+
+    panel.set_sessions(measurement_view.build_sessions("0", 1, [], tmp_path, taken=[]), version=1)
+
+    assert panel.outstanding_titles() == ["w-L_1 (sw)"]
+    rows = {with_method(row.item_name, row.method_suffix): row for row in panel._rows}
+    for title in (control, "w-R_1 (sw)"):
+        assert rows[title].status == "optional", title
+        assert i18n.t("measOptional") in rows[title]._name_label.text(), title
+
+
 def test_an_import_after_the_round_closed_takes_its_captures_into_a_new_round(tmp_path, monkeypatch):
     """Finding 147, on the Arbiter's VM: `sw_7 (sw)` taken «as it is», `sw_7 (rta)` left on
     «Re-take», Applied — and the card showed both blue. The last round was closed and its id was
@@ -2906,10 +2941,24 @@ def test_the_refresh_button_is_off_on_a_past_series_and_stays_off_after_a_read()
     assert panel._refresh_btn.isEnabled() and panel._read_btn.isEnabled()
 
 
-def test_the_card_and_the_strip_name_a_change_of_rews_level_calibration(tmp_path, monkeypatch):
+def _before_the_level_base(project, tmp_path_factory) -> None:
+    """`project` bound to a copy of the method that writes no `capture.level_base` (v3.1.x): the
+    level line is W-10's reading of REW's listing (tcc#198), as before tcc#220."""
+    from tests._method_copies import NO_LEVEL_BASE, copy_of_the_method, entry, linked
+
+    if entry(project).is_symlink():
+        entry(project).unlink()
+    linked(project, copy_of_the_method(tmp_path_factory.mktemp("no-level-base"),
+                                       changes=NO_LEVEL_BASE))
+
+
+def test_the_card_and_the_strip_name_a_change_of_rews_level_calibration(tmp_path, monkeypatch,
+                                                                        tmp_path_factory):
     """tcc#198 (hub #268, PAS-015): REW reset its SPL calibration between two rounds — every
     `splOffsetdB` 103.35 → 120.0 — and nothing said so. A read of REW's list now names it: on the
-    card's orange line while it holds, on the strip once. Gone when the offsets agree again."""
+    card's orange line while it holds, on the strip once. Gone when the offsets agree again.
+
+    On a copy that writes no level base (tcc#220): W-10's reading, unchanged."""
     from autosound_tcc.core import app_log, config, vendor_loader
 
     from tests import _rounds
@@ -2924,6 +2973,7 @@ def test_the_card_and_the_strip_name_a_change_of_rews_level_calibration(tmp_path
                         pad=False)
     _rounds.write_round(tmp_path, version=4, expected=["w-L_4 (sw)"], taken=["w-L_4 (sw)"],
                         pad=False)
+    _before_the_level_base(tmp_path, tmp_path_factory)
 
     def listing(after):
         return {"1": {"title": "w-L_3 (sw)", "uuid": "u3", "splOffsetdB": 103.35},
@@ -2941,9 +2991,9 @@ def test_the_card_and_the_strip_name_a_change_of_rews_level_calibration(tmp_path
     assert panel._level_label.isHidden() and not panel._level_label.text()
 
 
-def _three_rounds_apart(tmp_path, monkeypatch):
-    """Rounds 3 and 4 written by the method; REW's listing at 103.35 and 120.0. What reached the
-    strip as a warning is returned."""
+def _three_rounds_apart(tmp_path, monkeypatch, tmp_path_factory):
+    """Rounds 3 and 4 written by the method, on a copy that writes no level base (W-10's reading);
+    REW's listing at 103.35 and 120.0. What reached the strip as a warning is returned."""
     from autosound_tcc.core import app_log, config, vendor_loader
 
     from tests import _rounds
@@ -2958,6 +3008,7 @@ def _three_rounds_apart(tmp_path, monkeypatch):
                         pad=False)
     _rounds.write_round(tmp_path, version=4, expected=["w-L_4 (sw)"], taken=["w-L_4 (sw)"],
                         pad=False)
+    _before_the_level_base(tmp_path, tmp_path_factory)
     listing = {"1": {"title": "w-L_3 (sw)", "uuid": "u3", "splOffsetdB": 103.35},
                "2": {"title": "w-L_4 (sw)", "uuid": "u4", "splOffsetdB": 120.0}}
     return told, listing
@@ -2991,10 +3042,10 @@ def _after_import(panel, listing):
     pytest.param(_after_import, id="after-the-import"),
 ])
 def test_every_read_of_rews_list_names_a_change_of_its_level_calibration(tmp_path, monkeypatch,
-                                                                         read):
+                                                                         tmp_path_factory, read):
     """The Rounds group's review, I3: the import's read and the pass written after it say it too,
     as Refresh does (below)."""
-    told, listing = _three_rounds_apart(tmp_path, monkeypatch)
+    told, listing = _three_rounds_apart(tmp_path, monkeypatch, tmp_path_factory)
     _offer_seen(monkeypatch)
     panel = MeasurementPanel()
     said = i18n.t("levelCalJump").format(delta="+16.65", before="103.35", after="120.0")
@@ -3005,12 +3056,13 @@ def test_every_read_of_rews_list_names_a_change_of_its_level_calibration(tmp_pat
     assert told == [said]
 
 
-def test_a_level_calibration_that_cannot_be_read_never_blocks_the_import(tmp_path, monkeypatch):
+def test_a_level_calibration_that_cannot_be_read_never_blocks_the_import(tmp_path, monkeypatch,
+                                                                         tmp_path_factory):
     """The review: the comparison ran unguarded before the import window opened, and anything it
     raised took the offer with it. Logged, said once, and the window still opens."""
     from autosound_tcc.core import level_calibration
 
-    told, listing = _three_rounds_apart(tmp_path, monkeypatch)
+    told, listing = _three_rounds_apart(tmp_path, monkeypatch, tmp_path_factory)
     opened = _offer_seen(monkeypatch)
 
     def _broken(*_a, **_k):
@@ -3024,6 +3076,168 @@ def test_a_level_calibration_that_cannot_be_read_never_blocks_the_import(tmp_pat
 
     assert len(opened) == 2, "the import window opened both times"
     assert told == [i18n.t("levelCalFailed").format(error="RuntimeError: the record went away")]
+    assert panel._level_label.isHidden()
+
+
+# ---- tcc#220: the round on the method's level base --------------------------------------------
+# A copy that writes `capture.level_base` (the skill's #176): the card's line and the strip are the
+# method's field, read from the state on every refresh the window hands the panel (`set_sessions`,
+# after a capture check and on a change of `process-state.json`) — no REW listing, no record of TCC's.
+
+
+class _Calibrated:
+    """The method's `verify.verify` for good sweeps REW holds at the SPL calibration `offset` —
+    what `Process.check_captures` records, `capture.level_base` with it."""
+
+    def __init__(self, offset) -> None:
+        self.offset = offset
+
+    def verify(self, wanted):
+        return [{"name": title, "valid": True, "exists": True, "applicable": True,
+                 "reachable": True, "issues": [],
+                 "stats": {"uuid": f"u-{title}", "spl_offset_db": self.offset}}
+                for title in wanted]
+
+
+def _checked(project, version: int, offset):
+    """A round at `version` taking `w-L_<version> (sw)`, checked by the method at `offset`."""
+    from tests import _rounds
+
+    title = f"w-L_{version} (sw)"
+    process = _rounds.write_round(project, version=version, expected=[title], taken=[title],
+                                  pad=False)
+    process.check_captures(verifier=_Calibrated(offset))
+    return process
+
+
+def _on_the_level_base(tmp_path, monkeypatch) -> list:
+    """`tmp_path` as the window's project; what reached the strip as a warning is returned."""
+    from autosound_tcc.core import app_log, config, vendor_loader
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    _app()
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    told = []
+    monkeypatch.setattr(app_log, "warn", told.append)
+    return told
+
+
+_MOVED = dict(delta="+16.65", previous="cap_001", before="103.35", after="120.0", base="cap_001",
+              shift="-16.65")
+
+
+def test_the_card_reads_the_rounds_level_base_from_the_methods_state(
+        tmp_path, monkeypatch, own_copy_is_the_submodule):
+    """tcc#220: REW's calibration moved 103.35 → 120.0 between two rounds, and the method's check
+    recorded it in `capture.level_base`. The card says it in the method's numbers, the strip once;
+    REW's listing is not read — one that agrees changes nothing — and TCC keeps no record."""
+    from autosound_tcc.core import level_calibration
+
+    told = _on_the_level_base(tmp_path, monkeypatch)
+    _checked(tmp_path, 3, 103.35)
+    _checked(tmp_path, 4, 120.0)
+    panel = MeasurementPanel()
+    moved = i18n.t("levelBaseMoved").format(**_MOVED)
+
+    panel.set_sessions(MEAS_SESSIONS)  # what the window hands the panel on every refresh
+    panel.set_sessions(MEAS_SESSIONS)
+
+    assert panel._level_label.text() == moved and not panel._level_label.isHidden()
+    assert panel._level_label.property("class") == "caution-line"
+    assert told == [moved], "the strip is told once"
+
+    panel._on_refreshed({"1": {"title": "w-L_3 (sw)", "uuid": "u3", "splOffsetdB": 103.35},
+                         "2": {"title": "w-L_4 (sw)", "uuid": "u4", "splOffsetdB": 103.35}})
+
+    assert panel._level_label.text() == moved
+    assert told == [moved]
+    assert not level_calibration.store_path(tmp_path).exists(), "no record of TCC's own"
+
+
+def test_the_line_follows_the_state_and_a_round_not_checked_yet_says_nothing(
+        tmp_path, monkeypatch, own_copy_is_the_submodule):
+    """The line is redrawn when the state changes, not only on a read of REW: the next round
+    opened and not checked yet says nothing — and REW's listing is no fallback — then its check
+    puts it on the base, which is no news for the strip."""
+    from tests import _rounds
+
+    told = _on_the_level_base(tmp_path, monkeypatch)
+    _checked(tmp_path, 3, 103.35)
+    _checked(tmp_path, 4, 120.0)
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    assert not panel._level_label.isHidden()
+
+    process = _rounds.write_round(tmp_path, version=5, expected=["w-L_5 (sw)"],
+                                  taken=["w-L_5 (sw)"], pad=False)
+    panel.set_sessions(MEAS_SESSIONS)
+    assert panel._level_label.isHidden() and not panel._level_label.text()
+
+    panel._on_refreshed({"1": {"title": "w-L_4 (sw)", "uuid": "u4", "splOffsetdB": 120.0},
+                         "2": {"title": "w-L_5 (sw)", "uuid": "u5", "splOffsetdB": 103.35}})
+    assert panel._level_label.isHidden(), "REW's listing is no fallback"
+
+    process.check_captures(verifier=_Calibrated(120.0))
+    panel.set_sessions(MEAS_SESSIONS)
+
+    on_base = i18n.t("levelBaseOn").format(base="cap_001", offset="103.35")
+    assert panel._level_label.text() == on_base and not panel._level_label.isHidden()
+    assert panel._level_label.property("class") != "caution-line", "a fact, not a warning"
+    assert told == [i18n.t("levelBaseMoved").format(**_MOVED)]
+
+
+def test_the_first_round_is_named_the_level_base_on_the_card_and_not_on_the_strip(
+        tmp_path, monkeypatch, own_copy_is_the_submodule):
+    told = _on_the_level_base(tmp_path, monkeypatch)
+    _checked(tmp_path, 3, 103.35)
+    panel = MeasurementPanel()
+
+    panel.set_sessions(MEAS_SESSIONS)
+
+    assert panel._level_label.text() == i18n.t("levelBaseIsBase").format(offset="103.35")
+    assert panel._level_label.property("class") != "caution-line"
+    assert told == []
+
+
+def test_a_copy_without_the_level_base_keeps_w10s_reading(tmp_path, monkeypatch,
+                                                          tmp_path_factory):
+    """An older bound copy: the state is not read for the line, even one holding a level base,
+    and REW's listing says the jump as W-10 did (tcc#198)."""
+    told = _on_the_level_base(tmp_path, monkeypatch)
+    _checked(tmp_path, 3, 103.35)
+    _checked(tmp_path, 4, 120.0)
+    _before_the_level_base(tmp_path, tmp_path_factory)
+    panel = MeasurementPanel()
+
+    panel.set_sessions(MEAS_SESSIONS)
+    assert panel._level_label.isHidden() and told == []
+
+    panel._on_refreshed({"1": {"title": "w-L_3 (sw)", "uuid": "u3", "splOffsetdB": 103.35},
+                         "2": {"title": "w-L_4 (sw)", "uuid": "u4", "splOffsetdB": 120.0}})
+
+    said = i18n.t("levelCalJump").format(delta="+16.65", before="103.35", after="120.0")
+    assert panel._level_label.text() == said and told == [said]
+
+
+def test_a_level_base_that_cannot_be_read_never_stops_the_refresh(
+        tmp_path, monkeypatch, own_copy_is_the_submodule):
+    from autosound_tcc.core import level_base
+
+    told = _on_the_level_base(tmp_path, monkeypatch)
+    _checked(tmp_path, 3, 103.35)
+
+    def _broken(*_a, **_k):
+        raise RuntimeError("the state went away")
+
+    monkeypatch.setattr(level_base, "notes", _broken)
+    panel = MeasurementPanel()
+
+    panel.set_sessions(MEAS_SESSIONS)
+    panel.set_sessions(MEAS_SESSIONS)
+
+    assert panel._has_real_sessions, "the grid was drawn"
+    assert told == [i18n.t("levelCalFailed").format(error="RuntimeError: the state went away")]
     assert panel._level_label.isHidden()
 
 
@@ -3093,6 +3307,9 @@ def test_a_cancelled_switch_leaves_import_and_refresh_writing_into_the_window_s_
     monkeypatch.setattr(mp.capture_import, "retake_titles", spy("retake_titles", [], at=1))
     monkeypatch.setattr(mp.capture_import, "channel_of", spy("channel_of", "w-L", at=2))
     monkeypatch.setattr(mp.title_fixes, "supersede_each", spy("supersede_each", ([], [], [])))
+    # Asked of the window's project (tcc#220); a copy without the level base, so W-10's reading of
+    # REW's listing is asked of it too.
+    monkeypatch.setattr(mp.level_base, "applies", spy("level_base.applies", False))
     monkeypatch.setattr(mp.level_calibration, "notes", spy("level_calibration.notes", []))
     monkeypatch.setattr(mp.level_calibration, "tell", spy("level_calibration.tell"))
     captured = _fake_ledger(monkeypatch)
@@ -3127,7 +3344,8 @@ def test_a_cancelled_switch_leaves_import_and_refresh_writing_into_the_window_s_
     seen["_LedgerWriteWorker"] = [captured.get("project_dir")]
 
     for name in ("CaptureImportDialog", "record_imported", "record_retakes", "supersede_each",
-                 "_LedgerWriteWorker", "level_calibration.notes", "level_calibration.tell",
+                 "_LedgerWriteWorker", "level_base.applies", "level_calibration.notes",
+                 "level_calibration.tell",
                  "capture_round", "imported_titles", "retake_titles", "title_key"):
         assert seen.get(name), f"{name} was not reached"
         assert all(Path(got) == a for got in seen[name]), \
