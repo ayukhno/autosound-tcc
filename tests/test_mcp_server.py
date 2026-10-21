@@ -3926,7 +3926,8 @@ def test_a_session_close_says_whether_its_failure_was_busy(tmp_path, monkeypatch
 
 def test_a_busy_profile_write_is_still_a_failed_save_with_its_sentence(tmp_path, monkeypatch):
     """`profile_writer`'s busy answer is a `ProfileWriterError` too (#218), so the profile tools
-    that catch that keep answering a failed save — with the method's own busy line."""
+    that catch that keep answering a failed save — with the method's own busy line, and `busy`
+    beside it, as `_record` says it (the group review of #218/#219, J)."""
     import subprocess
 
     from autosound_tcc.core import method_cli, profile_writer
@@ -3941,4 +3942,86 @@ def test_a_busy_profile_write_is_still_a_failed_save_with_its_sentence(tmp_path,
     said = json.loads(_text(asyncio.run(mcp.call_tool(
         "save_profile_field", {"path": "dsp_processing_rate_hz", "value": 96000}))))
 
-    assert said == {"saved": False, "error": _BUSY_LINE}
+    assert said == {"saved": False, "error": _BUSY_LINE, "busy": True}
+
+
+# ---- the profile and car tools, off the server's loop (the group review of #218/#219) ----------
+
+_PROFILE_CALLS = [
+    ("check_existing_profile", "start", {"vendor": "Musway", "model": "M6V4"}),
+    ("save_profile_field", "set_field", {"path": "dsp_processing_rate_hz", "value": 96000}),
+    ("reset_profile_field", "reset_field", {"path": "dsp_processing_rate_hz"}),
+    ("finalize_profile", "finalize", {}),
+]
+
+
+@pytest.mark.parametrize("tool, writer, args", _PROFILE_CALLS,
+                         ids=[call[0] for call in _PROFILE_CALLS])
+def test_a_profile_write_held_at_the_lock_does_not_stop_another_tool(tmp_path, monkeypatch,
+                                                                     tool, writer, args):
+    """Since #218 a profile write takes TCC's lock and waits up to a minute for it off the main
+    thread. The profile tools called the writer on the server's own loop, so a save behind a
+    120 s capture check stalled every MCP call. Through `_in_thread`, as every other writer: while
+    one waits at the lock, another tool answers."""
+    from autosound_tcc.core import profile_writer
+
+    entered, release, waited = threading.Event(), threading.Event(), []
+
+    def held(*_args, **_kwargs):
+        entered.set()
+        waited.append(release.wait(2))
+        return {"draft": {}} if writer == "start" else {"saved": True}
+
+    monkeypatch.setattr(profile_writer, writer, held)
+    monkeypatch.setattr(profile_writer, "has_draft", lambda project_dir: True)
+    monkeypatch.setattr(profile_writer, "bundled_match", lambda *a, **k: {})
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    async def scenario():
+        first = asyncio.ensure_future(mcp.call_tool(tool, args))
+        for _ in range(200):
+            if entered.is_set():
+                break
+            await asyncio.sleep(0.01)
+        other = await asyncio.wait_for(mcp.call_tool("get_capability_checklist", {}), 2)
+        release.set()
+        await first
+        return other
+
+    assert _text(asyncio.run(scenario()))
+    assert waited == [True], "the other tool answered only once the held write gave up"
+
+
+def _busy_or_not(module, busy: bool):
+    """`module`'s busy failure, or its plain one."""
+    return (module.Busy if busy else
+            getattr(module, "ProfileWriterError", None) or module.CarLibraryError)("it failed")
+
+
+@pytest.mark.parametrize("busy", [True, False], ids=["busy", "not busy"])
+@pytest.mark.parametrize("tool, writer, args, failed", [
+    *[(tool, writer, args, {"start": {}, "set_field": {"saved": False},
+                            "reset_field": {"reset": False}, "finalize": {"saved": False}}[writer])
+      for tool, writer, args in _PROFILE_CALLS],
+    ("save_car", "record", {"make": "VW", "model": "Passat", "generation": "B8",
+                            "body": "wagon"}, {}),
+], ids=[call[0] for call in _PROFILE_CALLS] + ["save_car"])
+def test_a_profile_or_car_write_says_whether_its_failure_was_busy(tmp_path, monkeypatch, tool,
+                                                                  writer, args, failed, busy):
+    """`_record` tells a busy write (it works in a moment) from a refusal by a field of its own;
+    the profile and car tools said only the sentence (the group review of #218/#219, J)."""
+    from autosound_tcc.core import car_library, profile_writer
+
+    module = car_library if tool == "save_car" else profile_writer
+    error = _busy_or_not(module, busy)
+
+    def refuse(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(module, writer, refuse)
+    monkeypatch.setattr(profile_writer, "has_draft", lambda project_dir: True)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    said = json.loads(_text(asyncio.run(mcp.call_tool(tool, args))))
+
+    assert said == {**failed, "error": "it failed", "busy": busy}

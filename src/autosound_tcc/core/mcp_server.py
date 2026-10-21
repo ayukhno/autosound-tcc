@@ -857,6 +857,23 @@ def build_server(
         the whole remaining list into one message, even when several are still open."""
         return json.dumps(profile_writer.capability_checklist(), ensure_ascii=False)
 
+    def _busy(exc: BaseException) -> bool:
+        """Whether a write failed busy — another write held the project, nothing was written, the
+        same call works in a moment (#218) — as `_record` says it, for the profile and car tools."""
+        return isinstance(exc, process_writer.Busy)
+
+    def _profile_write(write, failed_key: str, *args) -> str:
+        """One profile-draft write, `write(project_dir, *args)`, as its tool answers it: the
+        writer's answer; or `{failed_key: False, "error": …, "busy": …}`. Called through
+        `_in_thread`: since #218 the writer waits up to a minute for the project's lock, and on the
+        server's loop that wait stalled every other MCP call (the group review of #218/#219, A)."""
+        if not profile_writer.has_draft(project_dir):
+            return json.dumps({"error": "call check_existing_profile first"})
+        try:
+            return json.dumps(write(project_dir, *args), ensure_ascii=False)
+        except profile_writer.ProfileWriterError as exc:
+            return json.dumps({failed_key: False, "error": str(exc), "busy": _busy(exc)})
+
     @tool()
     async def check_existing_profile(vendor: str, model: str) -> str:
         """Call this FIRST, before asking the human anything. Starts (or resumes) this project's
@@ -875,15 +892,21 @@ def build_server(
         library could not be read, and why is in it. Tell the Arbiter so; do not interview as for
         a DSP the library lacks.
         """
-        try:
-            current = profile_writer.start(project_dir, vendor, model)
-        except (profile_writer.ProfileWriterError, vendor_loader.VendorNotInitializedError) as exc:
-            return json.dumps({"error": str(exc)})
-        return json.dumps({
-            "project_profile": current.get("draft", {}),
-            "open_questions": current.get("open_questions", []),
-            **profile_writer.bundled_match(vendor, model, project_dir=project_dir),
-        }, ensure_ascii=False)
+        def _start() -> str:
+            try:
+                current = profile_writer.start(project_dir, vendor, model)
+            except (profile_writer.ProfileWriterError,
+                    vendor_loader.VendorNotInitializedError) as exc:
+                return json.dumps({"error": str(exc), "busy": _busy(exc)})
+            return json.dumps({
+                "project_profile": current.get("draft", {}),
+                "open_questions": current.get("open_questions", []),
+                **profile_writer.bundled_match(vendor, model, project_dir=project_dir),
+            }, ensure_ascii=False)
+
+        # Off the loop, as every writer: since #218 the draft's write waits up to a minute for the
+        # project's lock, and on the loop that stalled every other MCP call (the group review, A).
+        return await _in_thread(_start)
 
     @tool()
     async def check_existing_car(
@@ -949,7 +972,7 @@ def build_server(
                 )
             except car_library.CarLibraryError as exc:
                 # The sentence itself (#169, N9): the part to ask for, or why the copy did not run.
-                return json.dumps({"error": str(exc)}, ensure_ascii=False)
+                return json.dumps({"error": str(exc), "busy": _busy(exc)}, ensure_ascii=False)
             except Exception as exc:  # noqa: BLE001 — any other failure is an answer too
                 return json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False)
             return json.dumps({"recorded": True, "car": car}, ensure_ascii=False)
@@ -991,25 +1014,14 @@ def build_server(
     async def save_profile_field(path: str, value: Any) -> str:
         """One confirmed field into the draft. What the MODEL is told is `save_field_doc` above —
         this line is for whoever reads the file."""
-        if not profile_writer.has_draft(project_dir):
-            return json.dumps({"error": "call check_existing_profile first"})
-        try:
-            return json.dumps(profile_writer.set_field(project_dir, path, value),
-                               ensure_ascii=False)
-        except profile_writer.ProfileWriterError as exc:
-            return json.dumps({"saved": False, "error": str(exc)})
+        return await _in_thread(_profile_write, profile_writer.set_field, "saved", path, value)
 
     @tool()
     async def reset_profile_field(path: str) -> str:
         """Delete a field from the draft (by dotted path) so it can be re-saved from scratch --
         recovery if a previous save_profile_field produced the wrong shape (e.g. a list written as
         a string), not part of the normal interview flow."""
-        if not profile_writer.has_draft(project_dir):
-            return json.dumps({"error": "call check_existing_profile first"})
-        try:
-            return json.dumps(profile_writer.reset_field(project_dir, path), ensure_ascii=False)
-        except profile_writer.ProfileWriterError as exc:
-            return json.dumps({"reset": False, "error": str(exc)})
+        return await _in_thread(_profile_write, profile_writer.reset_field, "reset", path)
 
     @tool()
     async def finalize_profile() -> str:
@@ -1019,13 +1031,10 @@ def build_server(
         The skill's own writer decides: if it refuses, the reason comes back here and the draft is
         untouched, so fix that one field and call again rather than starting over.
         """
-        if not profile_writer.has_draft(project_dir):
-            return json.dumps({"error": "call check_existing_profile first"})
-        try:
-            return json.dumps({"saved_to": str(profile_writer.finalize(project_dir))},
-                               ensure_ascii=False)
-        except profile_writer.ProfileWriterError as exc:
-            return json.dumps({"saved": False, "error": str(exc)})
+        def _finalize(project_dir: Path) -> dict:
+            return {"saved_to": str(profile_writer.finalize(project_dir))}
+
+        return await _in_thread(_profile_write, _finalize, "saved")
 
     # ---- process record (the skill's writer; not gated -- recording is not a change) ----
     #
