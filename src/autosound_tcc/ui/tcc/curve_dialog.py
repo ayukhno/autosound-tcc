@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import (
     app_log, capture_import, config, curve_groups, delay_bank, own_store, project_settings,
-    protective,
+    protective, rew_bridge,
 )
 from autosound_tcc.state import process_view
 from autosound_tcc.core.allpass import AllpassError
@@ -122,7 +122,12 @@ def _title_facts(title: str) -> tuple[Optional[str], Optional[str]]:
 
 def _absent(exc: BaseException) -> bool:
     """Whether a read was refused because REW holds no measurement under the title: the method's
-    own `KeyError("No measurement titled …")`, read by its wording as `_held_twice` reads its."""
+    state "not_found" on the exception's class (#219) — any other state is not this, REW down and
+    REW answering an error among them — or, for a method before v3.1.2 that sets none, its own
+    `KeyError("No measurement titled …")`, read by its wording as `_held_twice` reads its."""
+    state = rew_bridge.method_state(exc)
+    if state is not None:
+        return state == "not_found"
     return isinstance(exc, KeyError) and str(exc.args[0] if exc.args else "").startswith(
         "No measurement titled")
 
@@ -346,10 +351,10 @@ class _CurveWorker(QThread):
 
     done = Signal(list)  # list[Trace]
     failed = Signal(str)
-    #: Titles REW could not answer for, as a fact rather than a sentence (finding 38). Separate
-    #: from `failed`, which only fires when NOTHING came back: a read where four of six worked
-    #: used to drop its four refusals on the floor, and those four are exactly what the picker
-    #: has to grey out.
+    #: Titles REW holds no measurement under, as a fact rather than a sentence (finding 38).
+    #: Separate from `failed`, which only fires when NOTHING came back: a read where four of six
+    #: worked used to drop its four refusals on the floor, and those four are exactly what the
+    #: picker has to grey out. Only those (#219): a read REW did not answer greys nothing.
     unreadable = Signal(list)
     #: Titles the method refused because REW holds each on more than one measurement (tcc#94).
     #: Apart from `unreadable`: those are not missing, and the advice for them is the reverse.
@@ -448,14 +453,15 @@ class _CurveWorker(QThread):
                     continue
                 # Its message too, and its traceback to the log (M76): a TypeError out of the method
                 # (F16-3) came to the window as a bare class name. A title REW does not hold is a
-                # fact the picker greys out, not a failure: one line, no traceback.
+                # fact the picker greys out, not a failure: one line, no traceback. Only that one
+                # (#219): REW down, or answering an error, greyed rows that read once REW is back.
                 if _absent(exc):
                     app_log.logger().info("curve window: REW holds no %s", title)
+                    missing.append(title)
                 else:
                     app_log.logger().warning("curve window: %s could not be read", title,
                                              exc_info=True)
                 problems.append(f"{title}: {type(exc).__name__}: {exc}")
-                missing.append(title)
         if twice:
             self.heldTwice.emit(twice)
         if missing:
@@ -2218,7 +2224,7 @@ class CurveDialog(QDialog):
         self._render_chips()
 
     def _on_unreadable(self, titles) -> None:
-        """REW refused these names. Remember them and grey their rows.
+        """REW holds no measurement under these names. Remember them and grey their rows.
 
         The Arbiter picked four titles of `cap_003` while REW was holding the `_49` series and got
         four refusals off rows that looked exactly like the ones that work (finding 38). The

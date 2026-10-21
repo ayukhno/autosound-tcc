@@ -4896,6 +4896,48 @@ def test_a_zero_hertz_bin_never_reaches_the_sum_overlay_as_minus_infinity():
     assert len(xs) == n - 1, "the 0 Hz point is dropped, and only it"
 
 
+def _down():
+    from autosound_tcc.core import vendor_loader
+
+    return vendor_loader.load_rew_api().RewUnavailable("connection refused", "http://localhost:4735")
+
+
+def _answered():
+    import urllib.error
+
+    return urllib.error.HTTPError("http://localhost:4735/measurements", 500,
+                                  "Internal Server Error", {}, None)
+
+
+@pytest.mark.parametrize("raised", [_down, _answered, lambda: KeyError("nope")],
+                         ids=["REW down", "REW answered an error", "a failure with no state"])
+def test_a_read_rew_could_not_answer_greys_no_row_as_not_in_rew(raised):
+    """#219: every failed read greyed its rows «REW is not holding this measurement — open the file
+    it was captured in», REW down and REW answering an error too — rows that read again the moment
+    REW is back, locked until the window was closed. Only REW holding no measurement by the title
+    greys it; the failure is said, red, and the rows stay pickable."""
+    _app()
+    dialog = _dialog(["tw-L_1 (sw)", "tw-R_1 (sw)"], bridge=_FakeBridge(raises=raised()),
+                     kind="fr", available=["tw-L_1 (sw)", "tw-R_1 (sw)"])
+    _fetch(dialog)
+
+    assert "curve-status-bad" in str(dialog._status.property("class") or "")
+    assert dialog._unreadable == set()
+    assert all(action.isEnabled() for action in dialog._choose_actions.values())
+
+
+def test_an_older_methods_missing_title_still_greys_by_its_words():
+    """A method before v3.1.2 raises a bare `KeyError` with no state: its «No measurement titled»
+    is read as before, the one fallback."""
+    _app()
+    dialog = _dialog(["tw-L_1 (sw)"], bridge=_FakeBridge(
+        raises=KeyError("No measurement titled 'tw-L_1 (sw)' (REW holds 3)")),
+        kind="fr", available=["tw-L_1 (sw)"])
+    _fetch(dialog)
+
+    assert dialog._unreadable == {"tw-L_1 (sw)"}
+
+
 def test_a_title_rew_could_not_answer_for_is_marked_and_the_error_goes_red():
     """The Arbiter, 2026-09-20, looking at four failed reads in grey 11px type above an empty
     plot: «хіба там щось видно - хоч би червоним коли помилки». And, on the rows themselves:
@@ -4910,8 +4952,11 @@ def test_a_title_rew_could_not_answer_for_is_marked_and_the_error_goes_red():
     guess about what REW holds. Asking REW would be a second network call on the GUI thread, and
     the answer is already in hand.
     """
+    from autosound_tcc.core import vendor_loader
+
     _app()
-    dialog = _dialog(["tw-L_1 (sw)", "tw-R_1 (sw)"], bridge=_FakeBridge(raises=KeyError("nope")),
+    absent = vendor_loader.load_rew_api().MeasurementNotFound("No measurement titled 'tw-L_1 (sw)'")
+    dialog = _dialog(["tw-L_1 (sw)", "tw-R_1 (sw)"], bridge=_FakeBridge(raises=absent),
                      kind="fr", available=["tw-L_1 (sw)", "tw-R_1 (sw)", "w-L_01 (sw)"])
     _fetch(dialog)
 
