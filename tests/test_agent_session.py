@@ -303,3 +303,28 @@ def test_the_interviews_lookup_says_a_library_it_could_not_read(tmp_path, monkey
     assert "could not be read" in why, why
     assert {"older skill": "v3.0.19", "no skill": "was not found", "missing": str(folder),
             "empty": str(folder), "lookup failed": "timed out"}[library] in why, why
+
+
+def test_a_busy_profile_write_is_still_said_as_not_saved(tmp_path, monkeypatch):
+    """`profile_writer`'s busy answer (#218) is a `ProfileWriterError` too, so the interview's
+    `save_profile_field`, which catches that, keeps saying «not saved» — with the method's own
+    busy line, for the model to retry rather than give up."""
+    import asyncio
+    import subprocess
+
+    from autosound_tcc.core import method_cli
+
+    if not agent_session.profile_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    line = ("busy: /car/.autosound/write.lock is held by another writer -- nothing was written, "
+            "safe to retry")
+    monkeypatch.setattr(agent_session.profile_writer, "start", lambda *a, **kw: None)
+    monkeypatch.setattr(agent_session.profile_writer, "draft", lambda *a, **kw: {"draft": {}})
+    monkeypatch.setattr(method_cli.child, "run_bounded", lambda argv, **_kw: (
+        subprocess.CompletedProcess(argv, method_cli.EXIT_BUSY, "", line)))
+    tools, _draft = agent_session.build_tools(tmp_path, "Musway", "M6V4 (no 512K)")
+    [save] = [t for t in tools if t.name == "save_profile_field"]
+
+    answer = asyncio.run(save.handler({"path": "dsp_processing_rate_hz", "value": 96000}))
+
+    assert answer["content"][0]["text"] == f"not saved: {line}"

@@ -56,6 +56,13 @@ class CarLibraryError(RuntimeError):
     will not run (`method_cli.Refused`'s sentence), a script that copy does not have, a timeout."""
 
 
+class Busy(CarLibraryError, method_cli.Busy):
+    """Another write to the project held the method's lock past the wait (its exit 75, #218):
+    nothing was written, and the same call will work in a moment. A `CarLibraryError`, so every
+    caller that says a car not recorded says this one, and a `method_cli.Busy`, so a caller that
+    tells busy apart can."""
+
+
 def _module():
     try:
         return vendor_loader.load(_MODULE)
@@ -165,6 +172,8 @@ def record(
     try:
         code, out, err = method_cli.spawn(project_dir, _WRITER, args, timeout_s=_TIMEOUT_S,
                                           lock=False)
+    except method_cli.Busy as exc:
+        raise Busy(str(exc)) from exc
     except method_cli.ProcessWriterError as exc:
         raise CarLibraryError(str(exc)) from exc
     if code != 0:

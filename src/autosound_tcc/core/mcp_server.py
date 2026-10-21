@@ -1042,11 +1042,18 @@ def build_server(
         if callable(method):
             method()
 
+    def _not_recorded(exc: process_writer.ProcessWriterError) -> str:
+        """A write that did not land: its sentence, and whether it was busy — another write held
+        the project, nothing was written, the same call works in a moment (#218) — as a field of
+        its own, so the model need not read that off the sentence."""
+        return json.dumps({"recorded": False, "error": str(exc),
+                           "busy": isinstance(exc, process_writer.Busy)}, ensure_ascii=False)
+
     def _record(call, *args, **kwargs) -> str:
         try:
             line = call(project_dir, *args, **kwargs)
         except process_writer.ProcessWriterError as exc:
-            return json.dumps({"recorded": False, "error": str(exc)}, ensure_ascii=False)
+            return _not_recorded(exc)
         bridge.refresh_from_disk()
         # Written after a close, it is no longer a closed session (TEST-FINDINGS 26).
         _tell("session_changed")
@@ -1167,7 +1174,7 @@ def build_server(
             try:
                 recorded, report = process_writer.close_session(project_dir)
             except process_writer.ProcessWriterError as exc:
-                return json.dumps({"recorded": False, "error": str(exc)}, ensure_ascii=False)
+                return _not_recorded(exc)
             if recorded:
                 bridge.refresh_from_disk()
                 # Everything is written and the end is on record: a quit need not ask to spend a

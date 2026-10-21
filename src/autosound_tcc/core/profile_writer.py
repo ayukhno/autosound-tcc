@@ -41,6 +41,13 @@ class ProfileWriterError(RuntimeError):
     """
 
 
+class Busy(ProfileWriterError, method_cli.Busy):
+    """Another write to the project held the method's lock past the wait (its exit 75, #218):
+    nothing was written, and the same call will work in a moment. A `ProfileWriterError`, so every
+    caller that says a failed save says this one in the method's own words (`agent_session`,
+    `mcp_server`), and a `method_cli.Busy`, so a caller that tells busy apart can."""
+
+
 def script_path() -> Path:
     """TCC's own writer, for a caller with no project (`is_available`). A call on a project runs
     the copy that project is bound to (`_run`)."""
@@ -56,10 +63,12 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
     bounded, in that copy's environment, and with no lock — the draft is the writer's own file,
     not the journal the project's lock guards. Every failure is a `ProfileWriterError` with its own
     sentence: a copy TCC will not run (`method_cli.Refused`, verbatim), a script not there, a
-    timeout, and a non-zero exit's own words."""
+    timeout, and a non-zero exit's own words — and the method's busy, its exit 75, a `Busy`."""
     try:
         code, out, err = method_cli.spawn(project_dir, _SCRIPT, args, timeout_s=timeout_s,
                                           lock=False)
+    except method_cli.Busy as exc:
+        raise Busy(str(exc)) from exc
     except method_cli.ProcessWriterError as exc:
         raise ProfileWriterError(str(exc)) from exc
     if code != 0:

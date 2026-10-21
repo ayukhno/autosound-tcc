@@ -104,7 +104,8 @@ class SaveConfigDialog(QDialog):
             self.said = result.said
             self.accept()
             return
-        self._say(i18n.t("cfgTooOld") if result.too_old else result.said or i18n.t("cfgNoAnswer"))
+        self._say(i18n.t("cfgTooOld") if result.too_old else i18n.t("cfgBusy") if result.busy
+                  else result.said or i18n.t("cfgNoAnswer"))
 
     def _say(self, text: str) -> None:
         self._result.setText(text)

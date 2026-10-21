@@ -35,6 +35,10 @@ class RepoResult:
     ok: bool
     said: str
     too_old: bool = False
+    #: The method's busy, its exit 75 (#218): nothing written, the same command works in a moment.
+    #: `project_repo.py` writes no file the method's lock guards and does not answer 75 today; the
+    #: mapping is there so a copy that does is not read as a failure.
+    busy: bool = False
 
 
 def script_path() -> Path:
@@ -72,7 +76,7 @@ def init(project: Path) -> RepoResult:
     except method_cli.ScriptMissing:
         return RepoResult(False, "", too_old=True)
     except method_cli.ProcessWriterError as exc:
-        return RepoResult(False, str(exc))
+        return RepoResult(False, str(exc), busy=isinstance(exc, method_cli.Busy))
     app_log.logger().info("project repo: init -> exit %s", code)
     return RepoResult(code == 0, out or err)
 
@@ -89,7 +93,7 @@ def backup_status(project: Path) -> dict | RepoResult:
     except method_cli.ScriptMissing:
         return RepoResult(False, "", too_old=True)
     except method_cli.ProcessWriterError as exc:
-        return RepoResult(False, str(exc))
+        return RepoResult(False, str(exc), busy=isinstance(exc, method_cli.Busy))
     if code != 0:
         return RepoResult(False, err or out or f"{_SCRIPT} status exited {code}")
     try:

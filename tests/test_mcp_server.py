@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
-from autosound_tcc.core import mcp_server, own_store
+from autosound_tcc.core import mcp_server, own_store, process_writer
 from autosound_tcc.core.mcp_server import (
     ConfirmRequest,
     HeadlessBridge,
@@ -3777,3 +3777,66 @@ def test_an_mcp_json_that_cannot_be_opened_is_refused_on_every_platform(tmp_path
     assert not list(tmp_path.glob(".mcp*.tmp")) and not list(tmp_path.rglob("*.corrupt-*")), (
         "not set aside, and no temp file left beside it")
     assert len(app_log_told) == 1 and str(path) in app_log_told[0], "said once, not per read"
+
+
+# ---- busy, kept as busy (#218) ------------------------------------------------------------------
+
+_BUSY_LINE = ("busy: /car/.autosound/write.lock is held by another writer -- nothing was written, "
+              "safe to retry")
+
+
+@pytest.mark.parametrize("failure, busy", [
+    (process_writer.Busy(_BUSY_LINE), True),
+    (process_writer.ProcessWriterError("error: step 2.9 is not in the plan"), False),
+])
+def test_a_recorded_move_says_whether_its_failure_was_busy(tmp_path, monkeypatch, failure, busy):
+    """A write another writer held past the wait wrote nothing and will work in a moment; a
+    refusal will not. The model is told which by a field of its own, `busy`, beside the `error`
+    text it already reads — never by parsing the sentence (#218)."""
+    def refuse(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(process_writer, "enter_phase", refuse)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    said = json.loads(_text(asyncio.run(mcp.call_tool("enter_phase", {"phase": "1"}))))
+
+    assert said == {"recorded": False, "error": str(failure), "busy": busy}
+
+
+@pytest.mark.parametrize("failure, busy", [
+    (process_writer.Busy(_BUSY_LINE), True),
+    (process_writer.ProcessWriterError("process.py timed out after 25s"), False),
+])
+def test_a_session_close_says_whether_its_failure_was_busy(tmp_path, monkeypatch, failure, busy):
+    """`session_close` answers outside `_record` — its exit 1 is the list of open work — and its
+    failures carry the same `busy` field (#218)."""
+    def refuse(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(process_writer, "close_session", refuse)
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    said = json.loads(_text(asyncio.run(mcp.call_tool("session_close", {}))))
+
+    assert said == {"recorded": False, "error": str(failure), "busy": busy}
+
+
+def test_a_busy_profile_write_is_still_a_failed_save_with_its_sentence(tmp_path, monkeypatch):
+    """`profile_writer`'s busy answer is a `ProfileWriterError` too (#218), so the profile tools
+    that catch that keep answering a failed save — with the method's own busy line."""
+    import subprocess
+
+    from autosound_tcc.core import method_cli, profile_writer
+
+    if not profile_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    (tmp_path / "dsp_profile.draft.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(method_cli.child, "run_bounded", lambda argv, **_kw: (
+        subprocess.CompletedProcess(argv, method_cli.EXIT_BUSY, "", _BUSY_LINE)))
+    mcp, _, _ = _server(tmp_path, HeadlessBridge(tmp_path))
+
+    said = json.loads(_text(asyncio.run(mcp.call_tool(
+        "save_profile_field", {"path": "dsp_processing_rate_hz", "value": 96000}))))
+
+    assert said == {"saved": False, "error": _BUSY_LINE}

@@ -33,6 +33,9 @@ class SaveResult:
     said: str
     #: The vendored method does not know `config` yet.
     too_old: bool = False
+    #: Another write held the project past the wait (the method's exit 75, #218): nothing was
+    #: recorded, and the same save will work in a moment.
+    busy: bool = False
 
 
 def script_path() -> Path:
@@ -62,6 +65,8 @@ def save(state_root: Path, version: str, name: str, *, slot: Optional[str] = Non
     project = Path(project_dir) if project_dir is not None else config.project_dir()
     try:
         code, out, err = method_cli.spawn(project, _SCRIPT, args, timeout_s=_TIMEOUT_S, lock=False)
+    except method_cli.Busy as exc:
+        return SaveResult(False, str(exc), busy=True)
     except method_cli.ProcessWriterError as exc:
         # A copy TCC will not run (the binding's sentence, verbatim), a script not there, a timeout.
         return SaveResult(False, str(exc))

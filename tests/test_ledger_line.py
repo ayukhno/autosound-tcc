@@ -277,6 +277,28 @@ def test_the_form_offers_the_device_preset_it_was_last_saved_to(tmp_path, monkey
     assert dialog.said == "SQ-2 = v_006 in slot SQ"
 
 
+def test_a_save_another_write_held_is_said_as_busy_and_the_form_stays(tmp_path, monkeypatch):
+    """The method's exit 75 (#218): another write held the project past the wait, nothing was
+    recorded, and the same save will work in a moment. The save says so — `busy`, not the method's
+    technical line about its lock file — and the form stays open for the retry."""
+    from autosound_tcc.ui.tcc import i18n
+    from autosound_tcc.ui.tcc.save_config_dialog import SaveConfigDialog
+
+    QApplication.instance() or QApplication([])
+    _arbiter_example(tmp_path)
+    line = ("busy: /car/.autosound/write.lock is held by another writer -- nothing was written, "
+            "safe to retry")
+    _the_method_answers(monkeypatch, method_cli.EXIT_BUSY, "", line)
+    assert config_writer.save(tmp_path, "v_006", "SQ-2") == config_writer.SaveResult(
+        False, line, busy=True)
+
+    dialog = SaveConfigDialog(tmp_path, "v_006", "SQ", ["FULL", "SQ"])
+    dialog._on_save()
+
+    assert dialog._result.text() == i18n.t("cfgBusy")
+    assert dialog.said is None, "the dialog closed as saved"
+
+
 def test_the_slot_list_holds_a_long_slot_name_whole(tmp_path, monkeypatch):
     """tcc#145's review, I1: every combo's list has `.mini-select`'s room for the check mark, and
     a plain box's list is only as wide as the box. A slot name longer than anything else in the

@@ -1172,3 +1172,54 @@ def test_capture_close_has_room_for_three_holds_of_the_method_s_lock(tmp_path, m
     call(car)
 
     assert bounds == [120.0 + 5.0 * holds]
+
+
+# ---- busy, kept as a type through every writer that runs through `spawn` (#218) -------------------
+# The launchers above that start their child through `spawn` — `contract_check` and `intake_form`
+# keep a `Popen` of their own and write nothing — each answered the method's exit 75 in their own
+# kind of failure, which said the busy line and lost what it meant: nothing written, the same call
+# works in a moment. Each keeps it now, in its own kind of answer.
+
+
+def _profile_writer_busy(project: Path) -> tuple[bool, str]:
+    with pytest.raises(profile_writer.ProfileWriterError) as caught:
+        profile_writer.draft(project)
+    assert isinstance(caught.value, profile_writer.Busy), type(caught.value)
+    return isinstance(caught.value, method_cli.Busy), str(caught.value)
+
+
+def _config_writer_busy(project: Path) -> tuple[bool, str]:
+    result = config_writer.save(config.state_root(), "v_001", "SQ-1")
+    assert not result.saved and not result.too_old
+    return result.busy, result.said
+
+
+def _project_repo_busy(project: Path) -> tuple[bool, str]:
+    result = project_repo.init(project)
+    assert not result.ok and not result.too_old
+    return result.busy, result.said
+
+
+def _car_library_busy(project: Path) -> tuple[bool, str]:
+    with pytest.raises(car_library.CarLibraryError) as caught:
+        car_library.record(project, "VW", "Passat", "B8", "sedan")
+    assert isinstance(caught.value, car_library.Busy), type(caught.value)
+    return isinstance(caught.value, method_cli.Busy), str(caught.value)
+
+
+@pytest.mark.parametrize("busy_answer", [
+    pytest.param(_profile_writer_busy, id="profile_writer"),
+    pytest.param(_config_writer_busy, id="config_writer"),
+    pytest.param(_project_repo_busy, id="project_repo"),
+    pytest.param(_car_library_busy, id="car_library"),
+])
+def test_every_writer_launcher_keeps_the_methods_busy_as_busy(monkeypatch, busy_answer):
+    """The method's exit 75, through each writer that runs through `spawn`: busy, as a type its
+    caller can tell from a refusal — `profile_writer.Busy` and `car_library.Busy`, each its
+    module's own error and a `method_cli.Busy`; `busy` on `config_writer`'s and `project_repo`'s
+    results — carrying the method's own line."""
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    _a_child_that_exits(monkeypatch, method_cli.EXIT_BUSY, _BUSY_LINE)
+
+    assert busy_answer(config.project_dir()) == (True, _BUSY_LINE)
