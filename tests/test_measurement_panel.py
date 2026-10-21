@@ -3181,7 +3181,10 @@ def test_the_line_follows_the_state_and_a_round_not_checked_yet_says_nothing(
     process.check_captures(verifier=_Calibrated(120.0))
     panel.set_sessions(MEAS_SESSIONS)
 
-    on_base = i18n.t("levelBaseOn").format(base="cap_001", offset="103.35")
+    # On the base by the method's shift, not at it: its own offset and the shift (the task review,
+    # I1) — «on it» was said of a round at 120.0 over a base at 103.35.
+    on_base = i18n.t("levelBaseOnShifted").format(base="cap_001", base_offset="103.35",
+                                                  offset="120.0", shift="-16.65")
     assert panel._level_label.text() == on_base and not panel._level_label.isHidden()
     assert panel._level_label.property("class") != "caution-line", "a fact, not a warning"
     assert told == [i18n.t("levelBaseMoved").format(**_MOVED)]
@@ -3218,6 +3221,38 @@ def test_a_copy_without_the_level_base_keeps_w10s_reading(tmp_path, monkeypatch,
 
     said = i18n.t("levelCalJump").format(delta="+16.65", before="103.35", after="120.0")
     assert panel._level_label.text() == said and told == [said]
+
+
+def test_a_control_that_doubts_its_reading_reaches_the_strip_in_the_caution_colour(
+        tmp_path, monkeypatch, own_copy_is_the_submodule):
+    """tcc#220's task review, I3: the method's `_LEVEL_DOUBTS` alone make its LEVEL line. Such a
+    doubt is news — the strip, once, and the stopper's colour — its `why` verbatim; an
+    unattributed control for a structural reason stays a quiet fact on the card."""
+    told = _on_the_level_base(tmp_path, monkeypatch)
+    _checked(tmp_path, 3, 103.35)
+    process = _checked(tmp_path, 4, 103.35)
+    why = "the bands disagree -- 1.9 dB of spread"
+
+    def control(reason):
+        state = process.load()
+        state["capture"]["level_base"]["control"] = {
+            "title": "ALL_4 (rta)", "taken": True, "verdict": "unattributed", "reason": reason,
+            "common_db": None, "bands": {}, "why": why}
+        process._write(state)
+
+    control("changes_unread")
+    panel = MeasurementPanel()
+    panel.set_sessions(MEAS_SESSIONS)
+    assert panel._level_label.property("class") != "caution-line" and told == []
+
+    control("disagree")
+    panel.set_sessions(MEAS_SESSIONS)
+    panel.set_sessions(MEAS_SESSIONS)
+
+    doubt = i18n.t("levelBaseControlDoubt").format(title="ALL_4 (rta)", why=why)
+    assert doubt in panel._level_label.text()
+    assert panel._level_label.property("class") == "caution-line"
+    assert told == [doubt]
 
 
 def test_a_level_base_that_cannot_be_read_never_stops_the_refresh(

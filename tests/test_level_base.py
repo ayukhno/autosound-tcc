@@ -179,10 +179,10 @@ def test_a_chain_change_the_control_names_is_news_with_the_methods_numbers(proje
 
 
 @pytest.mark.parametrize("control, key, values", [
-    pytest.param({"verdict": "unattributed", "reason": "disagree",
-                  "why": "the bands disagree -- 1.9 dB of spread"},
-                 "CONTROL_UNSURE", {"why": "the bands disagree -- 1.9 dB of spread"},
-                 id="unattributed-its-why-verbatim"),
+    pytest.param({"verdict": "unattributed", "reason": "changes_unread",
+                  "why": "no ledger version on record for cap_001"},
+                 "CONTROL_UNSURE", {"why": "no ledger version on record for cap_001"},
+                 id="unattributed-for-a-structural-reason-its-why-verbatim"),
     pytest.param({"verdict": "same_chain", "common_db": 0.1, "why": "x"}, "CONTROL_SAME", {},
                  id="same-chain"),
     pytest.param({"verdict": "same_chain", "common_db": 0.0, "reference": True, "why": "x"},
@@ -216,3 +216,180 @@ def test_tccs_own_copy_writes_the_level_base(tmp_path, own_copy_is_the_submodule
 
     assert method_features.has(method_features.LEVEL_BASE, tmp_path)
     assert level_base.applies(tmp_path)
+
+
+# ---- tcc#220's task review -------------------------------------------------------------------
+
+
+def test_a_later_round_on_the_base_says_its_own_offset_and_the_shift_applied(project):
+    """I1: 103.35, then 120.0 twice. The third round is `ok` — on the base by the method's shift,
+    not at it: its own `splOffsetdB` is 120.0, `to_base_db` +16.65, nothing moved against the
+    previous round. The card says the round's offset and the shift the method applies (-16.65, its
+    sign); «on it» is for a round whose shift is 0. Not news: the method's LEVEL line is silent."""
+    checked(project, 3, ["w-L_3 (sw)"], 103.35)
+    checked(project, 4, ["w-L_4 (sw)"], 120.0)
+    checked(project, 5, ["w-L_5 (sw)"], 120.0)
+    lb = process_view.capture_round(project)["level_base"]
+    row = lb["titles"]["w-L_5 (sw)"]
+    assert (lb["status"], lb["offset_db"], row["to_base_db"], row["to_previous_db"]) == (
+        "ok", 120.0, 16.65, 0.0)
+    assert vendor_loader.load_process()._level_line(lb) is None, "the method's line is silent"
+
+    notes = said(project)
+
+    assert notes == [note(level_base.ON_BASE_SHIFTED, "cap_003", base="cap_001",
+                          base_offset="103.35", offset="120.0", shift="-16.65")]
+    assert level_base.news(notes) == []
+
+
+def test_a_move_with_a_capture_rew_lists_no_calibration_for_keeps_the_shift(project):
+    """M1: one title calibrated and moved, another bare — `missing`, no round `offset_db`. The
+    method still says the move and the shift it brings the moved title by; the before → after
+    part and the shift part are clauses of their own."""
+    checked(project, 3, ["w-L_3 (sw)"], 103.35)
+    checked(project, 4, ["w-L_4 (sw)", "w-R_4 (sw)"], {"w-L_4 (sw)": 120.0, "w-R_4 (sw)": None})
+    lb = process_view.capture_round(project)["level_base"]
+    assert lb["status"] == "missing" and "offset_db" not in lb, lb
+    line = vendor_loader.load_process()._level_line(lb)
+    assert "moved +16.65 dB against cap_001: " in line and "by -16.65 dB" in line, line
+
+    notes = said(project)
+
+    moved = note(level_base.MOVED_SHIFT, "cap_002", delta="+16.65", previous="cap_001",
+                 base="cap_001", shift="-16.65")
+    assert notes == [note(level_base.MISSING, "cap_002", titles="w-R_4 (sw)", base="cap_001"),
+                     moved]
+    assert moved in level_base.news(notes)
+
+
+def test_a_move_with_the_offsets_and_no_shift_says_the_offsets(own_copy_is_the_submodule):
+    """M1, the other clause alone: a base REW lists no calibration for gives no shift, while this
+    round and the previous one have one each — the method says before → after and no shift. In the
+    shape its schema gives, its own line read beside TCC's."""
+    lb = {"status": "missing", "base_round": "cap_001", "previous_round": "cap_002",
+          "base_offset_db": None, "previous_offset_db": 103.35, "offset_db": 120.0,
+          "titles": {"w-L_5 (sw)": {"offset_db": 120.0, "to_base_db": None,
+                                    "to_previous_db": 16.65}}}
+    line = vendor_loader.load_process()._level_line(lb)
+    assert "moved +16.65 dB against cap_002 (splOffsetdB 103.35 -> 120.00)" in line, line
+    assert "brought to the base" not in line, line
+
+    notes = level_base.notes({"id": "cap_003", "level_base": lb})
+
+    assert notes == [note(level_base.NO_BASE_OFFSET, "cap_003", base="cap_001"),
+                     note(level_base.MOVED_OFFSETS, "cap_003", delta="+16.65",
+                          previous="cap_002", before="103.35", after="120.0")]
+
+
+def test_tccs_doubts_of_the_control_are_the_methods(own_copy_is_the_submodule):
+    """I3: the control's unattributed reasons the method's LEVEL line says — pinned against its
+    `_LEVEL_DOUBTS`, so a reason it adds or drops fails here first."""
+    assert level_base.DOUBTS == frozenset(vendor_loader.load_process()._LEVEL_DOUBTS)
+
+
+@pytest.mark.parametrize("reason", ["disagree", "spread_wide", "no_calibration", "not_read",
+                                    "retaken", "other_lineage"])
+def test_a_control_that_doubts_its_reading_is_news_with_the_methods_why(project, reason):
+    """I3: a doubt (`_LEVEL_DOUBTS`) alone makes the method's LEVEL line — loud. Its `why`
+    verbatim."""
+    checked(project, 3, ["w-L_3 (sw)"], 103.35)
+    process = checked(project, 4, ["w-L_4 (sw)"], 103.35)
+    why = "the bands disagree -- 1.9 dB of spread"
+    _with_control(process, verdict="unattributed", reason=reason, common_db=None, why=why)
+    assert vendor_loader.load_process()._level_line(
+        process_view.capture_round(project)["level_base"]) is not None
+
+    notes = said(project)
+
+    doubt = note(level_base.CONTROL_DOUBT, "cap_002", title="ALL_4 (rta)", why=why)
+    assert notes[1:] == [doubt]
+    assert level_base.news(notes) == [doubt]
+
+
+@pytest.mark.parametrize("level_base_, keys", [
+    pytest.param({"status": "ok", "base_round": "cap_001", "base_offset_db": 103.35,
+                  "titles": ["w-L_4 (sw)"]}, ["ON_BASE"], id="titles-a-list"),
+    pytest.param({"status": "mixed", "base_round": "cap_001", "base_offset_db": 103.35,
+                  "titles": "w-L_4 (sw)"}, ["MIXED"], id="titles-a-string"),
+    pytest.param({"status": "ok", "base_round": "cap_001", "base_offset_db": 103.35, "titles": {},
+                  "control": {"title": "ALL_4 (rta)", "verdict": "chain_change",
+                              "common_db": 1.2, "align_db": -1.2, "bands": ["low"]}},
+                 ["ON_BASE", "CHAIN"], id="control-bands-a-list"),
+])
+def test_a_level_base_of_the_wrong_shape_says_nothing_of_the_bad_part(level_base_, keys):
+    """M3: a malformed `level_base` raised in `notes()`, and the strip blamed REW for a shape of
+    the state. The bad part says nothing; the rest is said."""
+    notes = level_base.notes({"id": "cap_002", "level_base": level_base_})
+
+    assert [n.key for n in notes] == [getattr(level_base, k) for k in keys]
+
+
+def _told(project, monkeypatch):
+    from autosound_tcc.core import app_log, level_calibration
+
+    told: list[str] = []
+    monkeypatch.setattr(app_log, "warn", told.append)
+
+    def tell():
+        level_calibration.tell(project, level_base.news(said(project)),
+                               lambda n: f"{n.key} {n.values}")
+    return told, tell
+
+
+class _NotYet(Heard):
+    """`Heard`, with `absent` not in REW yet."""
+
+    def __init__(self, offsets, absent) -> None:
+        super().__init__(offsets)
+        self.absent = absent
+
+    def verify(self, wanted):
+        return [{**r, "exists": False, "valid": False, "stats": {}} if r["name"] == self.absent
+                else r for r in super().verify(wanted)]
+
+
+def _later(project, offsets):
+    """Round 4 asking for three titles, two taken and checked: `sw_4 (sw)` is taken later."""
+    process = _rounds.write_round(project, version=4, pad=False,
+                                  expected=["w-L_4 (sw)", "w-R_4 (sw)", "sw_4 (sw)"],
+                                  taken=["w-L_4 (sw)", "w-R_4 (sw)"])
+    process.check_captures(verifier=_NotYet(offsets, "sw_4 (sw)"))
+    assert "sw_4 (sw)" not in process_view.capture_round(project)["level_base"]["titles"]
+    return process
+
+
+def test_a_round_still_mixed_after_a_check_that_adds_a_title_is_not_told_again(project,
+                                                                               monkeypatch):
+    """M5: the same calibrations disagree; a check that adds a title at one of them is no news."""
+    told, tell = _told(project, monkeypatch)
+    checked(project, 3, ["w-L_3 (sw)"], 103.35)
+    offsets = {"w-L_4 (sw)": 120.0, "w-R_4 (sw)": 103.35, "sw_4 (sw)": 103.35}
+    process = _later(project, offsets)
+    tell()
+    assert len(told) == 1, told
+
+    process.record_capture("sw_4 (sw)")
+    process.check_captures(verifier=Heard(offsets))
+    assert "sw_4 (sw)" in process_view.capture_round(project)["level_base"]["titles"]
+    assert process_view.capture_round(project)["level_base"]["status"] == "mixed"
+    tell()
+
+    assert len(told) == 1, told
+
+
+def test_a_round_still_missing_after_a_check_that_adds_a_calibrated_title_is_not_told_again(
+        project, monkeypatch):
+    """M5: the same capture lacks a calibration; a calibrated title joining is no news."""
+    told, tell = _told(project, monkeypatch)
+    checked(project, 3, ["w-L_3 (sw)"], 103.35)
+    offsets = {"w-L_4 (sw)": 103.35, "w-R_4 (sw)": None, "sw_4 (sw)": 103.35}
+    process = _later(project, offsets)
+    tell()
+    assert len(told) == 1, told
+
+    process.record_capture("sw_4 (sw)")
+    process.check_captures(verifier=Heard(offsets))
+    assert "sw_4 (sw)" in process_view.capture_round(project)["level_base"]["titles"]
+    tell()
+
+    assert len(told) == 1, told

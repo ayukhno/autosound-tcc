@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import math
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -67,6 +67,9 @@ class Note:
     key: str
     args: tuple[tuple[str, str], ...]
     round_id: str
+    #: What makes it the same news for the strip's once, when not `(key, args)`: a sentence whose
+    #: words list every title of the round is not news again when only a title joined (tcc#220).
+    once: Optional[tuple] = field(default=None, compare=False)
 
     @property
     def values(self) -> dict[str, str]:
@@ -278,7 +281,8 @@ def notes(project_dir: Optional[Path], listing: Optional[dict]) -> list[Note]:
 def first_time(project_dir: Optional[Path], note: Note) -> bool:
     """Whether `note` is said for the first time in this run, for this project — the strip is
     told once; the card keeps the line while it holds."""
-    key = (str(Path(project_dir or config.project_dir())), note.round_id, note.key, note.args)
+    same = note.once if note.once is not None else (note.key, note.args)
+    key = (str(Path(project_dir or config.project_dir())), note.round_id, same)
     with _LOCK:
         if key in _SAID:
             return False

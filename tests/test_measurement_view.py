@@ -2084,3 +2084,77 @@ def test_an_optional_capture_taken_and_unusable_still_gates(with_control):
     assert _item(session, "w-R_1 (sw)").status == mv.STATUS_STALE
     assert mv.unusable_lines(round_, [wr], with_control) == [
         f"{wr} — in-band mean -94.0 dB — silence, not a sweep"]
+
+
+# ---- tcc#220's task review: I2 (the bound copy decides), M2 (the control gone from REW) --------
+
+
+class _ControlGone:
+    """The method's `verify.verify` for a check where REW holds every good sweep but `gone`."""
+
+    def __init__(self, gone: str) -> None:
+        self.gone = gone
+
+    def verify(self, wanted):
+        return [{"name": title, "valid": title != self.gone, "exists": title != self.gone,
+                 "applicable": True, "reachable": True, "issues": [],
+                 "stats": {"uuid": f"u-{index}"} if title != self.gone else {}}
+                for index, title in enumerate(wanted)]
+
+
+def test_a_copy_before_no_gap_waits_on_an_untaken_optional_on_the_live_card(
+        with_control, tmp_path_factory):
+    """I2: a bound copy without the method's #191 (v3.1.0 to v3.1.4) counts an optional capture
+    not taken as a gap — its `capture-check` exits 1 and `step done` refuses — so the live card
+    waits on it, as before tcc#220, and the import window counts it. The past card keeps
+    «optional»: that copy's close lists it apart (`missing_optional`)."""
+    from autosound_tcc.core import method_features
+    from tests._method_copies import OPTIONAL_A_GAP, copy_of_the_method, entry, linked
+
+    process = _round(with_control, version=1, expected=["w-L_1 (sw)"], optional=["w-R_1 (sw)"],
+                     taken=["w-L_1 (sw)"])
+    link = entry(with_control)
+    if link.is_symlink():
+        link.unlink()
+    # This project is `Path.home()` here (conftest), so its entry is the personal install: `known`.
+    linked(with_control, copy_of_the_method(tmp_path_factory.mktemp("gap"), changes=OPTIONAL_A_GAP))
+
+    live = mv.build_session("0", 1, [], with_control, taken=[])
+
+    assert _item(live, "w-R_1 (sw)").status == mv.STATUS_WAIT
+
+    process.close_capture("done")
+    [round_] = process_view.capture_rounds(with_control)
+    past = mv._session_for_round(round_, None, project_dir=with_control)
+    assert _item(past, _as_typed("w-R_1 (sw)")).status == mv.STATUS_OPTIONAL
+    assert not method_features.has(method_features.NO_GAP, with_control)
+    assert method_features.has(method_features.LEVEL_BASE, with_control)
+
+
+def test_tccs_own_copy_has_no_gap(tmp_path, own_copy_is_the_submodule):
+    from autosound_tcc.core import method_features
+
+    assert method_features.has(method_features.NO_GAP, tmp_path)
+    assert not method_features.older_than_v314(tmp_path)
+
+
+def test_the_methods_control_taken_and_gone_from_rew_is_optional_not_waiting(with_control):
+    """M2: the control taken, then gone from REW: the method's `unusable_captures()` is `[]` and
+    `_no_gap` holds for it — no gap, live and past alike, not «wait»."""
+    process = _round(with_control, version=1, expected=["w-L_1 (sw)"], taken=["w-L_1 (sw)"])
+    control = process.load()["capture"]["control"]
+    process.record_capture(control)
+    process.check_captures(verifier=_ControlGone(control))
+    module = vendor_loader.load_process()
+    round_ = process.load()["capture"]
+    assert process.unusable_captures() == [] and module._no_gap(round_, control)
+
+    live = mv.build_session("0", 1, [], with_control, taken=[])
+
+    assert _item(live, control).status == mv.STATUS_OPTIONAL
+    assert _item(live, "w-L_1 (sw)").status == mv.STATUS_DONE
+
+    process.close_capture("done")
+    [past_round] = process_view.capture_rounds(with_control)
+    past = mv._session_for_round(past_round, None, project_dir=with_control)
+    assert _item(past, control).status == mv.STATUS_OPTIONAL

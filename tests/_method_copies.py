@@ -44,6 +44,13 @@ NO_LEVEL_BASE = {
         lambda text: text.replace("def _level_base_of(", "def _no_level_base_("),
 }
 
+#: What the skill's #191 added (skill 22d8988, v3.2.0), taken out of a copy's text: an optional
+#: capture not taken is no gap (`_no_gap`). A copy as v3.1.0 to v3.1.4 shipped it, whose
+#: `unusable_captures` counts it as a gap. A change for `copy_of_the_method`.
+OPTIONAL_A_GAP = {
+    "rew_tool/state/process.py": lambda text: text.replace("def _no_gap(", "def _gap_free_("),
+}
+
 
 def checked_out() -> bool:
     """Whether the vendored method is there to copy."""

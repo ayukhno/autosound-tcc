@@ -181,9 +181,9 @@ class RewAnswered(ProcessWriterError):
     an error or with something it cannot read (#219): REW is running, and nothing was written. A
     class of its own, for the caller to say it as REW's answer and not as the method refusing.
 
-    Told only by the two lines the method prints for it, whole from their start (`rew_answered`),
-    never by the `error: ` every refusal begins with: a line that is not one of them stays the
-    refusal, said in its own words. `line` is the one that told it."""
+    Told only by the lines the method prints for it (`_REW_ANSWERED`, three since v3.2.0), whole
+    from their start (`rew_answered`), never by the `error: ` every refusal begins with: a line that
+    is not one of them stays the refusal, said in its own words. `line` is the one that told it."""
 
     def __init__(self, said: str, line: str = "") -> None:
         super().__init__(said)

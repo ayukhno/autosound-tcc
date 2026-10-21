@@ -31,6 +31,11 @@ AGENTS_SETUP = ("project.py", "agents-setup")             # #149: the AGENTS.md 
 #: the project's level base. Not one of v3.1.4's: a copy without it is not «older», it keeps W-10's
 #: reading of REW's listing (`level_calibration`), and nothing is said of it.
 LEVEL_BASE = ("state/process.py", "def _level_base_of(")
+#: From v3.2.0 (the skill's #191, 22d8988; tcc#220's task review, I2): an optional capture not taken
+#: is no gap — `unusable_captures`, the exit code and the step's gate skip it (`_no_gap`). A copy
+#: without it (v3.1.0 to v3.1.4) counts one as a gap, so the live card waits on it as before. Not
+#: one of v3.1.4's either: no «older» warning for it.
+NO_GAP = ("state/process.py", "def _no_gap(")
 
 #: path -> (st_mtime_ns, st_size, text): one read per file until it changes.
 _TEXT: dict[str, tuple[int, int, str]] = {}
