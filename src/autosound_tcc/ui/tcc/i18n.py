@@ -699,6 +699,8 @@ answers the first five questions anybody would ask.",
         "capRoundStoppedBoth": "Not recorded: {titles}, nor protection for {channels} — {why}",
         # The end-of-branch review, code I3: the round an import was for, gone by its write.
         "capRoundGone": "the import was for {round}, which is no longer the open round; import them again to record them in the round open now",
+        # #218: the round an import opened, named by the verb's own answer or refused.
+        "capRoundUnread": "A round was opened, but the method's answer did not name it — nothing recorded, so nothing goes into a round TCC cannot name. The method said: {said}",
         "capImportNumTip": "REW's number for it right now — for finding the row in REW, nothing else. A filter or a sort renumbers it, so it is never written down.",
         "capImportPicked": "Ticked by name: {n}.",
         "capImportProposed": "The New name was matched automatically (the round's spelling, or a likely typo). Tick the row if that is the name you mean.",
@@ -2086,6 +2088,8 @@ Choose sweeps (sw) above to read this.",
         "capRoundStoppedProt": "Захист не записано для {channels} — {why}",
         "capRoundStoppedBoth": "Не записано: {titles}, ані захисту для {channels} — {why}",
         "capRoundGone": "імпорт був для {round}, а це вже не відкритий набір; імпортуйте їх ще раз, щоб записати у відкритий зараз",
+        # #218: the English until the Advisor.
+        "capRoundUnread": "A round was opened, but the method's answer did not name it — nothing recorded, so nothing goes into a round TCC cannot name. The method said: {said}",
         "capImportNumTip": "Номер у REW зараз — щоб знайти рядок у REW, і більше нічого. Фільтр чи сортування його змінюють, тому він ніде не зберігається.",
         "capImportPicked": "Позначено за назвою: {n}.",
         "capImportProposed": "Нове ім'я підібрано автоматично (як у раунді, або схоже на одруківку). Постав галочку, якщо ти мав на увазі саме цю назву.",
@@ -3451,6 +3455,8 @@ Choose sweeps (sw) above to read this.",
         "capRoundStoppedBoth": "Not recorded: {titles}, nor protection for {channels} — {why}",
         # #170: the English until the Advisor.
         "capRoundGone": "the import was for {round}, which is no longer the open round; import them again to record them in the round open now",
+        # #218: the English until the Advisor.
+        "capRoundUnread": "A round was opened, but the method's answer did not name it — nothing recorded, so nothing goes into a round TCC cannot name. The method said: {said}",
         "capImportNumTip": 'Numer w REW teraz — żeby znaleźć wiersz w REW, i nic więcej. Filtr albo sortowanie go zmieniają, więc nigdzie nie jest zapisywany.',
         "capImportPicked": 'Zaznaczono po nazwie: {n}.',
         "capImportProposed": "Nowa nazwa została dopasowana automatycznie (jak w rundzie albo prawdopodobna literówka). Zaznacz wiersz, jeśli chodziło o tę nazwę.",
@@ -4864,6 +4870,8 @@ Choose sweeps (sw) above to read this.",
         "capRoundStoppedBoth": "Not recorded: {titles}, nor protection for {channels} — {why}",
         # #170: the English until the Advisor.
         "capRoundGone": "the import was for {round}, which is no longer the open round; import them again to record them in the round open now",
+        # #218: the English until the Advisor.
+        "capRoundUnread": "A round was opened, but the method's answer did not name it — nothing recorded, so nothing goes into a round TCC cannot name. The method said: {said}",
         "capImportNumTip": 'REWs Nummer dafür im Moment — nur um die Zeile in REW zu finden. Ein Filter oder eine Sortierung nummeriert neu, deshalb wird sie nirgends gespeichert.',
         "capImportPicked": 'Nach Namen abgehakt: {n}.',
         "capImportProposed": "Der neue Name wurde automatisch zugeordnet (wie in der Runde oder ein wahrscheinlicher Tippfehler). Hake die Zeile an, wenn du genau diesen Namen meinst.",

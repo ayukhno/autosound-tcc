@@ -1233,6 +1233,10 @@ def test_every_string_the_app_asks_for_exists_in_both_languages():
 # ---- the pass the ledger hears about ---------------------------------------------------------
 
 
+#: What the method's `capture-start` prints first (`process.py`), for the doubles below.
+_OPENED = "cap_003 open at 6, 0 capture(s) expected\nplan: process/capture-plan.md"
+
+
 def _ledger_calls(monkeypatch):
     """Stand in for the skill's CLI, recording what it was asked to write."""
     from autosound_tcc.ui.tcc import measurement_panel as mp
@@ -1241,9 +1245,11 @@ def _ledger_calls(monkeypatch):
     # `origin` too (S-048): where the measurements came from is part of what a round records,
     # and a double that drops it cannot tell this project's series from another project's.
     # And `plan` (SKL-054, tcc#77): whether the method gave the list or TCC did.
+    # And it answers as the method does, the round it opened on its first line (#218): that line
+    # is where the worker reads the round's id from.
     monkeypatch.setattr(mp.process_writer, "start_capture",
                         lambda d, v, e, step="", origin="", plan=False, **_kw:
-                        calls.append(("start", v, tuple(e), origin, plan)))
+                        calls.append(("start", v, tuple(e), origin, plan)) or _OPENED)
     monkeypatch.setattr(mp.process_writer, "record_capture",
                         lambda d, t, **_kw: calls.append(("taken", t)))
     # `source` is recorded too (method `v3.0.59`, S-036): who answered is part of what was
@@ -1251,7 +1257,6 @@ def _ledger_calls(monkeypatch):
     monkeypatch.setattr(mp.process_writer, "set_protective",
                         lambda d, c, legs, source="user", **_kw:
                         calls.append(("protective", c, legs, source)))
-    monkeypatch.setattr(mp.process_view, "capture_round", lambda *_a, **_k: {"id": "cap_003"})
     return calls
 
 
@@ -1827,6 +1832,7 @@ def test_a_pass_the_method_cannot_plan_still_opens_and_says_why(tmp_path, monkey
         calls.append(("start", v, tuple(e), origin, plan))
         if plan:
             raise process_writer.ProcessWriterError("refused:\n--plan needs the phase the round measures for")
+        return _OPENED
 
     monkeypatch.setattr(mp.process_writer, "start_capture", _start)
     worker = _LedgerWriteWorker(
@@ -1935,6 +1941,7 @@ def test_a_copy_older_than_plan_still_opens_the_pass_without_the_list_and_says_w
         calls.append(("start", v, tuple(e), origin, plan))
         if plan:
             raise process_writer.UnknownFlag("--plan")
+        return _OPENED
 
     monkeypatch.setattr(mp.process_writer, "start_capture", _start)
     worker = _LedgerWriteWorker(
@@ -2133,6 +2140,76 @@ def test_an_import_whose_round_the_session_moved_on_from_records_nothing_and_say
         titles=", ".join(titles), channels="w-L", why=why) in said, said
     assert i18n.t("capRoundRecorded").format(n=1) not in said
     assert "defect" not in said, said
+
+
+def test_a_round_the_session_opens_right_after_tccs_own_gets_none_of_the_import(
+        tmp_path, monkeypatch):
+    """#218, F-100's «Locks and rounds»: a pass with no round open opens its own, and then read the
+    round's id back from `process-state.json` — outside any lock. A session's `capture-start`
+    landing between the two closed TCC's round and opened its own, and the read handed this worker
+    the SESSION's id: the import was recorded into the session's round, «recorded» said. The id is
+    the one the verb itself printed, so the writes go to TCC's round or nowhere. On the real method:
+    the session's round holds none of it."""
+    from autosound_tcc.core import process_writer, vendor_loader
+    from autosound_tcc.state import process_view
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    from tests import _intake
+
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    _app()
+    _intake.seed(tmp_path)
+    session = vendor_loader.load_process().Process(str(process_view.process_dir(tmp_path)))
+    session.enter_phase("0")
+    real, opened = process_writer.start_capture, []
+
+    def _then_the_session(project_dir, *args, **kw):
+        said = real(project_dir, *args, **kw)
+        opened.append(session.load()["capture"]["id"])
+        session.start_capture(2, expected=["w-L_2 (sw)"])  # between TCC's open and its read
+        return said
+
+    monkeypatch.setattr(mp.process_writer, "start_capture", _then_the_session)
+    titles = ["w-L_01 (sw)"]
+    worker = _LedgerWriteWorker(project_dir=tmp_path, round_id="", version=1,
+                                expected=["w-L_1 (sw)"], titles=titles, protective={"w-L": "OFF"})
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    sessions = session.load()["capture"]
+    assert sessions["id"] != opened[0]
+    assert not process_view.standing(sessions) and not sessions.get("protective"), sessions
+    assert seen["opened"] == seen["round_id"] == opened[0], seen
+    assert seen["recorded"] == [] and seen["not_recorded"] == titles, seen
+    assert seen["stopped"] == i18n.t("capRoundGone").format(round=opened[0]), seen
+
+
+def test_a_round_whose_id_the_method_did_not_print_is_refused_not_read_back(tmp_path, monkeypatch):
+    """#218: the id of the round TCC opened comes from the verb's own answer. An answer that names
+    none is not mended by reading `process-state.json` — that read is the race the id is taken from
+    the answer to avoid — so the pass is refused, said, and nothing is recorded anywhere."""
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+    monkeypatch.setattr(mp.process_writer, "start_capture",
+                        lambda d, v, e, **_kw: calls.append(("start", v)) or "plan: written")
+    worker = _LedgerWriteWorker(project_dir=tmp_path, round_id="", version=6,
+                                expected=["w-L_6 (sw)"], titles=["w-L_6 (sw)"],
+                                protective={"w-L": "OFF"})
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert calls == [("start", "6")], "nothing recorded, into no round"
+    assert seen["opened"] == "" and seen["round_id"] == "", seen
+    assert seen["refused"] == [i18n.t("capRoundUnread").format(said="plan: written")], seen
 
 
 def test_an_import_writes_into_the_round_it_opened_itself(tmp_path, monkeypatch):

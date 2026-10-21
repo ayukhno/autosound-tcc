@@ -32,6 +32,7 @@ one implementation of "record a step" in the world rather than an in-process cop
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -687,6 +688,23 @@ def start_capture(
         if value is not None and str(value).strip():
             args += [flag, str(value)]
     return _run(project_dir, args)
+
+
+#: `capture-start`'s first line names the round it opened: `cap_007 open at 49, 12 capture(s)
+#: expected` (`process.py`, the same from v3.0.0 to v3.1.4).
+_OPENED = re.compile(r"^(\S+) open at \S", re.MULTILINE)
+
+
+def opened_round(said: str) -> str:
+    """The id of the round `start_capture` opened, as the verb itself printed it — or "" when its
+    answer names none.
+
+    Read from the answer, never from `process-state.json` after it: between the verb and that read
+    a session's `capture-start` can close this round and open its own, and the read hands TCC the
+    session's id — its import then recorded into a round it was not taken for (#218, F-100's
+    «Locks and rounds»). A caller that gets "" opened a round it cannot name, and writes nothing."""
+    found = _OPENED.search(said or "")
+    return found.group(1) if found else ""
 
 
 def capture_knobs(project_dir: Path, positions: dict) -> str:
