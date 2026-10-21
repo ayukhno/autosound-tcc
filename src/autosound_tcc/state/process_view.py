@@ -111,6 +111,27 @@ def unread(project_dir: Optional[Path] = None) -> Optional[StateUnread]:
     return StateUnread(why) if why is not None else None
 
 
+def method_refuses(project_dir: Optional[Path] = None) -> bool:
+    """Whether the method refuses `process-state.json`, which is there, before it writes into it:
+    a file that does not read, or a newer schema the copy the project runs does not read (`unread`,
+    the strict read, with the bound copy's say: the group review of #219, D); or a `schema_version`
+    that is no whole number, or older than TCC's copy reads — its `validate`, which refuses a 2.x
+    project with the way to migrate it. A state with no `schema_version` is not refused: the method
+    reads it as its own schema (`Process.load` fills it from its empty state). False with no file.
+    For a guard that must leave such a state to the method's own refusal (`process_writer`'s round
+    guard, the group review of #218, E)."""
+    if unread(project_dir) is not None:
+        return True
+    state = read_state_text(project_dir)
+    if state is None or "schema_version" not in state:
+        return False
+    version = state["schema_version"]
+    if not isinstance(version, int) or isinstance(version, bool):
+        return True
+    reads = getattr(_process_module(), "SCHEMA_VERSION", None)
+    return isinstance(reads, int) and version < reads
+
+
 def unreadable(project_dir: Optional[Path] = None) -> Optional[str]:
     """`unread`'s why alone, or None."""
     said = unread(project_dir)

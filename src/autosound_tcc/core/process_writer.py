@@ -830,10 +830,13 @@ def _in_round(project_dir: Path, round_id: Optional[str], command: str) -> dict:
 def _the_round_asked(project_dir: Path, round_id: str, command: str = "capture-check") -> None:
     """`RoundGone`, said once in the log, unless the round `process-state.json` holds open now is
     `round_id` (`check_captures`, `record_capture`, `set_protective`, under the lock). Read as the
-    file stands, not through the method: a state that does not read is left to the method, which
-    refuses it and writes nothing."""
+    file stands, not through the method: a state that does not read, and one the method refuses
+    before it writes — a newer schema the project's copy does not read, a schema it does not
+    validate (`process_view.method_refuses`) — is left to the method, which refuses it and writes
+    nothing. Read leniently, such a state said «the round is no longer open» over the method's
+    real refusal (the group review of #218, E)."""
     state = process_view.read_state_text(project_dir)
-    if state is None:
+    if state is None or process_view.method_refuses(project_dir):
         return
     round_ = state.get("capture") if isinstance(state.get("capture"), dict) else {}
     if round_.get("id") == round_id and not round_.get("closed"):

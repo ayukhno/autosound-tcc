@@ -413,6 +413,64 @@ def _bytes_of(project_dir: Path) -> tuple[bytes, bytes]:
     return (folder / "process-state.json").read_bytes(), (folder / "journal.jsonl").read_bytes()
 
 
+@pytest.mark.parametrize("state, refused", [
+    ({"schema_version": 99, "capture": {"id": "cap_001"}}, True),
+    ({"schema_version": 99}, True),
+    ({"schema_version": "3", "capture": {"id": "cap_001"}}, True),
+    ({"schema_version": 2, "capture": {"id": "cap_001"}}, True),
+    # The method fills a missing `schema_version` with its own (`Process.load`: its empty state,
+    # updated): such a state is its own schema, and the guard reads it.
+    ({"active_phase": "0", "capture": {"id": "cap_001"}}, False),
+    ({}, False),
+], ids=["a newer schema", "newer, no round", "a schema that is text", "a 2.x schema",
+        "no schema_version", "an empty object"])
+def test_a_state_the_method_refuses_is_left_to_the_method_not_said_as_a_round_gone(
+        tmp_path, state, refused):
+    """The group review of #218/#219, E: the round guard read the state leniently, so a JSON object
+    the method refuses — a newer schema (its strict read), a schema that is text or a 2.x one (its
+    `validate`, before any write) — read as «the round is no longer open» (`RoundGone`), and the
+    child that would have said the real refusal never ran. Such a state is left to the method, as
+    a file that does not read already was."""
+    import json as _json
+
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    path = tmp_path / "process" / "process-state.json"
+    path.parent.mkdir()
+    path.write_text(_json.dumps(state), encoding="utf-8")
+
+    if refused:
+        assert process_writer._the_round_asked(tmp_path, "cap_002") is None
+    else:
+        with pytest.raises(process_writer.RoundGone):
+            process_writer._the_round_asked(tmp_path, "cap_002")
+
+
+def test_a_newer_schema_the_projects_copy_reads_is_still_guarded(tmp_path, tmp_path_factory):
+    """E reuses D's decision: a project bound to an approved newer copy writes that schema, so its
+    state is no refusal, and the round guard reads it — another round open is `RoundGone`."""
+    import json as _json
+    import re
+
+    if not process_writer.is_available():
+        pytest.skip("skill submodule not checked out")
+    reads = vendor_loader.load_process().SCHEMA_VERSION
+    newer = copy_of_the_method(tmp_path_factory.mktemp("newer-method"), manifest=True, changes={
+        "rew_tool/state/process.py": lambda text: re.sub(
+            rf"^SCHEMA_VERSION = {reads}$", f"SCHEMA_VERSION = {reads + 1}", text,
+            flags=re.MULTILINE)})
+    car = tmp_path / "car"
+    _linked_and_approved(car, newer)
+    path = car / "process" / "process-state.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(_json.dumps({"schema_version": reads + 1, "capture": {"id": "cap_002"}}),
+                    encoding="utf-8")
+
+    assert process_writer._the_round_asked(car, "cap_002") is None
+    with pytest.raises(process_writer.RoundGone):
+        process_writer._the_round_asked(car, "cap_001")
+
+
 @pytest.mark.parametrize("meanwhile", ["the session opened the next round",
                                        "the session closed the round", "nothing"])
 def test_tccs_own_check_runs_over_the_round_it_was_asked_for_or_not_at_all(
