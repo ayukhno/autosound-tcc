@@ -3824,3 +3824,31 @@ method's half is SKL-078.
 
 TCC names a change to the method's verb by its channel, the row's slot in the version, and its old → new values,
 so that the method refuses a version that has moved instead of describing another change.
+
+## W-11 — the clean install walk (#228), on beta-v1.2.0-rc1 + the method's beta-v3.2.0-rc2
+
+The Arbiter, 2026-10-21, a clean Windows 11 VM (UTM now, not Parallels), the installer's one line with
+`-SkillRef beta-v3.2.0-rc2 -TccRef beta-v1.2.0-rc1`. No REW in this walk (the Arbiter: REW was tested on the
+Mac). The install finished («Installed.»): both tags checked as signed, TCC held to its constraints, the
+shortcuts made. Recorded as seen; the fix round comes after the walk.
+
+### 164. The installer's Claude sign-in failed: «Login failed: read ECONNRESET»
+Step «Sign in», item 1: the browser opened the OAuth page, then `Paste code here if prompted > Login failed:
+read ECONNRESET`. The installer went on: «not signed in yet. Later, in a terminal: claude auth login».
+**Whose:** to be found — the installer's step is the method's; the error is Claude Code's own `auth login`.
+
+### 165. The installer's advice names Gemini Flash (High) for a reviewer agy refuses Pro for
+«Start», step 2: «If agy says Pro is not supported where you are, pick a Gemini Flash (High) line instead.»
+Under ADC the method now names Flash **Medium** (skill #193, hub #301 — High stays silent for minutes there).
+**Whose:** the method's text (`install.ps1`, and likely `install.sh`).
+
+### 166. Lines of the installer's output run together in the console
+`==> Git for Windows`: «… a dialog: click Yes …», «through winget...», «OK git version 2.55.0…» and
+`==> Claude Code` are on one long line; the same after uv's «everything's installed!». Claude Code's own
+installer prints «Γ£ö Claude Code successfully installed!» (a ✔ in the wrong code page).
+**Whose:** the method's installer (how it relays winget's and uv's output), and Claude's installer for the
+mojibake. Cosmetic.
+
+### 167. «Phase 1's desk engine: absent: no SHA256SUMS on beta-v3.2.0-rc2 (HTTP 404)»
+The candidate tag carries no `SHA256SUMS`, so the engine is not fetched («builds from the .NET SDK when there is
+one»). **Whose:** the method's release assets — to check whether a beta candidate is meant to carry them.
