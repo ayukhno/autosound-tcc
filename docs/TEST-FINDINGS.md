@@ -3746,7 +3746,7 @@ this login is learned only when a session starts. Asked: the same check for the 
 
 **Weight.** Medium: a pick the login cannot use fails at the session's start, not when it is chosen.
 
-**Task.** The next wave's collection (the Arbiter: «запиши на наступну хвилю»). → #222 on `W-11 · v1.1.5`.
+**Task.** The next wave's collection (the Arbiter: «запиши на наступну хвилю»). → #222 on `W-11 · v1.2.0`.
 
 ### 161. The menu: check it whole, and every line that opens a submenu in bold
 
@@ -3780,7 +3780,7 @@ activity line (`_add_chip` / `_tick_activity` / `_end_chip`); all three routes.
 **Weight.** Medium: a long tool-less think looks like a stalled or idle window, and after a Stop it reads as the
 indicator missing.
 
-**Task.** The next wave's collection. → #223 on `W-11 · v1.1.5`.
+**Task.** The next wave's collection. → #223 on `W-11 · v1.2.0`.
 
 ### 163. The change analysis in compare mode, carried on to the chat — and a phrase to nudge the terminal's AI
 
