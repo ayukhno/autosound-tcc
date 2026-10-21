@@ -75,8 +75,10 @@ def test_a_state_file_that_is_not_a_state_reads_as_none(project, written):
     assert process_view.read_state_text(project) is None
     assert process_view.has_process_state(project)  # there: how the window's guard tells them apart
     # And why, in the read's own words (Task 24's review M2/M3, the G6+G7 review's M5): a write cut
-    # off and a hand edit gone wrong are told apart, by the agent and in the log.
-    assert process_view.unreadable(project) == {
+    # off and a hand edit gone wrong are told apart, by the agent and in the log. TCC's mirror
+    # says it so; the method's strict read, where the copy has one, says it in its own (#219).
+    assert process_view.unreadable(project)
+    assert process_view._read_state(project)[1] == {
         b"{ half": "it is not valid JSON: Expecting property name enclosed in double quotes: "
                    "line 1 column 3 (char 2)",
         b"": "it is empty",
@@ -88,6 +90,73 @@ def test_a_state_file_that_is_not_a_state_reads_as_none(project, written):
     assert path.read_bytes() == written, "read, never written or moved aside (R-bw)"
 
 
+def _refusal(project):
+    """What the method's own strict read says of the project's `process-state.json` (v3.1.2)."""
+    try:
+        vendor_loader.load_process().Process(str(process_view.process_dir(project))).load(
+            strict=True)
+    except Exception as exc:  # noqa: BLE001 — the refusal is the answer
+        return exc
+    raise AssertionError("the method read it")
+
+
+@pytest.mark.parametrize("written", [b"{ half", b"", b"null", b"[]", b"\xff\xfe{}"],
+                         ids=["cut-off", "empty", "null", "a-list", "not-utf8"])
+def test_a_state_that_does_not_read_carries_the_methods_reason_and_repair(project, written):
+    """K-2 (#219): from v3.1.2 the method's `Process.load(strict=True)` refuses a state that is there
+    and does not read, naming why and the repair — the committed copy back, or for another code page
+    a rewrite as UTF-8. TCC read the file with a mirror of its own and showed no repair at all."""
+    path = process_view.state_file(project)
+    path.parent.mkdir()
+    path.write_bytes(written)
+    refused = _refusal(project)
+
+    said = process_view.unread(project)
+
+    assert said == process_view.StateUnread(f"it {refused.reason}", refused.repair)
+    assert said.repair and process_view.unreadable(project) == said.why
+    assert process_view.load_state(project) is None
+    assert path.read_bytes() == written, "read, never written or moved aside (R-bw)"
+
+
+def test_a_state_a_newer_method_wrote_is_refused_with_the_way_to_one(project):
+    """K-2/T-21 (#219): a state of a newer schema was read leniently and drawn as this copy's plan.
+    The method's strict read refuses it, and says to update the method."""
+    path = process_view.state_file(project)
+    path.parent.mkdir()
+    path.write_text('{"schema_version": 99, "active_phase": "1"}', encoding="utf-8")
+
+    said = process_view.unread(project)
+
+    assert process_view.load_state(project) is None
+    assert said is not None and "schema v99" in said.why and "update the method" in said.why
+
+
+def test_an_older_copy_without_strict_is_read_by_tccs_own_mirror(project, monkeypatch):
+    """A copy up to v3.1.1 has no `strict` (v3.1.2): told by its signature, never its version. TCC's
+    mirror decides then, in its own words, and names no repair — that copy has none to name."""
+    import types
+
+    class _Older:
+        def __init__(self, folder):
+            self.folder = folder
+
+        def load(self):
+            return {"active_phase": None}
+
+    monkeypatch.setattr(vendor_loader, "load_process",
+                        lambda: types.SimpleNamespace(Process=_Older, ProcessError=RuntimeError))
+    path = process_view.state_file(project)
+    path.parent.mkdir()
+    path.write_bytes(b"")
+
+    assert process_view.unread(project) == process_view.StateUnread("it is empty")
+    assert process_view.load_state(project) is None
+    path.write_text("{}", encoding="utf-8")
+    assert process_view.unread(project) is None and process_view.load_state(project) == {
+        "active_phase": None}
+
+
 def test_a_state_file_that_cannot_be_opened_reads_as_none(project, process, monkeypatch):
     """#176's last case: a whole state that no reader can open -- held by another program, as a
     sharing violation holds it on Windows. The method reads it as the empty process; it is None."""
@@ -96,8 +165,9 @@ def test_a_state_file_that_cannot_be_opened_reads_as_none(project, process, monk
 
     assert process_view.load_state(project) is None
     assert process_view.read_state_text(project) is None
-    assert process_view.unreadable(project).startswith("it could not be opened: [Errno 13] held by "
-                                                       "another program")
+    said = process_view.unread(project)
+    assert said.why.startswith("it cannot be opened (") and "held by another program" in said.why
+    assert said.repair, "the method's repair for its cause (#219)"
 
 
 def test_a_state_that_reads_or_is_not_there_has_nothing_to_say(project, process):

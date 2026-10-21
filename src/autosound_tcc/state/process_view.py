@@ -16,10 +16,11 @@ the mock rather than showing an empty plan that looks like a finished one.
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 import re
 from pathlib import Path
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from autosound_tcc.core import config, vendor_loader
@@ -83,13 +84,63 @@ def read_state_text(project_dir: Optional[Path] = None) -> Optional[dict]:
     return _read_state(project_dir)[0]
 
 
+@dataclass(frozen=True)
+class StateUnread:
+    """Why `process-state.json`, which is there, does not read as a state — «it is not valid JSON
+    (…)», «it is empty -- a write was cut off» — and `repair`, the method's line that mends it, or
+    "" from a copy that names none (K-2, #219)."""
+
+    why: str
+    repair: str = ""
+
+
+def unread(project_dir: Optional[Path] = None) -> Optional[StateUnread]:
+    """Why `process-state.json`, which is there, does not read as a state, and how to mend it — or
+    None when it reads, or there is no file. A write cut off and a hand edit gone wrong read alike
+    as None, and the agent and the log need to tell them apart (Task 24's review M2/M3; the G6+G7
+    review's M5). The file is only read (R-bw).
+
+    The method's own strict read decides, from the copy whose `Process.load` takes `strict`
+    (v3.1.2, K-2): its reason, and its repair — a state a newer method wrote among them (T-21).
+    A copy without it is read by TCC's mirror (`read_state_text`), which names no repair."""
+    process = _process_module()
+    if process is not None and _reads_strictly(process):
+        return _strict(process, project_dir)[1] if has_process_state(project_dir) else None
+    why = _read_state(project_dir)[1]
+    return StateUnread(why) if why is not None else None
+
+
 def unreadable(project_dir: Optional[Path] = None) -> Optional[str]:
-    """Why `process-state.json`, which is there, does not read as a state — `read_state_text`'s
-    None, in the read's own words: «it is not valid JSON: Expecting …», «it is empty» — or None
-    when it reads, or there is no file. A write cut off and a hand edit gone wrong read alike as
-    None, and the agent and the log need to tell them apart (Task 24's review M2/M3; the G6+G7
-    review's M5). The file is only read (R-bw)."""
-    return _read_state(project_dir)[1]
+    """`unread`'s why alone, or None."""
+    said = unread(project_dir)
+    return said.why if said is not None else None
+
+
+def _reads_strictly(process) -> bool:
+    """Whether this copy's `Process.load` takes `strict` (v3.1.2): told by its signature, never its
+    version (as `mcp_server` tells it)."""
+    try:
+        return "strict" in inspect.signature(process.Process.load).parameters
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+def _strict(process, project_dir: Optional[Path]) -> tuple[Optional[dict], Optional[StateUnread]]:
+    """The state by the method's strict read: `(state, None)`, or `(None, why and repair)` for a
+    file that is there and does not read (`is_unreadable` on the exception's class: TCC's copy is
+    namespaced, so never the class itself) or that a newer method wrote (`ProcessError`). Anything
+    else the read raises goes up, as the lenient read lets it."""
+    folder = process_dir(project_dir)
+    try:
+        return process.Process(str(folder)).load(strict=True), None
+    except Exception as exc:  # noqa: BLE001 — sorted below; the rest is raised
+        if getattr(type(exc), "is_unreadable", False):
+            return None, StateUnread(f"it {exc.reason}", str(exc.repair or ""))
+        if isinstance(exc, process.ProcessError):
+            said = str(exc)
+            path = str(folder / "process-state.json")
+            return None, StateUnread("it" + said[len(path):] if said.startswith(path) else said)
+        raise
 
 
 #: What a top level that is no object holds, in JSON's words.
@@ -122,12 +173,14 @@ def _read_state(project_dir: Optional[Path]) -> tuple[Optional[dict], Optional[s
 
 def load_state(project_dir: Optional[Path] = None) -> Optional[dict]:
     """The raw process-state dict, or None if this project has none / the skill isn't vendored /
-    the file is there and does not read as a state (`read_state_text`, #176)."""
-    if read_state_text(project_dir) is None:
+    the file is there and does not read as a state (#176) — by the method's strict read where the
+    copy has one (`unread`, K-2), else by TCC's mirror (`read_state_text`) and the lenient read."""
+    process = _process_module()
+    if process is None or not has_process_state(project_dir):
         return None
-    try:
-        process = vendor_loader.load_process()
-    except vendor_loader.VendorNotInitializedError:
+    if _reads_strictly(process):
+        return _strict(process, project_dir)[0]
+    if read_state_text(project_dir) is None:
         return None
     return process.Process(str(process_dir(project_dir))).load()
 

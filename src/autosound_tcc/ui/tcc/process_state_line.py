@@ -14,6 +14,14 @@ from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc import i18n
 
 
+def line(said: process_view.StateUnread) -> str:
+    """The strip's line for a state that does not read: why, and the method's repair when its copy
+    names one (K-2, #219)."""
+    text = i18n.t("processStateUnread").format(why=said.why)
+    return f"{text} {i18n.t('processStateRepair').format(repair=said.repair)}" if said.repair \
+        else text
+
+
 class Unread:
     """The guard on the plan. A file that is there and does not read as a state stops the refresh,
     and the plan on screen stays the last thing known to be true: blanking it turned half a second
@@ -32,17 +40,23 @@ class Unread:
         self._seen: Optional[tuple] = None
         self._line: Optional[str] = None
 
-    def stops(self, strip, state: Optional[dict], project_dir: Optional[Path] = None) -> bool:
+    def stops(self, strip, state: Optional[dict], project_dir: Optional[Path] = None,
+              panel=None) -> bool:
         """Whether the refresh stops here: `state` (`process_view.load_state()`) is None and the
-        file is there. Says why on `strip` and in the log, once per state of the file; takes the
-        line back from `strip` when the file reads or is gone."""
+        file is there. Says why on `strip` and in the log, once per state of the file, with the
+        method's repair; takes the line back from `strip` when the file reads or is gone. `panel`,
+        the plan panel, is handed the refusal (`set_unread`) and None once it ends: a plan on
+        screen stays, and a panel with none says why instead of «No plan yet» (#219)."""
         there = state is None and process_view.has_process_state(project_dir)
         # None when it reads after all: the method did not load, or the write ended in between.
-        why = process_view.unreadable(project_dir) if there else None
-        if why is None:
+        said = process_view.unread(project_dir) if there else None
+        if panel is not None:
+            panel.set_unread(said)
+        if said is None:
             strip.withdraw(self._line)
             self._seen = self._line = None
             return there
+        why = said.why
         path = process_view.state_file(project_dir)
         try:
             info = path.stat()
@@ -54,6 +68,6 @@ class Unread:
             app_log.logger().warning("process-state.json at %s does not read, so the plan shown is "
                                      "the last one read: %s", path, why)
             strip.withdraw(self._line)
-            self._line = i18n.t("processStateUnread").format(why=why)
+            self._line = line(said)
             strip.notify(self._line, level="warn")
         return True

@@ -3626,8 +3626,8 @@ class MainWindow(QMainWindow):
         self._sync_capture_ready()
         state = process_view.load_state()
         # A file that is there and did not read as a state keeps the plan on screen, and says so
-        # once per state of the file (`process_state_line.Unread`, #176).
-        if self._process_unread.stops(self._status_strip, state):
+        # once per state of the file, with the method's repair (`process_state_line.Unread`, #219).
+        if self._process_unread.stops(self._status_strip, state, panel=self._plan_panel):
             return
         if state is None:
             # "No plan yet" and "no project open" are different empty states with different fixes,

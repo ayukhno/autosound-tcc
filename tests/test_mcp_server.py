@@ -791,17 +791,26 @@ def test_report_phase_on_a_file_that_is_not_a_state_says_it_could_not_be_read(tm
 
     result = json.loads(_text(asyncio.run(mcp.call_tool("report_phase", {"phase": "2"}))))
 
-    assert result == {"refreshed": False, "error": _UNREAD_HALF.format(dir=tmp_path / "process")}
+    assert result == {"refreshed": False, "error": _unread_said(tmp_path)}
     assert registry.current_phase() is None
     assert bridge.refreshes == 0, "«refreshed: false» is not a refresh"
     assert (tmp_path / "process" / "process-state.json").read_bytes() == b"{ half", "never written"
 
 
-#: What the agent is told about a `{ half` state (the G6+G7 review's M5): the cause in the read's
-#: words — a write cut off is not a hand edit gone wrong — and where the method names the repair.
+#: What the agent is told about a `{ half` state by a copy whose read has no `strict` (the G6+G7
+#: review's M5): the cause in TCC's own read's words, and no repair — that copy names none.
 _UNREAD_HALF = ("process-state.json could not be read: it is not valid JSON: Expecting property "
-                "name enclosed in double quotes: line 1 column 3 (char 2) -- the method's own read "
-                "names the repair: `state/process.py {dir} show`")
+                "name enclosed in double quotes: line 1 column 3 (char 2)")
+
+
+def _unread_said(project):
+    """What the agent is told of the project's unreadable state by a copy whose read is strict
+    (v3.1.2, K-2): the method's reason, and its repair after it (#219)."""
+    from autosound_tcc.state import process_view
+
+    said = process_view.unread(project)
+    assert said.repair
+    return f"process-state.json could not be read: {said.why} -- {said.repair}"
 
 
 def test_the_state_tcc_reports_says_why_the_file_did_not_read(tmp_path):
@@ -814,7 +823,9 @@ def test_the_state_tcc_reports_says_why_the_file_did_not_read(tmp_path):
 
     result = json.loads(_text(asyncio.run(mcp.call_tool("get_tcc_state", {}))))
 
-    assert result["process_state_error"] == _UNREAD_HALF.format(dir=tmp_path / "process")
+    # K-2 (#219): the method's own reason, and its repair — not a pointer at a verb to run.
+    assert "checkout HEAD -- process-state.json" in result["process_state_error"]
+    assert result["process_state_error"] == _unread_said(tmp_path)
     assert result["current_phase"] is None
     assert state.read_text(encoding="utf-8") == "{ half", "never written or moved aside"
 
@@ -841,7 +852,7 @@ def test_a_copy_of_the_method_that_names_no_repair_is_not_pointed_at(tmp_path, m
 
     result = json.loads(_text(asyncio.run(mcp.call_tool("get_tcc_state", {}))))
 
-    assert result["process_state_error"] == _UNREAD_HALF.split(" -- ")[0]
+    assert result["process_state_error"] == _UNREAD_HALF
 
 
 def test_a_recorded_move_over_a_state_that_then_does_not_read_keeps_the_reason(tmp_path,
@@ -862,7 +873,7 @@ def test_a_recorded_move_over_a_state_that_then_does_not_read_keeps_the_reason(t
     result = json.loads(_text(asyncio.run(mcp.call_tool("enter_phase", {"phase": "2"}))))
 
     assert result["recorded"] is True and result["active_phase"] is None, result
-    assert result["process_state_error"] == _UNREAD_HALF.format(dir=tmp_path / "process")
+    assert result["process_state_error"] == _unread_said(tmp_path)
 
 
 def test_write_mcp_config_merges_instead_of_clobbering(tmp_path, monkeypatch):

@@ -9,6 +9,7 @@ import pytest
 from autosound_tcc.core import vendor_loader
 from autosound_tcc.state import process_view
 from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import process_state_line
 from autosound_tcc.ui.tcc.process_state_line import Unread
 from tests._fresh import qt_loaded
 
@@ -55,11 +56,11 @@ def test_each_state_of_the_file_is_said_once_and_taken_back_when_it_reads(projec
     path.write_text("{ half", encoding="utf-8")
     assert guard.stops(strip, process_view.load_state(project), project)
     assert guard.stops(strip, process_view.load_state(project), project), "still: still stops"
-    half = i18n.t("processStateUnread").format(why=process_view.unreadable(project))
+    half = process_state_line.line(process_view.unread(project))
     assert strip.told == [("said", half, "warn")], "once per state, not per refresh"
     path.write_text("[]", encoding="utf-8")
     assert guard.stops(strip, process_view.load_state(project), project)
-    listed = i18n.t("processStateUnread").format(why=process_view.unreadable(project))
+    listed = process_state_line.line(process_view.unread(project))
     assert strip.told[1:] == [("withdrawn", half), ("said", listed, "warn")]
     assert len(app_log_warnings) == 2 and str(path) in app_log_warnings[0].getMessage()
 
@@ -79,3 +80,28 @@ def test_no_file_is_no_stop_and_a_file_that_reads_stops_in_silence(project, app_
     process_view.state_file(project).unlink()
     assert not guard.stops(strip, None, project)
     assert strip.told == [] and app_log_warnings == []
+
+
+def test_the_line_carries_the_methods_repair_and_the_plan_panel_hears_it(project):
+    """K-2 (#219): the strip said why the file does not read and nothing of how to mend it, though
+    the method names the repair; and the plan panel was not told at all, so at launch it said «No
+    plan yet» over a file with a plan in it. The repair is on the line, and the panel is handed
+    the refusal — and None once the file reads."""
+    path = process_view.state_file(project)
+    good = path.read_bytes()
+    guard, strip = Unread(), _Strip()
+    told: list = []
+    panel = type("Panel", (), {"set_unread": lambda self, said: told.append(said)})()
+
+    path.write_text("{ half", encoding="utf-8")
+    assert guard.stops(strip, process_view.load_state(project), project, panel=panel)
+
+    said = process_view.unread(project)
+    assert said.repair and said.repair in strip.told[0][1]
+    assert strip.told[0][1] == i18n.t("processStateUnread").format(why=said.why) + " " + i18n.t(
+        "processStateRepair").format(repair=said.repair)
+    assert told == [said]
+
+    path.write_bytes(good)
+    assert not guard.stops(strip, process_view.load_state(project), project, panel=panel)
+    assert told[-1] is None

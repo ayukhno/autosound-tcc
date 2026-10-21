@@ -438,6 +438,9 @@ class PlanPanel(QScrollArea):
         # started tuning showed seven invented phases with invented progress -- the same mistake
         # the dialog panel already refuses to make with demo bubbles. An empty plan says so.
         self._plan: tuple[PlanPhase, ...] | None = None
+        #: Why `process-state.json` does not read, when it does not (`process_view.StateUnread`):
+        #: said in place of «No plan yet» while no plan is on screen (K-2, #219).
+        self._unread = None
         self._body = QWidget()
         self._layout = QVBoxLayout(self._body)
         self._layout.setContentsMargins(8, 8, 8, 12)
@@ -449,6 +452,14 @@ class PlanPanel(QScrollArea):
         """Swap in the real plan, or None when the project has no process state yet."""
         self._plan = phases
         self.retranslate()
+
+    def set_unread(self, said) -> None:
+        """`process-state.json` does not read (`process_view.StateUnread`), or None once it does. A
+        plan on screen stays — the last one known to be true; a panel with none says why and the
+        method's repair, not «No plan yet» over a file with a plan in it (#219)."""
+        if said != self._unread:
+            self._unread = said
+            self.retranslate()
 
     def set_open_questions(self, questions) -> None:
         """Which intake facts the project still has open, keyed `<file>:<dotted.path>`.
@@ -478,6 +489,16 @@ class PlanPanel(QScrollArea):
     def plan(self) -> "tuple[PlanPhase, ...]":
         return self._plan if self._plan is not None else ()
 
+    def _empty_text(self) -> str:
+        """What an empty panel says: why the state does not read, and its repair, when it does not;
+        else «No plan yet» or «No project open»."""
+        said = self._unread
+        if said is None:
+            return i18n.t("planEmpty" if self._plan is None else "planNoProject")
+        text = i18n.t("planUnread").format(why=said.why)
+        return f"{text} {i18n.t('processStateRepair').format(repair=said.repair)}" if said.repair \
+            else text
+
     def retranslate(self) -> None:
         """Rebuild every phase/step row from the active plan + the progress overlay in the current
         language --
@@ -495,7 +516,7 @@ class PlanPanel(QScrollArea):
         if not plan:
             # Which of the two empty states this is matters: a project with no plan is waiting for
             # a session, a window with no project is waiting for a folder.
-            empty = QLabel(i18n.t("planEmpty" if self._plan is None else "planNoProject"))
+            empty = QLabel(self._empty_text())
             empty.setWordWrap(True)
             empty.setProperty("class", "muted")
             self._layout.addWidget(empty)

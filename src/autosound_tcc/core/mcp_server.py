@@ -54,7 +54,6 @@ import contextvars
 import ctypes
 import dataclasses
 import functools
-import inspect
 import json
 import logging
 import os
@@ -623,18 +622,17 @@ def build_server(
         answered with why, in the read's own words (the G6+G7 review's M5): a write in progress
         is asked again in a second, a broken edit is repaired — the method's own read names how,
         from the copy whose `load` takes `strict` (v3.1.2); an older one names none, and is not
-        pointed at. Never written or moved aside (R-bw).
+        pointed at. Never written or moved aside (R-bw). The repair itself, since #219 (K-2): the
+        method's strict read names it (`process_view.unread`), and it is said after the cause.
         """
         try:
             process = vendor_loader.load_process()
         except vendor_loader.VendorNotInitializedError as exc:
             return None, str(exc)
-        why = process_view.unreadable(project_dir)
-        if why is not None:
-            names = "strict" in inspect.signature(process.Process.load).parameters
-            return None, (f"process-state.json could not be read: {why}" + (
-                " -- the method's own read names the repair: `state/process.py "
-                f"{process_view.process_dir(project_dir)} show`" if names else ""))
+        said = process_view.unread(project_dir)
+        if said is not None:
+            return None, (f"process-state.json could not be read: {said.why}"
+                          + (f" -- {said.repair}" if said.repair else ""))
         return process.Process(str(project_dir / "process")).load(), None
 
     async def _confirm(request: ConfirmRequest) -> Confirmation:

@@ -79,6 +79,30 @@ def test_no_project_and_no_plan_say_different_things():
     )
 
 
+def test_a_plan_over_a_state_that_does_not_read_says_why_and_how_to_mend_it_not_no_plan_yet():
+    """K-2 (#219): at launch over a `process-state.json` that does not read, the plan said «No plan
+    yet» — the file is there, and the session has a plan in it. It says why it cannot be shown and
+    the method's repair; once a plan is on screen, the plan stays (the last one known to be true)."""
+    from autosound_tcc.state.process_view import StateUnread
+
+    _app()
+    panel = PlanPanel()
+    said = StateUnread("it is empty -- a write was cut off", "restore the last committed copy")
+
+    panel.set_unread(said)
+
+    texts = [label.text() for label in panel.widget().findChildren(QLabel)]
+    assert any(said.why in text and said.repair in text for text in texts), texts
+    assert not any(i18n.t("planEmpty") in text for text in texts)
+
+    panel.set_plan(PLAN)
+    assert len(panel.widget().findChildren(_PhaseRow)) == len(PLAN), "a plan on screen stays"
+
+    panel.set_plan(None)
+    panel.set_unread(None)
+    assert any(i18n.t("planEmpty") in label.text() for label in panel.widget().findChildren(QLabel))
+
+
 def test_retranslate_does_not_leave_stale_rows_behind():
     """Regression: see test_dialog_panel.py's identical-shaped test -- deleteLater() alone
     without setParent(None) first leaves the old rows as real children until the event loop
