@@ -17,6 +17,7 @@ Nothing here imports Qt.
 
 from __future__ import annotations
 
+import re
 import threading
 from pathlib import Path
 from typing import Optional
@@ -74,6 +75,14 @@ def has(feature: tuple[str, str], project_dir: Optional[Path | str] = None) -> b
     be read holds nothing."""
     text = _text(_script(feature, project_dir))
     return text is not None and feature[1] in text
+
+
+def stated_number(script: Path, name: str) -> Optional[int]:
+    """The integer a script's text assigns to the module constant `name` (`PROBE_WAIT_S = 60`), or
+    None: a copy that does not state it, or cannot be read (#232)."""
+    text = _text(script)
+    found = re.search(rf"^{re.escape(name)}\s*=\s*(\d+)\b", text or "", re.MULTILINE)
+    return int(found.group(1)) if found else None
 
 
 def unreadable(project_dir: Optional[Path | str] = None) -> Optional[Path]:

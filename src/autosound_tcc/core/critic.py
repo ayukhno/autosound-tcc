@@ -34,9 +34,17 @@ from pathlib import Path, PureWindowsPath
 from typing import Mapping, Optional
 
 from autosound_tcc.core import app_log, child, codex_cli
-from autosound_tcc.core import config, vendor_loader
+from autosound_tcc.core import config, method_features, vendor_loader
 
 DEFAULT_TIMEOUT_S = 600.0
+#: TCC waits this much longer than the method does, so the method's own timeout message and advice
+#: reach the screen before TCC's kill (#232).
+METHOD_MARGIN_S = 60.0
+#: The longest review a session's MCP tool call waits for: a fixed bound, as the package's size is
+#: not known when the session starts. 2400 s = probe 60 + margin 60 + 25 s per KB up to ~90 KB of
+#: prompt, beyond the largest package seen (31 KB, 776 s). The MCP timeouts of `omp_session` and
+#: `codex_session` sit a minute above it, so a review's own wait always ends first (#232).
+LONGEST_REVIEW_S = 2400.0
 # The script prints this as its last stdout line on a real answer: `— [critic: Gemini 3.1 Pro]`.
 _MODEL_MARKER = re.compile(r"^—\s*\[(?P<role>\w+):\s*(?P<model>.+?)\]\s*$", re.MULTILINE)
 _CLIPBOARD_MARKER = "CLIPBOARD MODE"
@@ -476,6 +484,33 @@ def via_of(harness: str) -> str:
     return "cli" if route in _LOGIN_ROUTES else ""
 
 
+def review_wait(script: Path, package_bytes: int, harness: str = "",
+                env: Optional[Mapping[str, str]] = None) -> float:
+    """How long TCC waits for a review: the method's own wait, from the copy's text, plus a margin (#232).
+
+    The method waits `PROBE_WAIT_S` for a one-line probe before an agy package, then `cli_wait`:
+    `AUTOSOUND_CLI_TIMEOUT` when set, else `max(CLI_WAIT_MIN_S, CLI_WAIT_PER_KB_S * KB)`. A copy that
+    states none of it (no probe: 0) keeps `DEFAULT_TIMEOUT_S`, as before."""
+    minimum = method_features.stated_number(script, "CLI_WAIT_MIN_S")
+    per_kb = method_features.stated_number(script, "CLI_WAIT_PER_KB_S")
+    probe = method_features.stated_number(script, "PROBE_WAIT_S") if harness == "agy" else None
+    said = ((env if env is not None else os.environ).get("AUTOSOUND_CLI_TIMEOUT") or "").strip()
+    try:
+        fixed = float(int(said)) if said else None
+    except ValueError:
+        fixed = None
+    if fixed is None and minimum is None and per_kb is None:
+        return DEFAULT_TIMEOUT_S
+    if fixed is None:
+        fixed = max(float(minimum or 0), float(per_kb or 0) * package_bytes / 1024)
+    return float(probe or 0) + fixed + METHOD_MARGIN_S
+
+
+def doctor_wait(script: Path) -> float:
+    """What `doctor` is given: its own checks (60 s, as before) plus the live call's `PROBE_WAIT_S`."""
+    return 60.0 + float(method_features.stated_number(script, "PROBE_WAIT_S") or 0)
+
+
 def run(
     package: str,
     project_dir: Optional[Path] = None,
@@ -483,7 +518,7 @@ def run(
     role: str = "critic",
     model: Optional[str] = None,
     harness: str = "",
-    timeout_s: float = DEFAULT_TIMEOUT_S,
+    timeout_s: Optional[float] = None,
     python_executable: Optional[str] = None,
     extra_env: Optional[Mapping[str, str]] = None,
     via: str = "",
@@ -589,6 +624,12 @@ def run(
         model or "(the script's default)",
         "--model" if by_flag else "GEMINI_CRITIC_MODEL" if model else "none sent",
         harness, os.environ.get("GEMINI_BIN"))
+    if timeout_s is None:
+        try:
+            size = package_path.stat().st_size
+        except OSError:
+            size = len(package.encode("utf-8"))
+        timeout_s = review_wait(script_path(), size, harness, env)
     try:
         # Bounded on Windows too: `subprocess.run` there waits with no bound for pipes a
         # grandchild holds after the kill (tcc#132, F16-1).
@@ -1062,7 +1103,7 @@ def doctor(project_dir: Optional[Path] = None, python_executable: Optional[str] 
     project_dir = Path(project_dir or config.project_dir())
     try:
         proc = child.run_bounded(  # bounded on Windows too (F16-1)
-            [python_executable, str(script_path()), "doctor"], timeout=60,
+            [python_executable, str(script_path()), "doctor"], timeout=doctor_wait(script_path()),
             cwd=str(project_dir), text=True, encoding="utf-8", errors="replace",
             env=vendor_loader.child_env(**critic_bin_override()),  # TCC-002, as above
             **child.quiet(),

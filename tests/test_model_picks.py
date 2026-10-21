@@ -81,7 +81,7 @@ def test_the_gone_check_follows_an_alias_as_the_pick_does():
 
 API_PICK = Choice(harness="api", model="gemini-3.1-pro-preview", label="gemini-3.1-pro-preview",
                   provider="google")
-FLASH = Choice(harness="agy", model="gemini-3.8-flash-high", label="Gemini 3.8 Flash (High)",
+FLASH = Choice(harness="agy", model="gemini-3.8-flash-medium", label="Gemini 3.8 Flash (Medium)",
                provider="google")
 PRO = Choice(harness="agy", model="gemini-3.1-pro-high", label="Gemini 3.1 Pro (High)",
              provider="google")
@@ -115,7 +115,7 @@ def test_installed_is_said_until_the_sign_in_was_checked(agy_by_adc):
 
     availability.succeeded(FLASH.key)  # it answered this launch
     notes, _ = model_picks.critic_notes(API_PICK.key, [API_PICK, PRO, FLASH], None)
-    assert any(n.tip == "criticSignedInRoute" and "AGY · Gemini 3.8 Flash (High)" in
+    assert any(n.tip == "criticSignedInRoute" and "AGY · Gemini 3.8 Flash (Medium)" in
                n.args["instead"] for n in notes)
 
 

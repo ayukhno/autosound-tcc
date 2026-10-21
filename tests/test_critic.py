@@ -1826,3 +1826,62 @@ def test_a_codex_refusal_that_does_not_name_the_model_does_not_send_to_another_m
 
     assert fix.startswith("Codex: You have hit your usage limit.")
     assert "Pick another Codex model" not in fix
+
+
+# ---- TCC waits as long as the method does (tcc#232) --------------------------------------------
+
+_METHOD_WITH_PROBE = "CLI_WAIT_MIN_S = 600\nCLI_WAIT_PER_KB_S = 25\nPROBE_WAIT_S = 60\n"
+
+
+def _timeouts_seen(monkeypatch, tmp_path, script_text, size_kb, harness="agy", env=None):
+    critic = _reviewer_ready(monkeypatch, tmp_path)
+    (tmp_path / "autosound_ai.py").write_text(script_text, encoding="utf-8")
+    monkeypatch.delenv("AUTOSOUND_CLI_TIMEOUT", raising=False)
+    for key, value in (env or {}).items():
+        monkeypatch.setenv(key, value)
+    seen = []
+
+    def capture(_argv, **kwargs):
+        seen.append(kwargs["timeout"])
+        raise OSError("not running the reviewer in a test")
+
+    monkeypatch.setattr(critic.child, "run_bounded", capture)
+    critic.run("x" * int(size_kb * 1024), project_dir=tmp_path, role="ask", harness=harness)
+    critic.doctor(tmp_path, python_executable="python")
+    return seen
+
+
+def test_a_review_waits_for_the_methods_probe_and_cli_wait_and_a_margin(tmp_path, monkeypatch):
+    small, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1)
+    big, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 40)
+    assert small == 60 + 600 + 60      # probe + cli_wait's floor + margin
+    assert big == 60 + 25 * 40 + 60    # probe + 25 s per KB + margin
+
+
+def test_a_review_not_through_agy_has_no_probe_in_its_wait(tmp_path, monkeypatch):
+    seen, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1, harness="codex")
+    assert seen == 600 + 60
+
+
+def test_a_review_honours_the_methods_cli_timeout_variable(tmp_path, monkeypatch):
+    seen, _ = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 40,
+                             env={"AUTOSOUND_CLI_TIMEOUT": "900"})
+    assert seen == 60 + 900 + 60
+
+
+def test_a_copy_that_states_no_waits_keeps_todays_review_and_doctor_wait(tmp_path, monkeypatch):
+    review, doctor = _timeouts_seen(monkeypatch, tmp_path, "# an older copy\n", 40)
+    assert review == critic.DEFAULT_TIMEOUT_S == 600.0
+    assert doctor == 60
+
+
+def test_doctor_waits_for_the_methods_probe_by_itself(tmp_path, monkeypatch):
+    _, doctor = _timeouts_seen(monkeypatch, tmp_path, _METHOD_WITH_PROBE, 1)
+    assert doctor >= 60 + 60
+
+
+def test_a_sessions_tool_wait_outlasts_the_longest_review():
+    from autosound_tcc.core import codex_session, omp_session
+
+    assert omp_session.OMP_TOOL_TIMEOUT_MS > critic.LONGEST_REVIEW_S * 1000
+    assert codex_session.TOOL_TIMEOUT_S > critic.LONGEST_REVIEW_S

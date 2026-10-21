@@ -732,8 +732,9 @@ def _agy_env() -> Optional[dict]:
 
 #: The reviewer the method names for agy under Google Cloud's ADC (hub #235): there agy offers
 #: Gemini 3.6–3.8 Flash in three tiers and 3.1 Pro only at `low` (`setup-critic-channel.md`, «Or
-#: sign in through Google Cloud's ADC»).
-ADC_REVIEWER = "gemini-3.8-flash-high"
+#: sign in through Google Cloud's ADC»). `-medium` since the method's v3.2.0 (skill #193, tcc#232):
+#: under ADC `-high` stays silent 90–180 s and more, even on one line, and `-medium` answers in 9 s.
+ADC_REVIEWER = "gemini-3.8-flash-medium"
 
 
 def agy_on_adc() -> bool:

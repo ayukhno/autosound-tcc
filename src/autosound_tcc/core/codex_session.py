@@ -61,7 +61,7 @@ SILENCE_WARN_S = 120.0
 REQUEST_TIMEOUT_S = 60.0
 #: How long Codex waits for one of TCC's MCP tools: above a confirmation's and a review's limits —
 #: Codex's own ~60 s default would cut either (omp's `OMP_TOOL_TIMEOUT_MS`, for the same reason).
-TOOL_TIMEOUT_S = int(max(CONFIRM_TIMEOUT_S, critic.DEFAULT_TIMEOUT_S) + 60)
+TOOL_TIMEOUT_S = int(max(CONFIRM_TIMEOUT_S, critic.LONGEST_REVIEW_S) + 60)
 
 #: How long a request swept at the turn's end waits for Codex's own withdrawal before TCC declines it.
 SWEEP_DECLINE_S = 1.0

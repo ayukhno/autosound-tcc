@@ -1110,15 +1110,15 @@ def test_tccs_own_agy_models_inherits_as_before_without_an_adc_line(monkeypatch)
     assert envs == [None]
 
 
-def _adc_flash_high():
+def _adc_flash_medium():
     from autosound_tcc.core import model_choices as mc
 
-    return mc.Choice(harness="agy", model="gemini-3.8-flash-high", label="Gemini 3.8 Flash (High)")
+    return mc.Choice(harness="agy", model="gemini-3.8-flash-medium", label="Gemini 3.8 Flash (Medium)")
 
 
 def test_under_adc_the_methods_reviewer_is_recommended_not_cautioned(monkeypatch):
     """hub #235, tcc#135: under Google Cloud's ADC agy offers Flash in three tiers and Pro only at
-    `low`, and the method names `gemini-3.8-flash-high` as the reviewer there
+    `low`, and the method names `gemini-3.8-flash-medium` as the reviewer there
     (`setup-critic-channel.md`). TCC's Pro-only recommendation and its Flash caution (tcc#118)
     would call the one reviewer the method sends an ADC user to «not recommended»."""
     from autosound_tcc.core import model_choices as mc
@@ -1126,8 +1126,8 @@ def test_under_adc_the_methods_reviewer_is_recommended_not_cautioned(monkeypatch
     monkeypatch.delenv("AGY_ADC_AUTH", raising=False)
     _write_critic_env("AGY_ADC_AUTH=true\n")
 
-    assert mc.recommended(_adc_flash_high(), critic=True)
-    assert mc.reviewer_caution(_adc_flash_high()) == ""
+    assert mc.recommended(_adc_flash_medium(), critic=True)
+    assert mc.reviewer_caution(_adc_flash_medium()) == ""
     low = mc.Choice(harness="agy", model="gemini-3.8-flash-low", label="Gemini 3.8 Flash (Low)")
     assert not mc.recommended(low, critic=True)
     assert mc.reviewer_caution(low) == mc.REVIEWER_CAUTION_FLASH
@@ -1139,8 +1139,8 @@ def test_without_adc_flash_stays_cautioned(monkeypatch):
     monkeypatch.delenv("AGY_ADC_AUTH", raising=False)
     _write_critic_env("AUTOSOUND_CRITIC_MODEL=x\n")
 
-    assert not mc.recommended(_adc_flash_high(), critic=True)
-    assert mc.reviewer_caution(_adc_flash_high()) == mc.REVIEWER_CAUTION_FLASH
+    assert not mc.recommended(_adc_flash_medium(), critic=True)
+    assert mc.reviewer_caution(_adc_flash_medium()) == mc.REVIEWER_CAUTION_FLASH
 
 
 def test_adc_from_the_environment_counts_as_well(monkeypatch):
@@ -1149,7 +1149,7 @@ def test_adc_from_the_environment_counts_as_well(monkeypatch):
     _write_critic_env("")
     monkeypatch.setenv("AGY_ADC_AUTH", "true")
 
-    assert mc.recommended(_adc_flash_high(), critic=True)
+    assert mc.recommended(_adc_flash_medium(), critic=True)
 
 
 def test_an_adc_line_added_while_tcc_runs_is_read_without_a_restart(monkeypatch):
@@ -1162,14 +1162,14 @@ def test_an_adc_line_added_while_tcc_runs_is_read_without_a_restart(monkeypatch)
 
     monkeypatch.delenv("AGY_ADC_AUTH", raising=False)
     _write_critic_env("AUTOSOUND_CRITIC_MODEL=x\n")
-    assert mc.reviewer_caution(_adc_flash_high()) == mc.REVIEWER_CAUTION_FLASH
+    assert mc.reviewer_caution(_adc_flash_medium()) == mc.REVIEWER_CAUTION_FLASH
 
     path = critic_env.machine_config_path()
     path.write_text("AUTOSOUND_CRITIC_MODEL=x\nAGY_ADC_AUTH=true\n", encoding="utf-8")  # an editor
     stat = path.stat()  # a later stamp, as an edit a moment later gets on any file system
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
 
-    assert mc.reviewer_caution(_adc_flash_high()) == ""
+    assert mc.reviewer_caution(_adc_flash_medium()) == ""
 
 
 def test_critic_env_read_in_one_place_is_not_the_answer_for_another(monkeypatch, tmp_path):
@@ -1513,3 +1513,15 @@ def test_a_forced_refresh_in_the_suite_runs_no_real_cli(monkeypatch):
     mc.refresh_cli_catalogue(force=True)
 
     assert spawned == []
+
+
+def test_the_adc_reviewer_is_the_medium_tier_and_high_is_not_it(monkeypatch):
+    """tcc#232 (skill #193): under ADC `-high` stays silent 90-180 s; the method names `-medium`."""
+    from autosound_tcc.core import model_choices as mc
+
+    monkeypatch.setattr(mc, "agy_on_adc", lambda: True)
+    high = mc.Choice(harness="agy", model="gemini-3.8-flash-high", label="Gemini 3.8 Flash (High)")
+    assert mc.ADC_REVIEWER == "gemini-3.8-flash-medium"
+    assert mc.recommended(_adc_flash_medium(), critic=True)
+    assert not mc.recommended(high, critic=True)
+    assert mc.reviewer_caution(high) == mc.REVIEWER_CAUTION_FLASH

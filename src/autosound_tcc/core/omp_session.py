@@ -235,10 +235,10 @@ FRAME_LOG = "omp-frames.jsonl"
 FRAME_LIMIT_BYTES = 64 * 1024 * 1024
 
 #: How long omp waits for one of TCC's MCP tools. omp aborts an MCP request after
-#: `OMP_MCP_TIMEOUT_MS`, 30 000 ms by default, and a review is allowed `critic.DEFAULT_TIMEOUT_S`:
+#: `OMP_MCP_TIMEOUT_MS`, 30 000 ms by default, and a review is allowed up to `critic.LONGEST_REVIEW_S`:
 #: the session's `call_critic` was cut ~30 s in and read as «збій транспорту MCP» while the reviewer
-#: still worked (finding 97, tcc#85). A minute over the review's own limit, so the review decides.
-OMP_TOOL_TIMEOUT_MS = int((critic.DEFAULT_TIMEOUT_S + 60) * 1000)
+#: still worked (finding 97, tcc#85). A minute over the longest review's limit, so the review decides.
+OMP_TOOL_TIMEOUT_MS = int((critic.LONGEST_REVIEW_S + 60) * 1000)
 FRAME_LOG_MAX_BYTES = 4_000_000
 # Big frames are shrunk field by field rather than by cutting the line, so every line parses --
 # see `_shrink`.
