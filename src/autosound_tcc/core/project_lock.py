@@ -86,15 +86,21 @@ def _key(project_dir: Path | str) -> tuple[int, int] | Path:
     for a folder made while its lock was held by path — not there when the hold began, made inside
     it by the legacy flock's `mkdir` or by the method's first write. Its identity then names the
     path it was keyed by, so a second writer, or the same thread asking again, meets the same lock
-    (#218 review). Found by the folder's identity among the path-keyed locks held now, and kept."""
+    (#218 review). Found by the folder's identity among the path-keyed locks held now, and kept.
+
+    A kept alias is used only while its path is still that folder: renamed, or deleted and another
+    folder made reusing its inode (APFS and ext4 do), it names another folder, and is dropped. The
+    held path is looked for before the identity's own lock, so a folder deleted and made again
+    inside a hold, on an inode an earlier folder's lock still keys, stays the one lock."""
     key = _folder(project_dir)
     if isinstance(key, Path):
         return key
     with _THREAD_LOCKS_GUARD:
-        if key in _ALIASES:
-            return _ALIASES[key]
-        if key in _THREAD_LOCKS:
-            return key
+        alias = _ALIASES.get(key)
+        if alias is not None:
+            if _identity(alias) == key:
+                return alias
+            del _ALIASES[key]
         for other, lock in _THREAD_LOCKS.items():
             if isinstance(other, Path) and lock.locked() and _identity(other) == key:
                 _ALIASES[key] = other

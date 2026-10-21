@@ -464,3 +464,40 @@ def test_a_folder_made_inside_a_hold_stays_one_lock(tmp_path):
             _in_another_thread(lambda: project_lock.hold(car, timeout_s=0.2, cross_process=False))
     with project_lock.hold(car, timeout_s=0, cross_process=False):  # given back, by either key
         pass
+
+
+def test_an_alias_whose_folder_was_renamed_no_longer_joins_its_new_name_to_the_old_lock(tmp_path):
+    """The alias a folder made inside a hold leaves (`_key`) names it by identity. Renamed, that
+    identity is another path's, and the old name may be a new project: the alias is checked against
+    the folder it names before it is used, and dropped when they differ (#218 re-review)."""
+    car, moved = tmp_path / "car", tmp_path / "moved"
+
+    with project_lock.hold(car, timeout_s=0, cross_process=False):
+        car.mkdir()
+        assert project_lock._key(car) == car.resolve(), "made inside the hold: keyed by its path"
+    car.rename(moved)
+
+    with _held_by_another_thread(project_lock.hold(car, timeout_s=5, cross_process=False)):
+        with project_lock.hold(moved, timeout_s=0.2, cross_process=False):
+            pass  # `moved` is not `car` any more: it does not wait on `car`'s lock
+
+
+def test_a_folder_deleted_and_remade_inside_a_hold_stays_one_lock(tmp_path, monkeypatch):
+    """Deleted and made again inside a hold, a folder can come back with an inode an earlier folder
+    had — APFS and ext4 reuse them — whose lock this process still keeps. The held path's lock is
+    looked for first, so the remade folder is still the one lock (#218 re-review)."""
+    car = tmp_path / "car"
+
+    with project_lock.hold(car, timeout_s=0, cross_process=False):
+        car.mkdir()
+        car.rmdir()
+        car.mkdir()
+        info = os.stat(car)
+        # The lock an earlier folder with this inode left in this process.
+        monkeypatch.setitem(project_lock._THREAD_LOCKS, (info.st_dev, info.st_ino),
+                            threading.Lock())
+        with pytest.raises(project_lock.LockTimeout, match="this thread already holds"):
+            with project_lock.hold(car, timeout_s=0):
+                pass
+        with pytest.raises(project_lock.LockTimeout, match="thread lock"):
+            _in_another_thread(lambda: project_lock.hold(car, timeout_s=0.2, cross_process=False))
