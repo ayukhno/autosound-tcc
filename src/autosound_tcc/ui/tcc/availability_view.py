@@ -68,7 +68,7 @@ def detail(state: availability.Status, choice) -> str:
 
 
 def mark_missing(combo, entries, warn: bool = False, reviewer: bool = False,
-                 ok: bool = False) -> None:
+                 ok: bool = False, refused: bool = False) -> None:
     """Red when the current choice is not among `entries`, plain when it is.
 
     Recomputed on every selection change, not only when the list is rebuilt. It was set once at
@@ -78,7 +78,8 @@ def mark_missing(combo, entries, warn: bool = False, reviewer: bool = False,
     `warn` is the other tint — the choice exists but is not what it appears to be — and it is
     passed in rather than applied by the caller afterwards because both write the same `class`
     property: whoever wrote second used to erase the other's answer. `ok` is the green the main
-    AI's check gives a pick its route lists for this login (tcc#222), never over red or a warning.
+    AI's check gives a pick its route lists for this login (tcc#222), never over red or a warning;
+    `refused` is that check's red — a pick the login does not list, or a signed-out route.
     """
     current = str(combo.currentData() or "")
     # A route whose CLI is not installed counts as missing here, even though its row is now on the
@@ -92,7 +93,8 @@ def mark_missing(combo, entries, warn: bool = False, reviewer: bool = False,
         state = availability.status(choice, reviewer=reviewer)
         return choice.available and (state.ready or state.reason == availability.NOT_CHECKED)
 
-    missing = bool(current) and not any(choice.key == current and runs(choice) for choice in entries)
+    missing = refused or (bool(current) and not any(
+        choice.key == current and runs(choice) for choice in entries))
     classes = "mini-select" + (" is-missing" if missing else "") + (" is-warn" if warn else "")
     if ok and not (missing or warn):
         classes += " is-ok"

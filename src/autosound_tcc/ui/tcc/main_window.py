@@ -4526,7 +4526,7 @@ class MainWindow(QMainWindow):
         self._main_warn_tip.set_text(note)
         self._main_warn_detail = f"{note}\n\n{tip}" if note else ""
         _mark_missing(self._ai_main_combo, self._model_choices, warn=bool(note),
-                      ok=self._gen_check.ok())
+                      **self._gen_check.tint())
 
     def _explain_main_warning(self) -> None:
         if not self._main_warn_detail:

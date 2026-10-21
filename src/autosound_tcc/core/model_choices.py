@@ -700,6 +700,12 @@ def read_route_list(harness: str) -> tuple[list[Choice], str]:
     return rows, _LIST_WHY.get(route, "") or ("" if rows else f"{harness} listed no models")
 
 
+def read_in_part(harness: str) -> bool:
+    """Whether the route's last list came with rows that could not be read (`_PARTIAL`): a model
+    missing from it may be one of those, not a model this login lacks (the group review of #222)."""
+    return (_SDK_CLI_ROUTE if harness == "sdk" else harness) in _PARTIAL
+
+
 #: What agy needs from the method's machine file to sign in through Google Cloud's ADC (tcc#135,
 #: hub #235): the method's one carrier is `AGY_ADC_AUTH=true` in critic-env, which every run of the
 #: method reads (`setup-critic-channel.md`). TCC's own `agy models` runs agy directly, and a TCC

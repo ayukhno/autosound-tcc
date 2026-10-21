@@ -31,6 +31,9 @@ NOT_LISTED = "not_listed"
 SIGN_IN = availability.SIGN_IN
 #: The route was asked and gave no list: why is the detail.
 UNREAD = "unread"
+#: The list came with rows that could not be read, and the pick is not among those that could:
+#: it may be one of the others, so it is neither listed nor refused (the group review).
+PARTIAL = "partial"
 NOT_CHECKED = availability.NOT_CHECKED
 
 
@@ -57,8 +60,9 @@ def run(choice) -> Result:
         return Result(key, SIGN_IN, at=at)
     if not rows:
         return Result(key, UNREAD, why, at)
-    listed = any(row.model == choice.model for row in rows)
-    return Result(key, LISTED if listed else NOT_LISTED, at=at)
+    if any(row.model == choice.model for row in rows):
+        return Result(key, LISTED, at=at)
+    return Result(key, PARTIAL if model_choices.read_in_part(choice.harness) else NOT_LISTED, at=at)
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,8 @@ def shown(choice, result: Optional[Result], checking: bool) -> Shown:
         return Shown("mainCheckNotListed", "mainCheckNotListedTip", args, "missing")
     if result.state == SIGN_IN:
         return Shown("availPhraseSignIn", "mainCheckSignInTip", args, "missing")
+    if result.state == PARTIAL:
+        return Shown("mainCheckNotChecked", "mainCheckPartialTip", args)
     args["why"] = result.detail or "?"
     return Shown("mainCheckNotChecked", "mainCheckUnreadTip", args)
 
@@ -99,12 +105,20 @@ class Checks:
 
     `picked` says which key to start a check for now (None: nothing to ask, or one is running —
     then the newest pick is asked when it ends, `ended`). `answered` keeps a result only when it is
-    for the pick still on screen: a slow answer for an earlier pick must not paint the new one."""
+    for the pick still on screen: a slow answer for an earlier pick must not paint the new one.
+
+    A check runs from its start to its thread's end (`ended`), not to its answer: the answer comes
+    at `done`, with the thread still unwinding until `finished`, and a pick between the two started
+    a second thread and dropped the first one's last reference (the group review)."""
 
     def __init__(self) -> None:
         self.running = ""
+        #: The key whose answer is still to come — the line says «checking» for it.
+        self.asking = ""
         self.waiting = False
         self.result: Optional[Result] = None
+        #: The running check's answer was kept for the pick on screen.
+        self._kept = False
 
     def picked(self, choice) -> Optional[str]:
         if choice is None or choice.harness not in CHECKABLE:
@@ -112,25 +126,29 @@ class Checks:
         if self.running:
             self.waiting = True
             return None
-        self.running = choice.key
+        self.running = self.asking = choice.key
+        self._kept = False
         return choice.key
 
     def checking(self, choice) -> bool:
-        return choice is not None and (self.running == choice.key or (
+        return choice is not None and (self.asking == choice.key or (
             self.waiting and choice.harness in CHECKABLE))
 
     def answered(self, result: Result, current: Optional[str]) -> bool:
-        self.running = ""
+        self.asking = ""
         if result.key != current:
             return False
         self.result = result
+        self._kept = True
         return True
 
     def ended(self, choice) -> Optional[str]:
         """The check's thread is over: the pick that waited for it, if any, to ask now."""
+        self.running = ""
+        kept, self._kept = self._kept, False
         if not self.waiting:
             return None
         self.waiting = False
-        if choice is not None and self.result is not None and self.result.key == choice.key:
-            return None  # the answer that came in was already this pick's
+        if kept and choice is not None and self.result.key == choice.key:
+            return None  # the answer that just came in was this pick's — not one from before
         return self.picked(choice)
