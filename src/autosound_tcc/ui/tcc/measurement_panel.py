@@ -379,6 +379,7 @@ class _LedgerWriteWorker(QThread):
                 # (2026-09-06), and what came in is recorded as unplanned rather than against a
                 # list TCC made up. Which refusals say «no list», and which propagate to be refused
                 # whole below: `_retries_without_plan`.
+                unplanned = ""
                 try:
                     said = process_writer.start_capture(
                         self._project_dir, str(self._version), [], origin=self._origin,
@@ -388,9 +389,10 @@ class _LedgerWriteWorker(QThread):
                         raise
                     said = process_writer.start_capture(
                         self._project_dir, str(self._version), [], origin=self._origin)
-                    # Only once the round opened: a retry refused too (a copy older than both
-                    # `--plan` and `--origin`) opened none, and is said as refused alone (M37).
-                    result["unplanned"] = self._why(exc)
+                    # Said only once the round opened AND is named (below): a retry refused too (a
+                    # copy older than both `--plan` and `--origin`) opened none, and is said as
+                    # refused alone (M37); one whose answer names none recorded nothing (#218).
+                    unplanned = self._why(exc)
                 # The round the verb itself opened, as it printed it — not `process-state.json`
                 # read after it, outside any lock: a session's `capture-start` between the two
                 # made that read the session's round, and this pass went into it (#218). An
@@ -402,6 +404,7 @@ class _LedgerWriteWorker(QThread):
                     raise process_writer.ProcessWriterError(
                         i18n.t("capRoundUnread").format(said=first))
                 result["round_id"] = result["opened"] = opened
+                result["unplanned"] = unplanned
             except Exception as exc:  # noqa: BLE001 — the gate's words, not ours
                 # Without a round there is nowhere for the rest to go. The measurements are in the
                 # project's own store either way (`capture_import.record_imported` ran first).

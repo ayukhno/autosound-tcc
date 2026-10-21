@@ -2212,6 +2212,37 @@ def test_a_round_whose_id_the_method_did_not_print_is_refused_not_read_back(tmp_
     assert seen["refused"] == [i18n.t("capRoundUnread").format(said="plan: written")], seen
 
 
+def test_a_retry_without_plan_whose_round_is_unnamed_is_not_said_as_unplanned(tmp_path, monkeypatch):
+    """#218's review, minor 1: on the `--plan` retry the method's «cannot plan» reason was kept as
+    «recorded as unplanned» BEFORE the retry's answer was read for the round's id. An answer naming
+    none then said both «recorded as unplanned» and «did not take it» — for a pass recorded
+    nowhere. The reason is said only once the round is named."""
+    from autosound_tcc.core import process_writer
+    from autosound_tcc.ui.tcc import measurement_panel as mp
+    from autosound_tcc.ui.tcc.measurement_panel import _LedgerWriteWorker
+
+    _app()
+    calls = _ledger_calls(monkeypatch)
+
+    def _start(d, v, e, step="", origin="", plan=False, **_kw):
+        calls.append(("start", v, tuple(e), origin, plan))
+        if plan:
+            raise process_writer.ProcessWriterError("refused:\n--plan needs the phase")
+        return "plan: written"
+
+    monkeypatch.setattr(mp.process_writer, "start_capture", _start)
+    worker = _LedgerWriteWorker(project_dir=tmp_path, round_id="", version=6,
+                                expected=["w-L_6 (sw)"], titles=["w-L_6 (sw)"], protective={})
+    seen: dict = {}
+    worker.done.connect(seen.update)
+
+    worker.run()
+
+    assert seen["refused"] == [i18n.t("capRoundUnread").format(said="plan: written")], seen
+    assert seen["unplanned"] == "" and seen["opened"] == "", seen
+    assert not [c for c in calls if c[0] == "taken"], "nothing recorded, into no round"
+
+
 def test_an_import_writes_into_the_round_it_opened_itself(tmp_path, monkeypatch):
     """A pass with no round open opens its own, and its writes are asked with THAT round: the one
     TCC opened is the one they go to, or none."""
