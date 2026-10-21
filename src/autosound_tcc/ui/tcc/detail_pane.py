@@ -779,7 +779,6 @@ class EqBandCard(QFrame):
 
         values = {key: (name, _band_value(key, band))
                   for key, name in (("freq", "Freq"), ("q", "Q"), ("gain", "Gain"))}
-        self._field_names = [values[key][0] for key in order]
         self._changed_labels: list = []
         for key, (label, value) in ((key, values[key]) for key in order):
             row = QWidget()
@@ -812,9 +811,6 @@ class EqBandCard(QFrame):
         apply_caps(self._byp, spacing_px=0.8)
         self._byp.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._byp)
-
-    def field_names(self) -> list:
-        return list(self._field_names)
 
     def changed_fields(self) -> list:
         """The value rows drawn as changed, by their names («Gain», «Q»)."""

@@ -809,6 +809,14 @@ def test_a_bypassed_band_says_so_and_an_old_band_without_the_field_is_on():
     assert "on" not in old._byp.property("class").split() and old._byp.text().startswith("○")
 
 
+def _card_labels(card) -> list:
+    """The field names a band card draws, top to bottom (creation order is layout order)."""
+    from PySide6.QtWidgets import QLabel
+
+    return [label.text() for label in card.findChildren(QLabel)
+            if label.property("class") == "band-fk"]
+
+
 def test_the_fields_follow_the_processor_s_own_order():
     """Finding 68: a Helix reads Freq · Gain · Q (PC-Tool), a MUSWAY Freq · Q · Gain."""
     from autosound_tcc.ui.tcc.detail_pane import EqBandCard, eq_field_order
@@ -817,8 +825,8 @@ def test_the_fields_follow_the_processor_s_own_order():
     band = EqBand(type="PK", freq_hz=114.0, gain_db=-10, q=5)
     helix = EqBandCard(band, order=eq_field_order("Audiotec-Fischer", "Helix DSP Ultra S"))
     musway = EqBandCard(band, order=eq_field_order("MUSWAY", "M6v8"))
-    assert helix.field_names() == ["Freq", "Gain", "Q"]
-    assert musway.field_names() == ["Freq", "Q", "Gain"]
+    assert _card_labels(helix) == ["Freq", "Gain", "Q"]
+    assert _card_labels(musway) == ["Freq", "Q", "Gain"]
 
 
 def test_cards_follow_the_band_numbers_and_an_empty_slot_draws_nothing():

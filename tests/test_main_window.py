@@ -7250,19 +7250,34 @@ def test_a_repaired_file_s_version_keeps_its_hover_through_a_language_switch(
 
 def test_the_eq_card_order_is_a_setting_the_processor_s_by_default(monkeypatch):
     """Finding 70 (tcc#67): the field order as a TCC setting, not only the vendor's rule (68)."""
+    from PySide6.QtWidgets import QLabel
+
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
     from autosound_tcc.ui.tcc import main_window as mw
+
+    def drawn_order():
+        """The field names of the open EQ card, as the person reads them, left to right."""
+        card = window._detail._scroll.widget()
+        return [label.text() for label in card.findChildren(QLabel)
+                if label.property("class") == "band-fk"]
 
     _app()
     window = MainWindow()
     _KEEP_WINDOWS.append(window)
+    group = ProfileGroup(id="physical_outputs", label="Output", fields=("eq",), rows=(
+        GroupRow(id="m-L", name="m-L", slot="E",
+                 raw={"eq": [{"type": "PK", "f": 100, "gain_db": -1.0, "q": 2.0}]}),))
     window._eq_order_vendor = ("freq", "gain", "q")  # a Helix
+    window._detail.open_eq(group, group.rows[0])
     try:
         window._set_eq_order_pref("q_first")
-        assert window._detail._eq_order == ("freq", "q", "gain")
+        assert drawn_order() == ["Freq", "Q", "Gain"]
+        assert str(mw.get_settings().value(mw._EQ_ORDER_KEY)) == "q_first", "and it is kept"
         assert window._eq_order_actions["q_first"].isChecked()
 
         window._set_eq_order_pref("auto")
-        assert window._detail._eq_order == ("freq", "gain", "q"), "back to the processor's"
+        assert drawn_order() == ["Freq", "Gain", "Q"], "back to the processor's"
+        assert window._eq_order_actions["auto"].isChecked()
     finally:
         mw.get_settings().remove(mw._EQ_ORDER_KEY)
 
