@@ -20,7 +20,72 @@ REW must be running locally; `rew_api` talks to http://localhost:4735.
 from __future__ import annotations
 
 import inspect
+import urllib.error
+from dataclasses import dataclass
 from types import ModuleType
+from typing import Optional
+
+from autosound_tcc.core import app_log
+
+#: What TCC tells of REW (#219, audit T-2/T-3): it answered; it did not answer (down, the port shut,
+#: a timeout); it answered, and not with what was asked (an HTTP error, an answer that cannot be
+#: read, a write it did not keep); or a failure TCC cannot place, which is said as not known and
+#: logged — never as «offline», which it may not be.
+ONLINE = "online"
+UNAVAILABLE = "unavailable"
+ANSWERED_ERROR = "error"
+UNKNOWN = "unknown"
+
+#: The method's states in which REW answered, and not with what was asked (`rew_api.py`).
+_ANSWERED = frozenset({"error", "protocol", "write_mismatch"})
+
+
+def method_state(exc: BaseException) -> Optional[str]:
+    """The method's REW state for `exc` — `rew_state` on its class (`rew_api.rew_state`), or
+    "error" for REW answering 4xx/5xx — or None when it carries none.
+
+    Off the class, never by `isinstance` on the method's classes: TCC loads `rew_api.py` by path,
+    a copy of its own, and another copy's classes are other classes. REW's error answer is the
+    standard library's one `HTTPError`, which has no `rew_state`; it is the one class matched.
+    A method before v3.1.2 sets no state at all, and its failures are None here — read by what the
+    exception carries, never by the method's version."""
+    state = getattr(type(exc), "rew_state", None)
+    if state is not None:
+        return str(state)
+    if isinstance(exc, urllib.error.HTTPError):
+        return "error"
+    return None
+
+
+def status_of(exc: BaseException) -> str:
+    """Which of TCC's three states `exc` is: `UNAVAILABLE`, `ANSWERED_ERROR` or `UNKNOWN`. A
+    missing state is unknown — never REW down, and never a measurement missing."""
+    state = method_state(exc)
+    if state == "unavailable":
+        return UNAVAILABLE
+    if state in _ANSWERED:
+        return ANSWERED_ERROR
+    return UNKNOWN
+
+
+@dataclass(frozen=True)
+class RewProbe:
+    """What TCC last learned of REW: `state`, one of the four above, and `detail`, the failure in
+    its own words («RewUnavailable: REW is not answering at …»), empty when REW answered."""
+
+    state: str
+    detail: str = ""
+
+
+def probe_of(exc: BaseException) -> RewProbe:
+    """`exc`, met asking REW, as a `RewProbe`. One TCC cannot place goes to the log whole, with
+    its traceback: the dot says only that the state is not known."""
+    state = status_of(exc)
+    detail = f"{type(exc).__name__}: {exc}"
+    if state == UNKNOWN:
+        app_log.logger().warning("REW's state is not known: asking it failed with %s", detail,
+                                 exc_info=exc)
+    return RewProbe(state, detail)
 
 
 def _takes_smoothing(call) -> bool:
@@ -61,14 +126,15 @@ class RewBridge:
     def base_url(self) -> str:
         return self.api.BASE_URL
 
-    def is_reachable(self) -> bool:
-        """Cheap connectivity probe for the System-params REW-online dot -- same call
-        `_RewReadWorker` already makes, just discarding the result. Call off the GUI thread."""
+    def probe(self) -> RewProbe:
+        """The REW dot's probe: REW's list asked for, the answer dropped — `ONLINE`, or the state
+        the failure is (`probe_of`). It said «offline» for any failure (#219): REW answering an
+        error read as REW not running. Call off the GUI thread."""
         try:
             self.measurements()
-        except Exception:  # noqa: BLE001 — any failure (REW closed, wrong port, ...) means offline
-            return False
-        return True
+        except Exception as exc:  # noqa: BLE001 — every failure is a state, said or logged
+            return probe_of(exc)
+        return RewProbe(ONLINE)
 
     # -- measurements --
     def measurements(self) -> dict:

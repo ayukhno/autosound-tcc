@@ -38,7 +38,9 @@ class _RewPingWorker(QThread):
     measurement panel talks to REW, and on a slow timer while the window has focus.
     """
 
-    result = Signal(bool)
+    #: What it met: a `rew_bridge.RewProbe` — REW answering, down, answering an error, or a
+    #: failure not known (#219). It said a yes or no, and «no» was all three.
+    result = Signal(object)
 
     def __init__(self, bridge: RewBridge) -> None:
         super().__init__()
@@ -48,7 +50,7 @@ class _RewPingWorker(QThread):
         qt_shutdown.watch(self)
 
     def run(self) -> None:
-        self.result.emit(self._bridge.is_reachable())
+        self.result.emit(self._bridge.probe())
 
 
 class _ContractWorker(QThread):

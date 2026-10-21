@@ -1,4 +1,5 @@
-"""RewBridge.is_reachable() -- the REW-online dot's connectivity probe (core/rew_bridge.py)."""
+"""RewBridge.probe() -- the REW dot's probe, and REW's states read off the method's exceptions
+(core/rew_bridge.py, #219)."""
 
 from __future__ import annotations
 
@@ -21,21 +22,68 @@ class _FakeApi:
         return self._measurements
 
 
-def test_is_reachable_true_when_the_call_succeeds():
-    bridge = RewBridge(api=_FakeApi(measurements={"0": {"title": "x"}}))
-    assert bridge.is_reachable() is True
+def _rew_api():
+    """The method's own `rew_api`, loaded as TCC loads it: by path, a namespaced copy — so its
+    classes are never TCC's, and only `rew_state` on them tells REW's states apart (#219)."""
+    from autosound_tcc.core import vendor_loader
+
+    return vendor_loader.load_rew_api()
 
 
-def test_is_reachable_true_even_with_zero_measurements():
-    """An empty response still means REW answered -- offline is a connection failure, not an
-    empty project."""
-    bridge = RewBridge(api=_FakeApi(measurements={}))
-    assert bridge.is_reachable() is True
+def test_a_probe_that_answers_is_online_even_with_zero_measurements():
+    """An empty list still means REW answered: offline is REW not answering, not an empty project."""
+    from autosound_tcc.core import rew_bridge
+
+    for held in ({"0": {"title": "x"}}, {}):
+        assert RewBridge(api=_FakeApi(measurements=held)).probe() == rew_bridge.RewProbe(
+            rew_bridge.ONLINE)
 
 
-def test_is_reachable_false_on_any_exception():
-    bridge = RewBridge(api=_FakeApi(raise_exc=ConnectionRefusedError("no REW listening")))
-    assert bridge.is_reachable() is False
+def _http_error(code=500, said="Internal Server Error"):
+    import urllib.error
+
+    return urllib.error.HTTPError("http://localhost:4735/measurements", code, said, {}, None)
+
+
+@pytest.mark.parametrize(("raised", "state"), [
+    (lambda api: api.RewUnavailable("connection refused", "http://localhost:4735"), "unavailable"),
+    (lambda api: _http_error(), "error"),
+    (lambda api: api.RewProtocolError("REW answered something that is not JSON"), "error"),
+    (lambda api: api.RewWriteMismatch("slot 3 came back at 0 dB"), "error"),
+    (lambda api: api.RewAddressError("REW_API_URL 'localhost' is no address"), "unknown"),
+    (lambda api: ConnectionRefusedError("no REW listening"), "unknown"),
+])
+def test_a_probe_says_which_of_rews_states_it_met(raised, state):
+    """#219 (audit T-2/T-3): REW down, REW answering an error and a failure TCC cannot place were
+    all «offline» — `is_reachable` read any exception as REW not running. The state is read off the
+    method's class (`rew_state`; TCC's copy is namespaced, so never by `isinstance` on the
+    method's classes); REW's 4xx/5xx is the standard library's own `HTTPError`, which carries none;
+    and a failure with no state is «unknown», never «not running»."""
+    exc = raised(_rew_api())
+    probe = RewBridge(api=_FakeApi(raise_exc=exc)).probe()
+    assert probe.state == state
+    assert str(exc) in probe.detail
+
+
+def test_a_probe_that_cannot_place_a_failure_logs_it(caplog):
+    """«Unknown» is not a quiet state: the failure goes to the log whole, with its traceback, since
+    the dot's words alone cannot say what it was."""
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        RewBridge(api=_FakeApi(raise_exc=ConnectionRefusedError("no REW listening"))).probe()
+    assert any("no REW listening" in r.getMessage() and r.exc_info for r in caplog.records)
+
+
+def test_a_missing_state_is_unknown_never_not_found():
+    """A method before v3.1.2 has no `rew_state`: its KeyError for a title is no proof the title is
+    missing (`state_of` reads capability, never a version)."""
+    from autosound_tcc.core import rew_bridge
+
+    assert rew_bridge.method_state(KeyError("No measurement titled 'x'")) is None
+    assert rew_bridge.status_of(KeyError("No measurement titled 'x'")) == rew_bridge.UNKNOWN
+    assert rew_bridge.method_state(_rew_api().MeasurementNotFound("No measurement titled 'x'")) \
+        == "not_found"
 
 
 def test_a_curve_read_names_its_smoothing_and_a_read_without_one_takes_the_view():

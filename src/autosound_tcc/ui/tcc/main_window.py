@@ -104,7 +104,7 @@ from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, mcp_view, s
 from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line, terminal_menu
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
-from autosound_tcc.ui.tcc import qt_shutdown, window_folder
+from autosound_tcc.ui.tcc import qt_shutdown, rew_status, window_folder
 from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order, is_other_preset
 from autosound_tcc.ui.tcc.row_rule import table_fields
 from autosound_tcc.ui.tcc.setting_status import group_status
@@ -770,7 +770,7 @@ class MainWindow(QMainWindow):
         self._nudge_timer.setInterval(2000)
         self._nudge_timer.timeout.connect(self._nudge_for_open_signals)
         self._nudge_timer.start()
-        self._rew_online: bool | None = None  # None = not checked yet -- read before _build_left()
+        self._rew_online = None  # a `RewProbe` once asked (`rew_status`) -- read before _build_left()
         # Diagnostics (TCC-TZ.md §8). Set up before _build_header(), which adds the button that
         # opens the dialog, and before _load_project(), which re-runs the check.
         self._contract_report: ContractReport | None = None
@@ -1328,11 +1328,6 @@ class MainWindow(QMainWindow):
         label.setContentsMargins(12, 10, 12, 10)
         return label
 
-    def _rew_status_class(self) -> str:
-        if self._rew_online is None:
-            return "wait"  # not checked yet -- same neutral dot the measurement legend uses
-        return "done" if self._rew_online else "bad"
-
     def _rew_dots(self):
         """Every widget showing REW reachability: the System-params row and the measurement card's
         header. Both are optional here because this is called during construction, before the one
@@ -1344,7 +1339,7 @@ class MainWindow(QMainWindow):
                 yield dot
 
     def _retip_rew_dots(self) -> None:
-        tip = i18n.t("rewOnlineTip") if self._rew_online else i18n.t("rewOfflineTip")
+        tip = rew_status.tip(self._rew_online)
         for dot in self._rew_dots():
             dot.setToolTip(tip)
 
@@ -1361,7 +1356,7 @@ class MainWindow(QMainWindow):
         # recorded and nothing in the app ever showed it back, so a project with a fully recorded
         # cabin described its whole rig and never said which car (tcc#11).
         self._add_car_row()
-        self._rew_dot = TrafficLight(self._rew_status_class())
+        self._rew_dot = TrafficLight(rew_status.dot(self._rew_online))
         self._retip_rew_dots()  # the new instance, and the header's, in the current language
         self._system_section.body_layout().addWidget(
             _kv_row(i18n.t("rewPort"), _rew_endpoint_label(), trailing=self._rew_dot)
@@ -1686,14 +1681,14 @@ class MainWindow(QMainWindow):
     def _theme_word(self) -> str:
         return i18n.t("cfgThemeDark" if self._mode == "dark" else "cfgThemeLight")
 
-    def _set_rew_online(self, online: bool) -> None:
-        self._rew_online = online
+    def _set_rew_online(self, status) -> None:
+        self._rew_online = rew_status.coerce(status)  # a `RewProbe`; a bool reads as before (#219)
         for dot in self._rew_dots():
-            dot.set_status(self._rew_status_class())
+            dot.set_status(rew_status.dot(self._rew_online))
         self._retip_rew_dots()
         dialog = getattr(self, "_curve_dialog", None)
         if dialog is not None:
-            dialog.rew_state_changed(online)
+            dialog.rew_state_changed(rew_status.online(self._rew_online))
 
     def _ping_rew(self) -> None:
         """Ask REW whether it is there, unless a previous ask is still out.
@@ -1824,10 +1819,9 @@ class MainWindow(QMainWindow):
         # The check has just asked REW the same question the dot answers, and the answer used to
         # be thrown away here: the panel could say "16/16 captured" while the dot beside it stayed
         # red because the one probe of the session ran before REW was started (user, 2026-09-06).
-        # `skipped` is not an answer — that is `--no-rew`, where nothing was asked.
-        rew = report.rew() if report.available else {}
-        if rew and not str(rew.get("note") or "").startswith("skipped"):
-            self._set_rew_online(bool(rew.get("reachable")))
+        # By its state (#219): `reachable: true` is also REW answering its list with an error.
+        if status := rew_status.from_contract(report.rew() if report.available else {}):
+            self._set_rew_online(status)
         if self._diag_dialog is not None:
             self._diag_dialog.set_report(report)
         if not report.available:
@@ -1935,7 +1929,7 @@ class MainWindow(QMainWindow):
         if dialog is None:
             dialog = CurveDialog(
                 titles, markers=markers or [], kind=kind, available=available, parent=self,
-                rew_online=lambda: getattr(self, "_rew_online", None),
+                rew_online=lambda: rew_status.online(getattr(self, "_rew_online", None)),
             )
             # The reading lands in the composer rather than being sent: it is the Arbiter's
             # statement, and they see and edit it before it goes out. Nothing is recorded behind
@@ -3368,7 +3362,7 @@ class MainWindow(QMainWindow):
         meas_head.layout().addWidget(self._capture_ready_btn)
         self._meas_rew_lbl = QLabel("REW")
         self._meas_rew_lbl.setProperty("class", "phead-sub")
-        self._meas_rew_dot = TrafficLight(self._rew_status_class())
+        self._meas_rew_dot = TrafficLight(rew_status.dot(self._rew_online))
         meas_head.layout().addWidget(self._meas_rew_lbl)
         meas_head.layout().addWidget(self._meas_rew_dot)
         self._retip_rew_dots()
