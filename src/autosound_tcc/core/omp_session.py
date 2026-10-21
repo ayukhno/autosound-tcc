@@ -59,6 +59,7 @@ from autosound_tcc.core.agent_events import (
     QuestionOption,
     QuestionWithdrawn,
     TextDelta,
+    Thinking,
     ToolCall,
     ToolEnd,
     TurnEnd,
@@ -681,6 +682,9 @@ class OmpSession:
             event = frame.get("assistantMessageEvent") or {}
             if event.get("type") == "text_delta" and event.get("delta"):
                 return [TextDelta(str(event["delta"]))]
+            if event.get("type") == "thinking_start":
+                # The model reasoning (#223); `thinking_delta` carries its text, never shown.
+                return [Thinking()]
             return []
 
         if kind == "tool_execution_start":

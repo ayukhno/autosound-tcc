@@ -7,10 +7,11 @@ now that somewhere was the SDK's own message objects — `dialog_panel._on_chunk
 reading `.event` for a stream delta and `.content[].name` for a tool call. That works for exactly
 one harness and silently for none of the others.
 
-So the panel is given a vocabulary instead of a vendor. Eight events, chosen because both harnesses
+So the panel is given a vocabulary instead of a vendor. Nine events, chosen because both harnesses
 actually produce them and the panel actually renders them:
 
     TextDelta          prose arriving a piece at a time -> grows the live bubble
+    Thinking           the model is reasoning -> the activity line says «thinking» (never its text)
     ToolCall           the agent used a tool -> a one-line process chip
     ToolEnd            that tool returned -> the chip stops moving
     Question           a structured question for the Arbiter, and the turn is blocked on it
@@ -40,6 +41,19 @@ class TextDelta:
     """A piece of the assistant's prose. Consecutive deltas belong to one bubble."""
 
     text: str
+
+
+@dataclass(frozen=True)
+class Thinking:
+    """The model is reasoning, and the route said so. Carries no text: the thinking is not shown.
+
+    A long think without a tool looked like a stalled window (finding 162, #223): the activity line
+    moved only while a tool ran. The panel keeps the line moving for the whole open turn anyway;
+    this event is what a route that can see the reasoning adds -- the line is put back on
+    «thinking» even when a tool's end never arrived. Codex reports its `reasoning` item only once
+    the reasoning is over (started and completed in the same millisecond), so on that route the
+    event comes late and the panel's own line is what covers the think.
+    """
 
 
 @dataclass(frozen=True)
@@ -139,7 +153,8 @@ class Unasked:
 
 
 AgentEvent = (
-    TextDelta | ToolCall | ToolEnd | Question | QuestionWithdrawn | Notice | Unasked | TurnEnd
+    TextDelta | Thinking | ToolCall | ToolEnd | Question | QuestionWithdrawn | Notice | Unasked
+    | TurnEnd
 )
 
 

@@ -1466,3 +1466,22 @@ def test_a_stop_the_arbiter_pressed_is_not_an_error(tmp_path, why):
     events = _answered(tmp_path, subtype="error_during_execution", is_error=True,
                        errors=["[ede_diagnostic] result_type=user"], terminal_reason=why)
     assert events == [TurnEnd(session_id="s-1")]
+
+
+def test_a_thinking_block_says_the_model_is_thinking_and_its_text_stays_out(tmp_path):
+    """#223: the SDK route read only `text_delta`, so a think was silence. The block's start is
+    the event; its deltas carry the thinking text, which is never shown."""
+    from autosound_tcc.core.agent_events import Thinking
+
+    session = TuningSession(project_dir=tmp_path)
+
+    class Start:
+        event = {"type": "content_block_start", "index": 0,
+                 "content_block": {"type": "thinking", "thinking": ""}}
+
+    class Delta:
+        event = {"type": "content_block_delta", "index": 0,
+                 "delta": {"type": "thinking_delta", "thinking": "secret plan"}}
+
+    assert session._translate(Start()) == [Thinking()]
+    assert session._translate(Delta()) == []

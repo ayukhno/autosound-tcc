@@ -40,8 +40,8 @@ from typing import Any, AsyncIterator, Optional
 from autosound_tcc.core import (agents_md, app_log, child, codex_cli, codex_rpc, config, critic,
                                 method_binding, model_choices, openers, process_writer,
                                 signal_bus, vendor_loader)
-from autosound_tcc.core.agent_events import (AgentEvent, Notice, TextDelta, ToolCall, ToolEnd,
-                                             TurnEnd, Unasked)
+from autosound_tcc.core.agent_events import (AgentEvent, Notice, TextDelta, Thinking, ToolCall,
+                                             ToolEnd, TurnEnd, Unasked)
 from autosound_tcc.core.mcp_server import (CONFIRM_TIMEOUT_S, ConfirmRequest, HeadlessBridge,
                                            UiBridge, await_confirmation)
 from autosound_tcc.core.omp_session import FRAME_LOG_MAX_BYTES
@@ -85,6 +85,8 @@ _SHELL_WRAPPER = re.compile(r"^(?:\S*/)?(?:zsh|bash|sh)\s+-l?c\s+(.+)$", re.S)
 #: Item types that are tools, and the names the panel (and the gate) know them by.
 _COMMAND, _FILE_CHANGE, _MCP_CALL, _AGENT_MESSAGE = (
     "commandExecution", "fileChange", "mcpToolCall", "agentMessage")
+#: The model's reasoning. Its text is never shown; that it happened is (#223).
+_REASONING = "reasoning"
 
 
 class CodexNotInstalled(RuntimeError):
@@ -1053,6 +1055,10 @@ class CodexSession:
 
     def _item_started(self, item: dict) -> list[AgentEvent]:
         kind, item_id = item.get("type"), str(item.get("id") or "")
+        if kind == _REASONING:
+            # Codex 0.162 reports it once the reasoning is over (started and completed in the same
+            # millisecond), so this is late; the panel's own «thinking» line covers the think.
+            return [Thinking()]
         if kind == _MCP_CALL:
             # `mcp__<server>__<tool>`, the SDK's spelling: the gate's `mcp__tcc` prefix holds.
             name = f"mcp__{item.get('server') or '?'}__{item.get('tool') or '?'}"

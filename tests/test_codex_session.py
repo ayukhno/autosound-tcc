@@ -25,8 +25,8 @@ from pathlib import Path
 import pytest
 
 from autosound_tcc.core import codex_session, method_binding
-from autosound_tcc.core.agent_events import (Notice, TextDelta, ToolCall, ToolEnd, TurnEnd,
-                                             Unasked)
+from autosound_tcc.core.agent_events import (Notice, TextDelta, Thinking, ToolCall, ToolEnd,
+                                             TurnEnd, Unasked)
 from autosound_tcc.core.codex_session import (CodexSession, CodexSignedOut, CodexStartFailed,
                                               inner_command)
 from autosound_tcc.core.session_registry import SessionRegistry
@@ -236,8 +236,10 @@ def test_a_streamed_turn_with_mcp_calls_maps_to_events_and_turn_end_comes_last(
     events, server = run(go())
     tool = "mcp__tcc__get_capability_checklist"
     thread = "01a13983-78ef-74e0-92bf-ca42ec7e6753"
-    assert events == [ToolCall(tool, {}), ToolEnd(tool), ToolCall(tool, {}), ToolEnd(tool),
-                      TextDelta("570"), TurnEnd(thread)]
+    # Each `reasoning` item is a `Thinking` since #223.
+    assert events == [Thinking(), Thinking(), ToolCall(tool, {}), ToolEnd(tool),
+                      Thinking(), ToolCall(tool, {}), ToolEnd(tool),
+                      Thinking(), TextDelta("570"), TurnEnd(thread)]
     assert session.session_id == thread
     assert server.returncode == 0 and stand_in.breaches() == []
 
@@ -273,7 +275,7 @@ def test_the_registry_binds_the_thread_on_the_codex_route_at_once(project, stand
             await session.close()
 
     first, bound = run(go())
-    assert isinstance(first, ToolCall)
+    assert isinstance(first, Thinking)  # the opening `reasoning` item (#223)
     assert bound["session_id"] == session.session_id and bound["route"] == "codex"
     assert registry.resumable_session(route="codex") == session.session_id
     assert registry.resumable_session(route="sdk") is None
@@ -409,7 +411,8 @@ def test_codex_dying_mid_turn_ends_the_turn_with_why_and_the_next_turn_says_so(p
             await session.close()
 
     events, after = run(go())
-    assert events[0] == ToolCall("mcp__tcc__get_capability_checklist", {})
+    assert [e for e in events if not isinstance(e, Thinking)][0] == ToolCall(
+        "mcp__tcc__get_capability_checklist", {})
     assert not any(isinstance(e, TurnEnd) for e in events)
     said = events[-1]
     assert isinstance(said, Notice) and "exit code 1" in said.text
@@ -1993,3 +1996,13 @@ def test_a_start_that_fails_before_the_journal_claims_nothing(project, stand_in)
     with pytest.raises(CodexSignedOut):
         run(go())
     assert session.journaled is False
+
+
+def test_a_reasoning_item_says_the_model_is_thinking(tmp_path):
+    """#223: Codex's `reasoning` item was dropped, so the panel never heard of a think. Its text
+    stays out — the panel says «thinking», never what was thought."""
+    session = CodexSession(project_dir=tmp_path)
+    item = {"type": "reasoning", "id": "rs_1", "summary": ["secret plan"], "content": []}
+
+    assert session._map({"method": "item/started", "params": {"item": item}}) == ([Thinking()], False)
+    assert session._map({"method": "item/completed", "params": {"item": item}}) == ([], False)

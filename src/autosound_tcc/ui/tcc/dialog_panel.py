@@ -39,6 +39,7 @@ from autosound_tcc.core.agent_events import (
     Question,
     QuestionWithdrawn,
     TextDelta,
+    Thinking,
     ToolCall,
     ToolEnd,
     Unasked,
@@ -294,6 +295,9 @@ class DialogPanel(QWidget):
         self._chip_tool = ""
         self._chip_count = 0
         self._activity_label = ""
+        # The line is the turn's, not only a tool's (finding 162, #223): with no tool open it says
+        # «thinking» and keeps moving. One moving element — a tool's run takes the line over.
+        self._thinking = False
         # The question the turn is currently parked on, and the option buttons offering it.
         self._pending_question: Optional[str] = None
         self._question_widgets: Optional[QWidget] = None
@@ -1001,8 +1005,12 @@ class DialogPanel(QWidget):
         if busy and not was_busy:
             self._turn_started = time.monotonic()
             self._turn_timer.start()
+            self._think()
         elif not busy:
             self._turn_timer.stop()
+            self._activity_timer.stop()
+            self._thinking = False
+            self._activity.setHidden(True)
         if self._pending_question is None:
             self._sub_label.setText(i18n.t("agentThinking") if busy else i18n.t("dialogSub"))
 
@@ -1123,7 +1131,14 @@ class DialogPanel(QWidget):
         a harness must not mean touching this method.
         """
         if isinstance(item, TextDelta):
+            if self._thinking:
+                self._chip_started = time.monotonic()  # the think's clock counts from the last word
             self._append_live_text(item.text)
+        elif isinstance(item, Thinking):
+            # The route saw the model reasoning. It cannot be while its tool still runs, so a
+            # tool whose end never arrived gives the line back too.
+            if getattr(self, "_busy", False):
+                self._think()
         elif isinstance(item, ToolCall):
             self._add_chip(item.name)
         elif isinstance(item, ToolEnd):
@@ -1241,6 +1256,8 @@ class DialogPanel(QWidget):
         # "Working…" while the harness is blocked waiting for the human is the window blaming the
         # model for its own silence. Say who is being waited on.
         self._sub_label.setText(i18n.t("questionWaiting"))
+        if self._thinking:
+            self._tick_activity()  # the line goes while the turn waits on the Arbiter
         self._end_live_bubble()
         self._scroll_to_end()
 
@@ -1258,9 +1275,19 @@ class DialogPanel(QWidget):
             self._question_widgets = None
         self._refresh_placeholder()
         self._sub_label.setText(i18n.t("agentThinking"))
+        if self._thinking:
+            self._tick_activity()  # the model's again: the line comes back
         self._add_system_message(i18n.t("questionWithdrawn"))
 
     def _tick_activity(self) -> None:
+        # A turn parked on the Arbiter's question waits on him, not on the model: the header says
+        # so, and «thinking» moving under the card would say the opposite.
+        parked = self._thinking and self._pending_question is not None
+        self._activity.setHidden(parked)
+        if parked:
+            return
+        if self._thinking:
+            self._activity_label = i18n.t("activityThinking")  # follows a language switch
         self._activity_phase = (self._activity_phase + 1) % 4
         dots = "." * self._activity_phase
         took = _clock(time.monotonic() - self._chip_started) if self._chip_started else ""
@@ -1273,11 +1300,29 @@ class DialogPanel(QWidget):
         arrived on the wire and was dropped, so the last tool of a turn kept spinning for as long as
         the window stayed open. A stalled turn then looked exactly like a busy one -- which is how
         "⟳ omp:autoresearch…" came to read as "it is off doing something".
+
+        While the turn is open the line does not go still, though: the model is back to thinking,
+        and a still line read as a stalled window (finding 162, #223).
         """
+        if getattr(self, "_busy", False):
+            self._thinking = False
+            self._think()
+            return
         self._activity_timer.stop()
         if self._activity_label:
             took = _clock(time.monotonic() - self._chip_started) if self._chip_started else ""
             self._activity.setText(f"· {self._activity_label}" + (f" · {took}" if took else ""))
+
+    def _think(self) -> None:
+        """No tool is running in the open turn: the line says «thinking» and moves, with its own
+        clock (finding 162, #223). Already thinking — nothing changes, the clock keeps counting."""
+        if self._thinking:
+            return
+        self._thinking = True
+        self._chip_started = time.monotonic()
+        self._tick_activity()
+        if not self._activity_timer.isActive():
+            self._activity_timer.start()
 
     def _answer_question(self, value: str) -> None:
         """Send the Arbiter's choice back through the channel the question came from."""
@@ -1289,6 +1334,8 @@ class DialogPanel(QWidget):
             self._question_widgets = None
         self._refresh_placeholder()
         self._sub_label.setText(i18n.t("agentThinking"))  # the turn is ours to wait on again
+        if self._thinking:
+            self._tick_activity()  # the model's again: the line comes back
         self._follow_again()  # answering is the user's own hand, same as sending (F-008)
         self._add_bubble("user", "Arbiter · you", _markdown(value), value)
         self._scroll_to_end()
@@ -1314,6 +1361,7 @@ class DialogPanel(QWidget):
         is, and "TOOL" on eight consecutive rows is the same word eight times.
         """
         pretty = tool_name.replace("mcp__tcc__", "").replace("mcp__tcc_", "")
+        self._thinking = False  # the tool takes the line over; «thinking» comes back at its end
         self._chip_started = time.monotonic()  # the clock is the CURRENT call's, not the run's
         self._chip_count = self._chip_count + 1 if self._chip_tool == pretty else 1
         self._chip_tool = pretty

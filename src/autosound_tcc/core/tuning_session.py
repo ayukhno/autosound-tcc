@@ -30,6 +30,7 @@ from autosound_tcc.core.agent_events import (
     AgentEvent,
     Notice,
     TextDelta,
+    Thinking,
     ToolCall,
     ToolEnd,
     TurnEnd,
@@ -549,6 +550,12 @@ class TuningSession:
         claude_sdk.bind(SDK_NAMES, globals())
         event = getattr(message, "event", None)
         if isinstance(event, dict):  # StreamEvent -- the raw Anthropic stream event
+            if event.get("type") == "content_block_start":
+                # A thinking block opening is the model reasoning (#223). Its deltas carry the
+                # thinking text, which is never shown.
+                block = event.get("content_block") or {}
+                if block.get("type") in ("thinking", "redacted_thinking"):
+                    return [Thinking()]
             if event.get("type") == "content_block_delta":
                 delta = event.get("delta") or {}
                 if delta.get("type") == "text_delta" and delta.get("text"):

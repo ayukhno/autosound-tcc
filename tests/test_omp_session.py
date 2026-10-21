@@ -1526,3 +1526,18 @@ def test_omp_ending_mid_turn_ends_the_turn_out_loud(tmp_path):
 
     events = asyncio.run(run())
     assert events and isinstance(events[-1], Notice) and "omp has stopped" in events[-1].text
+
+
+def test_a_thinking_start_says_the_model_is_thinking_and_its_text_stays_out(tmp_path):
+    """#223: omp's `message_update` kept only `text_delta`. `thinking_start` is the event (the
+    shape is in `tests/fixtures/omp-frames-real.jsonl`); the deltas are the thinking text."""
+    from autosound_tcc.core.agent_events import Thinking
+
+    session = _session(tmp_path)
+
+    def update(event):
+        return session._handle({"type": "message_update", "assistantMessageEvent": event})
+
+    assert update({"type": "thinking_start"}) == [Thinking()]
+    assert update({"type": "thinking_delta", "delta": "secret plan"}) == []
+    assert update({"type": "thinking_end"}) == []

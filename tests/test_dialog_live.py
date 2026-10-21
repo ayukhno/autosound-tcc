@@ -1030,20 +1030,22 @@ def test_a_command_let_through_unasked_is_a_line_in_the_dialog(tmp_path):
     assert "rm -rf ~/old &amp;&amp; echo done &gt; /tmp/x" in shown
 
 
-def test_the_activity_line_stops_moving_when_the_tool_returns(tmp_path):
-    """A static line says a tool ran, a moving one says it is still running — that difference is
-    the only reason the line exists, and nothing ever stopped the dots."""
+def test_a_tool_takes_the_line_and_thinking_comes_back_after_it(tmp_path):
+    """One moving element, never two (#223): while a tool runs the line is the tool's, and when it
+    returns the line stops claiming the tool still runs -- but the turn is open, so it says
+    «thinking» and keeps moving rather than going still."""
     from autosound_tcc.core.agent_events import ToolEnd
 
     panel, worker, _ = _attached(tmp_path)
     worker.chunk.emit(ToolCall(name="read"))
-    assert panel._activity_timer.isActive()
+    assert panel._activity.text().startswith("⟳ read")
+    assert i18n.t("activityThinking") not in panel._activity.text()
 
     worker.chunk.emit(ToolEnd(name="read"))
 
-    assert not panel._activity_timer.isActive()
-    assert "⟳" not in panel._activity.text()
-    assert "read" in panel._activity.text()
+    assert "read" not in panel._activity.text()
+    assert panel._activity.text().startswith(f"⟳ {i18n.t('activityThinking')}")
+    assert panel._activity_timer.isActive()
 
 
 def test_the_next_tool_starts_the_line_moving_again(tmp_path):
@@ -1387,8 +1389,8 @@ def test_the_running_call_and_the_turn_say_how_long_they_have_taken(_app, monkey
     assert "Bash · 1:32" in panel._activity.text()
     panel._tick_turn()
     assert panel._sub_label.text() == f"{i18n.t('agentThinking')} · 1:32"
-    panel._end_chip()
-    assert panel._activity.text() == "· Bash · 1:32"
+    panel._end_chip()  # the turn is still open: the line goes back to thinking, its own clock
+    assert panel._activity.text().startswith(f"⟳ {i18n.t('activityThinking')} · 0:00")
 
 
 def test_a_long_stream_is_drawn_at_a_bounded_rate_and_whole_at_the_end(tmp_path, monkeypatch):
@@ -1660,3 +1662,47 @@ def test_send_now_interrupts_and_the_new_turn_shows_working_to_its_end(_live):
     assert _working(panel)
     session.finish(worker)
     assert _pump_until(lambda: not panel._busy)
+
+
+# ---- #223: something moves for the whole open turn ------------------------------------------
+
+
+def test_the_line_moves_while_the_turn_is_open_and_no_tool_runs(tmp_path):
+    """Finding 162: a 29 s think with no tool left nothing moving -- the header's clock is static
+    text, and the dots ran only inside a tool call. The open turn itself now moves the line."""
+    panel, _worker, _ = _attached(tmp_path)  # attaching starts the first turn
+
+    assert not panel._activity.isHidden()
+    assert panel._activity.text().startswith(f"⟳ {i18n.t('activityThinking')}")
+    assert panel._activity_timer.isActive()
+    before = panel._activity.text()
+    panel._tick_activity()  # one tick of the line's own timer
+    assert panel._activity.text() != before
+
+
+def test_a_route_saying_it_thinks_puts_thinking_on_the_line(tmp_path):
+    """Where a route reports reasoning, the line says «thinking» -- even over a tool whose end
+    never arrived: the model does not reason while its tool is still running."""
+    from autosound_tcc.core.agent_events import Thinking
+
+    panel, worker, _ = _attached(tmp_path)
+    worker.chunk.emit(ToolCall(name="read"))
+
+    worker.chunk.emit(Thinking())
+
+    assert panel._activity.text().startswith(f"⟳ {i18n.t('activityThinking')}")
+    assert panel._bubbles == []  # the thinking itself is never shown
+
+
+def test_a_parked_question_does_not_claim_the_model_is_thinking(tmp_path):
+    """The turn is waiting on the Arbiter, not on the model: the header says so, and a moving
+    «thinking» under the card would contradict it."""
+    panel, worker, _ = _attached(tmp_path)
+
+    worker.chunk.emit(Question(id="q1", question="Reference seat?",
+                               options=(QuestionOption("Driver"),)))
+
+    assert panel._activity.isHidden()
+    worker.chunk.emit(QuestionWithdrawn(id="q1"))
+    assert not panel._activity.isHidden()
+    assert panel._activity.text().startswith(f"⟳ {i18n.t('activityThinking')}")
