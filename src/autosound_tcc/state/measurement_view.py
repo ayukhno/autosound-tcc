@@ -281,7 +281,14 @@ def absent(verdict: dict) -> bool:
     is not there is yellow, waiting to be taken. The method's check reports both as `ok: false`,
     the absent one with REW's own «No measurement titled …» — sixteen of those once painted a
     whole round red while nothing had been measured badly at all.
+
+    Read off `exists` first (#219): the method records it on every verdict — false, REW holds none;
+    null, REW's list was not read, which is no proof of absence. REW's words decide only a verdict
+    with no `exists` at all, one an older method wrote.
     """
+    exists = (verdict or {}).get("exists")
+    if isinstance(exists, bool):
+        return not exists
     return any("no measurement titled" in str(issue).lower()
                for issue in (verdict or {}).get("issues") or [])
 

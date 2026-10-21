@@ -455,6 +455,7 @@ answers the first five questions anybody would ask.",
         "captureCheckTimedOut": "The capture check did not finish: it ran past {seconds} s and was stopped.",
         "captureCheckRefused": "The capture check did not run: {why}",
         "captureCheckRewDown": "The capture check did not run: REW did not answer, so nothing was recorded. Start REW, then «Check again».",
+        "captureCheckRewError": "The capture check did not run: REW is running, but it did not give its measurement list, so nothing was recorded — {why}. Put it right in REW, then «Check again».",
         "captureCheckAgain": "Check again",
         "captureCheckUnread": "The capture check ran, and its verdicts could not be read back: process-state.json does not read. The cards follow it once it does.",
         "captureCheckRoundGone": "The capture check did not run: it was asked for {round}, which is no longer the open round, so nothing was checked.",
@@ -1853,6 +1854,8 @@ Choose sweeps (sw) above to read this.",
         "captureCheckTimedOut": "Перевірка замірів не завершилась: вона йшла понад {seconds} с, і її зупинено.",
         "captureCheckRefused": "Перевірку замірів не запущено: {why}",
         "captureCheckRewDown": "Перевірку замірів не запущено: REW не відповів, тож нічого не записано. Запустіть REW, тоді «Перевірити знову».",
+        # #219: the English until the Advisor.
+        "captureCheckRewError": "The capture check did not run: REW is running, but it did not give its measurement list, so nothing was recorded — {why}. Put it right in REW, then «Check again».",
         "captureCheckAgain": "Перевірити знову",
         "captureCheckUnread": "Перевірка замірів пройшла, але її вердикти не вдалося прочитати: process-state.json не читається. Картки підхоплять їх, щойно він прочитається.",
         "captureCheckRoundGone": "Перевірку замірів не запущено: її просили для {round}, а це вже не відкритий раунд, тож нічого не перевірено.",
@@ -3201,6 +3204,8 @@ Choose sweeps (sw) above to read this.",
         "captureCheckRefused": "The capture check did not run: {why}",
         # #170: the English until the Advisor.
         "captureCheckRewDown": "The capture check did not run: REW did not answer, so nothing was recorded. Start REW, then «Check again».",
+        # #219: the English until the Advisor.
+        "captureCheckRewError": "The capture check did not run: REW is running, but it did not give its measurement list, so nothing was recorded — {why}. Put it right in REW, then «Check again».",
         # #170: the English until the Advisor.
         "captureCheckAgain": "Check again",
         # #170: the English until the Advisor.
@@ -4619,6 +4624,8 @@ Choose sweeps (sw) above to read this.",
         "captureCheckRefused": "The capture check did not run: {why}",
         # #170: the English until the Advisor.
         "captureCheckRewDown": "The capture check did not run: REW did not answer, so nothing was recorded. Start REW, then «Check again».",
+        # #219: the English until the Advisor.
+        "captureCheckRewError": "The capture check did not run: REW is running, but it did not give its measurement list, so nothing was recorded — {why}. Put it right in REW, then «Check again».",
         # #170: the English until the Advisor.
         "captureCheckAgain": "Check again",
         # #170: the English until the Advisor.

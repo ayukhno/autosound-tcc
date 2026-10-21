@@ -149,6 +149,35 @@ class RewUnavailable(ProcessWriterError):
     method's, whose advice names a command-line verb (the G6+G7 review's M4)."""
 
 
+class RewAnswered(ProcessWriterError):
+    """The method's exit 1 for REW answering, and not with what was asked — its list answered with
+    an error or with something it cannot read (#219): REW is running, and nothing was written. A
+    class of its own, for the caller to say it as REW's answer and not as the method refusing.
+
+    Told only by the two lines the method prints for it, whole from their start (`rew_answered`),
+    never by the `error: ` every refusal begins with: a line that is not one of them stays the
+    refusal, said in its own words. `line` is the one that told it."""
+
+    def __init__(self, said: str, line: str = "") -> None:
+        super().__init__(said)
+        self.line = line or said
+
+
+#: The lines the method prints, from their start, when REW answered and not with its list: from
+#: `_main` for REW's 4xx/5xx, and from `capture-check` for a list REW answered with an error or
+#: with something it cannot read (`process.py`, #134). Pinned words or a code are TCC-064's ask 2.
+_REW_ANSWERED = ("error: REW answered with an error: ", "error: REW's measurement list was not read (")
+
+
+def rew_answered(code: int, err: str) -> str:
+    """The line of `err` that says REW answered, and not with its list — one of `_REW_ANSWERED`,
+    whole — or "" when exit `code` with `err` is anything else: another exit, a crash, or a
+    refusal of the method's own."""
+    refused = refusal(code, err)
+    first = refused.splitlines()[0] if refused else ""
+    return first if first.startswith(_REW_ANSWERED) else ""
+
+
 class RoundGone(ProcessWriterError):
     """TCC's own `command` was asked for round `asked` — its capture check, or its import's
     capture and protective records — and by its turn at the project's lock that round was no
@@ -225,6 +254,8 @@ def _run(project_dir: Path, args: list[str], timeout_s: float = DEFAULT_TIMEOUT_
     said = (err or out).strip() or f"process.py exited {code}"
     if logged:
         _log_not_run(project_dir, args, code, said if crashed(err) else method_cli.tail(said))
+    if line := rew_answered(code, err):
+        raise RewAnswered(said, line)
     raise (RewUnavailable if code == EXIT_REW_UNAVAILABLE else ProcessWriterError)(said)
 
 

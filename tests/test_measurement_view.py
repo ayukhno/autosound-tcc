@@ -1523,6 +1523,20 @@ def test_a_curve_rew_does_not_hold_is_absent_not_bad(project):
     assert _state(project, round_, "w-R_7 (sw)") == mv.VERDICT_ABSENT
 
 
+@pytest.mark.parametrize(("verdict", "absent"), [
+    ({"ok": False, "exists": False, "issues": ["REW holds none by that title"]}, True),
+    ({"ok": False, "exists": True, "issues": ["no measurement titled like it was expected"]}, False),
+    ({"ok": False, "exists": None, "issues": ["REW answered an error: HTTP Error 500"]}, False),
+    ({"ok": False, "issues": ["No measurement titled 'w-R_7 (sw)'"]}, True),
+    ({"ok": False, "issues": ["silence"]}, False),
+], ids=["exists false", "exists true", "REW's list unread", "an older verdict", "bad"])
+def test_absent_is_read_off_exists_first_and_the_words_only_without_it(verdict, absent):
+    """#219: the method records `exists` on every verdict (false: REW holds none; null: REW's list
+    was not read), and TCC read the words alone — «No measurement titled» — which the next wording
+    change breaks. `exists` decides when it is a bool; the words only on a verdict that has none."""
+    assert mv.absent(verdict) is absent
+
+
 def test_a_failing_capture_is_bad_and_so_is_one_never_checked(project):
     """A capture taken and never checked is not usable yet, as the method's own gate reads it
     (`unusable_captures`): `bad` too, so the window's check asks about it."""

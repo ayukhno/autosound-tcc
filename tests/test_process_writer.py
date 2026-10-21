@@ -282,6 +282,32 @@ def test_a_capture_check_that_did_not_run_is_raised_in_its_own_words(monkeypatch
         assert err in logged, "a crash is logged with its traceback whole"
 
 
+@pytest.mark.parametrize("err, answered", [
+    ("error: REW's measurement list was not read (REW answered an error: HTTP Error 500) -- nothing "
+     "was recorded", True),
+    ("error: REW answered with an error: HTTP Error 500: Internal Server Error -- nothing was "
+     "written", True),
+    # Every refusal carries `error: `, and naming REW is not REW answering.
+    ("error: step 2.3 has no captures -- REW answered with an error is not why", False),
+    ("error: finish 2.3 first: REW's measurement list was not read (by the step)", False),
+    ("error: process-state.json is empty -- a write was cut off", False),
+], ids=["list not read", "REW's error", "a refusal naming it", "inside another line", "a refusal"])
+def test_rew_answering_an_error_is_told_from_a_refusal_by_its_whole_line(monkeypatch, err,
+                                                                         answered):
+    """#219: the method's capture check exits 1 both when REW answered its list with an error and
+    when it refuses — TCC told them apart by nothing, and said REW's answer as a refusal. Only the
+    two lines the method prints for REW's answer, whole from their start, are REW's; anything else
+    stays the refusal, in its own words, and the words are kept either way."""
+    monkeypatch.setattr(process_writer, "_spawn",
+                        lambda project_dir, args, timeout_s=None, **_kw: (1, "", err))
+
+    with pytest.raises(process_writer.ProcessWriterError) as failed:
+        process_writer.check_captures(Path("car"), ["w-L_1 (sw)"])
+
+    assert isinstance(failed.value, process_writer.RewAnswered) == answered
+    assert str(failed.value) == err
+
+
 def test_tccs_own_check_on_a_method_too_old_for_it_is_logged_once(project, monkeypatch,
                                                                   app_log_warnings):
     """The re-review of the G6+G7 fix: `TooOld` was raised before the log line every other failure

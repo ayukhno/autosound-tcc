@@ -6430,7 +6430,7 @@ def test_the_capture_check_worker_hands_the_method_its_titles(monkeypatch, tmp_p
 
 
 @pytest.mark.parametrize("stopped", ["busy", "timed out", "refused", "the method's refusal",
-                                     "REW down", "a crash", "the round moved on"])
+                                     "REW down", "REW answered", "a crash", "the round moved on"])
 def test_a_capture_check_that_did_not_run_says_so_and_why(monkeypatch, tmp_path, stopped):
     """R-ax (the G5+G8 review's I2): Busy, a refused binding, a timeout and the method's refusal all
     came back on the same signal as a verdict, with no `UNUSABLE` line in them — and vanished. The
@@ -6451,9 +6451,17 @@ def test_a_capture_check_that_did_not_run_says_so_and_why(monkeypatch, tmp_path,
                         why="this project runs a copy of the method TCC has not approved")),
         "the method's refusal": (
             process_writer.ProcessWriterError(
-                "error: REW's measurement list was not read (HTTP 500) -- nothing was recorded"),
+                "error: step 2.3 has no captures to check -- nothing was recorded"),
             i18n.t("captureCheckRefused").format(
-                why="REW's measurement list was not read (HTTP 500) -- nothing was recorded")),
+                why="step 2.3 has no captures to check -- nothing was recorded")),
+        # #219: REW answering its list with an error is REW's answer, not the method refusing.
+        "REW answered": (
+            process_writer.RewAnswered(
+                "error: REW's measurement list was not read (REW answered an error: HTTP Error 500) "
+                "-- nothing was recorded"),
+            i18n.t("captureCheckRewError").format(
+                why="REW's measurement list was not read (REW answered an error: HTTP Error 500) "
+                    "-- nothing was recorded")),
         "REW down": (
             process_writer.RewUnavailable(
                 "error: REW did not answer (connection refused) -- nothing was recorded; start "
