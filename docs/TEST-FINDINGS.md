@@ -3746,7 +3746,7 @@ this login is learned only when a session starts. Asked: the same check for the 
 
 **Weight.** Medium: a pick the login cannot use fails at the session's start, not when it is chosen.
 
-**Task.** The next wave's collection (the Arbiter: «запиши на наступну хвилю»).
+**Task.** The next wave's collection (the Arbiter: «запиши на наступну хвилю»). → #222 on `W-11 · v1.1.5`.
 
 ### 161. The menu: check it whole, and every line that opens a submenu in bold
 
@@ -3780,7 +3780,7 @@ activity line (`_add_chip` / `_tick_activity` / `_end_chip`); all three routes.
 **Weight.** Medium: a long tool-less think looks like a stalled or idle window, and after a Stop it reads as the
 indicator missing.
 
-**Task.** The next wave's collection.
+**Task.** The next wave's collection. → #223 on `W-11 · v1.1.5`.
 
 ### 163. The change analysis in compare mode, carried on to the chat — and a phrase to nudge the terminal's AI
 
@@ -3803,6 +3803,8 @@ indicator missing.
 
 **Weight.** Medium: it replaces the expectations the Arbiter has been writing by hand and taking to the car
 (PAS-014's week of examples).
+
+**Out of W-11** (the Arbiter, 2026-10-21: the last wave before a freeze; the skill's item 15 left its W-11 too, hub #295); hub #264 deferred until his word after the freeze.
 
 **Task.** W-11's collection — TCC's half of hub #264 (the buttons, the panel, the handoff, the phrase); the
 method's half is SKL-078.
