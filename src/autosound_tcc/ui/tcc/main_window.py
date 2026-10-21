@@ -106,7 +106,7 @@ from autosound_tcc.ui.tcc.generator_check_view import GeneratorCheckView
 from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line, terminal_menu
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
-from autosound_tcc.ui.tcc import qt_shutdown, rew_status, window_folder
+from autosound_tcc.ui.tcc import project_watch, qt_shutdown, rew_status, window_folder
 from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order, is_other_preset
 from autosound_tcc.ui.tcc.row_rule import table_fields
 from autosound_tcc.ui.tcc.setting_status import group_status
@@ -3486,7 +3486,6 @@ class MainWindow(QMainWindow):
             lambda *_args: self._process_reload.start())
         self._refresh_process()
 
-
         # The plan was the only thing watched, so the left column kept saying "no data yet" beside
         # a `project.json` the session had just written -- it only caught up on the next launch.
         # Reported after a completed phase -1: the car, the amps and the open questions were all
@@ -3547,7 +3546,7 @@ class MainWindow(QMainWindow):
             return []
         root = config.state_root()
         if not root.is_dir():
-            return [str(project_dir)]
+            return project_watch.watch_folder(self, project_dir)
         return ledger_line.watched_dirs(root, config.available_presets(root))
 
     def _arm_project_watcher(self) -> None:
@@ -3563,9 +3562,10 @@ class MainWindow(QMainWindow):
             if path not in watcher.directories():
                 watcher.addPath(path)
 
-    def _on_project_file_changed(self, *_args) -> None:
+    def _on_project_file_changed(self, *args) -> None:
         self._arm_project_watcher()
-        self._project_reload.start()
+        if project_watch.worth_reload(self, args, config.chosen_project_dir()):  # not `.tcc/` (#225)
+            self._project_reload.start()
 
     def _set_project_setting(self, key: str, value) -> bool:
         """A choice made in this window, saved into its own folder's `.tcc/` (#206) — unless it is
