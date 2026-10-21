@@ -2082,9 +2082,32 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 
 ### F-103 — W-11: the collection
 
-**Статус**: open · **collecting** — paused 2026-10-15 on the Arbiter's «поки що все»: findings to 163, the next is 164; answered today: SKL-076 (the audit's minimum), SKL-078/079 (the compare panel's description), hub #287 closed (main green), W-10's numbers to the hub (hub #290) · collecting since 2026-10-15 (the Arbiter: «збираємо W-11», after v1.1.4 was installed and seen on screen) · no milestone yet; neither product has an open `W-…` milestone, so the wave is W-11 (`max(W-N) + 1`, `WAVES.md`)
+**Статус**: open · **collecting** — the scope decided 2026-10-21 (below: the last wave before a freeze; Codex reviews technical work); the milestone waits for «збір закінчено» · paused 2026-10-15 on the Arbiter's «поки що все»: findings to 163, the next is 164; answered today: SKL-076 (the audit's minimum), SKL-078/079 (the compare panel's description), hub #287 closed (main green), W-10's numbers to the hub (hub #290) · collecting since 2026-10-15 (the Arbiter: «збираємо W-11», after v1.1.4 was installed and seen on screen) · no milestone yet; neither product has an open `W-…` milestone, so the wave is W-11 (`max(W-N) + 1`, `WAVES.md`)
 
 Each new finding goes to `TEST-FINDINGS.md` (163 onward), recorded, not diagnosed. Carried in: **the audit's minimum** (the Arbiter, 2026-10-15, SKL-076 hub #288): G8 phase 1 (TCC takes the skill's lock, with F-100's lock/`process/` item) and G7's remainder (REW's three states, the gates' refusals on screen) — `PLAN-AUDIT` §3; findings 160 (the main AI's model checked when picked) and 162 (nothing moves while the model thinks without a tool); hub #285 (the method's level base, which TCC's half of #198 waits on); hub #246 asks 1–2 (the release train's half); hub #264 and F-096 (deferred to W-11's review in W-10) — #264 (PAS-014, «Describe the changes» in compare mode) is split by SKL-078 (hub #292): the method describes, TCC shows; the Arbiter, 2026-10-15: «Discuss with AI» is the Advisor's one answer in the compare panel, run by the method, plus a button that carries the discussion on into the main chat (main mode: TCC's session; control mode: TCC's signal bus to the terminal's agent); per change or a picked set by SKL-079 (hub #293), the interface in TEST-FINDINGS 163 — taken into W-11 (the Arbiter, 2026-10-15: «пробуємо і беремо в W-11»), «what if» later; F-100's remainder; hub #287 (main's Windows-only red: git-timing tests, and possibly a real header bug in the method's journal — early on the milestone). Not taken: #184 (the Arbiter, 2026-10-15: «не беремо»; closed, not planned). Closed as duplicates of #192: #210–#213 (the Arbiter, 2026-10-15). On the Arbiter's «збір закінчено» the milestone `W-11 · v1.1.5` opens and each item becomes an issue with the four assessment lines; nothing is built before his `ok` on that task.
+
+The Arbiter's decisions, 2026-10-21 («ок» on TCC's proposal):
+- **W-11 is the last wave before a freeze: a stable version for users.** Bugs, hygiene, small clear improvements; no
+  new large features. After it, only fixes for what users report; the work moves to promotion, in a separate project
+  (a new role and repo are the hub's, between waves). The freeze has to be joint with the skill: TCC is pinned to the
+  method's version.
+- **In:** «Fresh» still resumes on the Claude route (found in W-10, above); the Monitor and diagnostics panels read the
+  global project folder, not their window's (Codex's GUI audit A2: `control_layout.py:141`, also
+  `diagnostics_panel.py:1441,1491,1509`, `model_config_dialog.py:230` — reproduce first); the audit's minimum (G8
+  phase 1, G7's remainder); findings 160 and 162; the double project reload after a reviewer pick (above);
+  quarantine the flaky tests and one `/test-audit` pass; the user guide checked against the screen; an install from
+  zero on a clean Mac and Windows, by hand (the freeze's gate and the base for promotion); hub #246 (the stable
+  version goes out with the skill's).
+- **Out:** the GUI refactor of `docs/audit/AUDIT-2026-10-19-GUI-ARCHITECTURE.md` (it pays only if development goes
+  on; its bug is in); F-096 the car package; #264 / finding 163 (a reversal of 15.10's «беремо в W-11», on the
+  freeze; at most its first layer — the button and the method's description, no «Discuss with AI», no terminal
+  handoff — if the Arbiter asks at the milestone); hub #285 only if the skill builds its half in its W-11.
+- **Reviewers: Codex on technical work, Gemini on texts and creative work** (a trial for W-11). Codex
+  (`codex exec -m gpt-6-astra -c model_reasoning_effort=high -s read-only --ephemeral`, checked 2026-10-21) takes
+  the plan review, the group seats and the final branch review; on `Risk: high` (the lock) the Opus seats run beside
+  it on the first group to compare. Gemini (`agy`) reviews the guide, the CHANGELOG and any user-facing text. Every
+  finding checked against the code before acting. The result — findings real/false, Claude tokens saved — goes to
+  the hub's H-019 at the review between waves; the hub's «Models by role» does not name Codex yet.
 
 ### F-102 — W-10: real use and earlier waves' leftovers, without superpowers — open the milestone
 
