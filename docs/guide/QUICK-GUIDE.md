@@ -15,12 +15,14 @@ The window has three columns:
 - **Left**: the project, the car, what the cabin does to the sound, and the DSP tree with every
   channel's crossover, gain, polarity and EQ.
 - **Middle**: the AI dialog. You are the **Arbiter**, the **Generator** proposes and the **Critic**
-  (the reviewer) checks the proposal. Write in any language, then press *Send*.
-- **Right**: the plan (*Plan — fact*) above, and below it *In focus now*, the measurements the
+  (the reviewer) checks the proposal. Write in any language, then press *Send*. While the AI
+  thinks, the dialog shows **⟳ thinking** with the time.
+- **Right**: the plan (*Plan — Fact*) above, and below it *In focus now*, the measurements the
   current step asks for.
 
 The footer holds the models: *AI main* (the Generator), *Effort*, *AI critic*, and the reviewer's
-status.
+status. Beside *AI main*, a line says whether your login can use the model you picked (*on this
+login* or *not on this login*).
 
 ## 2. The header
 
@@ -29,7 +31,7 @@ status.
 From left to right: **☰ Menu**, the project folder, the **Preset** you are looking at (SQ, FULL…),
 and the **Target curve**, which opens in the target-curve tool (see
 [the house curve in TCC](HOUSE-CURVE.md)). On the right: **Control mode**
-(see screen 8), **⟳** reloads the project from disk, **⚙** opens diagnostics and updates, then the
+(see screen 8), **↻** reloads the project from disk, **⚙** opens diagnostics and updates, then the
 language, the text size and the light/dark theme.
 
 ## 3. The DSP settings as a table
@@ -64,7 +66,7 @@ evidence it names cannot be found on disk.
 ![The In focus now card: a capture round with sweeps waiting and MMM captures done](img/capture-round.webp)
 
 When a step needs measurements, *In focus now* lists them by name and method (sweep, MMM RTA). The
-colours: yellow **waiting**, blue **in REW**, green **done** (or «taken as it is», «usable over its own range»), red **unusable** (a retake), grey
+colours: yellow **waiting**, blue **in REW**, green **done** (or «taken as it is»), red **unusable** (a retake), grey
 **skipped**. Take the measurements in REW under these names, then press **⬇** to read them from
 REW, matched against what the round expects. When they are all in, **Done** tells the AI to start on
 them. The picker at the top opens earlier rounds. **Protection** records the protective filters a

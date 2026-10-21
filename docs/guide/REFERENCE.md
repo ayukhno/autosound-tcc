@@ -21,7 +21,7 @@ translated into English. The conversation in the dialog panel is an example.
   - [EQ](#eq)
   - [One parameter across every channel](#one-parameter-across-every-channel)
 - [The AI dialog](#the-ai-dialog)
-- [Plan — fact](#plan--fact)
+- [Plan — Fact](#plan--fact)
 - [In focus now: capture rounds](#in-focus-now-capture-rounds)
 - [The curve window](#the-curve-window)
 - [Control mode](#control-mode)
@@ -74,9 +74,9 @@ Windows drops the app's identity when it pins a shortcut.
 | **⌂ passat-b8-2026** | The project folder this window is bound to. |
 | **Preset** | Which preset the tree and the tables show. |
 | **Target curve** | The curve this project tunes to. Click it to open the [target-curve tool](HOUSE-CURVE.md) in a browser. The **?** after it opens the method's [target-curve guide](https://github.com/ayukhno/autosound-tuning-skill/blob/v3.1.4/skills/autosound-tuning/references/patterns/target-curves/target_curves_guide.md): what a target curve is and how to choose one. |
-| **Control mode** | Hands the session to a terminal. See [Control mode](#control-mode). |
-| **⟳** | Reloads the project from disk: the DSP profile and the ledger. |
-| **⚙** | Diagnostics: the project check, updates, installation and run logs. |
+| **Control mode** | For a session in a terminal: TCC moves to a compact window beside it. While it is on, the button reads **Active TCC**. See [Control mode](#control-mode). |
+| **↻** | Reloads the project from disk: the DSP profile and the ledger. |
+| **⚙** | Diagnostics, in tabs: **Project** (the project check), **Updates**, **Installation**, **Log** and **AI history**. |
 | **EN** | The interface language: English, Ukrainian, Polish or German. |
 | **A− 100% A+** | The text size of the whole window. |
 | **◐ theme** | Light or dark. |
@@ -95,8 +95,10 @@ think (*Effort*), the theme, and the **Permissions** the AI works with. With *Do
 the car.
 
 **Git** says whether the project folder keeps a history. In the screenshot it does not, so the dot
-is red and **Make it a repository** offers to start one. **Open questions** lists what the project
-has not answered yet.
+is red and **Back up to GitHub (0/2)** offers to start one in two steps. The first press starts
+the history in the project folder; the button then reads **(1/2)** and offers a private copy on
+GitHub. **Open questions**
+lists what the project has not answered yet.
 
 ### System params
 
@@ -193,9 +195,12 @@ screenshot. **A− 100% A+** in the dialog's own header changes the dialog's tex
 **✎ Project param edit** is for a change the project's files do not show yet. It asks why: the
 skill did not save it, or you changed something by hand.
 
+While the AI works, a line under the messages shows what it is doing: **⟳ thinking** with the
+time, or the name of the tool it is running. The AI's own reasoning is never shown.
+
 Right-click almost anything in the window to copy its value, its row or its hint.
 
-## Plan — fact
+## Plan — Fact
 
 ![The plan with Phase 5 open and its steps](img/plan.webp)
 
@@ -222,7 +227,7 @@ The card lists the measurements that the current step expects, by name, in one c
 |---|---|
 | yellow | **waiting**: not taken yet |
 | blue | **in REW**: REW has it, not read yet |
-| green | **done**: read and accepted — or **taken as it is** (the check failed it and you took it anyway), or **usable over its own range** (a sub's or a tweeter's sweep, judged over the range it was taken with) |
+| green | **done**: read and accepted — or **taken as it is** (the check failed it and you took it anyway) |
 | red | **unusable**: taken, failed the check, needs a retake |
 | grey | **skipped** |
 
@@ -236,8 +241,8 @@ The controls, left to right:
 - **⬇**: reads the measurements from REW and matches them against what the round expects.
 - **Done**: tells the AI that the captures are taken and it can start on them. It reaches a
   terminal session too.
-- **REW ●**: the same REW check as in *System params*: yellow until checked, then green or red.
-  REW's API is in its beta builds only.
+- **REW ●**: the same REW check as in *System params*: yellow until checked (and when its state is
+  not known), then green or red. Hover over it for the reason. REW's API is in its beta builds only.
 
 When the current phase takes no measurements, the card says so.
 
@@ -250,7 +255,7 @@ The curves come straight from REW. The row at the top:
 - **series**: which capture series the curves are taken from.
 - **frequency response / impulse / phase**: what to draw. An MMM capture has only a frequency
   response. REW has no impulse and no phase for one.
-- **group**: fills the selection with a whole group from this car's glossary: the woofers, one side,
+- **fill**: fills the selection with a whole group from this car's glossary: the woofers, one side,
   everything.
 - **Choose… (n)**: tick any measurements you want. Each one becomes a chip in its own colour; **×**
   takes it off.
@@ -282,11 +287,13 @@ The dark theme:
 
 ![Control mode: the session feed, the tables and the panels in a compact window](img/control-mode.webp)
 
-For a session that runs in a terminal. TCC moves to the right half of the screen, and the terminal
+For a session that runs in a terminal. The button does not work while a session runs in this
+window: stop that session first. TCC moves to the right half of the screen, and the terminal
 takes the rest. You type in the terminal, and TCC shows:
 
 - **Monitoring**: the session's journal as it is written, newest at the bottom.
-- **Table-V, Table-O, EQ, Gain, Delay, Phase**: the same views as the detail pane.
+- **Table-V, Table-O, EQ, Gain, Delay, Phase**: the same views as the detail pane (plus **Table-I**
+  when the processor has inputs).
 - The left column, the plan and the capture card, below.
 
 **Done** and **Listening** reach the session as signals. **Active TCC** in the header brings the
@@ -296,18 +303,29 @@ full window back. Both borders can be dragged, and TCC remembers where you left 
 
 ![The menu](img/menu.webp)
 
-- **Project**: open another project folder, start a new one, copy a car from another project, run
-  the intake form, re-read the project from disk.
-- **Session and models**: start a session in TCC, open a terminal on the project, save what the
-  model knows to disk, start a fresh session.
-- **Tools**: diagnostics and updates, importing from a Resonalyze project, the
-  [target-curve tool](HOUSE-CURVE.md). Last comes **⚙ Settings**, a submenu in bold: the field order
-  of the EQ card, configure models, the reviewer's key, what the session asks you about, the theme,
-  the language, and larger or smaller text.
-- **Help and support**: **📖 Guides**, a submenu in bold, opens a page of this guide on GitHub, at
-  the version you have installed: the quick guide ([the quick tour](QUICK-GUIDE.md)), the full
-  guide (this reference), or the target-curve guide ([the target-curve page](HOUSE-CURVE.md)).
-  Then message the developer, and the support links.
+- **Project**: *Open project folder…*, *New project…*, *Copy the car…* (start from a car that is
+  already described), *Intake…* (the intake form, in your browser), *Re-read this project from disk*.
+- **Session and models**: *Start a tuning session in TCC*, *Open a terminal on this project* (a
+  submenu: Terminal, Claude, Codex, Antigravity, OMP; an app that is not installed is greyed out),
+  *Save what the model knows to disk*, *Start a new session (saves, then clears the context)*. The
+  last two need a running session.
+- **Tools**: *Diagnostics and updates…*, *Import from a Resonalyze project…*,
+  [*Target-curve tool (opens a browser)*](HOUSE-CURVE.md). Last comes
+  **⚙ Settings**, a submenu in bold:
+  - *EQ card field order*: as the processor shows it, or Freq · Gain · Q, or Freq · Q · Gain.
+  - *Configure models (OMP)…*, then *Install Codex* and *Sign in to Codex*.
+  - *Reviewer key…*.
+  - **Ask about**: the same **Permissions** as in *Project params*, the writes the session stops
+    to ask you about: *Every write*, *only what the skill does not own* (anything outside
+    `process/`, `state/` and the project's own files), *Don't ask at all (auto)*, or *Don't ask at
+    all, not even about the irreversible*. *Ask again about what I ticked* resets every «don't ask
+    again» choice in this project.
+  - *Switch theme (light / dark)*, **Language**, *Larger text* and *Smaller text*.
+- **Help and support**: **💬 Message the developer**, then **📖 Guides** (a submenu in bold). It
+  opens this guide on GitHub at the version you have installed: *Quick guide*
+  ([TCC in eight screens](QUICK-GUIDE.md)), *Full guide* (this reference), or *Target-curve guide*
+  ([the house curve in TCC](HOUSE-CURVE.md)). Last, the support links: *GitHub Sponsors* and
+  *Monobank jar*.
 
 ## Dialogs
 
@@ -360,8 +378,13 @@ GitHub issue, and send. The version line at the bottom goes with your message.
 
 At the bottom of the [main window](#the-window):
 
-- **OMP**: the same dialog as *Configure models* in the menu.
+- **OMP**: the same dialog as *Configure models (OMP)…* in the menu.
 - **AI main** and **Effort**: the Generator and how hard it thinks. *x-high* is the default and
-  suits almost every step.
+  suits almost every step. When you pick a model, a line beside the picker says whether your login
+  can use it: *checking…*, then *on this login* (green), or *not on this login* or *sign in required*
+  (red). With a red line a session would fail to start, so pick another model or sign in. *not
+  checked* means this provider cannot be checked without running the model, or its model list could
+  not be read; hover for the reason. The check only reads the provider's model list: no model runs
+  and nothing is billed.
 - **AI critic**: the reviewer, and its status next to it.
 - **Buy me a coffee** and **Message the developer**.

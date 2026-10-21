@@ -23,8 +23,8 @@ method's target-curve guide.
 
 ## Opening it in the target-curve tool
 
-Click that name, or pick *Target-curve tool* under *Tools* in the *☰ Menu*. The tool opens in your
-browser. It carries only the method's own curves, so for any other curve TCC finds the curve's file
+Click that name, or pick *Target-curve tool (opens a browser)* under *Tools* in the **☰ Menu**, to
+open the tool in your browser. It carries only the method's own curves, so for any other curve TCC finds the curve's file
 in the project folder and does one of these, and the status line says which:
 
 - **Hands it over in the link.** The page opens with your curve already on the plot.
