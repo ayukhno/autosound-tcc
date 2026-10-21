@@ -65,3 +65,37 @@ def detail(state: availability.Status, choice) -> str:
         if ready:
             said += " " + i18n.t("availRegionInstead").format(models=", ".join(ready))
     return f"{said}\n{state.detail}" if state.detail else said
+
+
+def mark_missing(combo, entries, warn: bool = False, reviewer: bool = False,
+                 ok: bool = False) -> None:
+    """Red when the current choice is not among `entries`, plain when it is.
+
+    Recomputed on every selection change, not only when the list is rebuilt. It was set once at
+    fill time, so a combo that had ever been red STAYED red through every later pick — the Arbiter
+    chose a model that exists and the field went on claiming it did not (user, 2026-08-12).
+
+    `warn` is the other tint — the choice exists but is not what it appears to be — and it is
+    passed in rather than applied by the caller afterwards because both write the same `class`
+    property: whoever wrote second used to erase the other's answer. `ok` is the green the main
+    AI's check gives a pick its route lists for this login (tcc#222), never over red or a warning.
+    """
+    current = str(combo.currentData() or "")
+    # A route whose CLI is not installed counts as missing here, even though its row is now on the
+    # list (greyed, saying what it needs). The row exists so the option is discoverable; the field
+    # still has to say that what it currently holds cannot run.
+    #
+    # And so does a choice this launch saw REFUSED — by region, a missing sign-in, a refused call
+    # (finding 20: red in the open list, plain in the closed picker that is on screen all the
+    # time). "Not checked yet" is not a refusal and does not turn it red.
+    def runs(choice) -> bool:
+        state = availability.status(choice, reviewer=reviewer)
+        return choice.available and (state.ready or state.reason == availability.NOT_CHECKED)
+
+    missing = bool(current) and not any(choice.key == current and runs(choice) for choice in entries)
+    classes = "mini-select" + (" is-missing" if missing else "") + (" is-warn" if warn else "")
+    if ok and not (missing or warn):
+        classes += " is-ok"
+    combo.setProperty("class", classes)
+    combo.style().unpolish(combo)
+    combo.style().polish(combo)

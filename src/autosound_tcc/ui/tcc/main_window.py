@@ -101,6 +101,8 @@ from autosound_tcc.state import (
 from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, VersionRefused, load_project_view, rig_view
 from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, mcp_view, sizing
+from autosound_tcc.ui.tcc.availability_view import mark_missing as _mark_missing
+from autosound_tcc.ui.tcc.generator_check_view import GeneratorCheckView
 from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line, terminal_menu
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
@@ -485,36 +487,6 @@ def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel,
 
     layout.addStretch(1)
     return row, title, sub
-
-
-def _mark_missing(combo, entries, warn: bool = False, reviewer: bool = False) -> None:
-    """Red when the current choice is not among `entries`, plain when it is.
-
-    Recomputed on every selection change, not only when the list is rebuilt. It was set once at
-    fill time, so a combo that had ever been red STAYED red through every later pick — the Arbiter
-    chose a model that exists and the field went on claiming it did not (user, 2026-08-12).
-
-    `warn` is the other tint — the choice exists but is not what it appears to be — and it is
-    passed in rather than applied by the caller afterwards because both write the same `class`
-    property: whoever wrote second used to erase the other's answer.
-    """
-    current = str(combo.currentData() or "")
-    # A route whose CLI is not installed counts as missing here, even though its row is now on the
-    # list (greyed, saying what it needs). The row exists so the option is discoverable; the field
-    # still has to say that what it currently holds cannot run.
-    #
-    # And so does a choice this launch saw REFUSED — by region, a missing sign-in, a refused call
-    # (finding 20: red in the open list, plain in the closed picker that is on screen all the
-    # time). "Not checked yet" is not a refusal and does not turn it red.
-    def runs(choice) -> bool:
-        state = availability.status(choice, reviewer=reviewer)
-        return choice.available and (state.ready or state.reason == availability.NOT_CHECKED)
-
-    missing = bool(current) and not any(choice.key == current and runs(choice) for choice in entries)
-    classes = "mini-select" + (" is-missing" if missing else "") + (" is-warn" if warn else "")
-    combo.setProperty("class", classes)
-    combo.style().unpolish(combo)
-    combo.style().polish(combo)
 
 
 def _said(note) -> tuple[str, str]:
@@ -1177,6 +1149,8 @@ class MainWindow(QMainWindow):
         self._main_warn_tip = attach_tip(self._main_warn, "")
         self._main_warn_detail = ""
         layout.addWidget(self._main_warn)
+        self._gen_check = GeneratorCheckView(self)  # the pick checked on its route, beside it (#222)
+        layout.addWidget(self._gen_check.label)
         # The session in a terminal, as it named itself over MCP (finding 41): the picker says
         # what TCC would START, this says what is answering now — which may be a model TCC's list
         # does not have at all. Hidden until such a session calls in.
@@ -4551,7 +4525,8 @@ class MainWindow(QMainWindow):
         warn.setVisible(bool(note))
         self._main_warn_tip.set_text(note)
         self._main_warn_detail = f"{note}\n\n{tip}" if note else ""
-        _mark_missing(self._ai_main_combo, self._model_choices, warn=bool(note))
+        _mark_missing(self._ai_main_combo, self._model_choices, warn=bool(note),
+                      ok=self._gen_check.ok())
 
     def _explain_main_warning(self) -> None:
         if not self._main_warn_detail:
@@ -5338,6 +5313,7 @@ class MainWindow(QMainWindow):
         # it is a property of the PAIR, not of either picker alone.
         self._refresh_critic_warning()
         choice = self._generator_choice()
+        self._gen_check.picked(choice)  # asked of its route's list now (finding 160, tcc#222)
         if choice is None:
             self._update_session_button()
             return
@@ -5766,6 +5742,8 @@ class MainWindow(QMainWindow):
         qt_shutdown.stop_or_detach(gate, 3000)
         qt_shutdown.stop_or_detach(getattr(self, "_capture_check", None), 5000)
         menu_registry.stop_workers(self)  # a feature's own work: Codex's install or sign-in (#181)
+        if getattr(self, "_gen_check", None) is not None:
+            self._gen_check.stop()  # the main AI's check (tcc#222)
         # Both can outlast any wait worth making at quit: a probe is a real model call, and the
         # catalogue can be mid-read. Asked to stop and handed over if they will not, rather than
         # left for Qt to destroy running (F-027) — with `done` cut first, so a late answer never

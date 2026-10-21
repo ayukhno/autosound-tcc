@@ -20,6 +20,7 @@ from autosound_tcc.core import (
     codex_login,
     contract_check,
     critic,
+    generator_check,
     model_choices,
     process_writer,
     self_check,
@@ -252,6 +253,25 @@ class _ReviewerProbeWorker(QThread):
             app_log.logger().exception("reviewer probe failed")
         finally:
             self.done.emit(mode)
+
+
+class GeneratorCheckWorker(QThread):
+    """The main AI's pick asked of its route's own list and login — no model run (tcc#222)."""
+
+    done = Signal(object)  # generator_check.Result
+
+    def __init__(self, choice) -> None:
+        super().__init__()
+        self._choice = choice
+        qt_shutdown.watch(self)
+
+    def run(self) -> None:
+        try:
+            result = generator_check.run(self._choice)
+        except Exception as exc:  # noqa: BLE001 — a check must never take the window down
+            app_log.logger().exception("main AI check failed")
+            result = generator_check.Result(self._choice.key, generator_check.UNREAD, str(exc))
+        self.done.emit(result)
 
 
 class _CaptureCheckWorker(QThread):

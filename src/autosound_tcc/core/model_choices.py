@@ -685,6 +685,21 @@ def ask_cli_lists(*, recheck: bool = False) -> None:
     _save_cached_catalogue()
 
 
+def read_route_list(harness: str) -> tuple[list[Choice], str]:
+    """Ask one route's CLI for its list now — Codex's `model/list` (with its login) or `claude`'s
+    — into the same cache the pickers read, and return its rows and why there are none. **Off the
+    GUI thread.** The main AI's check at a pick (tcc#222); runs no model."""
+    _load_cached_catalogue()
+    if harness == "codex":
+        rows = _codex_rows(codex_cli.probe(force=True)) if cli_available("codex") else []
+        route = "codex"
+    else:
+        rows, route = _ask_claude_models(), _SDK_CLI_ROUTE
+    _store(route, rows)
+    _save_cached_catalogue()
+    return rows, _LIST_WHY.get(route, "") or ("" if rows else f"{harness} listed no models")
+
+
 #: What agy needs from the method's machine file to sign in through Google Cloud's ADC (tcc#135,
 #: hub #235): the method's one carrier is `AGY_ADC_AUTH=true` in critic-env, which every run of the
 #: method reads (`setup-critic-channel.md`). TCC's own `agy models` runs agy directly, and a TCC
