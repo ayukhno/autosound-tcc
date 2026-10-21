@@ -1726,27 +1726,36 @@ def test_a_worker_that_outlasts_the_wait_is_handed_over_rather_than_dropped(monk
     The wait itself is not the guard: `qt_shutdown.stop_or_detach` is, and what it buys is that a
     still-busy worker is held by `_DETACHED` instead of by nobody.
     """
+    import threading
+
     from PySide6.QtCore import QThread
 
     from autosound_tcc.ui.tcc import measurement_panel as mp
     from autosound_tcc.ui.tcc import qt_shutdown
 
+    started, release = threading.Event(), threading.Event()
+
     class _Stubborn(QThread):
         def run(self) -> None:
-            self.msleep(400)  # longer than the wait below, and it ignores interruption
+            started.set()
+            release.wait(60)  # until the test lets go; it ignores interruption
 
     _app()
     monkeypatch.setattr(mp, "_REPLACE_WAIT_MS", 50, raising=False)
     panel = MeasurementPanel()
     first = _Stubborn()
-    panel._replace_worker("_worker", first)
-    first.start()
+    try:
+        panel._replace_worker("_worker", first)
+        first.start()
+        assert started.wait(10), "the worker is running before it is replaced"
 
-    panel._replace_worker("_worker", _Stubborn())
+        panel._replace_worker("_worker", _Stubborn())
 
-    assert first.isRunning(), "the point of the test: it did NOT finish inside the wait"
-    assert first in qt_shutdown.detached(), "so something has to be holding it"
-    first.wait(4000)
+        assert first.isRunning(), "the point of the test: it did NOT finish inside the wait"
+        assert first in qt_shutdown.detached(), "so something has to be holding it"
+    finally:
+        release.set()
+        first.wait(10000)
 
 
 def test_the_series_question_can_also_say_the_measurements_came_from_another_project(monkeypatch):

@@ -5341,26 +5341,29 @@ def test_a_catalogue_worker_waiting_on_the_start_stops_when_asked(monkeypatch):
     waited five seconds and then left a RUNNING QThread for Qt to destroy — `qFatal` (final review,
     Important 5)."""
     import threading
-    import time
 
     _app()
     asked = []
     monkeypatch.setattr(main_window.model_choices, "refresh_cli_catalogue",
                         lambda **kw: asked.append(kw) or {})
-    never = SimpleNamespace(done=threading.Event())
+    release, in_the_wait = threading.Event(), threading.Event()
+
+    def waiting(timeout):  # the start's reading never finishes; the worker announces it is waiting
+        in_the_wait.set()
+        return release.wait(timeout)
+
+    never = SimpleNamespace(done=SimpleNamespace(wait=waiting))
     worker = main_window._CliCatalogueWorker(wait_for=never)
     worker.start()
     try:
-        started = time.monotonic()
+        assert in_the_wait.wait(10), "the worker reached the wait before it was interrupted"
         worker.requestInterruption()
-        stopped = worker.wait(2000)
-        took = time.monotonic() - started
+        stopped = worker.wait(10000)  # generous: only stops a hung test, no speed is asserted
     finally:
-        never.done.set()  # releases a worker that did not listen, so no thread outlives the test
+        release.set()  # releases a worker that did not listen, so no thread outlives the test
         worker.wait(5000)
 
     assert stopped, "it returns once asked, though the start's reading never finished"
-    assert took < 1.5
     assert asked == [], "an interrupted wait asks nothing afterwards"
 
 
@@ -6980,11 +6983,12 @@ def test_picking_a_reviewer_puts_it_in_the_project_params_at_once(monkeypatch):
                         lambda view, reuse_git=False: refreshed.append(reuse_git))
 
     window._ai_critic_combo.setCurrentIndex(window._ai_critic_combo.findData(flash.key))
-    # Long enough for the folder watcher's reload to land had it been heard (tcc#202): a single
-    # `processEvents()` caught it only on a slow Windows runner, so the mute in `_reviewer_window`
-    # was pinned on no OS. Pumped past the coalesce window, a reload that slips in reads False.
-    from PySide6.QtTest import QTest
-    QTest.qWait(main_window._RELOAD_COALESCE_MS + 200)
+    # The refresh is queued for the next turn of the loop (`singleShot(0)`): turns are counted, not
+    # slept. The folder watcher is deaf in `_reviewer_window` (tcc#202), so no reload is pending
+    # that could add a git read of its own.
+    assert not window._project_reload.isActive(), "the watcher's reload is not on its way"
+    for _ in range(5):
+        QApplication.processEvents()
 
     assert refreshed, "the panel names the reviewer, so it must not lag the picker"
     assert all(refreshed), "git's last answer, not a new read"

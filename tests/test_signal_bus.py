@@ -83,6 +83,43 @@ def test_an_unknown_id_is_reported_not_swallowed(tmp_path):
     assert unknown == ["not-an-id"]
 
 
+class _ParkSpy:
+    """The bus's condition, announcing when a waiter has parked on it. The announcement is made
+    while the waiter still holds the lock, so a producer that starts after it cannot get in before
+    the wait has released it: the wakeup under test is the only way the waiter can return."""
+
+    def __init__(self, cond):
+        self._cond, self.parked = cond, threading.Event()
+
+    def __enter__(self):
+        return self._cond.__enter__()
+
+    def __exit__(self, *exc):
+        return self._cond.__exit__(*exc)
+
+    def wait(self, timeout=None):
+        self.parked.set()
+        return self._cond.wait(timeout)
+
+    def notify_all(self):
+        self._cond.notify_all()
+
+
+def _wake_a_parked_waiter(bus, produce):
+    """Park `bus.wait` on a thread, run `produce` once it has parked, and return what it returned.
+    The long timeout is only the net under a hung test: the waiter must return on the notify."""
+    spy = _ParkSpy(bus._cond)
+    bus._cond = spy
+    got: list = []
+    waiter = threading.Thread(target=lambda: got.append(bus.wait(timeout=60.0)), daemon=True)
+    waiter.start()
+    assert spy.parked.wait(10), "the waiter parked"
+    produce()
+    waiter.join(10)
+    assert not waiter.is_alive(), "the notify woke the waiter; it did not sit out its timeout"
+    return got[0]
+
+
 def test_restore_returns_delivered_signals_to_pending(tmp_path):
     """The end-of-turn rule: delivered-but-unacked must not die with the turn."""
     bus = SignalBus(tmp_path)
@@ -101,13 +138,10 @@ def test_restore_wakes_a_parked_waiter(tmp_path):
     bus = SignalBus(tmp_path)
     bus.push(NOT_VISIBLE, note="late")
     bus.deliver()
-    threading.Timer(0.05, bus.restore_delivered).start()
 
-    started = time.monotonic()
-    signals = bus.wait(timeout=5.0)
+    signals = _wake_a_parked_waiter(bus, bus.restore_delivered)
 
     assert [s.kind for s in signals] == [NOT_VISIBLE]
-    assert time.monotonic() - started < 2.0  # woke on the notify, didn't sit out the timeout
 
 
 # ---- wait ------------------------------------------------------------------
@@ -116,13 +150,10 @@ def test_restore_wakes_a_parked_waiter(tmp_path):
 def test_wait_returns_as_soon_as_the_ui_pushes(tmp_path):
     """The push path: an agent parked on wait() wakes on the GUI thread's push, not on a poll."""
     bus = SignalBus(tmp_path)
-    threading.Timer(0.05, lambda: bus.push(NOT_VISIBLE, note="late")).start()
 
-    started = time.monotonic()
-    signals = bus.wait(timeout=5.0)
+    signals = _wake_a_parked_waiter(bus, lambda: bus.push(NOT_VISIBLE, note="late"))
 
     assert [s.kind for s in signals] == [NOT_VISIBLE]
-    assert time.monotonic() - started < 2.0  # woke on the notify, didn't sit out the timeout
 
 
 def test_wait_times_out_to_an_empty_list(tmp_path):
