@@ -3,6 +3,10 @@
 While `state/` is missing the whole project folder is watched, and Qt reports only the folder's
 path, not what changed in it. TCC's own `.tcc/` (a reviewer pick, a setting) lands there too, and
 cost two reloads. The folder's entry list, minus `.tcc`, tells the two apart.
+
+Ignored: a change that leaves every entry but `.tcc` as it was, and the root files named in
+`READ_FILES` as they were (mtime, size). Not ignored: a new or removed entry, an edited `READ_FILES`
+file. `project.json` and `dsp_profile.json` are watched as files and need no entry here.
 """
 
 from __future__ import annotations
@@ -10,13 +14,25 @@ from __future__ import annotations
 from pathlib import Path
 
 OWN_DIR = ".tcc"
+#: Root files the intake gate reads (the vendored `contract.py`: `project.json`, `dsp_profile.json`,
+#: `glossary.json`) that Qt does not watch as files. Rewriting one leaves the entry list as it was,
+#: so the listing alone would call it "nothing happened" and the gate would not re-run.
+READ_FILES = ("glossary.json",)
 
 
-def _entries(folder: Path) -> frozenset[str]:
+def _entries(folder: Path) -> tuple:
     try:
-        return frozenset(p.name for p in folder.iterdir() if p.name != OWN_DIR)
+        names = frozenset(p.name for p in folder.iterdir() if p.name != OWN_DIR)
     except OSError:
-        return frozenset()
+        return (frozenset(), ())
+    stats = []
+    for name in READ_FILES:
+        try:
+            st = (folder / name).stat()
+            stats.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            stats.append(None)
+    return (names, tuple(stats))
 
 
 def watch_folder(host, project_dir: Path) -> list[str]:

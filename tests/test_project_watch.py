@@ -52,3 +52,30 @@ def test_project_file_change_still_reloads(armed):
     MainWindow._on_project_file_changed(host, str(folder))
     MainWindow._on_project_file_changed(host, str(folder / "project.json"))
     assert host._project_reload.starts == 2
+
+
+def test_each_new_file_reloads_once_and_a_quiet_event_does_not(armed):
+    """The listing is re-noted on every call: new file, nothing new, another new file -> 2 starts."""
+    host, folder = armed
+    (folder / "a.txt").write_text("1")
+    MainWindow._on_project_file_changed(host, str(folder))
+    MainWindow._on_project_file_changed(host, str(folder))
+    (folder / "b.txt").write_text("2")
+    MainWindow._on_project_file_changed(host, str(folder))
+    assert host._project_reload.starts == 2
+
+
+def test_an_edited_glossary_reloads_and_a_tcc_write_still_does_not(armed):
+    """The intake gate reads `glossary.json`, which is not watched as a file (contract.py)."""
+    host, folder = armed
+    glossary = folder / "glossary.json"
+    glossary.write_text("{}")
+    MainWindow._on_project_file_changed(host, str(folder))  # appeared: listing changed
+    assert host._project_reload.starts == 1
+    glossary.write_text('{"a": "bb"}')  # same entries, new content
+    MainWindow._on_project_file_changed(host, str(folder))
+    assert host._project_reload.starts == 2
+    (folder / ".tcc").mkdir()
+    (folder / ".tcc" / "settings.json").write_text("{}")
+    MainWindow._on_project_file_changed(host, str(folder))
+    assert host._project_reload.starts == 2
