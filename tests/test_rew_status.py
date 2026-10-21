@@ -22,6 +22,7 @@ _UNKNOWN = RewProbe(rew_bridge.UNKNOWN, "ConnectionRefusedError: no REW listenin
     (RewProbe(rew_bridge.UNAVAILABLE, "RewUnavailable: refused"), "bad"),
     (_ERROR, "bad"),
     (_UNKNOWN, "wait"),
+    (RewProbe(rew_bridge.ADDRESS, "RewAddressError: REW_API_URL 'x' is not an address"), "bad"),
 ])
 def test_only_rew_that_answered_is_green(status, dot):
     """REW answering an error was green or red by luck of the call: the dot said REW's list was
@@ -38,6 +39,19 @@ def test_each_state_has_its_own_words_on_the_dot():
     assert rew_status.tip(_UNKNOWN) == i18n.t("rewUnknownTip").format(detail=_UNKNOWN.detail)
     assert rew_status.tip(None) == i18n.t("rewUncheckedTip")
     assert len({rew_status.tip(s) for s in (None, _ERROR, _UNKNOWN)}) == 3
+
+
+def test_a_rew_address_that_is_none_has_its_own_words(monkeypatch):
+    """The group review of #219, H: a mistyped `REW_API_URL` (the method's state `config`) read as
+    «unknown», a yellow dot that names no fix. Its own tip, saying what mends it, and a red dot:
+    REW was never asked, and nothing will be until the address is put right."""
+    address = RewProbe(rew_bridge.ADDRESS, "RewAddressError: REW_API_URL 'x' is not an address")
+    said = rew_status.tip(address)
+
+    assert said == i18n.t("rewAddressTip").format(detail=address.detail)
+    assert "REW_API_URL" in i18n.t("rewAddressTip")
+    assert said not in {rew_status.tip(s) for s in (None, _ERROR, _UNKNOWN)}
+    assert rew_status.online(address) is None, "waiting for REW mends no address"
 
 
 def test_the_curve_window_waits_for_rew_only_when_rew_is_down():

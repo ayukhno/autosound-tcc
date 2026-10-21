@@ -104,7 +104,8 @@ has not answered yet.
 
 The rig: the car, the port REW's API listens on, the processor, the amplifiers, the source, and
 how many channels are in use. The dot next to the port is yellow until REW has been asked, green
-when REW answers, and red when it does not answer or answers with an error. Hover over it to see
+when REW answers, and red when it does not answer, answers with an error, or when the address TCC
+asks it at is no address (`REW_API_URL` mistyped — set it right, or unset it). Hover over it to see
 which, with REW's own words for an error. A failure TCC cannot place keeps the dot yellow: the
 hover says the state is not known, and the log has the failure in full.
 

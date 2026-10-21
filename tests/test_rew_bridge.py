@@ -11,6 +11,15 @@ import pytest
 from autosound_tcc.core.rew_bridge import RewBridge
 
 
+@pytest.fixture(autouse=True)
+def _rews_state_not_learned_yet(monkeypatch):
+    """Each test starts with nothing learned of REW: an unknown failure is logged once per change
+    of state (`probe_of`), and the state another test left would decide this one's log."""
+    from autosound_tcc.core import rew_bridge
+
+    monkeypatch.setattr(rew_bridge, "_last_state", None)
+
+
 class _FakeApi:
     def __init__(self, measurements=None, raise_exc=None):
         self._measurements = measurements or {}
@@ -45,13 +54,24 @@ def _http_error(code=500, said="Internal Server Error"):
     return urllib.error.HTTPError("http://localhost:4735/measurements", code, said, {}, None)
 
 
+def _url_error():
+    import urllib.error
+
+    return urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
+
+
 @pytest.mark.parametrize(("raised", "state"), [
     (lambda api: api.RewUnavailable("connection refused", "http://localhost:4735"), "unavailable"),
     (lambda api: _http_error(), "error"),
     (lambda api: api.RewProtocolError("REW answered something that is not JSON"), "error"),
     (lambda api: api.RewWriteMismatch("slot 3 came back at 0 dB"), "error"),
-    (lambda api: api.RewAddressError("REW_API_URL 'localhost' is no address"), "unknown"),
-    (lambda api: ConnectionRefusedError("no REW listening"), "unknown"),
+    (lambda api: api.RewAddressError("REW_API_URL 'localhost' is no address"), "config"),
+    # The standard library's transport errors, from a copy with no `rew_state` (the group review
+    # of #219, G): REW down, as before #219 — never «unknown».
+    (lambda api: _url_error(), "unavailable"),
+    (lambda api: ConnectionRefusedError("no REW listening"), "unavailable"),
+    (lambda api: TimeoutError("timed out"), "unavailable"),
+    (lambda api: RuntimeError("a bug in the reader"), "unknown"),
 ])
 def test_a_probe_says_which_of_rews_states_it_met(raised, state):
     """#219 (audit T-2/T-3): REW down, REW answering an error and a failure TCC cannot place were
@@ -71,8 +91,25 @@ def test_a_probe_that_cannot_place_a_failure_logs_it(caplog):
     import logging
 
     with caplog.at_level(logging.WARNING):
-        RewBridge(api=_FakeApi(raise_exc=ConnectionRefusedError("no REW listening"))).probe()
-    assert any("no REW listening" in r.getMessage() and r.exc_info for r in caplog.records)
+        RewBridge(api=_FakeApi(raise_exc=RuntimeError("a bug in the reader"))).probe()
+    assert any("a bug in the reader" in r.getMessage() and r.exc_info for r in caplog.records)
+
+
+def test_an_unknown_failure_is_logged_once_per_change_of_state(caplog):
+    """The group review of #219, H: the ping asks REW every 30 s, and an «unknown» failure went to
+    the log whole, traceback and all, on every ping. Once when REW's state becomes unknown; again
+    only after it has been another."""
+    import logging
+
+    unknown = RewBridge(api=_FakeApi(raise_exc=RuntimeError("a bug in the reader")))
+    with caplog.at_level(logging.WARNING):
+        unknown.probe()
+        unknown.probe()
+        RewBridge(api=_FakeApi(measurements={})).probe()  # REW answered
+        unknown.probe()
+        unknown.probe()
+    said = [r for r in caplog.records if "a bug in the reader" in r.getMessage()]
+    assert len(said) == 2, [r.getMessage() for r in said]
 
 
 def test_a_missing_state_is_unknown_never_not_found():

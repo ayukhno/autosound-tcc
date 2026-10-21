@@ -20,6 +20,7 @@ REW must be running locally; `rew_api` talks to http://localhost:4735.
 from __future__ import annotations
 
 import inspect
+import socket
 import urllib.error
 from dataclasses import dataclass
 from types import ModuleType
@@ -35,6 +36,9 @@ ONLINE = "online"
 UNAVAILABLE = "unavailable"
 ANSWERED_ERROR = "error"
 UNKNOWN = "unknown"
+#: REW's address is no address (`REW_API_URL` mistyped, the method's `RewAddressError`): REW was
+#: never asked, and nothing will be until the address is put right (the group review of #219, H).
+ADDRESS = "config"
 
 #: The method's states in which REW answered, and not with what was asked (`rew_api.py`).
 _ANSWERED = frozenset({"error", "protocol", "write_mismatch"})
@@ -47,24 +51,35 @@ def method_state(exc: BaseException) -> Optional[str]:
     Off the class, never by `isinstance` on the method's classes: TCC loads `rew_api.py` by path,
     a copy of its own, and another copy's classes are other classes. REW's error answer is the
     standard library's one `HTTPError`, which has no `rew_state`; it is the one class matched.
-    A method before v3.1.2 sets no state at all, and its failures are None here — read by what the
-    exception carries, never by the method's version."""
+    A method before v3.1.2 sets no state at all — read by what the exception carries, never by the
+    method's version — so the standard library's own transport errors are read too, after
+    `HTTPError` (one of them): a `URLError`, a refused or dropped connection, a timeout is REW not
+    answering, "unavailable", as it was before #219 (the group review, G). Anything else with no
+    state is None here."""
     state = getattr(type(exc), "rew_state", None)
     if state is not None:
         return str(state)
     if isinstance(exc, urllib.error.HTTPError):
         return "error"
+    if isinstance(exc, _TRANSPORT):
+        return "unavailable"
     return None
 
 
+#: The standard library's errors for REW not answering: what a copy with no `rew_state` raises.
+_TRANSPORT = (urllib.error.URLError, ConnectionError, TimeoutError, socket.timeout)
+
+
 def status_of(exc: BaseException) -> str:
-    """Which of TCC's three states `exc` is: `UNAVAILABLE`, `ANSWERED_ERROR` or `UNKNOWN`. A
+    """Which of TCC's states `exc` is: `UNAVAILABLE`, `ANSWERED_ERROR`, `ADDRESS` or `UNKNOWN`. A
     missing state is unknown — never REW down, and never a measurement missing."""
     state = method_state(exc)
     if state == "unavailable":
         return UNAVAILABLE
     if state in _ANSWERED:
         return ANSWERED_ERROR
+    if state == ADDRESS:
+        return ADDRESS
     return UNKNOWN
 
 
@@ -77,14 +92,22 @@ class RewProbe:
     detail: str = ""
 
 
+#: The state TCC last learned of REW (`probe_of`, `RewBridge.probe`), so an unknown failure is
+#: logged once per change of state: the ping asks every 30 s (the group review of #219, H).
+_last_state: Optional[str] = None
+
+
 def probe_of(exc: BaseException) -> RewProbe:
     """`exc`, met asking REW, as a `RewProbe`. One TCC cannot place goes to the log whole, with
-    its traceback: the dot says only that the state is not known."""
+    its traceback, when REW's state becomes unknown — not again on every ping while it stays so:
+    the dot says only that the state is not known."""
+    global _last_state
     state = status_of(exc)
     detail = f"{type(exc).__name__}: {exc}"
-    if state == UNKNOWN:
+    if state == UNKNOWN and _last_state != UNKNOWN:
         app_log.logger().warning("REW's state is not known: asking it failed with %s", detail,
                                  exc_info=exc)
+    _last_state = state
     return RewProbe(state, detail)
 
 
@@ -130,10 +153,12 @@ class RewBridge:
         """The REW dot's probe: REW's list asked for, the answer dropped — `ONLINE`, or the state
         the failure is (`probe_of`). It said «offline» for any failure (#219): REW answering an
         error read as REW not running. Call off the GUI thread."""
+        global _last_state
         try:
             self.measurements()
         except Exception as exc:  # noqa: BLE001 — every failure is a state, said or logged
             return probe_of(exc)
+        _last_state = ONLINE
         return RewProbe(ONLINE)
 
     # -- measurements --

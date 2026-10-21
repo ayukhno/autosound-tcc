@@ -17,7 +17,7 @@ from autosound_tcc.ui.tcc import i18n
 #: The traffic-light class per state. Unknown is the neutral dot, as «not asked yet» is: nothing is
 #: known in either. An error is not green: REW is there, and its answer is no use.
 _DOTS = {rew_bridge.ONLINE: "done", rew_bridge.UNAVAILABLE: "bad",
-         rew_bridge.ANSWERED_ERROR: "bad"}
+         rew_bridge.ANSWERED_ERROR: "bad", rew_bridge.ADDRESS: "bad"}
 
 #: The contract check's states (`contract.py cross_check_rew`) as TCC's.
 _CONTRACT = {"unavailable": rew_bridge.UNAVAILABLE, "error": rew_bridge.ANSWERED_ERROR,
@@ -34,7 +34,7 @@ def coerce(status) -> Optional[RewProbe]:
 
 def dot(status: Optional[RewProbe]) -> str:
     """The dot's class: `wait` until asked and for a state not known, `done` for REW answering,
-    `bad` for REW down or answering an error."""
+    `bad` for REW down, answering an error, or at an address that is none."""
     return "wait" if status is None else _DOTS.get(status.state, "wait")
 
 
@@ -47,7 +47,8 @@ def tip(status: Optional[RewProbe]) -> str:
         return i18n.t("rewOnlineTip")
     if status.state == rew_bridge.UNAVAILABLE:
         return i18n.t("rewOfflineTip")
-    key = "rewErrorTip" if status.state == rew_bridge.ANSWERED_ERROR else "rewUnknownTip"
+    key = {rew_bridge.ANSWERED_ERROR: "rewErrorTip", rew_bridge.ADDRESS: "rewAddressTip"}.get(
+        status.state, "rewUnknownTip")
     return i18n.t(key).format(detail=status.detail)
 
 

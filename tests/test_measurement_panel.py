@@ -2801,7 +2801,9 @@ def test_refresh_rereads_rew_off_the_gui_thread_and_opens_no_window(monkeypatch)
 
 
 def test_a_refresh_that_cannot_reach_rew_says_so():
-    """Finding 155: REW down — the same line ⤓ says, and both buttons come back."""
+    """Finding 155: REW down — the same line ⤓ says, and both buttons come back. A refused
+    connection with no `rew_state` (a copy before v3.1.2) is REW down, said as such (the group
+    review of #219, G): it was «unknown»."""
     _app()
     panel = MeasurementPanel()
     panel.set_sessions(MEAS_SESSIONS)
@@ -2809,7 +2811,8 @@ def test_a_refresh_that_cannot_reach_rew_says_so():
     panel._refresh_btn.click()
     panel._worker.wait(2000)
     _app().processEvents()
-    assert panel._status_label.text().startswith(i18n.t("measReadFail").split("{")[0])
+    assert panel._status_label.text() == i18n.t("measReadFailDown").format(
+        error="ConnectionRefusedError: no REW")
     assert panel._refresh_btn.isEnabled() and panel._read_btn.isEnabled()
 
 
