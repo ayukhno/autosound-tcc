@@ -185,7 +185,7 @@ needs, and the error message will look as if the package is broken. `--constrain
 the dependency versions this release was tested with (it needs `uv` 0.5.6 or newer).
 
 ```sh
-uv tool install --python 3.12 --constraints https://raw.githubusercontent.com/ayukhno/autosound-tcc/v1.2.0/constraints.txt 'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc@v1.2.0'
+uv tool install --python 3.12 --constraints https://raw.githubusercontent.com/ayukhno/autosound-tcc/v1.2.1/constraints.txt 'autosound-tcc[gui,claude] @ git+https://github.com/ayukhno/autosound-tcc@v1.2.1'
 ```
 
 Install Claude Code, if you do not have it:
