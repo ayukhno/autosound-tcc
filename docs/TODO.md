@@ -2082,11 +2082,14 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 
 ### F-105 — v1.2.1: README says the app is released (hub #305)
 
-**Статус**: open · the Arbiter's «терміново, патчем» 2026-10-25, during W-12's collection (`WAVES.md` §1: a small
-branch and PR from `main`, a patch release) · branch `fix-305`: README's note said «not released yet» above the
-install line for v1.2.0; now «released», and what is unproven in his words — every part of a tune driven from the
-window in pieces, not one full tune from start to finish · left: CI on the PR, `main` fast-forwarded, `make ship
-REAL=1`, the GitHub release as Latest, hub #305 closed with the tag · resume:
+**Статус**: done v1.2.1 · the Arbiter's «терміново, патчем» 2026-10-25, during W-12's collection (`WAVES.md` §1: a
+small branch and PR from `main`, a patch release) · PR #234 (`fix-305`): README's note said «not released yet» above
+the install line for v1.2.0; now «released», and what is unproven in his words — every part of a tune driven from
+the window in pieces, not one full tune from start to finish · signed tag v1.2.1 on 6612ab67 (CI: the PR's run on
+that commit, macOS and Windows green), the GitHub release Latest · for W-12's pool: `shard 1/4 (ubuntu-latest)`
+fails `test_the_three_installers_still_agree_with_each_other` twice on the same commit — the pinned v3.2.0
+`install.sh`, an unwritable receipt folder says «Already exists» (Linux is `continue-on-error`; the skill's
+`main` failed the same way 25.10 13:07, its branch `fix/s-112-receipt-wording` went green) · resume:
 `hub/bin/role tcc --resume 35bf512a-8e7e-4681-9312-998c34af4752`
 
 ### F-104 — After v1.2.0: the freeze, and what is left open
