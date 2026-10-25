@@ -2080,6 +2080,15 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   skill: TCC-054 (hub #269, the round's raw-title matching vs `name_key`). Resume:
   `hub/bin/role tcc --resume 530f0561-3f1c-4b26-a240-c7149565668c`.
 
+### F-106 — W-12: the collection, what is waiting
+
+**Статус**: open · 2026-10-25, «добраніч» after v1.2.1 · W-12 is in collection (`WAVES.md` §1 step 1): the Arbiter
+tests, the session records · in the pool, not taken: bus `to:tcc` hub #298 (SKL-080, rounds on one level base: the
+capture-check fields), hub #299 (SKL-081, capture-check's exit 69 has two causes), hub #307 (SKL-084, three flaw
+kinds without a label); deferred hub #264 (PAS-014, «Порівняти», after the freeze, his word); tcc#233 (the
+quarantined header test — fix or delete at the milestone); F-105's Linux installer check · next: the start shows
+the queue and asks · resume: `hub/bin/role tcc --resume 35bf512a-8e7e-4681-9312-998c34af4752`
+
 ### F-105 — v1.2.1: README says the app is released (hub #305)
 
 **Статус**: done v1.2.1 · the Arbiter's «терміново, патчем» 2026-10-25, during W-12's collection (`WAVES.md` §1: a
