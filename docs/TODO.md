@@ -2080,6 +2080,15 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   skill: TCC-054 (hub #269, the round's raw-title matching vs `name_key`). Resume:
   `hub/bin/role tcc --resume 530f0561-3f1c-4b26-a240-c7149565668c`.
 
+### F-105 — v1.2.1: README says the app is released (hub #305)
+
+**Статус**: open · the Arbiter's «терміново, патчем» 2026-10-25, during W-12's collection (`WAVES.md` §1: a small
+branch and PR from `main`, a patch release) · branch `fix-305`: README's note said «not released yet» above the
+install line for v1.2.0; now «released», and what is unproven in his words — every part of a tune driven from the
+window in pieces, not one full tune from start to finish · left: CI on the PR, `main` fast-forwarded, `make ship
+REAL=1`, the GitHub release as Latest, hub #305 closed with the tag · resume:
+`hub/bin/role tcc --resume 35bf512a-8e7e-4681-9312-998c34af4752`
+
 ### F-104 — After v1.2.0: the freeze, and what is left open
 
 **Статус**: open · W-11 released 2026-10-21 (v1.2.0 on 20a3e99c, paired with the method v3.2.0); TCC is frozen —

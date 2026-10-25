@@ -20,9 +20,10 @@ without working in a terminal.
 > unmute, especially on tweeters, and start quiet.
 
 > [!NOTE]
-> **The app works, but it is not released yet.** It runs, reads REW and drives a tuning session,
-> and its installer has run from scratch on macOS and on Windows 11. What it has not had yet is a
-> full tune driven end to end from the window — the method in a terminal is the proven path.
+> **The app is released.** It runs, reads REW and drives a tuning session, and its installer has
+> run from scratch on macOS and on Windows 11. Every part of a tune has been driven from the window,
+> in pieces; one full tune from start to finish has not been run there yet — the method in a
+> terminal is the proven path.
 
 The method itself is documented in several languages:
 [Deutsch](https://github.com/ayukhno/autosound-tuning-skill/blob/main/README.de.md) ·
