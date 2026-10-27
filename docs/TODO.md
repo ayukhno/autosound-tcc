@@ -2086,8 +2086,9 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 tests, the session records · in the pool, not taken: bus `to:tcc` hub #298 (SKL-080, rounds on one level base: the
 capture-check fields), hub #299 (SKL-081, capture-check's exit 69 has two causes), hub #307 (SKL-084, three flaw
 kinds without a label); deferred hub #264 (PAS-014, «Порівняти», after the freeze, his word); tcc#233 (the
-quarantined header test — fix or delete at the milestone); F-105's Linux installer check; TEST-FINDINGS 169 (Control mode: no bottom bar of the in-app session, 2026-10-27), 170 (a lighter font, 2–3 font looks beside the theme switch) · next: the start shows
-the queue and asks · resume: `hub/bin/role tcc --resume 35bf512a-8e7e-4681-9312-998c34af4752`
+quarantined header test — fix or delete at the milestone); F-105's Linux installer check; TEST-FINDINGS 169 (Control mode: no bottom bar of the in-app session, 2026-10-27), 170 (a lighter font, 2–3 font looks beside the theme switch) · 2026-10-27, «добраніч»:
+the Arbiter added 169 and 170, nothing taken · next: the start shows the queue and asks · resume: `hub/bin/role tcc
+--resume 76a7e3a0-3072-4335-8e28-8b3d30c6ff91`
 
 ### F-105 — v1.2.1: README says the app is released (hub #305)
 
