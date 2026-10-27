@@ -3872,3 +3872,10 @@ there. Asked: do not show this bar in Control mode.
 **Where.** The bottom bar of the main window, «Control mode» layout.
 **Weight.** Low: clutter, and pickers that look like they act on the terminal's session.
 **Task.** W-12's collection (the Arbiter: «зареєструй задачу»).
+
+### 170. A lighter font, and a choice of 2–3 font styles beside the theme switch
+**What.** The Arbiter, 2026-10-27: wants to try another, lighter font for TCC. Asked as an idea: where the theme
+is switched (☰ «Switch theme (light / dark)»), add 2–3 more looks that differ by font.
+**Where.** The whole window; the ☰ menu's theme line.
+**Weight.** Low: reading comfort, a preference.
+**Task.** W-12's collection (the Arbiter: «ще одна»).
