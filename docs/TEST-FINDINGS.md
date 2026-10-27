@@ -3858,3 +3858,17 @@ After the install, `claude auth login` still did not sign in on the UTM VM (as 1
 Desktop shortcut and said that no model is available — what it should say with no sign-in.
 **The Arbiter, 2026-10-21: the walk counts as passed** («тест рахуємо пройденим»). The sign-in is the VM's
 network or Claude Code's own login, not TCC's; no session was started in this walk.
+
+## W-12 — collection (from 2026-10-25)
+
+Opened after v1.2.1, TCC frozen except for what users report (`docs/TODO.md` F-104, F-106). New findings go on from
+169, recorded, not diagnosed.
+
+### 169. Control mode still shows the bottom bar of the in-app session
+**What.** The Arbiter, 2026-10-27, a screenshot: in Control mode the bar at the bottom of the window still shows
+`OMP` · `AI MAIN` (`CODEX · GP…`) · `AI CRITIC` (`API · gemini…`) and the status «Critic: not called …». In Control
+mode the session runs in a terminal, not in TCC (`layoutNoInApp`), so these pickers and that status mean nothing
+there. Asked: do not show this bar in Control mode.
+**Where.** The bottom bar of the main window, «Control mode» layout.
+**Weight.** Low: clutter, and pickers that look like they act on the terminal's session.
+**Task.** W-12's collection (the Arbiter: «зареєструй задачу»).
