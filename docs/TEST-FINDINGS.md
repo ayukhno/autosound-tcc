@@ -3910,3 +3910,13 @@ but no `API · Claude` row, so the stored key has no row that would use it.
 **Where.** The AI CRITIC picker; ☰ «Ключ рецензента».
 **Weight.** Medium: the dialog takes an Anthropic key, and nothing in TCC can use it.
 **Task.** W-12's collection.
+
+### 174. After a Console sign-in the SDK rows turn black, and nothing says which login bills them
+**What.** The Arbiter, 2026-10-29: `claude auth login` through «Anthropic Console account», TCC restarted. The
+`SDK · Claude …` rows went from red («увійти») to black, the ordinary colour of a row that works. Asked whether
+this is still the SDK: it is — the SDK runs on whatever login `claude` holds, a subscription or a Console account
+(API billing), and the picker looks the same for both.
+**Where.** The AI MAIN and AI CRITIC pickers, the SDK rows and their tooltip («your own Claude login, through the
+Agent SDK»).
+**Weight.** Low: a person cannot see from TCC whether a session bills the subscription or the API.
+**Task.** W-12's collection (the Arbiter: «запиши»).
