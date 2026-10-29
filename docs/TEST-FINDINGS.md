@@ -3921,3 +3921,14 @@ Agent SDK»).
 **Weight.** Low: a person cannot see from TCC whether a session bills the subscription or the API.
 **Asked.** The Arbiter: «буде добре, як буде зеленіти» — a row that works and is signed in should be green.
 **Task.** W-12's collection (the Arbiter: «запиши»).
+
+### 175. Run TCC on a Claude API key, simply
+**What.** The Arbiter, 2026-10-29: «треба мати змогу запустити ТСС на API ключі від Клауд і щоб це було просто».
+Today a key works only as `ANTHROPIC_API_KEY` in TCC's own environment (a launch from a terminal); the key saved
+in «Ключ рецензента» reaches neither the main session nor a Claude reviewer (171, 173). The session's proposal:
+the key is saved once, in that window, and the pickers get their own rows for it («SDK · Claude Opus 5.5 · API
+key» beside «… · login»), so the bill is chosen by the pick. This keeps tcc#127's decision of 2026-10-02 (a login
+pick never goes to the API, so no money is spent unasked).
+**Where.** ☰ «Ключ рецензента», the AI MAIN and AI CRITIC pickers.
+**Weight.** Medium: a user with an API key and no subscription cannot use TCC without a terminal.
+**Task.** W-12's collection (the Arbiter: «які думки?»); with 171, 173, 174 one group.
