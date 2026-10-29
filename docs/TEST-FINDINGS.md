@@ -3919,4 +3919,5 @@ this is still the SDK: it is — the SDK runs on whatever login `claude` holds, 
 **Where.** The AI MAIN and AI CRITIC pickers, the SDK rows and their tooltip («your own Claude login, through the
 Agent SDK»).
 **Weight.** Low: a person cannot see from TCC whether a session bills the subscription or the API.
+**Asked.** The Arbiter: «буде добре, як буде зеленіти» — a row that works and is signed in should be green.
 **Task.** W-12's collection (the Arbiter: «запиши»).
