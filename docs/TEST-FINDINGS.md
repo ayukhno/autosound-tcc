@@ -3902,3 +3902,11 @@ in TCC.
 **Weight.** Medium: the session cannot be brought back from TCC's window, and the hint names a step that does not
 exist there.
 **Task.** W-12's collection.
+
+### 173. An Anthropic key in «Ключ рецензента» lights no Claude row for the reviewer
+**What.** The Arbiter, 2026-10-29, screenshots: Anthropic (Claude) «у захищеному сховищі», TCC restarted, no
+`claude` login. In AI CRITIC every `SDK · Claude …` row is red with «увійти»; the list holds `API · gemini-…` rows
+but no `API · Claude` row, so the stored key has no row that would use it.
+**Where.** The AI CRITIC picker; ☰ «Ключ рецензента».
+**Weight.** Medium: the dialog takes an Anthropic key, and nothing in TCC can use it.
+**Task.** W-12's collection.
