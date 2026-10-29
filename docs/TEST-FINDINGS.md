@@ -3932,3 +3932,11 @@ pick never goes to the API, so no money is spent unasked).
 **Where.** ☰ «Ключ рецензента», the AI MAIN and AI CRITIC pickers.
 **Weight.** Medium: a user with an API key and no subscription cannot use TCC without a terminal.
 **Task.** W-12's collection (the Arbiter: «які думки?»); with 171, 173, 174 one group.
+
+### 176. Fold a panel to its header, so the other one gets the height
+**What.** The Arbiter, 2026-10-29, a screenshot: the «ПЛАН — ФАКТ» panel (phases + steps) and the «У ФОКУСІ ЗАРАЗ»
+panel (the capture task, its list of captures) share the column, and each shows only a few rows. Asked: each of
+these panels can be folded to its header line, and the other one grows into the freed height.
+**Where.** The right column: «ПЛАН — ФАКТ» and «У ФОКУСІ ЗАРАЗ».
+**Weight.** Low: layout comfort; the capture list scrolls in a short box.
+**Task.** W-12's collection (the Arbiter: «запиши»).
