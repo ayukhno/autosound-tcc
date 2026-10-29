@@ -3879,3 +3879,26 @@ is switched (☰ «Switch theme (light / dark)»), add 2–3 more looks that dif
 **Where.** The whole window; the ☰ menu's theme line.
 **Weight.** Low: reading comfort, a preference.
 **Task.** W-12's collection (the Arbiter: «ще одна»).
+
+### 171. A Claude API key saved in TCC does not reach the main session, and nothing says so
+**What.** The Arbiter, 2026-10-29, screenshots: he opened «Ключ рецензента» to enter a Claude API key, then picked
+`SDK · Claude Opus 5.5` for AI MAIN. The session ran on his subscription login, not the key. The dialog's
+Anthropic row reads «ключа нема» on the screenshot. Asked: «як використати API ключ?» — he expected the key to
+drive the main session.
+**Where.** ☰ «Ключ рецензента» (a reviewer's key only) and the AI MAIN picker's SDK rows (the `claude` login, or
+`ANTHROPIC_API_KEY` in TCC's own environment).
+**Weight.** Medium: a user with an API key has no way to use it for the main session from TCC's window, and the
+only key dialog suggests he does.
+**Task.** W-12's collection.
+
+### 172. A logout under a running session: «Not logged in · Please run /login» on every message, no way back
+**What.** The Arbiter, 2026-10-29: he ran `claude auth logout` in a terminal while TCC's session (SDK · Claude
+Opus 5.5) was open. Each message after that got `Not logged in · Please run /login` and a system line «The session
+reported an error». He then signed in in the terminal through «Anthropic Console account» → «Sign in with your
+Console account»: the terminal worked, TCC did not. After a full logout and a TCC restart every SDK row in the
+picker reads «увійти».
+**Where.** The in-app session; the error relays Claude Code's `/login`, a command of its own terminal, not a step
+in TCC.
+**Weight.** Medium: the session cannot be brought back from TCC's window, and the hint names a step that does not
+exist there.
+**Task.** W-12's collection.
