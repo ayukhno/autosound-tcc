@@ -2080,9 +2080,19 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   skill: TCC-054 (hub #269, the round's raw-title matching vs `name_key`). Resume:
   `hub/bin/role tcc --resume 530f0561-3f1c-4b26-a240-c7149565668c`.
 
+### F-107 — W-12: the milestone
+
+**Статус**: open · 2026-10-30, the Arbiter's «збір закінчено»: milestone `W-12 · v1.2.2` (#12) opened in review mode
+(`WAVES.md` §1 step 2) — 24 issues, all assessed, none `ok` yet: tcc#236–#257, #233, #235 (the map: `docs/TEST-FINDINGS.md`,
+«W-12 — the milestone»); groups: The window · Claude API key · Session and MCP · The method's seam · DSP view · Codex ·
+Project on GitHub · Hygiene · three wait for the skill: #248 (hub #313 PAS-020), #251's «in the DSP now» (hub #325
+TCC-067), #235 (hub #326 TCC-068); #256 waits for the skill's S-119 · the number stays a patch until the method moves in
+the wave (then the minor, `WAVES.md` §3.1) · hub #264 stays deferred · next: the Arbiter's `ok` task by task (or by group),
+then the plan · nothing built
+
 ### F-106 — W-12: the collection, what is waiting
 
-**Статус**: open · 2026-10-25, «добраніч» after v1.2.1 · W-12 is in collection (`WAVES.md` §1 step 1): the Arbiter
+**Статус**: done · 2026-10-30, collection closed on the Arbiter's word; every item is on the milestone (F-107) · was: open · 2026-10-25, «добраніч» after v1.2.1 · W-12 is in collection (`WAVES.md` §1 step 1): the Arbiter
 tests, the session records · in the pool, not taken: bus `to:tcc` hub #298 (SKL-080, rounds on one level base: the
 capture-check fields), hub #299 (SKL-081, capture-check's exit 69 has two causes), hub #307 (SKL-084, three flaw
 kinds without a label); deferred hub #264 (PAS-014, «Порівняти», after the freeze, his word); tcc#233 (the

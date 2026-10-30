@@ -4075,3 +4075,37 @@ or «not read from a file»), and greyed defaults when nothing is set.
 waiting for the Arbiter's word under the freeze; TCC builds nothing before it. The source-file part is the same data
 as 184's hover (the ticket's «autosound-tcc #317» is hub #317 PAS-024); the changed mark follows 183. No new ticket to
 the skill: the dependency is already its own.
+
+## W-12 — the milestone (2026-10-30)
+
+The Arbiter's «збір закінчено» opened `W-12 · v1.2.2` (milestone #12). Every finding of W-12 is an issue on it, with
+its assessment; nothing is built before his `ok` on that issue.
+
+| finding | issue | group |
+|---|---|---|
+| 169 | tcc#236 | The window |
+| 170 | tcc#237 | The window |
+| 171 | tcc#238 | Claude API key |
+| 172 | tcc#239 | Claude API key |
+| 173 | tcc#240 | Claude API key |
+| 174 | tcc#241 | Claude API key |
+| 175 | tcc#242 | Claude API key |
+| 176 | tcc#243 | The window |
+| 177 | tcc#244 | The method's seam |
+| 178 | tcc#245 | The window |
+| 179 | tcc#246 | Session and MCP |
+| 180 | tcc#247 | Session and MCP |
+| 181 | tcc#248 | The method's seam — waits for hub #313 |
+| 182 | tcc#249 | DSP view |
+| 183 | tcc#250 | DSP view |
+| 184 | tcc#251 | DSP view — «in the DSP now» waits for hub #325 |
+| 185 | tcc#252 | Codex |
+| 186 | tcc#253 | Codex |
+| 187 | tcc#254 | Codex |
+| 188 | tcc#255 | Project on GitHub |
+| 189 | tcc#235 | Project on GitHub — waits for hub #326 |
+| 190 | tcc#233 | Hygiene |
+| 191 | tcc#256 | The method's seam — waits for the skill's S-119 |
+| `TODO.md` F-105 | tcc#257 | Hygiene |
+
+Not on it: hub #264 PAS-014, deferred until the Arbiter's word.
