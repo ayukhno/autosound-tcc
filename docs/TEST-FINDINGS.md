@@ -4078,7 +4078,7 @@ the skill: the dependency is already its own.
 
 ## W-12 — the milestone (2026-10-30)
 
-The Arbiter's «збір закінчено» opened `W-12 · v1.2.2` (milestone #12). Every finding of W-12 is an issue on it, with
+The Arbiter's «збір закінчено» opened `W-12 · v1.2.2` (milestone #12, renamed `W-12 · v1.3.0` the same day). Every finding of W-12 is an issue on it, with
 its assessment; nothing is built before his `ok` on that issue.
 
 | finding | issue | group |
