@@ -2089,8 +2089,10 @@ Arbiter's `ok` on 19** (18, then #256 back on the sync: the skill took its prese
 (DSP view; #251 whole, «in the DSP now» against hub #325), #252 #253 #254 (Codex), #255 #235 (Project on GitHub; #235
 against hub #326), #244 #248 (the method's seam; #248 against hub #313), #233 #257 (Hygiene) · **off the milestone, back
 to the pool**: #238–#242 (the Claude API key group, «все окрім ключів») — #256 came back with the sync · the skill takes hub #313, #325, #326 in its W-12 (his word, said on each ticket; #326
-already `accepted`) · the minor is his word (`WAVES.md` §3.1): skill v3.3.0 first, TCC pins it, then TCC's v1.3.0 · hub #264 stays deferred · next: the plan for the 19 (`docs/PLAN-W-12.md`), its cost, then his «го»
-· nothing built
+already `accepted`) · the minor is his word (`WAVES.md` §3.1): skill v3.3.0 first, TCC pins it, then TCC's v1.3.0 · hub #264 stays deferred · **the plan written** (`docs/PLAN-W-12.md`, 2026-10-30: order in 9 steps, code maps,
+~22–31 h / ~35 Claude runs, 8 decisions for his word) · next, in a new session (his word): the plan review (Codex if it
+has quota), his word on the plan's «Decisions» and «го», then `wave-12` from step 1 · nothing built · resume: `hub/bin/role
+tcc --resume 3ae8aa5d-b3fe-490d-8bc0-c93262f4e0a1`, or a fresh `hub/bin/role tcc`
 
 ### F-106 — W-12: the collection, what is waiting
 
