@@ -4062,3 +4062,16 @@ the spy caught the previous step's header read (git status, remotes), not the la
 **Weight.** Low: CI is green; the test does not check what it should while it stands.
 **Whose.** TCC only. The fix (wait for the header's read before the spy, or record the switch's own children) waits
 for the milestone (hub:seam: a mark that stood a whole wave comes up there).
+
+### 191. A «Пресет» tab and a DSP-tree section for the version's whole-preset settings (hub #324 SKL-090)
+**What.** A version holds `channels` and `virtual_channels` only; a Helix preset also carries whole-preset settings
+that change what is heard: input levels (Main, HEC/AUX, Digital), RealCenter / Dynamic Bass / SubXpander, RTC and its
+curve, BT, the Conductor's controls, the sub knob. Two versions that differ only there look the same in TCC. Asked: a
+«Пресет» tab beside the version tabs (with the same comparison and status dot), a «ПРЕСЕТ» section in the DSP tree
+beside «ВІРТУАЛЬНІ» and «ВИХІДНІ», the version's source preset file (name, md5, save time, when read, the attest result,
+or «not read from a file»), and greyed defaults when nothing is set.
+**Weight.** Medium: the tuner A/B's by these settings, and today they live in version notes by hand.
+**Whose.** Both, the method first: the preset tier's shape is the skill's S-119 (skill #200, with #197), not fixed and
+waiting for the Arbiter's word under the freeze; TCC builds nothing before it. The source-file part is the same data
+as 184's hover (the ticket's «autosound-tcc #317» is hub #317 PAS-024); the changed mark follows 183. No new ticket to
+the skill: the dependency is already its own.
