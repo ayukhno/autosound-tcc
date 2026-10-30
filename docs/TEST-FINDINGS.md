@@ -4108,4 +4108,6 @@ its assessment; nothing is built before his `ok` on that issue.
 | 191 | tcc#256 | The method's seam — waits for the skill's S-119 |
 | `TODO.md` F-105 | tcc#257 | Hygiene |
 
-Not on it: hub #264 PAS-014, deferred until the Arbiter's word.
+Not on it: hub #264 PAS-014, deferred until the Arbiter's word. Taken off the same day, back to the pool (the
+Arbiter's `ok` covers the rest, F-107): 171–175 (tcc#238–#242, the Claude API key group) and 191 (tcc#256, waits for the
+skill's deferred S-119).

@@ -2083,11 +2083,16 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 ### F-107 — W-12: the milestone
 
 **Статус**: open · 2026-10-30, the Arbiter's «збір закінчено»: milestone `W-12 · v1.2.2` (#12) opened in review mode
-(`WAVES.md` §1 step 2) — 24 issues, all assessed · **the Arbiter's `ok`, 2026-10-30, on 16** — everything that does not wait for the skill, the Claude API key group left out («все окрім ключів»): #236 #237 #243 #245 (The window), #246 #247 (Session and MCP), #249 #250 #251 (DSP view; #251 without «in the DSP now»), #252 #253 #254 (Codex), #255, #244, #233 #257 (Hygiene) · no `ok`: #238–#242 (Claude API key), #248 #256 #235 (wait for the skill) · all of them: tcc#236–#257, #233, #235 (the map: `docs/TEST-FINDINGS.md`,
-«W-12 — the milestone»); groups: The window · Claude API key · Session and MCP · The method's seam · DSP view · Codex ·
-Project on GitHub · Hygiene · three wait for the skill: #248 (hub #313 PAS-020), #251's «in the DSP now» (hub #325
-TCC-067), #235 (hub #326 TCC-068); #256 waits for the skill's S-119 · the number stays a patch until the method moves in
-the wave (then the minor, `WAVES.md` §3.1) · hub #264 stays deferred · next: the plan for the 16 (`docs/PLAN-W-12.md`), its cost, then his «го» · nothing built
+(`WAVES.md` §1 step 2), 24 issues assessed (the map: `docs/TEST-FINDINGS.md`, «W-12 — the milestone») · **the
+Arbiter's `ok` on 18**, the same day, corrected once («ми брали те що звʼязано зі скілом. які були відкладені раніше —
+не треба, але інші скіл бере в роботу»): #236 #237 #243 #245 (The window), #246 #247 (Session and MCP), #249 #250 #251
+(DSP view; #251 whole, «in the DSP now» against hub #325), #252 #253 #254 (Codex), #255 #235 (Project on GitHub; #235
+against hub #326), #244 #248 (the method's seam; #248 against hub #313), #233 #257 (Hygiene) · **off the milestone, back
+to the pool**: #238–#242 (the Claude API key group, «все окрім ключів»), #256 (the preset tier: the skill's S-119 was
+deferred under the freeze) · the skill takes hub #313, #325, #326 in its W-12 (his word, said on each ticket; #326
+already `accepted`) · the number stays a patch: TCC 1.2.x pins a skill v3.2.x, and a minor is cut on his word only
+(`WAVES.md` §3.1) · hub #264 stays deferred · next: the plan for the 18 (`docs/PLAN-W-12.md`), its cost, then his «го»
+· nothing built
 
 ### F-106 — W-12: the collection, what is waiting
 
