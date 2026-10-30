@@ -3940,3 +3940,125 @@ these panels can be folded to its header line, and the other one grows into the 
 **Where.** The right column: «ПЛАН — ФАКТ» and «У ФОКУСІ ЗАРАЗ».
 **Weight.** Low: layout comfort; the capture list scrolls in a short box.
 **Task.** W-12's collection (the Arbiter: «запиши»).
+
+## W-12 — the bus queue, folded in (2026-10-30)
+
+The Arbiter, 2026-10-30: «занось всі, аналізуй і там де є задачі Скіла став тікети». Every open `to:tcc` ticket and
+the repo's own issues, one finding each. **Whose** says whether any part is the method's; where it is, the ticket to
+the skill is named. Two tickets were already built in v1.2.0 and are closed, not recorded: hub #298 SKL-080 (tcc#220)
+and hub #299 SKL-081 (`captureCheckRewChanged`, `f8105c1c`). hub #264 PAS-014 stays deferred for the Arbiter's word.
+
+### 177. Three flaw kinds show a raw key, and `rew_bridge` promises curves TCC does not draw (hub #307 SKL-084)
+**What.** The method writes flaws of kind `ringing`, `energy_lag`, `decay_asymmetry`; TCC has no `flawKind_*` label
+for them, so the row's hover reads `flawKind_ringing`. `core/rew_bridge.py`'s docstring names group delay and
+distortion among the curves it exposes; nothing in `src/` calls them.
+**Weight.** Low: a raw key on every time-domain flaw row; a docstring that misleads a reader.
+**Whose.** TCC only: labels in four languages (or a lookup that never prints a key), the docstring and `unreachable.md`.
+
+### 178. The red refusal banner cannot be copied (hub #309 PAS-016)
+**What.** The method's refusal in the bottom banner (26.10, the move to phase 1, with the repair command
+`project.py <dir> flaw …` and «+2 more») cannot be selected or copied, and a long one is cut. The user sent
+screenshots of a command he had to retype.
+**Weight.** Medium: the command that fixes the refusal reaches the terminal only by retyping.
+**Whose.** TCC only: copy on right-click (this one and all), selectable text, the whole text when it does not fit.
+
+### 179. Plan and Captures stay empty when `process/process-state.json` appears after the project opened (hub #310 PAS-017)
+**What.** A project opened with `state/` and no `process/`; the session started a round and added steps over MCP, so
+the file appeared mid-session. The panels stayed empty; «Оновити» did not fill them, only reopening did.
+`_refresh_process` re-arms the watcher only for a file that exists; `_watched_project_dirs` watches the project folder
+only while there is no `state/`.
+**Weight.** Medium: the first round of every fresh project hits it, and the way out (a restart) breaks MCP (180).
+**Whose.** TCC only.
+
+### 180. A TCC restart changes the MCP key; the terminal's session loses TCC with 401 (hub #311 PAS-018)
+**What.** `TccMcpServer.__init__` makes a new `X-TCC-Token` per start and writes it to `.mcp.json`; the Claude Code
+session keeps the old one: «Dynamic Client Registration rejected (HTTP 401)», every `mcp__tcc__` gone until `/mcp` →
+reconnect.
+**Weight.** Medium: a restart is an ordinary action (179), and it cuts the session.
+**Whose.** TCC only: a key stable per project (in `.tcc/`, already git-ignored), or the previous key accepted, and a
+status line that says the session must reconnect.
+
+### 181. A plan step's note: what to do, what to expect, what to change if heard otherwise (hub #312 PAS-019)
+**What.** Step names carry paragraphs (P1-07a…e, 26.10) because a step has no note field; the expectation is lost
+once the step is closed. Asked: a document icon on a step with a note (`do` / `expect` / `if_not`), and after the
+close the Arbiter's answer beside `expect`.
+**Weight.** Medium: the listening loop (prediction → ear) has nowhere to live.
+**Whose.** Both. The data is the method's: hub #313 PAS-020 (`to:skill`, already open, from the Passat session).
+TCC's half shows the field; it waits for PAS-020's shape.
+
+### 182. The DSP tree shows only HEAD; any other version only as a diff (hub #315 PAS-022)
+**What.** Two candidates, v_010 and v_011 (proposed; HEAD v_009). To see one as it is — what to type into PC-Tool —
+the user has only «Порівняти з», a diff from the current one. «Поломати мозок». Asked: «Показати версію…» (any slot ×
+any version, read-only, a clear «not the current one» mark and one way back), and a compare of any two versions.
+**Weight.** Medium: a candidate cannot be checked before it is entered.
+**Whose.** TCC only: the versions are files of the ledger TCC already reads.
+
+### 183. A changed INV turns blue and loses the inversion colour (hub #316 PAS-023)
+**What.** 4.F v_002: tw-L and tw-R both INV; tw-L changed in this version, so its INV is the blue bold «changed»,
+tw-R's is the orange of an inversion. Read as «one tweeter inverted». The user: the «changed» mark should be the
+cell's frame and background, not the font colour.
+**Weight.** Medium: polarity is the field where an L/R difference matters most.
+**Whose.** TCC only: the output table and the tree (`pill-inv` + `chg` in `dsp_tree.py`).
+
+### 184. The versions list: a green «checked in the DSP» mark, the .pct6 file on hover, and «in the DSP now» (hub #317 PAS-024)
+**What.** 1.N, v_001…v_013: the HEAD tick was read as «loaded in the processor»; the DSP held v_009, the ear had
+heard v_008 from a re-saved file. Finding that out took the session a decode. Asked (with the user's correction of
+27.10, all three hold): a green mark on a version checked in the DSP (`applied` + `provenance.file`), a hover with the
+file, md5 and time (all files with the same content), and a separate «in the DSP now» mark.
+**Weight.** Medium.
+**Whose.** Both. The first two are TCC's: the data is in the version files. «In the DSP now» is the method's call:
+the ledger says by design it is «NOT a device mirror — device-truth = the latest measurement»
+(`rew_tool/state/schema.md`, AD-1), so TCC guessing it from file times would claim what the method refuses to.
+Ticket to the skill: hub #325 TCC-067.
+
+### 185. After TCC installs Codex, the row says «актуальна» and still offers «Встановити Codex» (hub #318 SKL-085)
+**What.** The Arbiter's second Mac, TCC 1.2.1: TCC installed Codex 0.162.1 (`tcc.log` 09:43:53); the row then read
+«Codex 0.162.1 — актуальна» beside the button «Встановити Codex».
+**Weight.** Low-medium: he could not tell whether Codex was there.
+**Whose.** TCC only.
+
+### 186. A Codex TCC installs is not found in a terminal (hub #321 SKL-088)
+**What.** The same install: Codex lives in `~/Library/Application Support/autosound-tcc/codex/0.162.1/…`, on no
+terminal's PATH. The skill's workaround is a link in `~/.local/bin`, pinned to the version folder.
+**Weight.** Medium: the Arbiter cannot run the Codex TCC gave him outside TCC.
+**Whose.** TCC only (`core/codex_install.py`, `codex_cli`): a stable path, or TCC says where it is and that it is its own.
+
+### 187. Codex says 0.165.0 is out; the «Оновлення» tab does not, and calls TCC's copy «ваш власний» (hub #322 SKL-089)
+**What.** Codex 0.162.1 (TCC's, run through 186's link) says «Update available! 0.162.1 -> 0.165.0»; the Updates tab
+reads «Codex 0.162.1 — ваш власний Codex», no update. After the link the row changed from «актуальна» (185) to
+«ваш власний» for the same binary. TCC pins Codex on purpose (`codex_cli.PIN` with sha256 per wheel), and the row
+does not say it is held.
+**Weight.** Low-medium: the row says neither the truth about updates nor whose Codex it is.
+**Whose.** TCC only: the pin and the reading of «whose» are TCC's. With 185 and 186 one group.
+
+### 188. A project cloned on a second Mac carries the first Mac's method link (hub #319 SKL-086)
+**What.** `passat-b8-2026_afterAYAfinal` cloned on the second Mac: «Перевірка контракту недоступна: …/.claude/skills/
+autosound-tuning points at /Users/o.yukhno/dev/autosound/skill/…, which is not on this machine». The link is absolute
+and tracked by git; «Перепривʼязати до копії TCC» makes a new absolute link, tracked again, which breaks the first Mac
+on the next pull.
+**Weight.** Medium: every move of a project between machines through git.
+**Whose.** TCC only: TCC makes the link (`core/vendor_loader.py`) and already merges its lines into the project's
+`.gitignore` (`mcp_server._IGNORE_LINES`); the link is one more line, plus taking an already tracked one out of the
+index.
+
+### 189. Saving to GitHub from TCC, made explicit (hub #320 SKL-087, tcc#235)
+**What.** The Arbiter cannot tell whether or when the project reaches GitHub, and cannot send it himself. 30.10, live:
+the panel said «Незбережені зміни 1 · Ще не відправлено 1» with an amber dot cut to «не ві…», while the session had
+made five commits and pushed each; the one file was `.sessions.log`. The git read is taken on a reload only; a count
+says nothing about what it is. Asked (tcc#235): a live git state, the files and commits by name (tuning files apart
+from housekeeping), «на GitHub до <hash> · <time>», the dot and labels by severity, a «Відправити» button (commit +
+push, once asked), and optionally who sends: the session after each step, or the button.
+**Weight.** Medium-high: GitHub is the project's only backup.
+**Whose.** Both. TCC: the panel, the live read, the colours, the button. The method: TCC does the project's git «the
+method's own way» (`core/project_repo.py` → `rew_tool/project_repo.py`), which has `init` and `status` only. A save
+verb (what to commit, the message, push, refuse when a pull is needed) and a `status --json` that names files by kind
+and commits ahead with the last push are the method's. Ticket to the skill: hub #326 TCC-068. Note: 188's link must
+not travel with such a save.
+
+### 190. The flaky project-header test stands quarantined (tcc#233)
+**What.** `test_the_project_header_says_each_state_of_the_history_and_its_backup` went red once on a slow macOS runner:
+the spy caught the previous step's header read (git status, remotes), not the language switch. Quarantined:
+`xfail(strict=False, reason="flaky: #233")`, `tests/test_project_view.py:614`.
+**Weight.** Low: CI is green; the test does not check what it should while it stands.
+**Whose.** TCC only. The fix (wait for the header's read before the spy, or record the switch's own children) waits
+for the milestone (hub:seam: a mark that stood a whole wave comes up there).
