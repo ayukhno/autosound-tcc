@@ -2083,12 +2083,11 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 ### F-107 — W-12: the milestone
 
 **Статус**: open · 2026-10-30, the Arbiter's «збір закінчено»: milestone `W-12 · v1.2.2` (#12) opened in review mode
-(`WAVES.md` §1 step 2) — 24 issues, all assessed, none `ok` yet: tcc#236–#257, #233, #235 (the map: `docs/TEST-FINDINGS.md`,
+(`WAVES.md` §1 step 2) — 24 issues, all assessed · **the Arbiter's `ok`, 2026-10-30, on 16** — everything that does not wait for the skill, the Claude API key group left out («все окрім ключів»): #236 #237 #243 #245 (The window), #246 #247 (Session and MCP), #249 #250 #251 (DSP view; #251 without «in the DSP now»), #252 #253 #254 (Codex), #255, #244, #233 #257 (Hygiene) · no `ok`: #238–#242 (Claude API key), #248 #256 #235 (wait for the skill) · all of them: tcc#236–#257, #233, #235 (the map: `docs/TEST-FINDINGS.md`,
 «W-12 — the milestone»); groups: The window · Claude API key · Session and MCP · The method's seam · DSP view · Codex ·
 Project on GitHub · Hygiene · three wait for the skill: #248 (hub #313 PAS-020), #251's «in the DSP now» (hub #325
 TCC-067), #235 (hub #326 TCC-068); #256 waits for the skill's S-119 · the number stays a patch until the method moves in
-the wave (then the minor, `WAVES.md` §3.1) · hub #264 stays deferred · next: the Arbiter's `ok` task by task (or by group),
-then the plan · nothing built
+the wave (then the minor, `WAVES.md` §3.1) · hub #264 stays deferred · next: the plan for the 16 (`docs/PLAN-W-12.md`), its cost, then his «го» · nothing built
 
 ### F-106 — W-12: the collection, what is waiting
 
