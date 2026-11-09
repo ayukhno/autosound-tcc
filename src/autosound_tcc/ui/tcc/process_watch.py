@@ -17,7 +17,7 @@ from typing import Callable
 
 from PySide6.QtCore import QFileSystemWatcher
 
-from autosound_tcc.core import config
+from autosound_tcc.core import app_log, config
 from autosound_tcc.state import process_view
 
 
@@ -29,6 +29,13 @@ def _folder_to_watch(state_file: Path) -> set[str]:
     process = state_file.parent
     folder = process if process.is_dir() else process.parent
     return {str(folder)} if folder.is_dir() else set()
+
+
+def add(watcher: QFileSystemWatcher, paths: list[str]) -> None:
+    """`addPaths`, whose answer is what it could not hold: a watch limit, or a path gone since it
+    was looked at. One log line; there is nothing on the screen a person could do about it."""
+    if refused := watcher.addPaths(paths):
+        app_log.logger().warning("the file watcher could not hold: %s", ", ".join(refused))
 
 
 class StateWatch:
@@ -54,7 +61,7 @@ class StateWatch:
         if gone := set(held) - wanted:
             self._watcher.removePaths(sorted(gone))
         if new := wanted - set(held):
-            self._watcher.addPaths(sorted(new))
+            add(self._watcher, sorted(new))
 
     def _on_folder(self, *_args) -> None:
         was_there = self._there

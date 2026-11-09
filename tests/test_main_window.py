@@ -5208,14 +5208,17 @@ def test_a_write_under_process_costs_the_capture_grid_nothing(tmp_path, monkeypa
     while `state/` is missing and the project's own watcher holds the folder; and a file written
     beside the state (the journal, on every step) is no redraw of the plan either."""
     window = _project_without_a_plan(tmp_path, monkeypatch, ledger=False)
+    reloads: list[int] = []
+    window._project_reload.timeout.connect(lambda: reloads.append(1))
 
     (tmp_path / "process").mkdir()
     window._project_watcher.directoryChanged.emit(str(tmp_path))
-    assert not window._project_reload.isActive(), "process/ is the plan's news, not the project's"
 
     _write_plan(tmp_path)
     assert _pump_until(lambda: _plan_and_captures_show(window), seconds=5)
-    assert not window._project_reload.isActive()
+    # Counted, and pumped past the coalesce: `isActive` read after the timer fired says nothing.
+    _pump_until(lambda: False, seconds=window._project_reload.interval() * 3 / 1000)
+    assert reloads == [], "process/ is the plan's news, not the project's"
 
     (tmp_path / "process" / "journal.jsonl").write_text("{}\n", encoding="utf-8")
     window._process_watcher.directoryChanged.emit(str(tmp_path / "process"))

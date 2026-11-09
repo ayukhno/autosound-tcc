@@ -3535,10 +3535,10 @@ class MainWindow(QMainWindow):
             return
         for path in self._watched_project_files():
             if Path(path).exists() and path not in watcher.files():
-                watcher.addPath(path)
+                process_watch.add(watcher, [path])
         for path in self._watched_project_dirs():
             if path not in watcher.directories():
-                watcher.addPath(path)
+                process_watch.add(watcher, [path])
 
     def _on_project_file_changed(self, *args) -> None:
         self._arm_project_watcher()

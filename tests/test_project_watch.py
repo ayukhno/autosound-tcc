@@ -6,8 +6,13 @@ through `config.chosen_project_dir`.
 
 import pytest
 
+from types import SimpleNamespace
+
+from PySide6.QtCore import QFileSystemWatcher
+from PySide6.QtWidgets import QApplication
+
 from autosound_tcc.core import config
-from autosound_tcc.ui.tcc import project_watch
+from autosound_tcc.ui.tcc import process_watch, project_watch
 from autosound_tcc.ui.tcc.main_window import MainWindow
 
 
@@ -79,3 +84,35 @@ def test_an_edited_glossary_reloads_and_a_tcc_write_still_does_not(armed):
     (folder / ".tcc" / "settings.json").write_text("{}")
     MainWindow._on_project_file_changed(host, str(folder))
     assert host._project_reload.starts == 2
+
+
+# ---- a watch Qt refused (#246): one log line, and nothing on the screen ----
+
+
+def _refused(app_log_warnings) -> list[str]:
+    return [r.getMessage() for r in app_log_warnings if "not-there" in r.getMessage()]
+
+
+def test_a_plan_watch_qt_refused_is_logged(tmp_path, app_log_warnings):
+    QApplication.instance() or QApplication([])
+    watch = process_watch.StateWatch(QFileSystemWatcher(), lambda: None)
+
+    watch._hold([], {str(tmp_path / "not-there")})
+
+    assert len(_refused(app_log_warnings)) == 1
+
+
+@pytest.mark.parametrize("kind", ["file", "folder"])
+def test_a_project_watch_qt_refused_is_logged(tmp_path, app_log_warnings, monkeypatch, kind):
+    """The real slot on a stand-in host, which is what the file's header says it does."""
+    QApplication.instance() or QApplication([])
+    missing = str(tmp_path / "not-there")
+    if kind == "file":  # the slot looks first: gone between that look and the add
+        monkeypatch.setattr("autosound_tcc.ui.tcc.main_window.Path.exists", lambda _self: True)
+    host = SimpleNamespace(_project_watcher=QFileSystemWatcher(),
+                           _watched_project_files=lambda: [missing] if kind == "file" else [],
+                           _watched_project_dirs=lambda: [missing] if kind == "folder" else [])
+
+    MainWindow._arm_project_watcher(host)
+
+    assert len(_refused(app_log_warnings)) == 1
