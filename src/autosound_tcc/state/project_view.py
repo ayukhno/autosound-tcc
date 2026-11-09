@@ -397,6 +397,9 @@ class GitStatus:
     counted: bool = True
     #: HEAD is on no branch: `branch` is then the commit's first digits (#235).
     detached: bool = False
+    #: Commits the upstream has and this copy does not, as of the last fetch; None when it has
+    #: none, there is no upstream to compare with, or git could not say (#235).
+    behind: Optional[int] = None
 
     @property
     def level(self) -> str:
@@ -486,7 +489,7 @@ def _read_git(project: Path) -> GitStatus:
     remotes = _git(project, "remote", "-v")
     if status is None and remotes is None:
         return GitStatus(works=True, repo=False)
-    head, oid, ahead, changed = "", "", None, None
+    head, oid, ahead, behind, changed = "", "", None, None, None
     if status is not None:
         changed = 0
         for line in status.splitlines():
@@ -495,8 +498,8 @@ def _read_git(project: Path) -> GitStatus:
             elif line.startswith("# branch.oid "):
                 oid = line[len("# branch.oid "):]
             elif line.startswith("# branch.ab "):
-                counts = re.fullmatch(r"\+(\d+) -\d+", line[len("# branch.ab "):])
-                ahead = int(counts.group(1)) if counts else None
+                counts = re.fullmatch(r"\+(\d+) -(\d+)", line[len("# branch.ab "):])
+                ahead, behind = (int(counts.group(1)), int(counts.group(2))) if counts else (None, None)
             elif line.strip() and not line.startswith("#"):
                 changed += 1
     # `branch.head` names the branch of a repo with no commits yet too -- which a project is for its
@@ -516,7 +519,7 @@ def _read_git(project: Path) -> GitStatus:
     return GitStatus(works=True, repo=True, branch=branch, changed=changed,
                      remote=_remote_label(url) if url else "",
                      unpushed=ahead if url and not detached else None, counted=counted,
-                     detached=detached)
+                     detached=detached, behind=(behind or None) if url and not detached else None)
 
 
 def _backup_url(remotes: str) -> str:

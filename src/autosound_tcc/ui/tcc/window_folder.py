@@ -68,6 +68,14 @@ def folder(widget) -> Optional[Path]:
     return None if window is None else window._built_on
 
 
+def shown(widget) -> Optional[Path]:
+    """The project folder `widget`'s window shows, and None for a window built on no project: what
+    a panel reads and sends from, where `folder` would answer None for both those and a stand-in.
+    A window that pinned none (a stand-in in a test) follows the process's."""
+    window = _owner(widget)
+    return config.chosen_project_dir() if window is None else window._built_on
+
+
 def tcc_dir(widget) -> Path:
     """`folder`'s `.tcc/`."""
     return config.tcc_dir(folder(widget))

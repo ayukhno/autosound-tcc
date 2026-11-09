@@ -32,10 +32,11 @@ _SCRIPT = "project_repo.py"
 #: `status --json --fetch`: the method's fetch (60 s) and its local reads, `gh auth status`
 #: (30 s) among them. Off the GUI thread only (`read`).
 _READ_TIMEOUT_S = 240
-#: `save`: a fetch (60 s), a look at the remote's branches (60 s), staging, a commit and a push of
-#: up to ten minutes, all the method's own bounds: above their sum, so the method ends a slow step
-#: itself and says so rather than TCC cutting it.
-_SAVE_TIMEOUT_S = 1500
+#: `save`, all the method's own bounds: a fetch (60 s), a look at the remote's branches (60 s),
+#: unstaging and staging (600 s each), a commit (60 s) and a push (600 s), 1980 s in all, and the
+#: room of two minutes for its local reads: above their sum, so the method ends a slow step itself
+#: and says so rather than TCC cutting it.
+_SAVE_TIMEOUT_S = 2100
 
 
 @dataclass(frozen=True)
