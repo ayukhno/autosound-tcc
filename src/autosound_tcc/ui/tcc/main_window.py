@@ -1736,9 +1736,7 @@ class MainWindow(QMainWindow):
         try:
             self._load_project()
         except Exception as exc:  # noqa: BLE001 - a rendering fault must not end the session
-            app_log.logger().exception("the project could not be drawn from disk")
-            self._status_strip.notify(i18n.t("projectRenderFailed").format(
-                error=f"{type(exc).__name__}: {str(exc)[:200]}"), level="warn")
+            shown_version.draw_failed(self, exc)
 
     def _start_contract_check(self) -> None:
         """Ask the skill's own checker what this project looks like on disk (`contract.py --json`).
@@ -3204,7 +3202,7 @@ class MainWindow(QMainWindow):
 
         self._detail = DetailPane()
         # What was copied and in what format, said where every other outcome is said.
-        self._detail.bankCopied.connect(lambda said: self._status_strip.notify(said))
+        self._detail.bankCopied.connect(lambda said: shown_version.say_copied(self, said))
         self._detail.compareChanged.connect(self._on_compare_chosen)
         self._detail.focusChanged.connect(self._on_pane_focus)
         splitter.addWidget(self._detail)

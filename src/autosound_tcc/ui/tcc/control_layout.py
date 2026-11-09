@@ -195,6 +195,7 @@ def _embedded(window, view) -> DetailPane:
     pane = DetailPane()
     pane.setParent(_nursery())
     pane.set_embedded(True)
+    pane.bankCopied.connect(lambda said: shown_version.say_copied(window, said))
     pane.set_eq_order(getattr(window, "_eq_order", None) or eq_field_order(None))
     pane.set_view(view)
     pane.use_compare(*_compare_now(window))
@@ -760,6 +761,17 @@ class ControlLayout:
         self._index[key] = self.tabs.addTab(page, text)
 
     def _fill_tabs(self) -> None:
+        """The tabs, from what is on screen. A version only looked at that a tab cannot draw goes
+        back to HEAD and is said (#249): this runs from a timer, outside every other guard."""
+        try:
+            self._draw_tabs()
+        except Exception as exc:  # noqa: BLE001 - a bad version must not trap the window
+            if shown_version.key_of(self.window) is None:
+                raise
+            shown_version.draw_failed(self.window, exc)
+            self._draw_tabs()
+
+    def _draw_tabs(self) -> None:
         view = shown_version.on_screen(self.window)
         current = self.tabs.currentIndex()
         while self.tabs.count():

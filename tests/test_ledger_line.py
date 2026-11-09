@@ -510,15 +510,15 @@ def _project_with_versions(tmp_path, monkeypatch):
     state = vendor_loader.load_dsp_state()
     full = state.PresetHistory(str(tmp_path / "state"), "FULL", project_dir=str(tmp_path))
 
-    def snap(history, preset, gain):
+    def snap(history, preset, gain, **row):
         history.snapshot({"preset": preset, "sample_rate": 96000,
-                          "channels": {"w-L": {"hp": None, "lp": None, "gain_db": gain, "ta_ms": 0.0,
-                                               "polarity": "NORM"}}}, note="fixture")
+                          "channels": {"w-L": {"hp": None, "lp": None, "gain_db": gain, "ta_ms": -gain,
+                                               "polarity": "NORM", **row}}}, note="fixture")
 
-    snap(full, "FULL", -1.5)
-    snap(full, "FULL", -4.5)
+    snap(full, "FULL", -1.5, off=True)  # v_002: its only channel switched off
+    snap(full, "FULL", -4.5, status="applied")
     sq = state.PresetHistory(str(tmp_path / "state"), "SQ", project_dir=str(tmp_path))
-    snap(sq, "SQ", -7.5)
+    snap(sq, "SQ", -7.5, status="proposed")
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path / "state"))
     window = _new_window()
@@ -538,6 +538,17 @@ def _shown_text(window) -> str:
     """What the person reads in the channel table, opened as the tree's «params» opens it."""
     window._on_table_requested("physical_outputs")
     return _table_text(window._detail)
+
+
+def _dot_of(window):
+    return window._dsp_section._dot.property("class")
+
+
+def _tree_text(window) -> str:
+    """Every word on the DSP tree, as drawn."""
+    from PySide6.QtWidgets import QLabel
+
+    return " ".join(label.text() for label in window._tree.findChildren(QLabel))
 
 
 def _pick(window, text_start):
@@ -572,15 +583,22 @@ def test_nothing_acts_on_a_looked_at_version_as_head(tmp_path, monkeypatch):
     the measurement panel's preset and what is published to a session all stay on HEAD."""
     from types import SimpleNamespace
 
-    from autosound_tcc.ui.tcc import listening_dialog, protective_dialog
+    from autosound_tcc.ui.tcc import i18n, listening_dialog, protective_dialog
 
+    i18n.set_language("en")
     window = _project_with_versions(tmp_path, monkeypatch)
     monkeypatch.setattr(ledger_line, "is_project_line", lambda _root: True)  # «Збережено в DSP…» lives there
     published = {}
     window._bridge = type("B", (), {"set_snapshot": lambda _s, **f: published.update(f)})()
-    _pick(window, "v_001")
+    head_dot = _dot_of(window)
+    _pick(window, "v_004")  # SQ's: another slot, so a reader of what is drawn would say SQ
 
+    assert window._shown_mark.text().startswith("Showing v_004") and "SQ" in window._shown_mark.text()
     assert window._view.version == "v_003", "the actors' view is HEAD"
+    assert _dot_of(window) == head_dot and head_dot == "tl tl-done", "the header's dot is HEAD's"
+    window._open_curves(["w-L_01 (sw)"])
+    assert window._curve_dialog._delays_provider() == {"w-L": 4.5}, "the delay panel reads HEAD"
+    window._curve_dialog.close()
     assert window._cfg_btn.isHidden(), "«Збережено в DSP…» is not offered over an old version"
     assert published["preset"] == "FULL", "the session is told what HEAD is"
     window._publish_snapshot()
@@ -596,6 +614,17 @@ def test_nothing_acts_on_a_looked_at_version_as_head(tmp_path, monkeypatch):
     assert sent == ["v_003", "v_003"], "a verdict or protection is never stamped on the shown one"
 
 
+def test_the_channel_switches_stay_on_head_while_another_version_is_looked_at(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
+    i18n.set_language("en")
+    window = _project_with_versions(tmp_path, monkeypatch)
+    _pick(window, "v_002")  # its channel is switched off; HEAD's is not
+    window._rebuild_system_params()  # as a language switch does: a reader of what is drawn shows here
+
+    assert window._toggle_buttons[("physical_outputs", "w-L")].text() == i18n.t("chanTurnOff")
+
+
 def test_a_shown_version_gone_says_so_and_goes_back_to_head(tmp_path, monkeypatch):
     window = _project_with_versions(tmp_path, monkeypatch)
     said = []
@@ -609,18 +638,207 @@ def test_a_shown_version_gone_says_so_and_goes_back_to_head(tmp_path, monkeypatc
     assert window._shown_mark.isHidden() and "-4.5" in _shown_text(window), "back on HEAD, no crash"
 
 
-def test_a_session_writing_while_a_version_is_shown_resets_and_says_once(tmp_path, monkeypatch):
+def test_a_write_that_moves_nothing_keeps_the_version_looked_at(tmp_path, monkeypatch):
+    """A live session rewriting `project.json` is no reason to throw the person off an old version."""
     window = _project_with_versions(tmp_path, monkeypatch)
     said = []
     monkeypatch.setattr(window._status_strip, "notify", lambda text, **_k: said.append(text))
     _pick(window, "v_001")
+    project_json = tmp_path / "project.json"
+    project_json.write_text(project_json.read_text(encoding="utf-8"), encoding="utf-8")
+
+    window._reload_project_files()
+
+    assert not window._shown_mark.isHidden() and "v_001" in window._shown_mark.text(), said
+    assert "-4.5" not in _shown_text(window) and not [line for line in said if "current version" in line]
+
+
+def _bank_a_new_head(tmp_path) -> None:
+    state = vendor_loader.load_dsp_state()
+    full = state.PresetHistory(str(tmp_path / "state"), "FULL", project_dir=str(tmp_path))
+    full.snapshot({"preset": "FULL", "sample_rate": 96000,
+                   "channels": {"w-L": {"hp": None, "lp": None, "gain_db": -9.5, "ta_ms": 0.0,
+                                        "polarity": "NORM"}}}, note="a session wrote")
+
+
+def test_a_session_banking_a_version_while_one_is_shown_resets_and_says_once(tmp_path, monkeypatch):
+    window = _project_with_versions(tmp_path, monkeypatch)
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **_k: said.append(text))
+    _pick(window, "v_001")
+    _bank_a_new_head(tmp_path)
 
     window._reload_project_files()
     window._reload_project_files()
 
     told = [line for line in said if "current version" in line]
-    assert len(told) == 1 and "v_003" in told[0], said
-    assert window._shown_mark.isHidden() and "-4.5" in _shown_text(window)
+    assert len(told) == 1 and "v_005" in told[0], said
+    assert window._shown_mark.isHidden() and "-9.5" in _shown_text(window)
+
+
+def test_a_new_version_on_the_line_resets_even_when_head_did_not_move(tmp_path, monkeypatch):
+    window = _project_with_versions(tmp_path, monkeypatch)
+    _pick(window, "v_001")
+    versions = tmp_path / "state" / "versions"
+    (versions / "v_009.json").write_text((versions / "v_002.json").read_text(encoding="utf-8"),
+                                         encoding="utf-8")
+
+    window._reload_project_files()
+
+    assert window._shown_mark.isHidden(), "the set of versions changed: back on HEAD"
+
+
+def test_a_version_that_loads_but_cannot_be_drawn_goes_back_to_head_and_says_so(tmp_path, monkeypatch):
+    """`role: 5` loads and then fails inside the tree: the strip said the last good view stays,
+    with the key still set, and every later load failed the same way."""
+    window = _project_with_versions(tmp_path, monkeypatch)
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **_k: said.append(text))
+    path = tmp_path / "state" / "versions" / "v_001.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["channels"]["w-L"]["role"] = 5
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    _pick(window, "v_001")
+
+    assert window._shown_mark.isHidden() and "-4.5" in _shown_text(window), "back on HEAD"
+    assert "w-L" in _tree_text(window), "the tree is drawn again, not left empty"
+    assert any("v_001" in line and "current one is shown" in line for line in said), said
+    assert not [line for line in said if "last good view" in line], said
+
+
+def test_a_control_mode_tab_that_cannot_draw_the_shown_version_goes_back_to_head(tmp_path, monkeypatch):
+    """The control tabs are redrawn from a timer: a raise there is outside every guard."""
+    from autosound_tcc.ui.tcc import control_layout
+
+    window = _project_with_versions(tmp_path, monkeypatch)
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **_k: said.append(text))
+    monkeypatch.setattr(control_layout, "place_terminal_left", lambda *a, **k: None)
+    monkeypatch.setattr(control_layout.MonitorFeed, "refresh", lambda self: None)
+    real = control_layout._table_tab
+
+    def fussy(win, view, group_id, empty_key):
+        if view.version == "v_001":
+            raise ValueError("a tab that cannot draw this version")
+        return real(win, view, group_id, empty_key)
+
+    monkeypatch.setattr(control_layout, "_table_tab", fussy)
+    layout = window._control_layout
+    layout.enter()
+    try:
+        _pick(window, "v_001")  # the tree and the pane draw it; only a tab cannot
+        layout.refresh()
+
+        assert window._shown_mark.isHidden(), "the key is cleared, not left to fail every redraw"
+        assert any("v_001" in line and "current one is shown" in line for line in said), said
+        tab = layout.tabs.widget(layout._index["physical_outputs"])
+        assert "-4.5" in _table_text(tab), "the tabs are drawn again, from HEAD"
+    finally:
+        layout.leave()
+
+
+def test_a_version_that_cannot_be_read_says_why_in_the_log(tmp_path, monkeypatch, caplog):
+    """The strip says it was unreadable; the log has to carry why, or nobody can find out."""
+    import logging
+
+    window = _project_with_versions(tmp_path, monkeypatch)
+    _pick(window, "v_001")
+    (tmp_path / "state" / "versions" / "v_001.json").write_text("{ not json", encoding="utf-8")
+    logger = logging.getLogger("autosound_tcc")
+    logger.addHandler(caplog.handler)
+    try:
+        window._reload_from_disk()
+    finally:
+        logger.removeHandler(caplog.handler)
+
+    records = [r for r in caplog.records if "v_001" in r.getMessage()]
+    assert records, caplog.text
+    assert records[0].exc_info is not None or "Error" in records[0].getMessage(), "the cause is in it"
+
+
+def _copy_said(monkeypatch, window, pane) -> list:
+    """Press «copy EQ» on `pane` over a channel; what the strip then says."""
+    from autosound_tcc.core import eq_export
+
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **_k: said.append(text))
+    monkeypatch.setattr(eq_export, "format_bank", lambda rows, **kw: eq_export.Bank(
+        text="BANK", format_name="X", written=1, bank_size=0, crossovers=0, notes=(), left_out=()))
+    group = window._find_group("physical_outputs")
+    pane._group, pane._row = group, group.rows[0]
+    pane._on_copy_eq_bank()
+    return said
+
+
+def test_a_copied_eq_names_the_version_only_while_one_is_looked_at(tmp_path, monkeypatch):
+    window = _project_with_versions(tmp_path, monkeypatch)
+
+    said = _copy_said(monkeypatch, window, window._detail)
+    assert len(said) == 1 and "v_00" not in said[0], said
+
+    _pick(window, "v_004")
+    said = _copy_said(monkeypatch, window, window._detail)
+    assert len(said) == 1 and "v_004" in said[0] and "SQ" in said[0], said
+    assert "not the current" in said[0], said
+
+
+def test_a_copy_from_a_control_mode_tab_is_said_and_names_the_version(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc import control_layout
+
+    window = _project_with_versions(tmp_path, monkeypatch)
+    monkeypatch.setattr(control_layout, "place_terminal_left", lambda *a, **k: None)
+    monkeypatch.setattr(control_layout.MonitorFeed, "refresh", lambda self: None)
+    _pick(window, "v_001")
+    layout = window._control_layout
+    layout.enter()
+    try:
+        tab = layout.tabs.widget(layout._index["eq"])
+        said = _copy_said(monkeypatch, window, tab)
+        assert len(said) == 1 and "v_001" in said[0], said
+    finally:
+        layout.leave()
+
+
+def test_the_tree_itself_shows_the_looked_at_version_also_after_a_language_change(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
+    window = _project_with_versions(tmp_path, monkeypatch)
+    assert "-4.5dB" in _tree_text(window), "the fixture's HEAD"
+
+    _pick(window, "v_001")
+    assert "+0.0dB" in _tree_text(window) and "-4.5dB" not in _tree_text(window), "the tree, not just the table"
+
+    before = i18n.current_language()
+    i18n.set_language("en" if before == "uk" else "uk")
+    window._retranslate()
+    assert "+0.0dB" in _tree_text(window) and "-4.5dB" not in _tree_text(window), "after a language change too"
+    i18n.set_language(before)
+    window._retranslate()
+
+
+def test_control_mode_opens_the_looked_at_values_and_its_list_says_so(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc import control_layout
+
+    window = _project_with_versions(tmp_path, monkeypatch)
+    monkeypatch.setattr(control_layout, "place_terminal_left", lambda *a, **k: None)
+    monkeypatch.setattr(control_layout.MonitorFeed, "refresh", lambda self: None)
+    _pick(window, "v_001")
+    layout = window._control_layout
+    layout.enter()
+    try:
+        row = window._find_group("physical_outputs").rows[0]
+        window._on_channel_clicked("physical_outputs", row.id)  # the tree's click
+
+        tab = layout.tabs.widget(layout._index["physical_outputs"])
+        assert layout.tabs.currentWidget() is tab
+        text = _table_text(tab)
+        assert "+0.0" in text and "-4.5" not in text, "the table opened on what is looked at"
+        combo = layout.compare_combo
+        shown = [combo.itemText(i) for i in range(combo.count()) if combo.itemText(i).startswith("v_001")]
+        assert shown and shown[0].endswith("shown"), "the mode's own list says it is looking"
+    finally:
+        layout.leave()
 
 
 def test_a_preset_switch_goes_back_to_head(tmp_path, monkeypatch):

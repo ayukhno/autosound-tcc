@@ -7,8 +7,10 @@ a version somebody is merely looking at. Only what DRAWS asks `on_screen`: the t
 control layout's tabs, the dots, the width floor.
 
 A key names the version (`v_002`, or `SQ/v_004` from another slot, as compare keys do). It is kept
-through a language or theme change and through control mode; the watcher's reload and a preset switch
-take it back to HEAD, and the watcher's says so once. Out of `main_window.py`, which may not grow.
+through a language or theme change and through control mode, and through a watcher's reload that moved
+nothing (a session rewriting `project.json`); a preset switch takes it back to HEAD, and so does a
+watcher's reload that found HEAD or the set of versions changed, which says so once. A version that
+cannot be read or drawn goes back to HEAD too, said. Out of `main_window.py`, which may not grow.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QPushButton, QWidget
 
-from autosound_tcc.core import config
+from autosound_tcc.core import app_log, config
 from autosound_tcc.state import ledger_line
 from autosound_tcc.ui.tcc import dsp_check, i18n
 from autosound_tcc.ui.tcc.detail_pane import is_other_preset
@@ -54,7 +56,9 @@ def read(window, load: Callable, root, profile):
         of, version = _split(window, key)
         try:
             window._looked_at = load(str(root), of, profile, version=version)
-        except Exception:  # noqa: BLE001 - gone or broken: a word and back to HEAD, not a crash
+        except Exception as exc:  # noqa: BLE001 - gone or broken: a word and back to HEAD, not a crash
+            app_log.logger().warning("the version looked at, %s of %s, could not be read: %s: %s",
+                                     version, of, type(exc).__name__, exc, exc_info=exc)
             window._shown_key = None
             window._status_strip.notify(
                 i18n.t("shownVersionUnreadable").format(version=version), level="warn",
@@ -153,6 +157,7 @@ def clear(window) -> None:
 
 def show(window, key: str) -> None:
     window._shown_key = key
+    window._shown_line = ledger_line.line_mark(config.state_root(), window._loaded_preset)
     window._safe_load_project()
 
 
@@ -162,15 +167,50 @@ def back(window) -> None:
     window._safe_load_project()
 
 
+def draw_failed(window, exc: Exception) -> None:
+    """A project load that could not be drawn (`_safe_load_project`). With a version looked at it is
+    that version's doing: the key goes, HEAD is drawn and the strip says so — left set, every
+    later load fails the same way with an empty tree. On HEAD itself the last good view stays on
+    screen and what happened is said (a ledger once said `slot: 1`, and `QLabel(int)` aborted the
+    process): a panel that cannot draw, not a session that ends."""
+    app_log.logger().exception("the project could not be drawn from disk")
+    key = key_of(window)
+    if key is None:
+        window._status_strip.notify(i18n.t("projectRenderFailed").format(
+            error=f"{type(exc).__name__}: {str(exc)[:200]}"), level="warn")
+        return
+    window._shown_key = None
+    window._looked_at = None
+    window._status_strip.notify(i18n.t("shownVersionUnreadable").format(version=_split(window, key)[1]),
+                                level="warn", dismissible=True)
+    window._safe_load_project()
+
+
+def say_copied(window, said: str) -> None:
+    """Where a copied EQ is said. A looked-at version's EQ can legitimately be copied; the sentence
+    names it, so nobody pastes it believing it is the current one."""
+    key = key_of(window)
+    window._status_strip.notify(i18n.t("shownVersionCopied").format(
+        version=_said(window, key), said=said) if key else said)
+
+
 def reload_at_head(window, load: Callable[[], None]) -> None:
-    """The watcher's reload: what is on disk has moved, so HEAD goes back on screen — said once,
-    and only if somebody was looking at another version."""
-    was_looking = key_of(window) is not None
+    """The watcher's reload. A write that moved nothing — a session rewriting `project.json` —
+    keeps the version looked at. HEAD or the set of versions changed: what is on disk has moved,
+    so HEAD goes back on screen, said once. A shown version that is gone says so in `read`."""
+    key = key_of(window)
+    if key is None:
+        load()
+        return
+    held = getattr(window, "_shown_line", None)
+    if held is not None and not ledger_line.moved(
+            held, ledger_line.line_mark(config.state_root(), window._loaded_preset)):
+        load()
+        return
     window._shown_key = None
     load()
-    if was_looking:
-        window._status_strip.notify(i18n.t("shownVersionReset").format(
-            version=getattr(window._view, "version", "") or ""), level="warn", dismissible=True)
+    window._status_strip.notify(i18n.t("shownVersionReset").format(
+        version=getattr(window._view, "version", "") or ""), level="warn", dismissible=True)
 
 
 def picker_menu(window) -> QMenu:
