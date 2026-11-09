@@ -6,7 +6,9 @@ out as wrong in *any* mode: this widget is the fix -- a single-line, single-mess
 regardless of view/control mode, that holds the latest fact and nothing else (not a log).
 
 A long message scrolls inside three lines instead of pushing the window down, and a warning can
-always be closed (the Arbiter, 2026-09-23, about sixteen lines that took half the window).
+always be closed (the Arbiter, 2026-09-23, about sixteen lines that took half the window). Its text
+can be selected and copied, and a line that does not fit opens whole (#245: a repair command in a
+refusal had to be retyped from a screenshot).
 
 One line is "the latest" except for what `app_log` reports, which stands until its ✕ (#173, I1):
 a store set aside at launch was said and, in the same `__init__`, written over before anyone read
@@ -19,10 +21,11 @@ import html
 from dataclasses import dataclass
 from typing import Callable, Literal, Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QToolButton
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import Qt as QtGuiNamespace
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QScrollArea, QToolButton
 
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import copy_menu, i18n
 
 Level = Literal["info", "warn"]
 
@@ -47,6 +50,11 @@ class _Line:
     on_dismiss: Optional[Callable[[], None]]
 
 
+def _clean(selected: str) -> str:
+    """Qt's selected text with its paragraph separators turned back into line breaks."""
+    return selected.replace("\u2029", "\n").replace("\u2028", "\n")
+
+
 class StatusStrip(QFrame):
     #: A link in the line was clicked — `action` (the offer) or `close` (the ✕).
     linkActivated = Signal(str)
@@ -59,6 +67,13 @@ class StatusStrip(QFrame):
         self._label.setWordWrap(True)
         self._label.setOpenExternalLinks(False)
         self._label.linkActivated.connect(self.linkActivated.emit)
+        # Selectable AND links: the flag alone would turn an offer into words.
+        self._label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse
+                                            | Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        copy_menu.enable_copy(self._label, hint="", extra=[
+            ("copySelection", lambda: _clean(self._label.selectedText())),
+            ("stripCopyAll", self._plain_text),
+        ])
         self._scroll = QScrollArea()
         self._scroll.setProperty("class", "status-strip-scroll")
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -79,10 +94,25 @@ class StatusStrip(QFrame):
         self._more = QLabel("")
         self._more.setProperty("class", "status-strip-more")
         self._more.setVisible(False)
+        # Offered only when the text is cut: the strip stays three lines, the rest opens over it.
+        self._whole_button = QToolButton()
+        self._whole_button.setProperty("class", "status-strip-close")
+        self._whole_button.setAutoRaise(True)
+        self._whole_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._whole_button.clicked.connect(self._open_whole)
+        self._whole_button.setVisible(False)
+        self._whole = QPlainTextEdit(self)
+        self._whole.setWindowFlags(Qt.WindowType.Popup)
+        self._whole.setReadOnly(True)
+        copy_menu.enable_copy(self._whole, hint="", extra=[
+            ("copySelection", lambda: _clean(self._whole.textCursor().selectedText())),
+            ("stripCopyAll", self._whole.toPlainText),
+        ])
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 6, 0)
         row.setSpacing(0)
         row.addWidget(self._scroll, 1)
+        row.addWidget(self._whole_button, 0, Qt.AlignmentFlag.AlignTop)
         row.addWidget(self._more, 0, Qt.AlignmentFlag.AlignTop)
         row.addWidget(self._close, 0, Qt.AlignmentFlag.AlignTop)
         self._fit_height()
@@ -112,6 +142,33 @@ class StatusStrip(QFrame):
         height = most if needed < 0 else min(needed, most)
         self._scroll.setFixedHeight(height)
         self.setFixedHeight(height + 1)  # and the border under it
+        # Cut downwards, or sideways by a token too long to wrap (a path).
+        self._whole_button.setVisible(
+            needed > most or (width > 0 and self._label.minimumSizeHint().width() > width))
+
+    def _plain_text(self) -> str:
+        """The shown line as a person reads it: no markup, and not the caption of its offer."""
+        line = self._shown
+        if line is None:
+            return ""
+        return copy_menu.plain(line.text) if line.action is None \
+            and QtGuiNamespace.mightBeRichText(line.text) else line.text
+
+    def _open_whole(self) -> None:
+        """The whole line under the strip, as wide as it and at most half the screen tall; moved up
+        as far as it must to stay on the screen."""
+        text = self._plain_text()
+        self._whole.setPlainText(text)
+        self._whole.ensurePolished()
+        screen = self.screen().availableGeometry()
+        width = self.width()
+        flags = Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextWrapAnywhere
+        tall = self._whole.fontMetrics().boundingRect(0, 0, width - 32, 0, flags.value, text).height()
+        height = min(tall + 32, screen.height() // 2)
+        under = self.mapToGlobal(QPoint(0, self.height()))
+        y = max(screen.top(), min(under.y(), screen.bottom() + 1 - height))
+        self._whole.setGeometry(under.x(), y, width, height)
+        self._whole.show()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 — Qt's name
         super().resizeEvent(event)
@@ -177,6 +234,7 @@ class StatusStrip(QFrame):
         self._more.setText(i18n.t("stripMore").format(n=behind) if behind else "")
         self._more.setToolTip(i18n.t("stripMoreTip") if behind else "")
         self._more.setVisible(behind > 0)
+        self._whole_button.setText(i18n.t("stripWholeText"))
         if line is self._shown:
             self._fit_height()
             return

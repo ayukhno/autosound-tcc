@@ -7,6 +7,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.ui.tcc import status_strip  # noqa: E402
@@ -171,6 +172,56 @@ def test_a_long_warning_scrolls_inside_three_lines_instead_of_taking_the_window(
     assert strip._close.isVisible(), "the ✕ stays in view at the last line too"
     strip._close.click()
     assert not strip.isVisible()
+
+
+def test_the_shown_line_is_offered_for_copying_on_right_click():
+    """#245: the repair command in a refusal had to be retyped from a screenshot. Every line the
+    strip shows can be copied, as the words on the screen: no markup, no caption of its offer."""
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    strip = StatusStrip()
+    said = "Refused.\nRun: project.py <dir> flaw add"
+    strip.notify(said, level="warn", action=("Open", lambda: None))
+    assert strip._label.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
+    assert strip._label.copy_items() == [(i18n.t("stripCopyAll"), said)]
+
+    strip.notify("a <b>fact</b>")
+    assert strip._label.copy_items() == [(i18n.t("stripCopyAll"), "a fact")]
+
+
+def test_the_line_can_be_selected_and_its_offer_stays_a_link():
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    strip = StatusStrip()
+    strip.notify("Intake ready", action=("Start the session", lambda: None))
+    flags = strip._label.textInteractionFlags()
+    assert flags & Qt.TextInteractionFlag.TextSelectableByMouse
+    assert flags & Qt.TextInteractionFlag.LinksAccessibleByMouse, "the offer is still one click"
+
+    strip._label.setSelection(0, 6)
+    assert strip._label.copy_items()[0] == (i18n.t("copySelection"), "Intake")
+
+
+def test_a_line_that_does_not_fit_opens_whole_and_one_that_fits_offers_nothing():
+    """#245: a long refusal was cut. The strip stays three lines; the whole text is one click away."""
+    _app()
+    strip = StatusStrip()
+    strip.resize(600, 400)
+    said = "\n".join(f"line {n}: something went wrong here" for n in range(30))
+    strip.notify(said, level="warn")
+    strip.show()
+    QApplication.processEvents()
+    assert not strip._whole_button.isHidden(), "the rest is offered"
+
+    strip._whole_button.click()
+    assert strip._whole.isVisible() and strip._whole.toPlainText() == said
+    strip._whole.close()
+
+    strip.notify("16 unusable", level="warn")
+    QApplication.processEvents()
+    assert strip._whole_button.isHidden(), "a line that fits has nothing more to show"
 
 
 def test_one_line_takes_one_line():
