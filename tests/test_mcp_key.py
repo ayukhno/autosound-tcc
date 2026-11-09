@@ -419,6 +419,42 @@ def test_two_tccs_share_a_key_and_one_quit_leaves_the_other_s_entry(folder):
     assert _advertised(folder) is None, "and B's own stop takes it"
 
 
+def _died(server: TccMcpServer) -> None:
+    """The serving thread is gone, as after a crash: `stop()` has not been called."""
+    server._server.should_exit = True
+    server._thread.join(20)
+    assert server.stopped_reason
+
+
+def test_a_server_that_died_leaves_the_entry_of_whoever_took_its_port(folder):
+    """A's server is dead, B took the port: an entry naming that port is B's, and a leftover entry
+    of A's own is the lesser harm."""
+    a = _server(folder)
+    a.start()
+    _died(a)
+    mcp_server.write_mcp_config(folder, a.port, "b-" * 20)
+
+    a.stop()
+
+    entry = _advertised(folder)
+    assert entry and entry["headers"]["X-TCC-Token"] == "b-" * 20, "A's quit took B's entry"
+
+
+def test_a_reset_on_a_dead_server_does_not_write_over_whoever_took_its_port(folder):
+    a = _server(folder)
+    a.start()
+    try:
+        _died(a)
+        mcp_server.write_mcp_config(folder, a.port, "b-" * 20)
+
+        a.reset_token()
+
+        assert a.key_note == "reset"
+        assert _advertised(folder)["headers"]["X-TCC-Token"] == "b-" * 20
+    finally:
+        a.stop()
+
+
 def test_a_stopping_server_withdraws_while_the_port_is_still_its_own(folder, monkeypatch):
     """With one key per folder the port is all that tells two TCCs apart, and a port given back can
     be taken by the next TCC before the old one reads `.mcp.json`. So the entry goes first."""

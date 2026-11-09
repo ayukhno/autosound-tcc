@@ -2076,9 +2076,10 @@ class TccMcpServer:
 
         Every session already running holds the old one and is refused until it reconnects — that
         is what a reset is — so the window says so (`mcp_view.reset_key`). Never raises: a key that
-        cannot be saved still replaces the old one for this run (`key_note`)."""
+        cannot be saved still replaces the old one for this run (`key_note`). A server whose thread
+        has died advertises nothing: its port may be another TCC's by now (`stop`)."""
         self._take_key(mcp_key.reset(self._key_folder))
-        if self._write_config and self._thread is not None:
+        if self._write_config and self._thread is not None and self.stopped_reason is None:
             self._advertise()
 
     def start(self, write_config: bool = True) -> int:
@@ -2214,13 +2215,16 @@ class TccMcpServer:
         # TCCs on one folder apart (#247): while this server holds it, an entry naming it is this
         # server's; given back, the next TCC can take it and write an entry that looks the same.
         # Guarded: this runs on the way out, and a raise here skipped the rest of the window's
-        # close (the branch review). Once, and only by a server that wrote one.
+        # close (the branch review). Once, and only by a server that wrote one -- and that still
+        # holds the port: once its thread has died the port is free, and another TCC may have
+        # written an entry naming it. A leftover entry of ours is the lesser harm (#247).
         if self._advertised:
             self._advertised = False
-            try:
-                forget_mcp_config(self.project_dir, port=self.port)
-            except Exception:  # noqa: BLE001 — logged; the close goes on
-                app_log.logger().exception("the MCP advertisement could not be withdrawn")
+            if self.stopped_reason is None:
+                try:
+                    forget_mcp_config(self.project_dir, port=self.port)
+                except Exception:  # noqa: BLE001 — logged; the close goes on
+                    app_log.logger().exception("the MCP advertisement could not be withdrawn")
         if self._server is not None:
             self._server.should_exit = True
         if self._thread is not None:
