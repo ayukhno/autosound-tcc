@@ -17,7 +17,7 @@ read on `main` at `fdb45747` (three Sonnet readers, 2026-10-30); line numbers dr
 
 | step | group | issues | note |
 |---|---|---|---|
-| 1 | Hygiene | #233, #257, #260 | #257 quarantined on Linux now; the pin to the candidate (step 8) carries the skill's fix (2306258) and lifts it; #260 is one rule in `CLAUDE.md` |
+| 1 | Hygiene | #233, #260 | #260 is one rule in `CLAUDE.md`. #257 needs no quarantine: the pin to the candidate (step 8) carries the skill's fix (2306258, in `beta-v3.3.0-rc1`) and the PR's CI runs after it |
 | 2 | Small fixes — the Sonnet trial | #252, #250, #244, #236 | ordinary, XS–S, each a short brief |
 | 3 | The window | #245, #243, #237 | #237 needs his pick of the looks first (Decisions, 3) |
 | 4 | Session and MCP | #246, then #247 | #247 `Risk: high`: a secret on disk |
@@ -121,8 +121,7 @@ that fire on the first event-loop turn. Fix: drain events (`QApplication.process
 drop the xfail. XS.
 
 **#257** — `tests/test_skill_selftests.py:123-148` runs the skill's `scripts/installer-consistency.py`; the fix is
-skill `2306258` (S-112), 6 commits after v3.2.0, in no tag. Now: `xfail(strict=False, reason="flaky: #257")` on
-Linux only; the re-pin lifts it. XS.
+skill `2306258` (S-112), in `beta-v3.3.0-rc1`. The pin at step 8 is the fix; the PR's Linux shard is the proof. XS.
 
 **#252** — `S/ui/tcc/codex_tool_row.py:117-124` `_draw` hides the button only for `STANDING_OWN`; after an install
 the state is `STANDING_TCC`, the button disabled but shown. Hide it for TCC too. Flip
