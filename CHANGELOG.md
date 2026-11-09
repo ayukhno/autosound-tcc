@@ -15,7 +15,7 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
-## [Unreleased]
+## [v1.3.0] — 2026-11-09 · any version of any slot read-only, the preset's settings, «in the DSP now», saving to GitHub in the open, the MCP key kept per project, the method at v3.3.0
 
 Paired with method `fe34a96065125753abfa06d75b27d5eff77492ac` — the method's signed candidate `beta-v3.3.0-rc1`: the
 train tags that commit **`v3.3.0`**.
