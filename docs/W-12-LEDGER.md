@@ -34,6 +34,7 @@ site. Sent to the hub by ticket at the wave's end.
 | 2026-11-09 | test seat (opus · high), 20 min | #235 | 15 | each proved by a run; 1 live bug | | | | 0 / 10 / 5 |
 | 2026-11-09 | Opus seat (`feature-dev:code-reviewer`, opus · high), covering silent failures too, 9 min, 245K | #256 | 9 | checked in the fix round | | | | 0 / 3 / 6 |
 | 2026-11-09 | test seat (opus · high) | #256 | 30 survivors in 7 classes | each proved by a throwaway test | | | | 0 / 20 / 10 |
+| 2026-11-09 | final branch review (Fable, high), 10 min, 251K | the whole branch, its seams | 4 | 4 | 0 | 0 | 4 | 0 / 2 / 2 |
 
 #255's Blocker came from the test seat, not the code seat: `.gitignore` rewritten during a rebase, so `git rebase --continue` then failed.
 
@@ -51,6 +52,9 @@ The first two seats found the same Important on their own (a pin bump leaves a p
 - #248, for the skill: `process-schema.md` says «TCC reads none of these keys»; it reads `note` now.
 - #251, for the skill: a person's word on a DSP whose file TCC cannot read has no per-version field, so those DSPs get no green mark.
 - #256: channel rows with `status: candidate` read as entered in the header dot (older than this wave, and a change there would touch every project).
+- #255 and #235 (the final review): a method `save` landing in the one git call between `keep_out`'s HEAD check and its commit would leave TCC's commit on the old tree. One-time, at the untrack only.
+- #235 (the final review): every ledger write costs a fetch and `gh auth status` on the worker; offline up to 90 s before the panel says so.
+- For the skill: `.gitignore` is not in `HOUSEKEEPING`, so the method counts TCC's own edit as tuning; TCC's panel now passes it over alone.
 - #247, for the live test: after a TCC restart the key holds and the MCP session id does not (`404`). Does Claude Code re-initialize?
 
 The re-review paid: four of its five Important are what #247's own fix round made (a brief of mine asked to refuse `.mcp.json` when git
