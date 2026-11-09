@@ -15,6 +15,8 @@ site. Sent to the hub by ticket at the wave's end.
 | 2026-11-09 | silent-failure seat (opus · high), 7 min, 185K | the window group (#245, #243, #237) | 7 | 6 (each by a red test) | 0 | 0 | 7 | 0 / 2 / 5 |
 | 2026-11-09 | test seat (opus · high), 10 min, 163K | the window group | 16 | 12 taken and red on the seat's mutation; 1 Minor taken; 3 Minor left | 0 | 0 | 16 | 0 / 12 / 4 |
 
+| 2026-11-09 | Opus seat (`feature-dev:code-reviewer`, opus · high) | #247's task review (`cb404d28`) | 7 | checked in the fix round | | | | 0 / 1 / 6 |
+
 The silent-failure seat's seventh (a setting written before the restyle) was left: no raiser exists today. The window group's fix
 round: opus · medium, three commits (`385b30bb`, `247d9193`, `41578365`).
 
