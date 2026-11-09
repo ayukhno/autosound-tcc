@@ -1664,6 +1664,9 @@ def test_control_mode_bar_keeps_the_session_name_coffee_and_feedback_and_leaving
     window._session_btn.setVisible(True)  # shown while a session runs: one of the bar's own states
     pickers.append(window._session_btn)
     # Hidden in the full window, and changed again while in Control mode: not shown on leaving.
+    # The window's own checks answer late on a Windows runner and would show them again themselves.
+    monkeypatch.setattr(window, "_refresh_critic_warning", lambda: None)
+    monkeypatch.setattr(window, "_refresh_main_warning", lambda: None)
     window._critic_warn.setVisible(False)
     window._main_warn.setVisible(False)
     assert window._terminal_btn.isHidden()
