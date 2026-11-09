@@ -60,8 +60,10 @@ _MOST_READ = 4096
 #: What must never travel out of a project folder. `.mcp.json` and `.tcc/mcp-token` carry the
 #: session's key; `.tcc/` is also TCC's own per-project state, including the picked models and the
 #: packages sent to the reviewer. `.mcp-*.tmp` is `.mcp.json` on its way through a temp file in the
-#: project's root: a kill between the write and the rename leaves the key in it.
-_IGNORE_LINES = (".mcp.json", ".tcc/", ".mcp-*.tmp")
+#: project's root: a kill between the write and the rename leaves the key in it. The link to the
+#: method is one computer's absolute path (#255), with no trailing slash: a `/` pattern does not
+#: match a symlink.
+_IGNORE_LINES = (".mcp.json", ".tcc/", ".mcp-*.tmp", ".claude/skills/autosound-tuning")
 
 
 #: How long git gets to answer, all its questions together. `load` and `reset` run on the GUI

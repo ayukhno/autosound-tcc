@@ -22,7 +22,7 @@ from typing import Optional
 # `method_binding` imports this module as well: either loads first, because each uses the other
 # only inside its functions. At the top, and with Windows' junction call, because
 # `link_skill_into` runs on the session worker's thread at every session start (#172).
-from autosound_tcc.core import method_binding
+from autosound_tcc.core import method_binding, method_link_git
 
 if sys.platform.startswith("win"):
     import _winapi
@@ -244,7 +244,18 @@ def link_skill_into(project_dir: Path) -> Optional[Path]:
     leads out of the project, or when the filesystem refuses — answered, never raised: a session
     with a warning beats no session. omp says so before its turn (`OmpSession.skill_warning`); the
     SDK route loads the method as a plugin and does not read this link.
+
+    The link is one computer's absolute path, so a link that is there is kept out of the project's
+    git as well (`method_link_git`, #255).
     """
+    link = _ensure_link(project_dir)
+    if link is not None:
+        method_link_git.keep_out(project_dir)
+    return link
+
+
+def _ensure_link(project_dir: Path) -> Optional[Path]:
+    """`link_skill_into`'s link, made when it is not there: the link, or None."""
     link = project_dir / ".claude" / "skills" / SKILL_NAME
     try:
         if not method_binding._inside(os.path.realpath(link.parent), os.path.realpath(project_dir)):
