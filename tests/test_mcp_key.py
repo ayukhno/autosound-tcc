@@ -870,6 +870,9 @@ class _Strip:
     def notify(self, text, level="info", sticky=False, **_kwargs) -> None:
         self.lines.append((text, level, sticky))
 
+    def let_go(self, _slot: str) -> None:
+        pass  # what stays on the screen is the real strip's: `test_status_strip`
+
 
 @pytest.mark.parametrize("note, key, level", [("made", "mcpKeyMade", "info"),
                                               ("replaced", "mcpKeyReplaced", "warn")])
@@ -955,6 +958,40 @@ def test_the_reset_line_is_off_while_there_is_no_server():
 
     assert entry.enabled(_host(None)) is False
     assert entry.enabled(_host(SimpleNamespace())) is True
+
+
+def test_the_reset_line_is_off_for_a_server_that_has_died(folder):
+    """Its key would change with nothing listening, and the strip would call that done."""
+    entry = next(e for e in menu_registry.collect() if e.id == "mcp_key_reset")
+    server = _server(folder)
+    server.start()
+    try:
+        assert entry.enabled(_host(server)) is True
+        _died(server)
+        assert entry.enabled(_host(server)) is False
+    finally:
+        server.stop()
+
+
+def test_a_good_reset_clears_what_the_last_advert_could_not_do(folder, monkeypatch):
+    real = mcp_server.write_mcp_config
+
+    def unread(*_args, **_kwargs):
+        raise own_store.StoreUnreadable("could not be read")
+
+    monkeypatch.setattr(mcp_server, "write_mcp_config", unread)
+    server = _server(folder)
+    server.start()
+    try:
+        assert server.config_error and server.config_unreadable
+        monkeypatch.setattr(mcp_server, "write_mcp_config", real)
+
+        server.reset_token()
+
+        assert server.config_error == "" and server.config_unreadable is None
+        assert _advertised(folder)["headers"]["X-TCC-Token"] == server.token
+    finally:
+        server.stop()
 
 
 def test_the_key_reaches_neither_the_log_nor_the_strip(folder, monkeypatch, app_log_told):

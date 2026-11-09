@@ -48,6 +48,7 @@ class _Line:
     action: Optional[tuple[str, Callable[[], None]]]
     dismissible: bool
     on_dismiss: Optional[Callable[[], None]]
+    slot: str = ""
 
 
 def _clean(selected: str) -> str:
@@ -194,7 +195,7 @@ class StatusStrip(QFrame):
                action: Optional[tuple[str, Callable[[], None]]] = None,
                dismissible: bool = False,
                on_dismiss: Optional[Callable[[], None]] = None,
-               sticky: bool = False) -> None:
+               sticky: bool = False, slot: str = "") -> None:
         """Show the latest fact — and, when it is an EVENT, let go of it after a while.
 
         The difference is not decoration. `info` says something HAPPENED ("opened a terminal
@@ -220,14 +221,18 @@ class StatusStrip(QFrame):
         and comes when it is closed. Several stand in the order they came; the same sentence
         stands once. A fact's thirty seconds start when it is shown, not while it waits: one said
         once — «Not written down: …» — ran out behind the report unseen (the re-review, N2).
+
+        `slot` names a standing line whose caller knows when it ends: the next under that name
+        replaces it, and `let_go` takes it back. A report has none, and keeps its ✕.
         """
-        line = _Line(text, level, action, dismissible or level == "warn" or sticky, on_dismiss)
+        line = _Line(text, level, action, dismissible or level == "warn" or sticky, on_dismiss, slot)
         if sticky:
-            if any(standing.text == text for standing in self._standing):
-                return
-            self._standing.append(line)
-            if len(self._standing) > _STANDING_MAX:
-                del self._standing[1]  # the oldest of those waiting, never the one being read
+            if slot:
+                self._standing = [held for held in self._standing if held.slot != slot]
+            if not any(standing.text == text for standing in self._standing):
+                self._standing.append(line)
+                if len(self._standing) > _STANDING_MAX:
+                    del self._standing[1]  # the oldest of those waiting, never the one being read
         else:
             self._timer.stop()
             self._line = line
@@ -281,6 +286,13 @@ class StatusStrip(QFrame):
         self._timer.stop()
         self._line = None
         self._show()
+
+    def let_go(self, slot: str) -> None:
+        """Take back the standing line under `slot`, if there is one: its cause has ended."""
+        kept = [line for line in self._standing if line.slot != slot]
+        if len(kept) != len(self._standing):
+            self._standing = kept
+            self._show()
 
     def withdraw(self, text: Optional[str]) -> bool:
         """Let go of the latest line if it says `text`, shown or waiting behind a standing one: a

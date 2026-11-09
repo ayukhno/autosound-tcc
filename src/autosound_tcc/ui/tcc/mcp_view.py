@@ -33,36 +33,53 @@ def omp_without_config(server) -> str:
     return say(session_routes.omp_without_config(server))
 
 
-def _say_key(server, strip, after_reset: bool = False) -> None:
-    """The line for what became of the key — when a session must reconnect, and only then. A key
-    that did not change is not news: that is the whole of #247. Holds the reason, never the key.
-    `after_reset`: the person asked for a new key, so the line also has to say what it did not
-    reach — a second TCC on the folder read the key once, at its start."""
+#: The strip's name for the key's standing line: one at a time, taken back when it stops being true.
+_KEY_SLOT = "mcp_key"
+
+
+def _key_standing(server, after_reset: bool) -> str:
+    """The line that stays until the cause is fixed, or "". Holds the reason, never the key.
+    Standing because it comes true again on every start, and the window's own opening lines would
+    otherwise replace it before anyone read it. `after_reset`: the person asked for a new key, so
+    the line also says what that did not reach, a second TCC, which read the key once at its start."""
+    note = getattr(server, "key_note", mcp_key.KEPT)
+    if note == mcp_key.OLD_ON_DISK:
+        return i18n.t("mcpKeyOldOnDisk").format(why=server.key_problem)
+    if note == mcp_key.RUN_ONLY:
+        line = "mcpKeyResetRunOnly" if after_reset else "mcpKeyRunOnly"
+        return i18n.t(line).format(why=server.key_problem)
+    return ""
+
+
+def _key_news(server) -> tuple[str, str]:
+    """The line and its level for a key that changed and a session must reconnect to, else "". A
+    key that did not change is not news: that is the whole of #247."""
     note = getattr(server, "key_note", mcp_key.KEPT)
     if note == mcp_key.MADE:
-        strip.notify(i18n.t("mcpKeyMade"))
-    elif note == mcp_key.REPLACED:
-        strip.notify(i18n.t("mcpKeyReplaced"), level="warn")
-    elif note == mcp_key.RESET:
-        strip.notify(i18n.t("mcpKeyReset"), level="warn")
-    elif note == mcp_key.OLD_ON_DISK:
-        strip.notify(i18n.t("mcpKeyOldOnDisk").format(why=server.key_problem), level="warn",
-                     sticky=True)
-    elif note == mcp_key.RUN_ONLY:
-        # Standing: it comes true again on every start until the cause is fixed, and the window's
-        # own opening lines would otherwise replace it before anyone read it.
-        line = "mcpKeyResetRunOnly" if after_reset else "mcpKeyRunOnly"
-        strip.notify(i18n.t(line).format(why=server.key_problem), level="warn", sticky=True)
+        return i18n.t("mcpKeyMade"), "info"
+    if note == mcp_key.REPLACED:
+        return i18n.t("mcpKeyReplaced"), "warn"
+    if note == mcp_key.RESET:
+        return i18n.t("mcpKeyReset"), "warn"
+    return "", "info"
 
 
 def say_started(server, strip, after_reset: bool = False) -> None:
-    """What the strip says once the server is up, or its key was reset: the key's line, then the
-    advertisement's — the server is up and `.mcp.json` may still not be, which is real and
-    invisible otherwise (a terminal session will not find TCC) but is NOT "the server did not
-    start", which is what it used to say about a server that was serving (user's log, 2026-09-06)."""
-    _say_key(server, strip, after_reset)
-    if getattr(server, "config_error", ""):
-        strip.notify(i18n.t("mcpNoConfig").format(error=server.config_error), level="warn")
+    """What the strip says once the server is up, or its key was reset. The key's standing line
+    goes up, or comes down when it stopped being true. The key's news and the advertisement's
+    trouble go in one line, since the second would replace the first at once: the server is up and
+    `.mcp.json` may still not be, which is real and invisible otherwise (a terminal session will
+    not find TCC) but is NOT "the server did not start", which is what it used to say about a
+    server that was serving (user's log, 2026-09-06)."""
+    if standing := _key_standing(server, after_reset):
+        strip.notify(standing, level="warn", sticky=True, slot=_KEY_SLOT)
+    else:
+        strip.let_go(_KEY_SLOT)
+    news, level = _key_news(server)
+    if error := getattr(server, "config_error", ""):
+        news, level = " ".join(filter(None, [news, i18n.t("mcpNoConfig").format(error=error)])), "warn"
+    if news:
+        strip.notify(news, level=level)
 
 
 def reset_key(host) -> None:
@@ -71,9 +88,15 @@ def reset_key(host) -> None:
     say_started(host._mcp_server, host._status_strip, after_reset=True)
 
 
+def _can_reset(host) -> bool:
+    """Not with no server, and not with a dead one: nothing is listening for the new key."""
+    server = host._mcp_server
+    return server is not None and getattr(server, "stopped_reason", None) is None
+
+
 def menu_entries() -> list:
     from autosound_tcc.ui.tcc.menu_registry import MenuEntry
 
     return [MenuEntry("mcp_key_reset", "settings", label_key="menuMcpKeyReset",
                       tip_key="menuMcpKeyResetTip", on=reset_key,
-                      enabled=lambda w: w._mcp_server is not None, after="reviewer_key")]
+                      enabled=_can_reset, after="reviewer_key")]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -11,7 +12,7 @@ from PySide6.QtCore import QPoint, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from autosound_tcc.ui.tcc import status_strip  # noqa: E402
+from autosound_tcc.ui.tcc import i18n, mcp_view, status_strip  # noqa: E402
 from autosound_tcc.ui.tcc.status_strip import StatusStrip  # noqa: E402
 
 
@@ -350,6 +351,69 @@ def test_a_sticky_line_stands_until_its_close_and_later_lines_wait_behind_it():
     assert strip.text().startswith("Phase 2 is done") and "<a " in strip.text(), \
         "its ✕ brings the line that waited, offer and all"
     assert strip._more.isHidden()
+
+
+def test_a_standing_line_under_a_name_is_replaced_by_the_next_and_taken_back():
+    """A caller whose cause ended takes its own line back; a report (no name) keeps its ✕."""
+    _app()
+    strip = StatusStrip()
+    strip.notify("a report", level="warn", sticky=True)
+    strip.notify("cannot keep it, because A", level="warn", sticky=True, slot="key")
+    strip.notify("cannot keep it, because B", level="warn", sticky=True, slot="key")
+
+    assert strip.text() == "a report" and strip.waiting() == ["cannot keep it, because B"]
+
+    strip.let_go("key")
+    assert strip.text() == "a report" and strip.waiting() == []
+
+    strip.let_go("key")  # nothing there any more: no harm
+    strip._close.click()
+    assert strip.text() == "" and strip.isHidden()
+
+
+def _key_said(note: str, why: str = "", config_error: str = "") -> SimpleNamespace:
+    return SimpleNamespace(key_note=note, key_problem=why, config_error=config_error,
+                           reset_token=lambda: None)
+
+
+def test_a_good_reset_takes_back_the_standing_could_not_keep():
+    """The real strip, since `_Strip` in test_mcp_key cannot say what stays on the screen."""
+    _app()
+    strip = StatusStrip()
+    server = _key_said("run_only", "git says no")
+    mcp_view.say_started(server, strip)
+    assert strip.text() == i18n.t("mcpKeyRunOnly").format(why="git says no")
+
+    server.key_note, server.key_problem = "reset", ""
+    mcp_view.reset_key(SimpleNamespace(_mcp_server=server, _status_strip=strip))
+
+    assert strip.text() == i18n.t("mcpKeyReset"), "the key is kept now: the line stopped being true"
+    assert strip.waiting() == []
+
+
+@pytest.mark.parametrize("still", ["run_only", "old_on_disk"])
+def test_a_reset_that_failed_too_says_the_new_reason_and_only_that(still):
+    _app()
+    strip = StatusStrip()
+    server = _key_said("run_only", "the old reason")
+    mcp_view.say_started(server, strip)
+
+    server.key_note, server.key_problem = still, "the new reason"
+    mcp_view.reset_key(SimpleNamespace(_mcp_server=server, _status_strip=strip))
+
+    assert "the new reason" in strip.text() and strip.waiting() == []
+
+
+def test_a_reset_s_line_is_not_lost_to_the_advert_s():
+    """Said one after the other, the second replaced the first before anyone read it."""
+    _app()
+    strip = StatusStrip()
+    server = _key_said("reset", config_error="Permission denied")
+
+    mcp_view.say_started(server, strip, after_reset=True)
+
+    assert "reconnect" in strip.text() and "Permission denied" in strip.text()
+    assert strip.waiting() == []
 
 
 def test_sticky_lines_stand_in_the_order_they_came_and_the_same_one_once():
