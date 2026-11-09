@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QStyleOption,
     QStyleOptionComboBox,
     QStyleOptionToolButton,
+    QStyledItemDelegate,
     QStyleOptionViewItem,
     QStylePainter,
     QTableWidget,
@@ -881,6 +882,26 @@ def _dot_icon(colour: QColor) -> QIcon:
 
 #: Marks a cell whose value differs from the compared version (the Arbiter, 2026-09-23).
 CHANGED_ROLE = Qt.ItemDataRole.UserRole + 7
+#: Marks a changed cell whose value is now INV: the frame `_ChangedInvFrame` draws (#250).
+CHANGED_INV_ROLE = Qt.ItemDataRole.UserRole + 9
+#: The orange frame's width inside the cell, in px.
+_INV_FRAME_PX = 2
+
+
+class _ChangedInvFrame(QStyledItemDelegate):
+    """The orange frame around a changed INV (the Arbiter, 2026-11-09, #250). A `ptable` cell never
+    paints an item's own background (`theme.py`, its `::item` rule), so a frame can only be drawn
+    here: over the normal paint, in the colour of the theme showing now."""
+
+    def paint(self, painter, option, index) -> None:
+        super().paint(painter, option, index)
+        if index.data(CHANGED_INV_ROLE) is not True:
+            return
+        colour, cell, px = QColor(current_theme().inv), option.rect, _INV_FRAME_PX
+        painter.fillRect(cell.left(), cell.top(), cell.width(), px, colour)
+        painter.fillRect(cell.left(), cell.bottom() - px + 1, cell.width(), px, colour)
+        painter.fillRect(cell.left(), cell.top(), px, cell.height(), colour)
+        painter.fillRect(cell.right() - px + 1, cell.top(), px, cell.height(), colour)
 
 
 def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] = None,
@@ -1709,6 +1730,7 @@ class DetailPane(QFrame):
         # user's "table on full width", without nine equal columns as wide as the widest.
         table = _ContentTable(len(rows), len(headers))
         table.setProperty("class", "ptable")
+        table.setItemDelegate(_ChangedInvFrame(table))
         table.setHorizontalHeaderLabels(headers)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1780,6 +1802,7 @@ class DetailPane(QFrame):
         rows = group.rows_visible()
         table = QTableWidget(len(rows), 3)
         table.setProperty("class", "ptable")
+        table.setItemDelegate(_ChangedInvFrame(table))
         table.setHorizontalHeaderLabels(["ID", i18n.t("colChan"), column_title(field)])
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1895,10 +1918,12 @@ class DetailPane(QFrame):
         if compared and field_changed(field, row, old):
             before = self._cell_text(field, old) if old is not None else None
             item.setData(CHANGED_ROLE, True)
-            # A background and bold, the font colour left to the value (#250): a changed INV
-            # that turned blue read as another polarity. The table's stylesheet paints over an
-            # item's background, so it is set here, and the change reads at a glance.
-            item.setBackground(QColor(t.mix("info", 14, "panel")))
+            # Blue and bold: the table's stylesheet paints over an item's background, and the
+            # change has to read at a glance — blue is the window's "new" (in REW, import it).
+            item.setForeground(QColor(t.info))
+            if field == "polarity" and row.raw.get("polarity") == "INV":
+                # Blue as well, so the inversion keeps attention by its frame (#250).
+                item.setData(CHANGED_INV_ROLE, True)
             font = item.font()
             font.setBold(True)
             item.setFont(font)

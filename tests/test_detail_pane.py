@@ -743,42 +743,102 @@ def test_pair_mode_survives_a_channel_that_has_no_pair():
     assert len(headings()) == 2, "back on a pair, the pair is shown again"
 
 
-def test_a_changed_cell_is_a_background_and_bold_and_keeps_the_values_own_colour():
-    """The Arbiter, 2026-11-09 (#250): a changed INV is not blue (it read as another polarity);
-    «changed» is the background plus bold text. Any other changed value reads the same way."""
+def _near(pixel, hex_colour: str, within: int = 70) -> bool:
     from PySide6.QtGui import QColor
 
+    want = QColor(hex_colour)
+    # The alpha too: a grab's translucent fill reads back with the fill's own colour at low alpha.
+    return pixel.alpha() > 200 and (abs(pixel.red() - want.red()) + abs(pixel.green() - want.green())
+            + abs(pixel.blue() - want.blue())) <= within
+
+
+def _ink_of(image, rect, hex_colour: str) -> int:
+    """How many pixels strictly inside `rect` (its edge left out) are about `hex_colour`."""
+    return sum(_near(image.pixelColor(x, y), hex_colour)
+               for x in range(rect.left() + 3, rect.right() - 2)
+               for y in range(rect.top() + 3, rect.bottom() - 2))
+
+
+def _edges_are(image, rect, hex_colour: str) -> bool:
+    """Whether all four edges of `rect`, midway along each, are exactly `hex_colour`."""
+    mid_x, mid_y = rect.center().x(), rect.center().y()
+    return all(image.pixelColor(x, y).name() == hex_colour for x, y in (
+        (rect.left(), mid_y), (rect.right(), mid_y), (mid_x, rect.top()), (mid_x, rect.bottom())))
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_a_changed_inversion_is_blue_in_an_orange_frame_and_only_it(mode, monkeypatch):
+    """The Arbiter, 2026-11-09 (#250): «changed» is blue and bold everywhere, and a changed INV is
+    blue too, with an orange frame so that the inversion keeps attention. By pixels, in the real
+    sheet: a `ptable` never paints an item's own background, so only a delegate can frame a cell.
+    """
+    from PySide6.QtWidgets import QTableWidget
+
     from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
-    from autosound_tcc.ui.tcc import detail_pane
+    from autosound_tcc.ui.tcc import theme
     from autosound_tcc.ui.tcc.detail_pane import DetailPane
-    from autosound_tcc.ui.tcc.theme import get_theme
 
     _app()
+    t = theme.get_theme(mode)
+    monkeypatch.setattr(theme, "_CURRENT", t)
 
-    def outputs(pol, delay):
+    def outputs(**rows):
         return ProfileGroup(id="physical_outputs", label="Output", fields=("polarity", "ta_ms"),
-                            rows=(GroupRow(id="m-L", name="m-L", slot="E",
-                                           raw={"polarity": pol, "ta_ms": delay}),))
+                            rows=tuple(GroupRow(id=name, name=name, slot="E",
+                                                raw={"polarity": pol, "ta_ms": delay})
+                                       for name, (pol, delay) in rows.items()))
 
-    before = type("V", (), {"groups": (outputs("NORM", 1.0),)})()
+    now = outputs(flipped=("INV", 1.0), same=("INV", 1.0), back=("NORM", 1.0), moved=("NORM", 2.0))
+    was = outputs(flipped=("NORM", 1.0), same=("INV", 1.0), back=("INV", 1.0), moved=("NORM", 1.0))
     pane = DetailPane()
-    pane.set_compare_choices(["v_006"], "v_006", lambda _v: before)
-    now = outputs("INV", 2.0)
-    for mode in ("dark", "light"):
-        t = get_theme(mode)
-        row = now.rows[0]
-        inv = pane._styled_cell("polarity", row, t, now.id)
-        assert inv.data(detail_pane.CHANGED_ROLE) is True, mode
-        assert inv.foreground().color().name() == t.inv, mode
-        assert inv.font().bold(), mode
-        assert inv.background().color().name(QColor.NameFormat.HexArgb) == \
-            QColor(t.mix("info", 14, "panel")).name(QColor.NameFormat.HexArgb), mode
-        delay = pane._styled_cell("ta_ms", row, t, now.id)
-        assert delay.data(detail_pane.CHANGED_ROLE) is True, mode
-        assert delay.font().bold(), mode
-        assert delay.background().color().name(QColor.NameFormat.HexArgb) == \
-            inv.background().color().name(QColor.NameFormat.HexArgb), mode
-        assert delay.foreground().color().name() != t.info, mode
+    pane.setStyleSheet(theme.build_qss(t))
+    pane.set_view(type("V", (), {"groups": (now,), "features": None})())
+    pane.set_compare_choices(["v_006"], "v_006", lambda _v: type("V", (), {"groups": (was,)})())
+    pane.resize(760, 320)
+    pane.show()
+
+    def shot(table, name, column):
+        for _ in range(3):
+            QApplication.processEvents()
+        row = next(r for r in range(table.rowCount()) if table.item(r, 1).text() == name)
+        return table.viewport().grab().toImage(), table.visualItemRect(table.item(row, column))
+
+    def bold(table, name, column):
+        row = next(r for r in range(table.rowCount()) if table.item(r, 1).text() == name)
+        return table.item(row, column).font().bold()
+
+    try:
+        pane.open_table(now)
+        table = pane.findChild(QTableWidget)
+        font_says = _no_real_font(table.font()) == ""
+
+        image, cell = shot(table, "flipped", 2)
+        assert _edges_are(image, cell, t.inv), f"{mode}: a changed INV is framed in orange"
+        assert bold(table, "flipped", 2), mode
+        if font_says:
+            assert _ink_of(image, cell, t.info) > 0, f"{mode}: a changed INV reads blue"
+            assert _ink_of(image, cell, t.inv) == 0, f"{mode}: its text is not orange"
+
+        image, cell = shot(table, "same", 2)
+        assert not _edges_are(image, cell, t.inv), f"{mode}: an unchanged INV has no frame"
+        if font_says:
+            assert _ink_of(image, cell, t.inv) > 0, f"{mode}: an unchanged INV stays orange"
+
+        for name, column, what in (("back", 2, "a changed NORM"), ("moved", 3, "a changed delay")):
+            image, cell = shot(table, name, column)
+            assert not _edges_are(image, cell, t.inv), f"{mode}: {what} has no frame"
+            assert _ink_of(image, cell, t.inv) == 0, f"{mode}: {what} has no orange at all"
+            assert bold(table, name, column), mode
+            if font_says:
+                assert _ink_of(image, cell, t.info) > 0, f"{mode}: {what} reads blue"
+
+        # The per-parameter tables go through the same `_styled_cell`, so they carry the delegate.
+        from autosound_tcc.ui.tcc.detail_pane import _ChangedInvFrame
+
+        pane.open_param("ta_ms")
+        assert all(isinstance(c.itemDelegate(), _ChangedInvFrame) for c in _param_columns(pane)), mode
+    finally:
+        pane.close()
 
 
 def test_a_moved_band_marks_the_eq_cell_even_with_the_same_count():

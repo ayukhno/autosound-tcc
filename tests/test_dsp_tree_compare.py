@@ -279,29 +279,79 @@ def test_a_cut_line_with_a_bold_part_still_fits_its_width(themed):
     assert any(heavy for _text, heavy in _drawn(line)[0]), "the cut kept the bold on what is left"
 
 
-def test_a_changed_inversion_pill_keeps_its_own_colour_and_wears_a_frame_and_background():
-    """The Arbiter, 2026-11-09 (#250): «changed» is a frame plus a background on the pill; the
-    font stays the value's own, so an INV that changed is still orange, not a blue «other
-    polarity». Bold stays, as every pill is bold."""
+def _shown_pill(now, was, mode):
+    """m-R's polarity pill, `now` against `was`, in the window's own sheet and on the screenless
+    platform: `(tree, pill)`."""
     from autosound_tcc.ui.tcc.theme import build_qss, get_theme
 
+    tree = DspTreeWidget()
+    tree.set_view(_rig(_HP20, 4.19, now, -3.0, 90))
+    tree.set_compared(list(_rig(_HP20, 4.19, was, -3.0, 90).groups))
+    tree.setStyleSheet(build_qss(get_theme(mode)))
+    tree.resize(380, 520)
+    tree.show()
+    for _ in range(3):
+        QApplication.processEvents()
+    return tree, _row_of(tree, "physical_outputs", "m-R")._pill
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_a_changed_inversion_pill_is_blue_in_an_orange_frame_and_keeps_its_size(mode):
+    """The Arbiter, 2026-11-09 (#250): a changed pill is blue, as it was; a changed INV is blue
+    with an orange frame, and that frame costs the pill no size. By pixels, in the real sheet."""
+    from PySide6.QtCore import QRect
+
+    from autosound_tcc.ui.tcc.theme import get_theme
+    from tests.test_detail_pane import _ink_of, _near, _no_real_font
+
     _app()
-    for mode in ("dark", "light"):
-        t = get_theme(mode)
-        tree = _compared_tree()  # m-R is INV in the compared version, NORM now
-        tree.set_view(_rig({"f": 25, "type": "BW", "slope": 24}, 0.0, "INV", -1.0, 90))
-        tree.set_compared(list(_rig(_HP20, 4.19, "NORM", -3.0, 90).groups))
-        tree.setStyleSheet(build_qss(t))
-        pill = _row_of(tree, "physical_outputs", "m-R")._pill
-        pill.ensurePolished()
-        classes = pill.property("class").split()
-        assert "chg" in classes and "pill-inv" in classes, mode
-        assert pill.palette().windowText().color().name() == t.inv, mode
-        assert pill.font().bold(), mode
-        qss = build_qss(t)
-        block = qss[qss.index('QLabel[class~="pill"][class~="chg"]'):]
-        block = block[:block.index("}")]
-        assert "border:" in block and "background:" in block and "color:" not in block, mode
+    t = get_theme(mode)
+
+    def box(pill):
+        image = pill.grab().toImage()
+        return image, QRect(0, 0, image.width(), image.height())
+
+    def edge_orange(image, rect):
+        # Midway along each side: the long sides are straight and exact; the pill's round ends are
+        # antialiased, so their middle is read as about orange.
+        mid_x, mid_y = rect.center().x(), rect.center().y()
+        return [image.pixelColor(mid_x, rect.top()).name() == t.inv,
+                image.pixelColor(mid_x, rect.bottom()).name() == t.inv,
+                _near(image.pixelColor(rect.left(), mid_y), t.inv),
+                _near(image.pixelColor(rect.right(), mid_y), t.inv)]
+
+    trees = []
+    try:
+        flipped_tree, flipped = _shown_pill("INV", "NORM", mode)
+        same_tree, same = _shown_pill("INV", "INV", mode)
+        back_tree, back = _shown_pill("NORM", "INV", mode)
+        trees = [flipped_tree, same_tree, back_tree]
+        assert "chg" in flipped.property("class").split(), mode
+        assert "chg" not in same.property("class").split(), mode
+        font_says = _no_real_font(flipped.font()) == ""
+
+        image, rect = box(flipped)
+        assert all(edge_orange(image, rect)), f"{mode}: a changed INV pill is framed in orange"
+        assert flipped.palette().windowText().color().name() == t.info, mode
+        if font_says:
+            assert _ink_of(image, rect, t.info) > 0, f"{mode}: and reads blue"
+
+        image, rect = box(same)
+        assert not any(edge_orange(image, rect)), f"{mode}: an unchanged INV pill has no frame"
+        assert same.palette().windowText().color().name() == t.inv, mode
+
+        image, rect = box(back)
+        assert not any(edge_orange(image, rect)), f"{mode}: a changed NORM pill has no frame"
+        assert back.palette().windowText().color().name() == t.info, mode
+        assert _ink_of(image, rect, t.inv) == 0, f"{mode}: and no orange"
+        assert back.font().bold(), mode
+
+        assert flipped.size() == same.size() and flipped.sizeHint() == same.sizeHint(), (
+            f"{mode}: {flipped.size()} / {flipped.sizeHint()} against {same.size()} / "
+            f"{same.sizeHint()}: the frame took the pill's own room")
+    finally:
+        for tree in trees:
+            tree.close()
 
 
 def test_the_tree_marks_exactly_the_cells_the_table_marks():
