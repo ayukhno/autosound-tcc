@@ -12,9 +12,13 @@ when the row offers it.
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -27,6 +31,9 @@ from autosound_tcc.core import codex_cli, codex_install, updates  # noqa: E402
 from autosound_tcc.core.codex_cli import Found  # noqa: E402
 from autosound_tcc.ui.tcc import codex_menu, i18n  # noqa: E402
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog  # noqa: E402
+
+#: The real query, from before `conftest` puts the suite's stand-in over it for each test.
+_REAL_QUERY = getattr(codex_cli, "_pypi_json", None)
 
 
 def _app():
@@ -345,3 +352,132 @@ def test_a_row_being_checked_shows_no_greyed_install(monkeypatch):
     row.check()
     row._poll()
     assert row.button.isHidden(), "no answer to act on, nothing to press"
+
+
+# ---- whose Codex, and what is newer than the pin (#254) -------------------------------------------
+
+
+def _pypi_says(version) -> bytes:
+    return json.dumps({"info": {"version": version}}).encode()
+
+
+def _pypi(monkeypatch, answer) -> list:
+    """The PyPI query stood in: its body, or the exception it dies of. Returns the calls' threads."""
+    asked: list[bool] = []
+
+    def query():
+        asked.append(threading.current_thread() is threading.main_thread())
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(codex_cli, "_pypi_json", query, raising=False)
+    return asked
+
+
+def _tcc_copy(monkeypatch, versions) -> None:
+    said, _ = versions
+    own = Found(_binary(codex_cli.tcc_copy_path().parents[1]), codex_cli.SOURCE_TCC)
+    said[own.path] = (0, 162, 1)
+    _finds(monkeypatch, own)
+
+
+def test_a_link_to_tccs_copy_is_tccs_copy(tmp_path, monkeypatch, versions):
+    """The workaround link put TCC's own binary on PATH, and the row called it «your own»."""
+    said, _ = versions
+    copy = codex_cli.tcc_copy_path()
+    copy.parent.mkdir(parents=True)
+    copy.write_bytes(b"\xcf\xfa\xed\xfe native")
+    copy.chmod(0o755)
+    link = tmp_path / "bin" / "codex"
+    link.parent.mkdir()
+    try:
+        link.symlink_to(copy)
+    except OSError:
+        pytest.skip("no symlinks here")
+    found = Found(str(link), codex_cli.SOURCE_PATH)
+    said[found.path] = (0, 162, 1)
+    _finds(monkeypatch, found)
+
+    dialog = _shown(_Host())
+
+    assert _line(dialog) == "Codex 0.162.1 — up to date"
+    assert dialog._codex_row.button.isHidden() and not dialog._codex_row.offered
+    assert found.path == str(link), "the path Codex is started by stays as found"
+
+
+@pytest.mark.parametrize("latest", ["0.165.0", "0.1000.0"])  # 0.1000 sorts before 0.162 as text
+def test_a_newer_codex_is_named_and_held_by_the_pin_with_no_button(
+        monkeypatch, versions, latest):
+    _tcc_copy(monkeypatch, versions)
+    asked = _pypi(monkeypatch, _pypi_says(latest))
+
+    dialog = _shown(_Host())
+
+    assert _line(dialog) == f"Codex {latest} is out; TCC holds 0.162.1 (pinned)"
+    row = dialog._codex_row
+    assert row.button.isHidden() and not row.offered, "a newer file has no pinned sum"
+    assert asked == [False], "PyPI asked on the worker, once"
+
+
+@pytest.mark.parametrize("answer", [
+    urllib.error.URLError("offline"),
+    ConnectionRefusedError("refused"),
+    TimeoutError("timed out"),
+    b"<html>not json</html>",
+    b'{"info": null}',
+    b"[1, 2]",
+    _pypi_says(165),
+    _pypi_says("0.166.0rc1"),
+    _pypi_says("0.162.1"),
+    _pypi_says("0.161.9"),
+    _pypi_says("0.99.0"),  # sorts after 0.162.1 as text
+], ids=["offline", "refused", "timeout", "not-json", "no-info", "a-list", "not-a-string",
+        "pre-release", "the-pin", "older", "older-by-number"])
+def test_no_newer_version_read_keeps_todays_text(monkeypatch, versions, answer):
+    _tcc_copy(monkeypatch, versions)
+    asked = _pypi(monkeypatch, answer)
+
+    dialog = _shown(_Host())
+
+    assert _line(dialog) == "Codex 0.162.1 — up to date"
+    assert dialog._codex_row.button.isHidden()
+    assert asked == [False], "the row did ask"
+
+
+def test_a_slow_pypi_does_not_hold_the_row(monkeypatch, versions):
+    """A dead line can sit in a DNS lookup past any socket timeout: the row says what it knows."""
+    _tcc_copy(monkeypatch, versions)
+    asked, release = threading.Event(), threading.Event()
+
+    def query():
+        asked.set()
+        release.wait(10)
+        return _pypi_says("0.165.0")
+
+    monkeypatch.setattr(codex_cli, "_pypi_json", query, raising=False)
+    from autosound_tcc.ui.tcc import codex_tool_row
+
+    host = _Host()
+    row = codex_tool_row.CodexToolRow(lambda: host, lambda: None)
+    row.check()
+    try:
+        _until(lambda: row.label.text() == "Codex 0.162.1 — up to date" and asked.is_set())
+        assert row.button.isHidden()
+    finally:
+        release.set()
+    _until(lambda: row.label.text() == "Codex 0.165.0 is out; TCC holds 0.162.1 (pinned)")
+    assert row.button.isHidden()
+
+
+def test_the_query_asks_pypi_for_the_packages_latest_with_a_timeout(monkeypatch):
+    calls: list = []
+
+    def urlopen(url, timeout=None):
+        calls.append((url, timeout))
+        return io.BytesIO(b"the body")
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    assert _REAL_QUERY is not None and _REAL_QUERY() == b"the body"
+    assert calls == [("https://pypi.org/pypi/openai-codex-cli-bin/json", codex_cli.PYPI_TIMEOUT_S)]
+    assert 0 < codex_cli.PYPI_TIMEOUT_S <= 10

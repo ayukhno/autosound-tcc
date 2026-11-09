@@ -7,7 +7,9 @@ plain thread — it runs `codex --version` — never on the GUI thread) and what
 * none found → «not installed», and «Install Codex», which is `codex_menu.install` — the same
   worker, progress and receipt as the menu line, on the main window's status strip;
 * only one known too old → «0.152.0 → 0.162.1 (TCC's own copy)», the same button;
-* TCC's own copy → «up to date»;
+* TCC's own copy, a link to it included → «up to date», or, when PyPI has a newer release, «0.165.0
+  is out; TCC holds 0.162.1 (pinned)» — said, never offered: a new version comes only with a TCC
+  release and its pinned sum (#254);
 * the person's own Codex, new enough → «<version> — your own Codex», no button: their winget, npm
   or Homebrew Codex is theirs to update, and the tooltip says so.
 
@@ -18,6 +20,7 @@ without one shows the row and offers nothing.
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from typing import Any, Callable, Optional
 
 from PySide6.QtCore import QTimer, Qt
@@ -31,7 +34,8 @@ _POLL_MS = 100
 
 class _Check:
     """`codex_cli.standing()` on a plain thread (nothing of Qt's, so it may outlive the row);
-    `result` is the `Standing`, `error` the exception's words."""
+    `result` is the `Standing`, `error` the exception's words. TCC's own copy then asks PyPI for
+    what is newer: `result` is already there while it does, for the row to say."""
 
     def __init__(self) -> None:
         self.result: Optional[codex_cli.Standing] = None
@@ -42,7 +46,9 @@ class _Check:
     def _run(self) -> None:
         try:
             codex_cli.forget()  # Re-check looks again: a Codex installed since is seen
-            self.result = codex_cli.standing()
+            found = self.result = codex_cli.standing()
+            if found.state == codex_cli.STANDING_TCC:
+                self.result = replace(found, newer=codex_cli.newer_than_pin())
         except Exception as exc:  # noqa: BLE001 — an answer on the row, not a dead thread
             self.error = f"{type(exc).__name__}: {exc}"
 
@@ -111,6 +117,8 @@ class CodexToolRow(QWidget):
         if found.state == codex_cli.STANDING_TOO_OLD:
             return i18n.t("updCodexTooOld").format(here=found.version, there=codex_cli.PIN)
         if found.state == codex_cli.STANDING_TCC:
+            if found.newer:
+                return i18n.t("updCodexHeldByPin").format(latest=found.newer, here=found.version)
             return i18n.t("updToolCurrent").format(name="Codex", here=found.version)
         return i18n.t("updCodexOwn").format(here=found.version)
 
@@ -147,7 +155,14 @@ class CodexToolRow(QWidget):
 
     def _poll(self) -> None:
         job = self._job
-        if job is None or job.running:
+        if job is None:
+            return
+        if job.running:
+            # PyPI may take its timeout, or more in a DNS lookup: what is known is said meanwhile.
+            early = job.result
+            if early is not None and early.state == codex_cli.STANDING_TCC and self.standing is None:
+                self.standing = early
+                self._draw()
             return
         self._timer.stop()
         self._job = None

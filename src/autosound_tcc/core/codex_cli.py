@@ -19,12 +19,14 @@ offers TCC's own copy then (`codex_install`), and `find` prefers it to the old o
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import platform as _platform
 import re
 import subprocess
 import sys
 import threading
+import urllib.request
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -45,11 +47,16 @@ SOURCE_TCC = "tcc"            # TCC's own copy (`tcc_copy_path`)
 #: `codex --version` and the probe: long enough for a cold start, short enough not to hold a read.
 VERSION_TIMEOUT_S = 10.0
 PROBE_TIMEOUT_S = 15.0
+#: What PyPI says the newest wheel is (#254): only ever adds a line, so it is not waited for long.
+PYPI_LATEST_URL = "https://pypi.org/pypi/openai-codex-cli-bin/json"
+PYPI_TIMEOUT_S = 5.0
 #: Pages of `model/list` read at most; 0.162.1 answers in one.
 MAX_PAGES = 10
 PAGE_LIMIT = 100
 
 _VERSION_RE = re.compile(r"codex-cli\s+(\d+)\.(\d+)\.(\d+)")
+#: A final release on PyPI. Anything else there (`0.166.0rc1`) is not offered to anyone as «out».
+_RELEASE_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 #: An MCP server name `-c mcp_servers.<name>.enabled=false` can carry as a bare TOML key.
 _BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -467,15 +474,48 @@ STANDING_OWN = "own"            # the person's own Codex, new enough (or unread)
 
 @dataclass(frozen=True)
 class Standing:
-    """The Codex TCC would use and its version (`version_text`; "" when none was found)."""
+    """The Codex TCC would use and its version (`version_text`; "" when none was found). `newer`
+    is the release on PyPI past `PIN` (`newer_than_pin`, TCC's own copy only); "" when none is
+    known. Not offered: a newer file has no sha256 in `codex_install`, so it comes with a TCC
+    release and its pinned sum."""
 
     state: str
     version: str = ""
+    newer: str = ""
 
     @property
     def offered(self) -> bool:
         """Whether TCC's install is the thing to do: none found, or only an old one."""
         return self.state in (STANDING_MISSING, STANDING_TOO_OLD)
+
+
+def _is_tccs_copy(found: Found) -> bool:
+    """`found` is, behind any links, a file in TCC's `codex/` folder: a link on PATH to TCC's copy
+    is found first, as `SOURCE_PATH`, and is still TCC's (#254). `Found.path` stays the link."""
+    # tcc_copy_path() is <codex folder>/<pin>/codex_cli_bin/bin/codex.
+    root = os.path.normcase(os.path.realpath(tcc_copy_path().parents[3]))
+    return os.path.normcase(os.path.realpath(found.path)).startswith(root + os.sep)
+
+
+def _pypi_json() -> bytes:
+    """PyPI's page for the package. **Worker thread only.**"""
+    with urllib.request.urlopen(PYPI_LATEST_URL, timeout=PYPI_TIMEOUT_S) as response:
+        return response.read()
+
+
+def newer_than_pin() -> str:
+    """The final release on PyPI past `PIN`, as PyPI spells it; "" when there is none or it could
+    not be told — no line, a refusal, a page of another shape: nothing of that may reach the row.
+    **Worker thread only.**"""
+    try:
+        latest = json.loads(_pypi_json())["info"]["version"]
+        release = _RELEASE_RE.fullmatch(latest)
+    except Exception as exc:  # noqa: BLE001 — anything at all here is just «not known»
+        app_log.logger().info("codex: PyPI's latest could not be read (%s)", exc)
+        return ""
+    if release is None or tuple(map(int, release.groups())) <= tuple(map(int, PIN.split("."))):
+        return ""
+    return latest
 
 
 def standing() -> Standing:
@@ -488,7 +528,7 @@ def standing() -> Standing:
         return Standing(STANDING_MISSING)
     if read is not None and read < MIN_VERSION:
         return Standing(STANDING_TOO_OLD, version_text(read))
-    if found.source == SOURCE_TCC:
+    if found.source == SOURCE_TCC or _is_tccs_copy(found):
         return Standing(STANDING_TCC, version_text(read) if read else PIN)
     return Standing(STANDING_OWN, version_text(read))
 

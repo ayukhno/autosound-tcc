@@ -751,6 +751,11 @@ def _isolated_machine_config(tmp_path, _machine_dir, monkeypatch):
                         raising=False)
     monkeypatch.setattr(updates, "update_tools",
                         lambda names: updates.ToolsUpdate((), "offline in tests"), raising=False)
+    # ...and PyPI, which Codex's row asks whether anything is newer than the pin (#254): no answer
+    # is «up to date». Tests about that patch it themselves.
+    from autosound_tcc.core import codex_cli
+
+    monkeypatch.setattr(codex_cli, "_pypi_json", lambda: b"", raising=False)
     # ...and what an update taught those rows, which lives as long as the process (tcc#138): one
     # test's update would grey the row of whichever test the same worker runs next.
     from autosound_tcc.ui.tcc import diagnostics_panel

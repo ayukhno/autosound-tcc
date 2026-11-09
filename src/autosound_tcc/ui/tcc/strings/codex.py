@@ -233,6 +233,12 @@ STRINGS: dict[str, dict[str, str]] = {
         'pl': 'Codex {here} → {there} (własna kopia TCC)',
         'de': 'Codex {here} → {there} (TCCs eigene Kopie)',
     },
+    'updCodexHeldByPin': {
+        'en': 'Codex {latest} is out; TCC holds {here} (pinned)',
+        'uk': 'Codex {latest} is out; TCC holds {here} (pinned)',
+        'pl': 'Codex {latest} is out; TCC holds {here} (pinned)',
+        'de': 'Codex {latest} is out; TCC holds {here} (pinned)',
+    },
     'updCodexOwn': {
         'en': 'Codex {here} — your own Codex',
         'uk': 'Codex {here} — ваш власний Codex',
