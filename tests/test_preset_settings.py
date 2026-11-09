@@ -532,17 +532,15 @@ def test_the_tree_has_a_preset_section_with_the_settings_and_the_dot(ledger):
     tree = _tree(view)
     section = tree._preset
     assert section.title() == "ПРЕСЕТ" or section.title().upper() == i18n.t("preset").upper()
-    values = section.values()
-    assert values[_label("presetInputGain")] == "-0.3 dB"
-    assert values[_label("presetRealcenter")] == i18n.t("presetOn")
+    assert _drawn(section, _label("presetInputGain"))[0] == "-0.3 dB"
+    assert _drawn(section, _label("presetRealcenter"))[0] == i18n.t("presetOn")
     assert tree.status_dots()["preset"].status() == "set"
 
 
 def test_a_tree_with_no_settings_shows_the_defaults_greyed(ledger):
     tree = _tree(_read(ledger, _bank(ledger)))
     section = tree._preset
-    assert section.values()[_label("presetMain")] == "0 dB"
-    assert section.is_grey(_label("presetMain"))
+    assert _drawn(section, _label("presetMain")) == ("0 dB", False, True), "the default, greyed"
     assert tree.status_dots()["preset"].status() == "none"
 
 
@@ -555,11 +553,11 @@ def test_the_tree_marks_a_changed_setting_and_turns_the_dot_blue(ledger):
     was = _bank(ledger, {"input_gain_db": -1.0, "status": "applied"})
     now = _bank(ledger, {"input_gain_db": -0.3, "status": "applied"})
     tree = _tree(_read(ledger, now), compared=_read(ledger, was))
-    assert tree._preset.is_changed(_label("presetInputGain"))
-    assert not tree._preset.is_changed(_label("presetMain"))
+    assert _drawn(tree._preset, _label("presetInputGain")) == ("-0.3 dB", True, False)
+    assert not _drawn(tree._preset, _label("presetMain"))[1]
     assert tree.status_dots()["preset"].status() == "chg"
     tree.set_compared(None)
-    assert not tree._preset.is_changed(_label("presetInputGain"))
+    assert _drawn(tree._preset, _label("presetInputGain")) == ("-0.3 dB", False, False)
     assert tree.status_dots()["preset"].status() == "set"
 
 
@@ -609,8 +607,8 @@ def test_the_section_is_folded_by_default(ledger):
 
 def test_the_section_says_the_file_with_its_md5(ledger):
     version = _bank(ledger, {"input_gain_db": -0.3, "status": "applied", "source_file": SOURCE})
-    values = _tree(_read(ledger, version))._preset.values()
-    assert values[_label("presetFile")] == "5S.pct6 · 46f99511"
+    tree = _tree(_read(ledger, version))
+    assert _drawn(tree._preset, _label("presetFile"))[0] == "5S.pct6 · 46f99511"
 
 
 # ---- the window: what is looked at, control mode, the tab's dot ------------------------------------
@@ -660,7 +658,7 @@ def test_a_looked_at_version_draws_its_own_settings_and_head_stays(window):
     shown_version.show(window, window._test_older)
     window._on_table_requested("preset")
     assert _cells(window._detail)[_label("presetInputGain")].text() == "-1 dB"
-    assert window._tree._preset.values()[_label("presetInputGain")] == "-1 dB"
+    assert _drawn(window._tree._preset, _label("presetInputGain"))[0] == "-1 dB"
     assert window._view.version == head, "`window._view` stays HEAD"
 
 
@@ -817,3 +815,149 @@ def test_the_tab_is_marked_against_the_new_compare_after_a_reload(window, tmp_pa
                    "preset_settings": {"input_gain_db": -5.0, "status": "applied"}}, note="four")
     window._safe_load_project()
     assert "-0.3 dB" in _cells(window._detail)[_label("presetInputGain")].toolTip()
+
+
+# ---- what a person sees, that the first pass read off the stored line ------------------------------
+
+
+def test_the_tree_s_grey_follows_a_theme_switch(ledger, monkeypatch):
+    app = _app()
+    monkeypatch.setattr(theme, "_CURRENT", theme._CURRENT)
+    sheet, palette = app.styleSheet(), QPalette(app.palette())
+    try:
+        theme.apply_theme(app, "dark")
+        tree = _tree(_read(ledger, _bank(ledger)))
+        label = _label("presetMain")
+        assert _drawn(tree._preset, label)[2], "greyed in dark"
+        theme.apply_theme(app, "light")
+        QApplication.processEvents()
+        assert _drawn(tree._preset, label)[2], "greyed in light, the repainted row's own colour"
+    finally:
+        app.setStyleSheet(sheet)
+        app.setPalette(palette)
+
+
+def test_a_real_click_on_the_tab_opens_it(ledger):
+    pane = DetailPane()
+    pane.set_view(_read(ledger, _bank(ledger, dict(FULL))))
+    assert pane._mode != "preset"
+    pane._tab_preset.clicked.emit()
+    assert pane._mode == "preset" and _cells(pane)[_label("presetInputGain")].text() == "-0.3 dB"
+
+
+def test_the_compare_reaches_the_tree_in_the_real_window(window):
+    window._control_layout.enter()
+    window._sync_status_dots()
+    assert window._tree.status_dots()["preset"].status() == "chg"
+    assert _drawn(window._tree._preset, _label("presetInputGain"))[1], "blue in the window's own tree"
+
+
+def test_a_compare_chosen_with_the_tab_open_redraws_it(ledger):
+    was, now = _bank(ledger, {"input_gain_db": -1.0, "status": "applied"}), _bank(ledger, APPLIED)
+    pane = _pane(_read(ledger, now))
+    assert not _is_changed(_cells(pane)[_label("presetInputGain")])
+    pane.use_compare(was, _read(ledger, was), was)
+    assert _is_changed(_cells(pane)[_label("presetInputGain")])
+
+
+def test_refresh_with_stays_on_the_tab_after_a_table(ledger):
+    view = _read(ledger, _bank(ledger, dict(FULL)))
+    pane = DetailPane()
+    pane.set_view(view)
+    pane.open_table(view.groups[0])
+    pane.open_preset()
+    pane.refresh_with(view.groups[0])
+    assert pane._mode == "preset"
+
+
+def _control_preset_page(layout):
+    index = next(i for i in range(layout.tabs.count()) if layout.tabs.tabText(i) == i18n.t("preset"))
+    return index, layout.tabs.widget(index)
+
+
+def test_control_tab_draws_the_looked_at_version(window):
+    from autosound_tcc.ui.tcc import shown_version
+
+    shown_version.show(window, window._test_older)
+    layout = window._control_layout
+    layout.enter()
+    _index, page = _control_preset_page(layout)
+    assert _cells(page)[_label("presetInputGain")].text() == "-1 dB"
+
+
+def test_control_dot_reads_the_looked_at_version(window):
+    """The first version has no settings, and HEAD has: the dot on the tab is the looked-at one's."""
+    from autosound_tcc.ui.tcc import shown_version
+
+    shown_version.show(window, "v_001")
+    layout = window._control_layout
+    layout.enter()
+    if window._detail._compare_version:
+        window._detail.select_compare(None)
+    index, _page = _control_preset_page(layout)
+    layout.sync_dots()
+    assert layout.tabs.tabBar().dot(index) == "none"
+
+
+def test_a_setting_stated_only_at_its_default_gives_no_set_dot(ledger):
+    view = _read(ledger, _bank(ledger, {"input_gain_db": 0.0, "status": "applied"}))
+    assert setting_status.preset_status(view, None, False) == "none"
+
+
+def test_a_setting_taken_back_to_its_default_is_a_change(ledger):
+    pane, _view, _old = _compared(ledger, {"status": "applied", "bt": {"auto_switch": False}},
+                                  {"input_gain_db": -1.0, "status": "applied"})
+    assert _is_changed(_cells(pane)[_label("presetInputGain")])
+
+
+def test_nothing_stated_does_not_stand_over_real_settings(ledger):
+    assert i18n.t("presetNothingStated") not in _said(_pane(_read(ledger, _bank(ledger, dict(FULL)))))
+    at_default = _read(ledger, _bank(ledger, {"input_gain_db": 0.0, "status": "applied"}))
+    assert i18n.t("presetNothingStated") not in _said(_pane(at_default))
+
+
+def test_the_header_says_no_wait_when_nothing_waits(ledger):
+    view = _read(ledger, _bank(ledger, APPLIED))
+    _dot, tip = dsp_check.header(ledger.root, view, HELIX, "base", "FULL")
+    assert i18n.t("presetWaitingTip") not in html.unescape(tip)
+
+
+def test_the_header_keeps_the_sentence_the_window_passes(ledger, apply_module):
+    """`now` is `now_in_dsp`'s plain sentence, as `MainWindow` passes it; the hover is markup."""
+    _bank(ledger)
+    apply_module.propose(ledger, {"preset_settings": {"input_gain_db": -0.3}}, note="a trim")
+    _dot, tip = dsp_check.header(ledger.root, _read(ledger), HELIX, "base", "FULL", now="the sentence")
+    assert "the sentence" in tip and "&lt;br" not in tip, tip
+
+
+def test_an_applied_trim_over_a_proposed_row_keeps_the_dot_waiting(ledger):
+    version = _bank(ledger, APPLIED, channels={"w-L": dict(ROW, status="proposed")})
+    assert _read(ledger, version).state == "proposed"
+
+
+def test_the_state_of_a_version_with_no_settings_is_what_it_was(ledger):
+    assert _read(ledger, _bank(ledger)).state == "applied"
+
+
+def test_a_candidate_with_a_file_has_no_tick(ledger, tmp_path):
+    version = _bank(ledger, {"input_gain_db": -0.3, "status": "candidate"},
+                    provenance={"file": "presets/a.pct6 (md5 ee627ad6…)"})
+    assert not ledger_line.checked_files(tmp_path / "state", "FULL", version)
+
+
+def test_a_difference_written_as_a_string_is_said(ledger):
+    bad = dict(SOURCE, compared="w-L gain differs")
+    pane = _pane(_read(ledger, _bank(ledger, dict(APPLIED, source_file=bad))))
+    assert "w-L gain differs" in _cells(pane)[_label("presetCompared")].text()
+
+
+def test_the_statuses_are_the_method_s():
+    from autosound_tcc.state import preset_settings
+
+    assert set(preset_settings._STATUSES) == set(vendor_loader.load_dsp_state().STATUSES)
+
+
+def test_a_dsp_named_only_helix_is_an_audiotec():
+    from autosound_tcc.state import preset_settings
+
+    assert preset_settings.is_audiotec(None, "Helix DSP Pro") and preset_settings.is_audiotec("Helix", None)

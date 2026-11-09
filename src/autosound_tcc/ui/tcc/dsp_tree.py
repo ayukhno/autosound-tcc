@@ -714,16 +714,6 @@ class PresetSection(QWidget):
     def title(self) -> str:
         return self._title.text()
 
-    def values(self) -> dict:
-        """`{the row's name: its value}`, as drawn."""
-        return {row.line.label: row.line.text for row in self._rows.values()}
-
-    def is_grey(self, label: str) -> bool:
-        return self._row_named(label).line.reading in ("default", "unknown", "dash")
-
-    def is_changed(self, label: str) -> bool:
-        return self._row_named(label).line.changed
-
     def _row_named(self, label: str) -> _PresetRow:
         return next(row for row in self._rows.values() if row.line.label == label)
 
