@@ -48,6 +48,7 @@ CONTRACT_1 = {
         "get_equaliser(mid)", "get_equalisers()", "get_crossover_types()", "get_slopes()",
         "get_target_settings(mid)", "get_target_response(mid)", "set_filters(mid, filters)",
         "is_swept(record)", "duplicate_titles(measurements=None)",
+        "rew_state(exc)",  # grown under contract 1 by the method's v3.3.0 (#203, hub #297)
     ),
     "state/state.py": (
         "PresetHistory(root, preset, project_dir=None)", "PresetHistory.head()",

@@ -4,7 +4,7 @@ What changed in Autosound TCC, the desktop app for the
 [autosound-tuning](https://github.com/ayukhno/autosound-tuning-skill) method. The app's update
 button follows the tags below, so a version here is what somebody actually receives when they press
 it. A fresh install takes the same tags: the paired method's installer (`install.sh` and
-`install.ps1` at v3.2.0) asks for TCC's newest release by its tag and checks the tag's signature
+`install.ps1` at v3.3.0) asks for TCC's newest release by its tag and checks the tag's signature
 first; a tag that does not check is not installed, and the method is installed without the app. Only
 when the installer cannot read TCC's releases at all — no network, or no tags yet — does it fall
 back to `main`, and it says so: that copy has no signature to check.
