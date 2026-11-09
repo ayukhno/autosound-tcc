@@ -540,6 +540,68 @@ def test_a_value_that_changed_since_the_compared_version_is_marked_with_what_it_
                for r in range(outputs.rowCount())), "no comparison, nothing marked"
 
 
+def _third_version():
+    """`_rig_view`, with w-L's delay somewhere else again: a compare both tables can tell apart."""
+    from dataclasses import replace
+
+    base = _rig_view()
+    moved = []
+    for group in base.groups:
+        moved.append(replace(group, rows=tuple(
+            replace(row, raw={**row.raw, "ta_ms": 9.99}) if row.name == "w-L" else row for row in group.rows)))
+    return replace(base, groups=tuple(moved))
+
+
+def _was_said(pane) -> list:
+    """Every «was:» a table on the pane says."""
+    from PySide6.QtWidgets import QTableWidget
+
+    held = pane._scroll.widget()
+    tables = held.findChildren(QTableWidget) + ([held] if isinstance(held, QTableWidget) else [])
+    return [t.item(r, c).toolTip() for t in tables for r in range(t.rowCount()) for c in range(t.columnCount())
+            if t.item(r, c) is not None and t.item(r, c).toolTip()]
+
+
+@pytest.mark.parametrize("mode", ["table", "param"])
+def test_a_new_compare_after_a_reload_redraws_an_open_table(mode):
+    """`set_compare_choices` came after the reload's redraw and only synced the tabs: the marks
+    stayed against the pair before it."""
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    now, first, second = _rig_view_changed(), _rig_view(), _third_version()
+    versions = {"v_1": first, "v_2": second}
+    pane = DetailPane()
+    pane.set_view(now)
+    pane.set_compare_choices(["v_1", "v_2"], "v_1", versions.__getitem__)
+    pane.open_param("ta_ms") if mode == "param" else pane.open_table(_grp(now, "physical_outputs"))
+    was = i18n.t("cmpWas")
+    assert any(was.format(value="5.22") in tip for tip in _was_said(pane)), "the control"
+
+    pane.set_compare_choices(["v_1", "v_2"], "v_2", versions.__getitem__)
+
+    said = _was_said(pane)
+    assert any(was.format(value="9.99") in tip for tip in said), said
+    assert not any(was.format(value="5.22") in tip for tip in said), said
+
+
+def test_a_new_compare_after_a_reload_redraws_an_open_eq():
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+
+    _app()
+    now, before = _eq_versions()
+    same = type("V", (), {"groups": (now,)})()
+    versions = {"v_1": before, "v_2": same}
+    pane = DetailPane()
+    pane.set_compare_choices(["v_1", "v_2"], "v_1", versions.__getitem__)
+    pane.open_eq(now, now.rows[0])
+    assert [c.mark for c in _card_rows(pane)[0]] == [None, "chg", "new"], "the control"
+
+    pane.set_compare_choices(["v_1", "v_2"], "v_2", versions.__getitem__)
+
+    assert [c.mark for c in _card_rows(pane)[0]] == [None, None, None]
+
+
 # ---- «Режим контролю» and the EQ view (the Arbiter, 2026-09-25: findings 47, 65, 66; tcc#51) ----
 
 _PK = {"type": "PK", "f": 482, "gain_db": -1.7, "q": 3.0}

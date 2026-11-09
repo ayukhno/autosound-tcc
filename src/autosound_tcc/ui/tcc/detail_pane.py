@@ -1392,7 +1392,8 @@ class DetailPane(QFrame):
         self._compare_label.setVisible(shown)
         self._compare_combo.setVisible(shown)
         self._load_compare()
-        self._sync_tabs()
+        # A reload draws the open page before this runs: its marks are against the last pair.
+        self._rerender()
 
     def select_compare(self, key: Optional[str]) -> None:
         """Pick `key` as the window picked it elsewhere — the same list, no echo back."""

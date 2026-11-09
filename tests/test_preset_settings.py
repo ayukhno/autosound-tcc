@@ -805,3 +805,15 @@ def test_a_number_too_big_for_a_float_is_unreadable_and_the_version_still_loads(
     view = _raw(dict(settings, status="applied"))
     assert any(s.reading == "unread" for s in view.preset_settings.settings)
     _cells(_pane(view))  # drawn
+
+
+def test_the_tab_is_marked_against_the_new_compare_after_a_reload(window, tmp_path):
+    """The reload redraws the open tab, and only then is the new compare loaded."""
+    window._on_table_requested("preset")
+    assert "-1 dB" in _cells(window._detail)[_label("presetInputGain")].toolTip(), "the control"
+    state = vendor_loader.load_dsp_state()
+    full = state.PresetHistory(str(tmp_path / "state"), "FULL", project_dir=str(tmp_path))
+    full.snapshot({"preset": "FULL", "sample_rate": 96000, "channels": {"w-L": dict(ROW)},
+                   "preset_settings": {"input_gain_db": -5.0, "status": "applied"}}, note="four")
+    window._safe_load_project()
+    assert "-0.3 dB" in _cells(window._detail)[_label("presetInputGain")].toolTip()
