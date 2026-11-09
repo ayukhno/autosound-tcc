@@ -84,6 +84,58 @@ def _ledger_is_newer(newest: Optional[str], head: Optional[Commit]) -> bool:
     return a is not None and b is not None and a > b
 
 
+#: The most names a hover shows of one kind; past it, how many more.
+NAMES_IN_TIP = 12
+
+
+def when(stamp: str) -> str:
+    """An ISO time as a person reads it: the hour today, the day and the hour before that."""
+    from datetime import datetime
+
+    moment = _parsed(stamp)
+    if moment is None:
+        return str(stamp)
+    local = moment.astimezone()
+    return f"{local:%H:%M}" if local.date() == datetime.now().date() else f"{local:%d.%m %H:%M}"
+
+
+def _short(full: str) -> str:
+    return (full or "")[:7]
+
+
+def _names(heading: str, paths: tuple[str, ...]) -> str:
+    shown = "\n".join(f"  {path}" for path in paths[:NAMES_IN_TIP])
+    more = len(paths) - NAMES_IN_TIP
+    return f"{heading}\n{shown}" + (f"\n{i18n.t('gitTipMore').format(n=more)}" if more > 0 else "")
+
+
+def changes_tip(read: Read) -> str:
+    """What is not committed, tuning files first: the hover of «Unsaved changes»."""
+    parts = []
+    if read.tuning:
+        parts.append(_names(i18n.t("gitTipTuning").format(n=len(read.tuning)), read.tuning))
+    if read.housekeeping:
+        parts.append(_names(i18n.t("gitTipHousekeeping").format(n=len(read.housekeeping)), read.housekeeping))
+    return "\n\n".join(parts)
+
+
+def on_github(read: Read) -> str:
+    """«on GitHub up to <hash> · <time>», or that nothing is."""
+    if read.remote_head is None:
+        return i18n.t("gitOnGithubNever")
+    return i18n.t("gitOnGithubUntil").format(hash=_short(read.remote_head.hash), time=when(read.remote_head.time))
+
+
+def ahead_tip(read: Read) -> str:
+    """The commits the remote does not have, newest first, then what it holds."""
+    commits = read.ahead or ()
+    lines = [f"{_short(c.hash)} · {when(c.time)} · {c.subject}" for c in commits[:NAMES_IN_TIP]]
+    more = len(commits) - NAMES_IN_TIP
+    if more > 0:
+        lines.append(i18n.t("gitTipMore").format(n=more))
+    return "\n".join([*lines, "", on_github(read)]) if lines else on_github(read)
+
+
 def _parsed(stamp: str):
     from datetime import datetime
 
@@ -164,6 +216,8 @@ def backup_label(step: int) -> str:
 class Row:
     key: str
     value: str
+    #: The hover: the names behind the number, or "".
+    tip: str = ""
 
 
 @dataclass(frozen=True)
@@ -198,9 +252,11 @@ def panel(git: GitStatus, read: Optional[Read], name: str) -> Panel:
         sub, tip = i18n.t("gitSubOk"), i18n.t("gitTipOk").format(remote=git.remote)
     rows = [Row(i18n.t("gitRow"), git.branch or "—")]
     if changed is not None:
-        rows.append(Row(i18n.t("gitChanges"), str(changed) if changed else i18n.t("gitClean")))
-    rows.append(Row(i18n.t("gitBackup"), git.remote or i18n.t("gitNone")))
+        rows.append(Row(i18n.t("gitChanges"), str(changed) if changed else i18n.t("gitClean"),
+                        changes_tip(read) if read is not None else ""))
+    rows.append(Row(i18n.t("gitBackup"), git.remote or i18n.t("gitNone"),
+                    on_github(read) if read is not None and git.remote else ""))
     if unpushed or not counted:
-        rows.append(Row(i18n.t("gitUnpushed"), str(unpushed or "?")))
+        rows.append(Row(i18n.t("gitUnpushed"), str(unpushed or "?"), ahead_tip(read) if read is not None else ""))
     level = git.level if read is None else ("wait" if not git.remote or unpushed or not counted else "done")
     return Panel(sub, level, tip, tuple(rows), None if git.remote else 1)

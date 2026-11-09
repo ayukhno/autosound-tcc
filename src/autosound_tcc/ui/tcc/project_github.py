@@ -110,11 +110,19 @@ class ProjectGithub(QObject):
         layout = self._box.layout()
         clear_layout(layout)
         for row in view.rows:
-            layout.addWidget(labels.kv_row(row.key, row.value))
+            layout.addWidget(self._row(row))
         if view.step is not None:
             slot = self._window._on_git_init if view.step == 0 else self._window._on_git_backup
             layout.addWidget(self._button(github_view.backup_label(view.step),
                                           "gitInitTip" if view.step == 0 else "gitBackupTip", slot))
+
+    @staticmethod
+    def _row(row: github_view.Row) -> QWidget:
+        widget = labels.kv_row(row.key, row.value)
+        if row.tip:
+            for label in widget.findChildren(labels.ElidedLabel):
+                label.set_tip(row.tip)  # kept through the resizes that re-cut the label
+        return widget
 
     def _button(self, text: str, tip_key: str, slot) -> QWidget:
         """A one-click fix under the git rows: the method's own command, run on the click."""

@@ -9,6 +9,7 @@ goes.
 
 from __future__ import annotations
 
+import datetime
 import os
 import subprocess
 import threading
@@ -23,7 +24,7 @@ from PySide6.QtCore import QSettings, QThread  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget  # noqa: E402
 
 from autosound_tcc.core import config, project_repo  # noqa: E402
-from autosound_tcc.ui.tcc import copy_menu, i18n, project_github, qt_shutdown  # noqa: E402
+from autosound_tcc.ui.tcc import copy_menu, github_view, i18n, project_github, qt_shutdown  # noqa: E402
 from autosound_tcc.ui.tcc.sidebar_section import SidebarSection  # noqa: E402
 
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
@@ -334,6 +335,102 @@ def test_a_project_with_no_repository_starts_no_read(repo, host, monkeypatch, tm
     assert starts == []
     assert widget._project_section.sub_text() == i18n.t("gitSubNoRepo")
     assert widget._backup_step == 0
+
+
+# ── (b) Names on hover ───────────────────────────────────────────────────────────────────────────
+
+def _labels(widget, key_text):
+    """The row whose key reads `key_text`: its key label and its value label."""
+    labels = widget._project_section.findChildren(QLabel)
+    keys = [x for x in labels if x.property("class") == "pk" and copy_menu.full_text(x) == key_text]
+    assert keys, key_text
+    row = keys[0].parentWidget()
+    value = next(x for x in row.findChildren(QLabel) if x.property("class") == "pv")
+    return keys[0], value
+
+
+def _tip(widget, key_text) -> str:
+    return _labels(widget, key_text)[1].toolTip()
+
+
+def test_the_changes_row_names_the_files_by_kind_on_hover(repo, host):
+    project, _bare = repo
+    _write(project, "state/v_009.json")
+    _write(project, ".sessions.log", "a session's log\n")
+    widget, panel = host()
+    panel.show()
+
+    assert _until(lambda: _settled(panel) and _rows(widget).get(i18n.t("gitChanges")) == "2"), _rows(widget)
+    tip = _tip(widget, i18n.t("gitChanges"))
+
+    assert i18n.t("gitTipTuning").format(n=1) in tip and "state/v_009.json" in tip
+    assert i18n.t("gitTipHousekeeping").format(n=1) in tip and ".sessions.log" in tip
+    assert tip.index("state/v_009.json") < tip.index(".sessions.log"), "tuning files first"
+    tuning_half = tip[:tip.index(i18n.t("gitTipHousekeeping").format(n=1))]
+    assert ".sessions.log" not in tuning_half
+
+
+def test_the_unsent_row_names_the_commits_and_what_github_holds(repo, host):
+    project, _bare = repo
+    pushed = _git(project, "rev-parse", "HEAD")
+    new = _commit(project, "docs/notes.md", "a banked version")
+    widget, panel = host()
+    panel.show()
+
+    assert _until(lambda: _settled(panel) and _rows(widget).get(i18n.t("gitUnpushed")) == "1"), _rows(widget)
+    tip = _tip(widget, i18n.t("gitUnpushed"))
+
+    assert new[:7] in tip and "a banked version" in tip
+    until = i18n.t("gitOnGithubUntil").format(hash=pushed[:7], time=github_view.when(_commit_time(project, pushed)))
+    assert until in tip
+    assert until in _tip(widget, i18n.t("gitBackup"))
+
+
+def _commit_time(project, rev: str) -> str:
+    return _git(project, "log", "-1", "--format=%cI", rev)
+
+
+def test_a_clean_project_says_what_github_holds(repo, host):
+    project, _bare = repo
+    widget, panel = host()
+    panel.show()
+
+    assert _until(lambda: _settled(panel))
+    pushed = _git(project, "rev-parse", "HEAD")
+    expected = i18n.t("gitOnGithubUntil").format(hash=pushed[:7], time=github_view.when(_commit_time(project, pushed)))
+    assert expected in _tip(widget, i18n.t("gitBackup"))
+    assert _labels(widget, i18n.t("gitChanges"))[1].toolTip() == ""
+
+
+def test_a_remote_never_pushed_to_says_so(repo, host, tmp_path):
+    project, _bare = repo
+    _git(project, "remote", "remove", "origin")
+    empty = tmp_path / "empty.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(empty)], check=True, capture_output=True, timeout=60)
+    _git(project, "remote", "add", "origin", str(empty))
+    widget, panel = host()
+    panel.show()
+
+    assert _until(lambda: _settled(panel) and i18n.t("gitUnpushed") in _rows(widget)), _rows(widget)
+    assert i18n.t("gitOnGithubNever") in _tip(widget, i18n.t("gitBackup"))
+
+
+def test_a_long_list_is_cut_with_how_many_more():
+    answer = {"repo": True, "remote": "x", "changes": {"tuning": [f"m{i}.txt" for i in range(30)], "housekeeping": []},
+              "ahead": [], "remote_head": None, "sends": "person"}
+    tip = github_view.changes_tip(github_view.from_status(answer))
+
+    assert "m0.txt" in tip and "m29.txt" not in tip
+    assert i18n.t("gitTipMore").format(n=30 - github_view.NAMES_IN_TIP) in tip
+
+
+def test_a_time_reads_today_or_with_its_day():
+    now = datetime.datetime.now().astimezone()
+    today = now.replace(hour=9, minute=5, second=0, microsecond=0)
+    assert github_view.when(today.isoformat(timespec="seconds")) == "09:05"
+    earlier = today - datetime.timedelta(days=3)
+    assert github_view.when(earlier.isoformat(timespec="seconds")) == f"{earlier:%d.%m} 09:05"
+    assert github_view.when("not a time") == "not a time"
 
 
 def test_the_window_shows_the_read_and_a_read_starts_no_reload(repo, monkeypatch):
