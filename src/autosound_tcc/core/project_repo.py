@@ -32,6 +32,10 @@ _SCRIPT = "project_repo.py"
 #: `status --json --fetch`: the method's fetch (60 s) and its local reads, `gh auth status`
 #: (30 s) among them. Off the GUI thread only (`read`).
 _READ_TIMEOUT_S = 240
+#: `save`: a fetch (60 s), a look at the remote's branches (60 s), staging, a commit and a push of
+#: up to ten minutes, all the method's own bounds: above their sum, so the method ends a slow step
+#: itself and says so rather than TCC cutting it.
+_SAVE_TIMEOUT_S = 1500
 
 
 @dataclass(frozen=True)
@@ -94,6 +98,24 @@ def backup_status(project: Path) -> dict | RepoResult:
     status. So «gh is not signed in» follows only from the method saying so: a failure read as an
     empty status said it."""
     return _status(project, ["--json"], _TIMEOUT_S)
+
+
+def save(project: Path, dry_run: bool = False) -> RepoResult:
+    """`project_repo.py save <project> [--dry-run]`: commit the tuning files, push, in the method's
+    own words (its `✓`/`✗` taken off). `ok` False is a refusal, and it changed nothing the method
+    did not say. For a worker thread: it goes to the remote and can take many minutes."""
+    try:
+        code, out, err = _run(project, ["save", str(project), *(["--dry-run"] if dry_run else [])],
+                              _SAVE_TIMEOUT_S)
+    except method_cli.ScriptMissing:
+        return RepoResult(False, "", too_old=True)
+    except method_cli.ProcessWriterError as exc:
+        return RepoResult(False, str(exc), busy=isinstance(exc, method_cli.Busy))
+    if code == 2:  # usage: a copy of the method from before `save`
+        return RepoResult(False, "", too_old=True)
+    app_log.logger().info("project repo: save%s -> exit %s", " --dry-run" if dry_run else "", code)
+    said = out or err or f"{_SCRIPT} save exited {code}"
+    return RepoResult(code == 0, said.lstrip("✓✗ ").strip())
 
 
 def read(project: Path) -> dict | RepoResult:

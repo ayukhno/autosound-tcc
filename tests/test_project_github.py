@@ -21,9 +21,9 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QSettings, QThread  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget  # noqa: E402
 
-from autosound_tcc.core import config, project_repo  # noqa: E402
+from autosound_tcc.core import config, project_repo, vendor_loader  # noqa: E402
 from autosound_tcc.ui.tcc import copy_menu, github_view, i18n, project_github, qt_shutdown  # noqa: E402
 from autosound_tcc.ui.tcc.sidebar_section import SidebarSection  # noqa: E402
 
@@ -609,10 +609,345 @@ def test_the_status_is_whole_at_the_narrowest_column_in_every_language(repo, mon
                 whole = label.text() == i18n.t(key)
                 assert whole or label.width() >= room - 1, (lang, key, label.text())
                 assert isinstance(label, labels.ElidedLabel)
+                coloured = label.grab().toImage()
+                label.setProperty("sev", None)
+                label.style().unpolish(label)
+                label.style().polish(label)
+                QApplication.processEvents()
+                assert label.grab().toImage() != coloured, "the `sev` property must reach the sheet"
     finally:
         window._github.stop()
         for worker in list(qt_shutdown.live()) + list(qt_shutdown.detached()):
             worker.wait(20000)
+
+
+# ── (d) «Відправити» ─────────────────────────────────────────────────────────────────────────────
+
+def _send_button(widget):
+    found = [b for b in widget._project_section.findChildren(QPushButton)
+             if b.text() in (i18n.t("gitSendBtn"), i18n.t("gitSendingBtn"))]
+    return found[0] if found else None
+
+
+def _answer(monkeypatch, *answers):
+    """`QMessageBox.exec` answers in turn and keeps what it was asked; nothing is drawn."""
+    asked = []
+    queue = list(answers)
+
+    def _exec(box):
+        asked.append(box.text())
+        answer = queue.pop(0) if queue else QMessageBox.StandardButton.No
+        return answer(box) if callable(answer) else answer
+
+    monkeypatch.setattr(QMessageBox, "exec", _exec)
+    return asked
+
+
+def _on_remote(bare) -> list[str]:
+    head = _git(bare, "rev-parse", "HEAD")
+    return _git(bare, "ls-tree", "-r", "--name-only", head).split("\n")
+
+
+def _strip(widget) -> str:
+    return widget._status_strip.said[-1][0] if widget._status_strip.said else ""
+
+
+YES, NO = QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No
+
+
+def _ready(repo, host):
+    project, _bare = repo
+    _write(project, "state/v_020.json")
+    _write(project, "process/journal.jsonl")
+    widget, panel = host()
+    panel.show()
+    assert _until(lambda: _settled(panel) and _send_button(widget) is not None), (_rows(widget), panel._read)
+    return widget, panel
+
+
+def test_the_button_says_no_when_there_is_nothing_to_send_or_nowhere(repo, host, monkeypatch, tmp_path):
+    project, _bare = repo
+    widget, panel = _painted(repo, host)
+    assert _send_button(widget) is None, "a clean project has nothing to send"
+
+    _write(project, "state/v_021.json")
+    panel.request()
+    assert _until(lambda: _send_button(widget) is not None)
+
+    _git(project, "remote", "remove", "origin")
+    panel.show()
+    assert _until(lambda: _settled(panel) and panel._read.remote is None)
+    assert _send_button(widget) is None, "no remote, nowhere to send"
+
+
+def test_no_button_for_a_read_that_could_not_be_read_or_a_detached_head(repo, host, monkeypatch):
+    _status_stub(monkeypatch, changes=None, ahead=None)
+    widget, panel = _painted(repo, host)
+    assert _send_button(widget) is None
+
+    project, _bare = repo
+    _status_stub(monkeypatch, changes={"tuning": ["a"], "housekeeping": []}, ahead=[])
+    _git(project, "checkout", "-q", "--detach")
+    panel.show()
+    assert _until(lambda: _settled(panel) and panel._git.detached)
+    assert _send_button(widget) is None
+
+
+def test_the_method_session_rule_keeps_the_button_as_the_spare(repo, host):
+    """`project_seed`: «the session; TCC's button is the spare». The row says who sends."""
+    widget, panel = _ready(repo, host)
+
+    assert panel._read.sends == "session"
+    assert _rows(widget)[i18n.t("gitSendsRow")] == i18n.t("gitSendsSession")
+    assert _send_button(widget).toolTip() == i18n.t("gitSendTipSpare") or \
+        getattr(_send_button(widget), "hover_tip", None) is not None
+
+
+def test_a_project_seeded_before_the_rule_says_the_person_sends(repo, host):
+    project, _bare = repo
+    for name in ("CLAUDE.md", "AGENTS.md"):
+        _write(project, name, "# their own\n")
+    _git(project, "add", "-A")
+    _git(project, "commit", "-q", "-m", "their own files")
+    _git(project, "push", "-q", "origin", "HEAD")
+    widget, panel = _painted(repo, host)
+
+    assert panel._read.sends == "person"
+    assert _rows(widget)[i18n.t("gitSendsRow")] == i18n.t("gitSendsPerson")
+
+
+def test_the_confirmation_names_the_files_the_commits_and_the_remote(repo, host, monkeypatch):
+    project, _bare = repo
+    _commit(project, "docs/note.md", "a commit already made")
+    widget, panel = _ready(repo, host)
+    asked = _answer(monkeypatch, NO)
+
+    _send_button(widget).click()
+
+    assert _until(lambda: asked), widget._status_strip.said
+    text = asked[0]
+    assert i18n.t("gitSendFilesLine").format(n=2) in text
+    assert i18n.t("gitSendCommitsLine").format(n=1) in text
+    assert panel._git.remote in text
+
+
+def test_no_sends_nothing(repo, host, monkeypatch):
+    project, bare = repo
+    head = _git(bare, "rev-parse", "HEAD")
+    widget, panel = _ready(repo, host)
+    _answer(monkeypatch, NO)
+
+    _send_button(widget).click()
+    assert _until(panel.idle)
+
+    assert _git(bare, "rev-parse", "HEAD") == head and _git(project, "rev-parse", "HEAD") == head
+    assert "state/v_020.json" in _git(project, "status", "--porcelain", "--untracked-files=all")
+    assert _send_button(widget).isEnabled()
+
+
+def test_yes_sends_the_tuning_files_and_the_outcome_is_the_methods_words(repo, host, monkeypatch):
+    project, bare = repo
+    widget, panel = _ready(repo, host)
+    asked = _answer(monkeypatch, YES)
+
+    _send_button(widget).click()
+
+    assert _until(lambda: _send_button(widget) is None and panel.idle()), widget._status_strip.said
+    assert len(asked) == 1
+    assert _git(bare, "rev-parse", "HEAD") == _git(project, "rev-parse", "HEAD")
+    assert {"state/v_020.json", "process/journal.jsonl"} <= set(_on_remote(bare))
+    said = _strip(widget)
+    assert said.startswith(i18n.t("gitSendDone").format(said="").rstrip()) and "sent to origin" in said
+    assert not said.startswith("✓")
+    assert _until(lambda: _settled(panel) and panel._read.remote_head.hash == _git(project, "rev-parse", "HEAD"))
+    assert i18n.t("gitOnGithubUntil").format(hash=_git(project, "rev-parse", "--short=7", "HEAD"),
+                                             time=github_view.when(_commit_time(project, "HEAD"))) \
+        in _tip(widget, i18n.t("gitBackup"))
+
+
+def test_the_key_the_link_and_the_logs_never_go(repo, host, monkeypatch):
+    """A clone must not get the machine's key or link. The older-project shape: nothing in
+    `.gitignore` names them, and the link is a real folder here, which is what git would take."""
+    project, bare = repo
+    (project / ".gitignore").unlink()
+    _git(project, "add", "-A")
+    _git(project, "commit", "-q", "-m", "an older project: no .gitignore")
+    _git(project, "push", "-q", "origin", "HEAD")
+    _write(project, ".tcc/mcp-token", "secret\n")
+    _write(project, ".sessions.log", "log\n")
+    link = project / ".claude" / "skills" / "autosound-tuning"
+    link.parent.mkdir(parents=True)
+    try:
+        link.symlink_to(vendor_loader.REW_TOOL_DIR.parent, target_is_directory=True)
+    except OSError:  # Windows without the right to make one: the method's selftest covers a junction
+        pass
+    _write(project, "state/v_022.json")
+    widget, panel = _ready(repo, host)
+    _answer(monkeypatch, YES)
+
+    _send_button(widget).click()
+    assert _until(lambda: _send_button(widget) is None and panel.idle()), widget._status_strip.said
+
+    sent = _on_remote(bare)
+    assert "state/v_022.json" in sent
+    assert not [p for p in sent if p.startswith((".tcc", ".claude")) or p == ".sessions.log"], sent
+
+
+def test_asked_before_each_send(repo, host, monkeypatch):
+    project, bare = repo
+    widget, panel = _ready(repo, host)
+    asked = _answer(monkeypatch, YES, NO)
+
+    _send_button(widget).click()
+    assert _until(lambda: _send_button(widget) is None and panel.idle())
+    _write(project, "state/v_023.json")
+    panel.request()
+    assert _until(lambda: _settled(panel) and _send_button(widget) is not None)
+    _send_button(widget).click()
+    assert _until(lambda: len(asked) == 2 and panel.idle())
+
+    assert len(asked) == 2
+
+
+def test_a_refusal_is_said_in_the_methods_words(repo, host, monkeypatch, tmp_path):
+    project, bare = repo
+    widget, panel = _ready(repo, host)
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", str(bare), str(other)], check=True, capture_output=True, timeout=60)
+    _commit(other, "from-elsewhere.txt")
+    _git(other, "push", "-q", "origin", "HEAD")
+    asked = _answer(monkeypatch, YES)
+
+    _send_button(widget).click()
+
+    assert _until(lambda: "pull first" in _strip(widget)), widget._status_strip.said
+    assert len(asked) == 1
+    assert widget._status_strip.said[-1][1] == "warn"
+    assert not _strip(widget).lstrip().startswith("✗")
+    assert "state/v_020.json" in _git(project, "status", "--porcelain", "--untracked-files=all")
+
+
+def test_a_second_press_starts_no_second_send(repo, host, monkeypatch):
+    project, bare = repo
+    widget, panel = _ready(repo, host)
+    _answer(monkeypatch, YES)
+    real, release, entered, sends = project_repo.save, threading.Event(), threading.Event(), []
+
+    def held(where, dry_run=False):
+        if not dry_run:
+            sends.append(where)
+            entered.set()
+            assert release.wait(20)
+        return real(where, dry_run=dry_run)
+
+    monkeypatch.setattr(project_repo, "save", held)
+    _send_button(widget).click()
+    assert _until(entered.is_set)
+    button = _send_button(widget)
+    assert button.text() == i18n.t("gitSendingBtn") and not button.isEnabled()
+
+    button.click()
+    panel._on_send()
+
+    release.set()
+    assert _until(lambda: _send_button(widget) is None and panel.idle())
+    assert len(sends) == 1, sends
+
+
+def test_what_changed_after_the_yes_is_said_and_not_sent(repo, host, monkeypatch):
+    """A session can bank between the question and the send: the person was not asked about that.
+    It goes nowhere, it is said, and the next press asks about what is there."""
+    project, bare = repo
+    head = _git(bare, "rev-parse", "HEAD")
+    widget, panel = _ready(repo, host)
+
+    def yes_and_a_new_file(_box):
+        _write(project, "state/v_024.json")
+        return YES
+
+    asked = _answer(monkeypatch, yes_and_a_new_file, YES)
+    _send_button(widget).click()
+
+    assert _until(lambda: i18n.t("gitSendChanged") in _strip(widget)), widget._status_strip.said
+    assert _git(bare, "rev-parse", "HEAD") == head, "what was not asked about does not go"
+
+    assert _until(lambda: _settled(panel) and _send_button(widget) is not None and _send_button(widget).isEnabled())
+    _send_button(widget).click()
+    assert _until(lambda: _send_button(widget) is None and panel.idle())
+    assert len(asked) == 2 and "state/v_024.json" in _on_remote(bare)
+
+
+def test_closing_during_the_question_sends_nothing(repo, host, monkeypatch):
+    project, bare = repo
+    head = _git(bare, "rev-parse", "HEAD")
+    widget, panel = _ready(repo, host)
+
+    def stopped(box):
+        panel.stop()
+        return YES
+
+    _answer(monkeypatch, stopped)
+    _send_button(widget).click()
+    assert _until(lambda: not qt_shutdown.live() and panel._job is None)
+
+    assert _git(bare, "rev-parse", "HEAD") == head
+
+
+def test_closing_mid_send_hands_the_thread_over_and_takes_no_answer(repo, host, monkeypatch):
+    project, bare = repo
+    widget, panel = _ready(repo, host)
+    _answer(monkeypatch, YES)
+    release, entered = threading.Event(), threading.Event()
+
+    def held(where, dry_run=False):
+        if dry_run:
+            return project_repo.RepoResult(True, "would send")
+        entered.set()
+        release.wait(20)
+        return project_repo.RepoResult(True, "sent to origin: something")
+
+    monkeypatch.setattr(project_repo, "save", held)
+    monkeypatch.setattr(qt_shutdown, "QUIT_WAIT_MS", 50)
+    _send_button(widget).click()
+    assert _until(entered.is_set)
+
+    panel.stop()
+    said_before = list(widget._status_strip.said)
+    running = [w for w in qt_shutdown.detached() if isinstance(w, QThread)]
+    release.set()
+
+    assert running, "a send past the wait is handed over, never dropped"
+    assert _until(lambda: not qt_shutdown.detached() and not qt_shutdown.live())
+    _until(lambda: False, 0.1)
+    assert widget._status_strip.said == said_before
+
+
+def test_the_save_bound_is_above_a_fetch_and_a_push(repo, monkeypatch):
+    """A fetch of up to 60 s and a push of up to 600 s (the method's own): `save` gets more."""
+    assert project_repo._SAVE_TIMEOUT_S > 60 + 600
+    seen = []
+    real = project_repo.method_cli.spawn
+
+    def spy(project, script, args, timeout_s, **kw):
+        seen.append((args[0], timeout_s))
+        return real(project, script, args, timeout_s=timeout_s, **kw)
+
+    monkeypatch.setattr(project_repo.method_cli, "spawn", spy)
+    project_repo.save(repo[0], dry_run=True)
+
+    assert seen == [("save", project_repo._SAVE_TIMEOUT_S)]
+
+
+def test_a_method_without_save_says_update(repo, monkeypatch):
+    """A project bound to a copy from before `save`: exit 2, its usage text; TCC says update."""
+    import tests.test_project_repo as trepo
+
+    project, _bare = repo
+    trepo._own_copy(project.parent, monkeypatch, "import sys; print('usage'); sys.exit(2)")
+
+    result = project_repo.save(project, dry_run=True)
+
+    assert result.too_old and not result.ok
 
 
 def test_the_window_shows_the_read_and_a_read_starts_no_reload(repo, monkeypatch):
@@ -639,6 +974,9 @@ def test_the_window_shows_the_read_and_a_read_starts_no_reload(repo, monkeypatch
         window._shown_key = "v_001"
         window._set_project_params(None, reuse_git=True)
         assert _rows(window) == before
+
+        window.stop_workers()
+        assert panel._stopped, "the window's close stops the panel"
     finally:
         window._github.stop()
         for worker in list(qt_shutdown.live()) + list(qt_shutdown.detached()):

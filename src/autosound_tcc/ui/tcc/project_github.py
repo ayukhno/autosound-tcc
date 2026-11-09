@@ -15,8 +15,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Optional
 
+import shiboken6
 from PySide6.QtCore import QFileSystemWatcher, QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QMessageBox, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from autosound_tcc.core import app_log, config, project_repo
 from autosound_tcc.state import project_view
@@ -62,6 +63,10 @@ class ProjectGithub(QObject):
         self._again = False
         self._stopped = False
         self._mark: tuple = ()
+        #: The send's state: None, or "asked", "sending".
+        self._send: Optional[str] = None
+        #: The next step of a send, kept while a read finishes: one job runs at a time.
+        self._after_job: Optional[Callable[[], None]] = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(COALESCE_MS)
@@ -89,16 +94,20 @@ class ProjectGithub(QObject):
         self._git = project_view.git_status(reuse=reuse)
         if self._read_of != chosen:
             self._read, self._read_of = None, None
-        self._box = QWidget()
-        box_layout = QVBoxLayout(self._box)
-        box_layout.setContentsMargins(0, 0, 0, 0)
-        box_layout.setSpacing(0)
-        section.body_layout().addWidget(self._box)
+        if not self._box_alive() or self._box.parentWidget() is None:  # the rebuild cleared it
+            self._box = QWidget()
+            box_layout = QVBoxLayout(self._box)
+            box_layout.setContentsMargins(0, 0, 0, 0)
+            box_layout.setSpacing(0)
+            section.body_layout().addWidget(self._box)
         self._paint(chosen)
         self._arm(chosen)
         if not reuse:
             self._mark = github_view.refs_mark(chosen / ".git")
             self.request()
+
+    def _box_alive(self) -> bool:
+        return self._box is not None and shiboken6.isValid(self._box)
 
     def _paint(self, chosen: Path) -> None:
         section = self._window._project_section
@@ -115,7 +124,13 @@ class ProjectGithub(QObject):
         if view.step is not None:
             slot = self._window._on_git_init if view.step == 0 else self._window._on_git_backup
             layout.addWidget(self._button(github_view.backup_label(view.step),
-                                          "gitInitTip" if view.step == 0 else "gitBackupTip", slot))
+                                          i18n.t("gitInitTip" if view.step == 0 else "gitBackupTip"), slot))
+        elif view.send is not None or self._send is not None:
+            sending = self._send is not None
+            row = self._button(i18n.t("gitSendingBtn" if sending else "gitSendBtn"),
+                               view.send or i18n.t("gitSendTip"), self._on_send)
+            row.findChild(QPushButton).setEnabled(not sending)
+            layout.addWidget(row)
 
     @staticmethod
     def _row(row: github_view.Row) -> QWidget:
@@ -134,7 +149,7 @@ class ProjectGithub(QObject):
             value.set_min_width(min(value.sizeHint().width(), 56))
         return widget
 
-    def _button(self, text: str, tip_key: str, slot) -> QWidget:
+    def _button(self, text: str, tip: str, slot) -> QWidget:
         """A one-click fix under the git rows: the method's own command, run on the click."""
         row = QWidget()
         layout = QHBoxLayout(row)
@@ -142,7 +157,7 @@ class ProjectGithub(QObject):
         button = QPushButton(text)
         button.setProperty("class", "link-btn")
         button.setCursor(Qt.CursorShape.PointingHandCursor)
-        attach_tip(button, i18n.t(tip_key))
+        attach_tip(button, tip)
         button.clicked.connect(slot)
         layout.addWidget(button)
         layout.addStretch(1)
@@ -188,7 +203,10 @@ class ProjectGithub(QObject):
         if self._stopped:
             return
         self._on_answer(answer)
-        if self._again and self._job is None:
+        if self._job is None and self._after_job is not None:
+            then, self._after_job = self._after_job, None
+            then()
+        elif self._again and self._job is None:
             self._again = False
             self._timer.start()
 
@@ -203,9 +221,82 @@ class ProjectGithub(QObject):
             read = github_view.from_status(answer, newest)
         self._read, self._read_of = read, Path(folder)
         self._mark = github_view.refs_mark(Path(folder) / ".git")  # what this read has already seen
-        if self._box is not None:
+        if self._box_alive():
             self._paint(Path(folder))
         self._arm(Path(folder))
+
+    # ── sending ──────────────────────────────────────────────────────────────────────────────
+
+    def _on_send(self, *_args) -> None:
+        """«Відправити»: the method's `save`, on a worker, asked before each send. The question
+        opens here, on the person's press, from the last read; what it promised is checked again
+        on the worker, so a session's write in the meantime is said rather than sent unasked."""
+        folder = config.chosen_project_dir()
+        read = self._read
+        if self._send is not None or self._stopped or folder is None or read is None:
+            return
+        box = QMessageBox(self._window)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(i18n.t("gitSendBtn"))
+        box.setText(github_view.confirm_text(read, self._git.remote if self._git else ""))
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        self._send = "asked"
+        yes = box.exec() == QMessageBox.StandardButton.Yes
+        if self._stopped or getattr(self._window, "_closing", False):
+            return  # the window went while it was being asked: nothing goes
+        if not yes:
+            self._send = None
+            self._repaint()
+            return
+        self._send = "sending"
+        self._repaint()
+        promised = github_view.fingerprint(read)
+        self._when_free(lambda: self._start_send(Path(folder), promised))
+
+    def _when_free(self, then: Callable[[], None]) -> None:
+        if self._job is None:
+            then()
+        else:
+            self._after_job = then
+
+    def _start_send(self, folder: Path, promised: tuple) -> None:
+        def work():
+            status = project_repo.backup_status(folder)
+            now = github_view.from_status(status) if isinstance(status, dict) else None
+            if now is None or github_view.fingerprint(now) != promised:
+                return ("changed", None, status)
+            return ("sent", project_repo.save(folder), None)
+
+        self._run(work, lambda result: self._sent(folder, *result))
+
+    def _sent(self, folder: Path, what: str, answer, status) -> None:
+        if what == "sent":
+            self._finish(folder, answer)
+        elif isinstance(status, project_repo.RepoResult):
+            self._finish(folder, status)
+        else:
+            self._finish(folder, project_repo.RepoResult(False, i18n.t("gitSendChanged")))
+
+    def _finish(self, folder: Path, result: project_repo.RepoResult) -> None:
+        """The method's outcome in its own words, the button back, and a fresh read."""
+        self._send = None
+        strip = self._window._status_strip
+        if result.too_old:
+            strip.notify(i18n.t("gitTooOld"), level="warn")
+        elif result.ok:
+            strip.notify(i18n.t("gitSendDone").format(said=result.said))
+        else:
+            strip.notify(i18n.t("gitSendRefused").format(said=result.said or "—"), level="warn")
+        self._repaint()
+        if Path(config.chosen_project_dir() or "") == folder:
+            self._mark = github_view.refs_mark(folder / ".git")
+            self.request()
+
+    def _repaint(self) -> None:
+        chosen = config.chosen_project_dir()
+        if chosen is not None and self._git is not None and self._box_alive():
+            self._paint(Path(chosen))
 
     # ── the watch ────────────────────────────────────────────────────────────────────────────
 
