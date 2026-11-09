@@ -254,4 +254,11 @@ at the session's pace, plus the PR's CI (~35–40 min per run) and the skill's v
 
 | issue | state | implementer | commits | review | note |
 |---|---|---|---|---|---|
-| the plan | written 2026-10-30, updated 2026-11-09 (hub #331, #333; acceptance, the brief, #259, #260; the eight decisions taken); waits for the Arbiter's «го» | — | this | — | — |
+| the plan | written 2026-10-30, updated 2026-11-09 (hub #331, #333; acceptance, the brief, #259, #260; the eight decisions taken); the Arbiter's «го» 2026-11-09 | — | this | — | — |
+| #260 | done | the session | `047998bc` | group | text only |
+| #233 | done | sonnet · medium | `f6cd1b81` | group | the source is the project watcher's 400 ms reload, neither the issue's nor the map's account; no natural red (a race), a forced timer gave one |
+| #257 | rides the pin (step 8) | — | — | the PR's Linux shard | no code |
+| #252 | done | sonnet · medium | `193af6dc` | group | red run shown |
+| #250 | done | sonnet · medium | `5d0009c0` | group | red run shown; on the group seat: INV on «changed» in light ≈3.0 contrast (the token's own), the pill's 1px frame |
+| #244 | done | sonnet · medium | `3142d66a` | group | red run shown; for step 9: `flawKind_ringing`, `flawKind_energy_lag`, `flawKind_decay_asymmetry` stand in English in uk/pl/de (the repo has no mark for it); the map's «IR unreachable» was wrong, it is drawn |
+| #236 | done | sonnet · medium | `ad903a3f` | group | red run shown; the whole left half hides, the terminal session's name (`_ext_session_lbl`) with it |
