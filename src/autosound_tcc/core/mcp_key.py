@@ -177,7 +177,11 @@ def load(project_dir: Optional[Path]) -> Key:
         # Not a key at all, so nothing is lost; left as it is, every start would make another.
         return _made(project_dir, REPLACED)
     problem = keep_out_of_git(Path(project_dir))
-    if problem:  # the file stays: it may be good again once git is told, and it is the person's
+    if problem:  # git would carry the file, and nothing uses it now: it goes, so `add -A` cannot
+        try:
+            path.unlink()
+        except OSError as exc:
+            app_log.logger().warning("could not remove the MCP key %s: %s", path, in_words(exc))
         return _run_only(problem)
     return Key(token)
 

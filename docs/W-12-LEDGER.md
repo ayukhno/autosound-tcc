@@ -16,6 +16,12 @@ site. Sent to the hub by ticket at the wave's end.
 | 2026-11-09 | test seat (opus · high), 10 min, 163K | the window group | 16 | 12 taken and red on the seat's mutation; 1 Minor taken; 3 Minor left | 0 | 0 | 16 | 0 / 12 / 4 |
 
 | 2026-11-09 | Opus seat (`feature-dev:code-reviewer`, opus · high) | #247's task review (`cb404d28`) | 7 | checked in the fix round | | | | 0 / 1 / 6 |
+| 2026-11-09 | silent-failure seat + re-review of #247's fixes (opus · high), 8 min, 176K | #246, #247 | 16 | checked in the fix round | | | | 0 / 5 / 11 |
+| 2026-11-09 | test seat (opus · high), 35 min, 181K | #246, #247 | 13 | each gap proved by a mutation run | | | | 0 / 5 / 8 |
+
+The re-review paid: four of its five Important are what #247's own fix round made (a brief of mine asked to refuse `.mcp.json` when git
+would not confirm, and any git failure read as «no»). The test seat's real `mcp` client showed the key survives a restart and the
+MCP session does not (`404 Session not found`): whether Claude Code re-initializes needs a live run.
 
 The silent-failure seat's seventh (a setting written before the restyle) was left: no raiser exists today. The window group's fix
 round: opus · medium, three commits (`385b30bb`, `247d9193`, `41578365`).
@@ -80,6 +86,9 @@ in `ayukhno/hub-kit`, each with its evidence. No write to hub-kit before that.
 12. **A test seat that proves each gap by a mutation.** The seat broke the product in memory and ran only the file concerned:
     «green» then means a real regression would pass. 12 Important, among them a signal nobody connected, a saved value equal
     to the default, and a look compared with itself; one live defect came out of it. Worth writing into the seat's brief.
-13. **From the skill's W-12, taken here:** acceptance on the exact head after the last code change; the reviewer's brief
+13. **Re-review a risky fix round, and suspect your own fix brief first.** On #247 the fix asked for by the session's own brief
+    took away a working path on any broken git; only the re-review saw it. The cure was simpler than the fix: a key for one run
+    and `.mcp.json` as before.
+14. **From the skill's W-12, taken here:** acceptance on the exact head after the last code change; the reviewer's brief
    (a quote at `path:line`, every site of a class, «checked → clean», what could not be checked). Their result in this wave
    goes here when the wave has one.

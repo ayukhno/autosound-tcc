@@ -381,7 +381,7 @@ def test_a_key_already_on_disk_is_not_used_once_git_would_take_it(repo, text):
     again = TccMcpServer(project_dir=repo)
 
     assert again.token != key and again.key_note == "run_only"
-    assert _key_file(repo).read_text(encoding="utf-8").strip() == key, "not written over"
+    assert not _key_file(repo).exists(), "`git add -A` would carry a key nothing uses"
 
 
 def test_a_definite_no_is_a_key_for_this_run_and_the_entry_still_written(repo):
