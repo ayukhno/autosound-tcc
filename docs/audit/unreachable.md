@@ -141,8 +141,9 @@ currently observe goes wrong because of it. Listed so it stops being found by ac
 - **`CurveView.markersChanged`** — `src/autosound_tcc/ui/tcc/curve_view.py:137`, emitted at `:646`,
   connected only by `tests/test_curve_view.py:64`. The dialog reads markers via `on_send`/
   `reading()`, and the view paints its own readout, so nothing visible is missing.
-- **`RewBridge` facade methods with no caller** — `src/autosound_tcc/core/rew_bridge.py:102-116`:
-  `equalisers()`, `crossover_types()`, `slopes()`, `target_settings()`, `target_response()`.
+- **`RewBridge` facade methods with no caller** — `src/autosound_tcc/core/rew_bridge.py:209-253`:
+  `group_delay()`, `distortion()`, `equalisers()`, `crossover_types()`, `slopes()`,
+  `target_settings()`, `target_response()`. (`impulse_response()` is called, by `curve_dialog.py:418`.)
 - **Orphaned public functions/methods** (zero references in src, tests, docs, or via
   getattr/strings):
   - `OnboardingSession.draft_profile` — `src/autosound_tcc/core/agent_session.py:227`

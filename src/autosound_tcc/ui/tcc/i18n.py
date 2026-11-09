@@ -383,6 +383,9 @@ answers the first five questions anybody would ask.",
         "flawKind_thd_spike": "distortion spike",
         "flawKind_pair_suckout": "pair suckout",
         "flawKind_level_tilt": "level tilt",
+        "flawKind_ringing": "ringing",
+        "flawKind_energy_lag": "energy lag",
+        "flawKind_decay_asymmetry": "decay asymmetry",
         "supervisorUnbacked": "These steps are closed, and their evidence names nothing that "
         "exists on disk or in REW:<br>{steps}<br>Either the work is recorded somewhere this "
         "cannot see, or it was not done.",
@@ -1822,6 +1825,9 @@ Choose sweeps (sw) above to read this.",
         "flawKind_thd_spike": "сплеск спотворень",
         "flawKind_pair_suckout": "провал пари",
         "flawKind_level_tilt": "перекіс рівня",
+        "flawKind_ringing": "ringing",
+        "flawKind_energy_lag": "energy lag",
+        "flawKind_decay_asymmetry": "decay asymmetry",
         "supervisorUnbacked": "Ці кроки закриті, а їхні докази не вказують ні на що на диску "
         "чи в REW:<br>{steps}<br>Або робота записана там, куди я не бачу, або її не було.",
         "recordTargetCurve": "цільова крива",
@@ -3188,6 +3194,9 @@ Choose sweeps (sw) above to read this.",
         "flawKind_thd_spike": 'skok zniekształceń',
         "flawKind_pair_suckout": 'zapadnięcie pary',
         "flawKind_level_tilt": 'przechył poziomu',
+        "flawKind_ringing": 'ringing',
+        "flawKind_energy_lag": 'energy lag',
+        "flawKind_decay_asymmetry": 'decay asymmetry',
         "supervisorUnbacked": 'Te kroki są zamknięte, a ich dowody nie wskazują na nic, co istnieje na dysku ani w '
                               'REW:<br>{steps}<br>Albo praca jest zapisana tam, gdzie tego nie widzę, albo jej nie było.',
         "recordTargetCurve": 'krzywa docelowa',
@@ -4608,6 +4617,9 @@ Choose sweeps (sw) above to read this.",
         "flawKind_thd_spike": 'Klirr-Spitze',
         "flawKind_pair_suckout": 'Auslöschung im Paar',
         "flawKind_level_tilt": 'Pegelschieflage',
+        "flawKind_ringing": 'ringing',
+        "flawKind_energy_lag": 'energy lag',
+        "flawKind_decay_asymmetry": 'decay asymmetry',
         "supervisorUnbacked": 'Diese Schritte sind geschlossen, und ihre Belege nennen nichts, was auf der Platte oder in '
                               'REW existiert:<br>{steps}<br>Entweder ist die Arbeit irgendwo festgehalten, wohin ich nicht '
                               'sehe, oder sie wurde nicht getan.',
@@ -5755,6 +5767,13 @@ def current_language() -> Lang:
 def t(key: str) -> str:
     """Plain string lookup, falling back to English, then the key itself."""
     return T.get(_lang, {}).get(key, T["en"].get(key, key))
+
+
+def flaw_kind(kind: str) -> str:
+    """The label of a flaw kind; a kind with no string reads as its own words, never as a key."""
+    key = f"flawKind_{kind}"
+    label = t(key)
+    return kind.replace("_", " ") if label == key else label
 
 
 def language_choices() -> list[tuple[Lang, str]]:

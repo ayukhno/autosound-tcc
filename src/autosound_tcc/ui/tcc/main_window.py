@@ -1472,7 +1472,7 @@ class MainWindow(QMainWindow):
         # method knows (`MMM`, `§26`, `еліпсоїд`, `ILL-POSED`). `kind` and the channels do not
         # disappear either way — the hover tip has said both since this row was written.
         line = ElidedLabel(
-            flaw.plain or f"{i18n.t('flawKind_' + flaw.kind)} · {detail}", min_width=60
+            flaw.plain or f"{i18n.flaw_kind(flaw.kind)} · {detail}", min_width=60
         )
         line.setProperty("class", "cline2")
         second.addWidget(line, 1)
@@ -1500,7 +1500,7 @@ class MainWindow(QMainWindow):
         # `test_copy_menu.py`, which the author of this line had not run).
         tip_head = " · ".join(part for part in (
             flaw.headline,
-            i18n.t(f"flawKind_{flaw.kind}"),
+            i18n.flaw_kind(flaw.kind),
             ", ".join(flaw.channels) or i18n.t("flawAllChannels"),
             i18n.t(f"flawAction_{flaw.action}"),
             doubt,

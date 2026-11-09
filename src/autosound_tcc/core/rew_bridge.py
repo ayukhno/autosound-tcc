@@ -1,8 +1,9 @@
 """Mostly-read-only wrapper over the vendored REW HTTP API (`rew_api.py`).
 
-Exposes the reading half of `rew_api`: measurements, curves (FR, group delay,
-impulse response, distortion), and REW's own internal filter / equaliser /
-target-response model. The write-capable functions (`set_filters`,
+Exposes the reading half of `rew_api`: measurements, curves, and REW's own
+internal filter / equaliser / target-response model. TCC draws frequency
+response and phase and the impulse response; the group-delay and distortion
+reads below exist but nothing in the app calls them (`docs/audit/unreachable.md`). The write-capable functions (`set_filters`,
 `set_equaliser`, `measurement_command`, and the phase/smoothing commands that
 create derived measurements) are deliberately NOT surfaced here, so the
 read-only guarantee is structural rather than a convention someone must
