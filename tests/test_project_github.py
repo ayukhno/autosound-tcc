@@ -126,6 +126,15 @@ def host(repo):
         widget.close()
 
 
+@pytest.fixture
+def settled():
+    """Whether every job this test started has ended. The registry is the process's: other test
+    files leave finished workers in it that nobody pumped out, so «empty» depended on the shard's
+    order (three tests red on every system at 8155e8c1)."""
+    before = qt_shutdown.detached() | qt_shutdown.live()
+    return lambda: not ((qt_shutdown.detached() | qt_shutdown.live()) - before)
+
+
 def _until(what, seconds: float = 20.0):
     end = time.monotonic() + seconds
     while time.monotonic() < end:
@@ -300,7 +309,7 @@ def test_an_answer_for_another_folder_is_dropped(repo, host, monkeypatch, tmp_pa
     assert panel._read is None
 
 
-def test_a_close_mid_read_stops_the_thread_without_an_abort(repo, host, monkeypatch):
+def test_a_close_mid_read_stops_the_thread_without_an_abort(repo, host, monkeypatch, settled):
     release, entered = threading.Event(), threading.Event()
 
     def held(_where):
@@ -319,7 +328,7 @@ def test_a_close_mid_read_stops_the_thread_without_an_abort(repo, host, monkeypa
     release.set()
 
     assert running, "a job past the wait is handed over, never dropped"
-    assert _until(lambda: not qt_shutdown.detached() and not qt_shutdown.live())
+    assert _until(settled)
     assert panel._read is None, "a stopped panel takes no answer"
 
 
@@ -914,7 +923,7 @@ def test_closing_during_the_question_sends_nothing(repo, host, monkeypatch):
     assert _git(bare, "rev-parse", "HEAD") == head
 
 
-def test_closing_mid_send_hands_the_thread_over_and_takes_no_answer(repo, host, monkeypatch):
+def test_closing_mid_send_hands_the_thread_over_and_takes_no_answer(repo, host, monkeypatch, settled):
     project, bare = repo
     widget, panel = _ready(repo, host)
     _answer(monkeypatch, YES)
@@ -938,7 +947,7 @@ def test_closing_mid_send_hands_the_thread_over_and_takes_no_answer(repo, host, 
     release.set()
 
     assert running, "a send past the wait is handed over, never dropped"
-    assert _until(lambda: not qt_shutdown.detached() and not qt_shutdown.live())
+    assert _until(settled)
     _until(lambda: False, 0.1)
     assert widget._status_strip.said == said_before
 
@@ -1374,7 +1383,7 @@ def test_no_question_at_close_with_no_send_under_way(repo, host, monkeypatch):
     assert asked == []
 
 
-def test_a_close_during_the_status_starts_no_push(repo, host, monkeypatch):
+def test_a_close_during_the_status_starts_no_push(repo, host, monkeypatch, settled):
     project, bare = repo
     head = _git(bare, "rev-parse", "HEAD")
     widget, panel = _ready(repo, host)
@@ -1395,7 +1404,7 @@ def test_a_close_during_the_status_starts_no_push(repo, host, monkeypatch):
     panel.stop()
     release.set()
 
-    assert _until(lambda: not qt_shutdown.detached() and not qt_shutdown.live())
+    assert _until(settled)
     assert saves == [] and _git(bare, "rev-parse", "HEAD") == head
 
 

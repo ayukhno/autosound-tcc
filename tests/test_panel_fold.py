@@ -224,9 +224,14 @@ def test_the_handle_shows_no_resize_cursor_while_a_card_is_folded():
 
 
 def test_the_arrow_costs_the_header_row_no_width():
+    from tests.test_detail_pane import _no_real_font
+
     QApplication.instance() or QApplication([])
     split = QSplitter()
     card, head, body = _Column._card()
+    fontless = _no_real_font(head.font())
+    if fontless:
+        pytest.skip(f"a box's width is no font's: {fontless}")
     sub = ElidedLabel("a subtitle that elides", min_width=40, policy=QSizePolicy.Policy.Maximum)
     head.layout().addWidget(sub)
     split.addWidget(card)
