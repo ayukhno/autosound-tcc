@@ -1,8 +1,9 @@
 # PLAN W-12 · v1.3.0 — the joint minor with the method's v3.3.0
 
-The milestone `W-12 · v1.3.0` (#12): 19 issues with `ok` (the Arbiter, 2026-10-30; state `docs/TODO.md` F-107). A
-shared wave (his word: «скіл налаштован на мінорний реліз — синхронізуйтесь», hub #327 TCC-069): the skill's v3.3.0 is
-cut first, TCC pins the published tag, then TCC's v1.3.0 (`WAVES.md` §1 step 4, §3.1). The Claude API key group
+The milestone `W-12 · v1.3.0` (#12): 21 issues with `ok` (the Arbiter, 2026-10-30, and #259, #260 on 2026-11-09; state
+`docs/TODO.md` F-107). A shared wave, in the order the Arbiter set on 2026-11-08 (hub #331): the skill built its wave and
+published the candidate `beta-v3.3.0-rc1` (`fe34a96`); TCC works on that candidate; when TCC is done, both minors go out,
+skill `v3.3.0` and TCC `v1.3.0` (`WAVES.md` §3.1, the `minor-pair` row). The Claude API key group
 (#238–#242) is not in this wave (his word: «все окрім ключів»).
 
 **The arm: no engine** (`hub/bin/role tcc`, `двигун: НЕМА`), as in W-10 and W-11: the session builds or briefs an
@@ -16,15 +17,19 @@ read on `main` at `fdb45747` (three Sonnet readers, 2026-10-30); line numbers dr
 
 | step | group | issues | note |
 |---|---|---|---|
-| 1 | Hygiene | #233, #257 | #257 quarantined on Linux now; the re-pin to v3.3.0 (step 9) carries the skill's fix (2306258, untagged today) and lifts it |
+| 1 | Hygiene | #233, #257, #260 | #257 quarantined on Linux now; the pin to the candidate (step 8) carries the skill's fix (2306258) and lifts it; #260 is one rule in `CLAUDE.md` |
 | 2 | Small fixes — the Sonnet trial | #252, #250, #244, #236 | ordinary, XS–S, each a short brief |
 | 3 | The window | #245, #243, #237 | #237 needs his pick of the looks first (Decisions, 3) |
 | 4 | Session and MCP | #246, then #247 | #247 `Risk: high`: a secret on disk |
 | 5 | Codex | #254, then #253 | #253 `Risk: high`: it touches what a terminal finds |
 | 6 | Project on GitHub — the link | #255 | `Risk: high`: it changes the user's git index |
 | 7 | DSP view | #249, #251 (green mark + hover) | #249 changes what `window._view` means: one at a time |
-| 8 | The method's seam | #248, #251's «in the DSP now», #235, #256 | only once the skill's candidate carries hub #313, #325, #326 and skill #200; a part whose shape has not come when 1–7 are done leaves the milestone |
-| 9 | The re-pin, the final review, the release | — | re-pin to the skill's v3.3.0 candidate; version 1.3.0, `## [v1.3.0]` with its Paired line; strings uk/pl/de through the Advisor; the final branch review; PR; the train |
+| 8 | The method's seam | #248, #251's «in the DSP now», #235, #256, #259 | first pin the skill's `beta-v3.3.0-rc1`: it carries the shapes (hub #313, #325, #326, skill #200; listed on hub #331). A skill fix rides a new candidate |
+| 9 | The final review and the PR | — | version 1.3.0, `## [v1.3.0]` with its Paired line; strings uk/pl/de through the Advisor; the final branch review; PR; its CI |
+| 10 | Acceptance | — | on the PR's exact head, after the last code change (below). A fix after it gets its own check and the act is re-run on the new head |
+| 11 | The release | — | the skill's `v3.3.0` and TCC's `v1.3.0` together; after acceptance only the pin to the tag and the bookkeeping lines change |
+
+**The first step names no desk paths** (the Arbiter, 2026-11-09): the skill's intake form, which TCC serves as it is, already offers them and says what each needs and gives. No TCC code for skill #210.
 
 Implementers run **one at a time** in the tree (W-10: a review over a half-edited file gave 445 setup errors).
 
@@ -33,14 +38,47 @@ Implementers run **one at a time** in the tree (W-10: a review over a half-edite
 | task | implementer | task review | group |
 |---|---|---|---|
 | `Risk: high` — #247, #253, #255, #248, #235, #256 | opus · high, a red test first | one seat → one fix round → re-review of the fix | silent-failure + tests seats |
-| ordinary code — #246, #249, #251, #254, #245, #243, #237 | opus · medium; one test per behaviour asked | none | the group's seats, one fix round |
+| ordinary code — #246, #249, #251, #254, #245, #243, #237, #259 | opus · medium; one test per behaviour asked | none | the group's seats, one fix round |
 | simple — #252, #250, #244, #236, #233, #257 | **sonnet · medium** (the trial: W-11 gave it 4 tasks, one Critical caught) | none | one seat for the group |
 | strings | the Advisor (`autosound_ai.py ask`) | — | the session checks placeholders by script |
 | the wave | — | — | one final branch review |
 
 **The seats:** Opus 5.5 (`hub:seam`'s own) — W-11 moved off Codex at its usage limit and off Gemini for code (invented
-quotes); Codex (`gpt-6-astra`) for the plan review before «го», and beside Opus on the first `Risk: high` group if it
-has quota. Gemini only for user-facing text.
+quotes). **No Codex in this wave**, neither on the plan nor beside Opus (the Arbiter, 2026-11-09, hub #333: three passes
+used up its quota in 4 minutes with no report). Reviews are targeted. Gemini only for user-facing text.
+
+**The weight stays the standing one** (the Arbiter, 2026-11-09, hub #333): the two halves of one wave are a comparison.
+Taken from the skill's W-12 on his word the same day, because neither changes how many passes run: the reviewer's brief
+and acceptance.
+
+**The reviewer's brief (every seat, from the skill's W-12 ledger):** no finding without a `path:line` opened and quoted;
+an inventory of every site of a class it finds; a severity; a «checked → clean» row per category; a section for what it
+could not check.
+
+**The numbers (hub #333):** in the form of the skill's `docs/W-12-LEDGER.md`: findings, real, in part, false, found only
+by this seat; per pass, blocker / important / minor; each checked at its main site. Sent to the hub by ticket at the
+wave's end.
+
+## Acceptance (step 10; the Arbiter, 2026-11-09)
+
+Why: in the skill's W-12 a critical defect was found only here, brought in by the last fix before the PR (skill
+`docs/W-12-ACCEPTANCE.md`, the ledger's alarm); the second run found two more on the same path.
+
+A fresh session on the PR's exact head, on the Mac, offscreen; Windows-only checks stay on the VM. It reads the reviews
+and CI instead of repeating them, changes nothing in the tree and decides nothing; the wave's session commits its act,
+`docs/W-12-ACCEPTANCE.md`.
+
+- **Each issue's asks:** done / no / not checked, each with a quote or a command's output; an ask met in part is «no».
+- **A clean install:** the built wheel into a clean HOME, the real home not written.
+- **The seam on real output:** the actual `beta-v3.3.0-rc1`, no doubles, on a copy of a real project (the Passat), run as
+  a person would: the DSP view at any version, «in the DSP now», the preset tab, a step's note, saving to GitHub against a
+  bare local remote.
+- **One end-to-end smoke, this once (G12's first line, `docs/PLAN-AUDIT-2026-10.md`):** the wheel → a fresh
+  `uv tool install` → import the CLI half → `TccMcpServer` on a fixture project → a real `mcp` client over HTTP, 401 without the
+  token and through with it → `get_tcc_state` and one gated write → the file on disk. A script in the session's scratch, not
+  a CI job; the rest of G12 is the next wave's.
+- **Who found what:** stage, found, critical, its fate. The alarm is a critical found only here, or by a person after the tag.
+- **Not checked:** said by name.
 
 ## Decisions the plan makes — the Arbiter's word before «го»
 
@@ -183,8 +221,10 @@ M, high (the seam).
 | The link (#255) | ~1.5–2 h | ~3 |
 | DSP view (#249, #251) | ~3–4 h | ~3 |
 | The seam (#248, #251's half, #235, #256), when the shapes come | ~6–9 h | ~8 |
-| Re-pin, strings, final review, the PR's fix round | ~2–3 h | ~4 |
-| **total** | **~22–31 h** | **~35** |
+| Strings, final review, the PR's fix round | ~2–3 h | ~4 |
+| #259, #260 (added 2026-11-09) | ~1 h | ~1 |
+| Acceptance, one or two runs (added 2026-11-09) | ~1–3 h | ~2 |
+| **total** | **~24–35 h** | **~38** |
 
 Against W-11 (14 issues, ~27 Claude runs, ~16–26 h): more issues, but most are small. Wall clock: three to four days
 at the session's pace, plus the PR's CI (~35–40 min per run) and the skill's v3.3.0 candidate (step 8 waits on it).
@@ -210,4 +250,4 @@ at the session's pace, plus the PR's CI (~35–40 min per run) and the skill's v
 
 | issue | state | implementer | commits | review | note |
 |---|---|---|---|---|---|
-| the plan | written 2026-10-30; waits for the plan review (Codex, if it has quota) and the Arbiter's word on «Decisions» and «го» | — | this | — | — |
+| the plan | written 2026-10-30, updated 2026-11-09 (hub #331, #333; acceptance, the brief, #259, #260); waits for the Arbiter's word on «Decisions» and «го» | — | this | — | — |

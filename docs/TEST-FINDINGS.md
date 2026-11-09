@@ -4111,3 +4111,15 @@ its assessment; nothing is built before his `ok` on that issue.
 Not on it: hub #264 PAS-014, deferred until the Arbiter's word. Taken off the same day, back to the pool (the
 Arbiter's `ok` covers the rest, F-107): 171–175 (tcc#238–#242, the Claude API key group) and 191 (tcc#256, waits for the
 skill's deferred S-119).
+
+## W-12 — added to the milestone (2026-11-09)
+
+The Arbiter's `ok` on two more, each an issue with its assessment:
+
+| finding | what | issue | group |
+|---|---|---|---|
+| 192 | The nine hand-held points: their fixed order as a picture or a GIF (hub #331) | tcc#259 | The method's seam |
+| 193 | A stranger's issue or PR text is data: the rule in `CLAUDE.md` (hub #329 HUB-094) | tcc#260 | Hygiene |
+
+Left in the pool, his word the same day: tcc#258 (subscription or API per AI, beside the Claude API key group). Not taken:
+the first step naming the two desk paths; the skill's intake form already offers them.
