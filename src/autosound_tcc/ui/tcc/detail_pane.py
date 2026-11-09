@@ -56,7 +56,7 @@ from autosound_tcc.core import eq_export
 from autosound_tcc.state.dsp_state import (UNREAD_LEG, CrossoverLeg, EqBand, GroupRow,
                                            ProfileGroup)
 from autosound_tcc.state.eq_diff import BandDiff, compare_bands
-from autosound_tcc.ui.tcc import copy_menu, i18n, rounded_tooltip
+from autosound_tcc.ui.tcc import copy_menu, dsp_check, i18n, rounded_tooltip
 from autosound_tcc.ui.tcc.labels import ElidedButton
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.row_rule import (band_count, band_empty, cell_text, column_title,
@@ -906,7 +906,8 @@ class _ChangedInvFrame(QStyledItemDelegate):
 
 def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] = None,
                        others: Optional[list] = None, preset: Optional[str] = None,
-                       current: Optional[str] = None, looked_at: bool = False) -> None:
+                       current: Optional[str] = None, looked_at: bool = False,
+                       checks: Optional[dict] = None) -> None:
     """«Порівняти з»: «—», this preset's versions under its own heading, then each other preset's
     under its.
 
@@ -921,7 +922,10 @@ def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] 
     own, and the loader has to know where to read it from.
 
     `looked_at`: `current` is a version somebody is only looking at (#249), so its row reads
-    «shown», not «now», which says the current configuration."""
+    «shown», not «now», which says the current configuration.
+
+    `checks` is `dsp_check.marks`' answer: a version in it gets the green mark and the hover that
+    names its files (#251), wherever its row stands, the greyed `current` row included."""
     combo.clear()
     combo.addItem("—", None)
     if preset is not None:
@@ -935,12 +939,14 @@ def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] 
             combo.model().item(combo.count() - 1).setEnabled(False)
         else:
             combo.addItem(label, str(version))
+        dsp_check.mark_row(combo, combo.count() - 1, (checks or {}).get(version))
     for other, items in others or ():
         combo.insertSeparator(combo.count())
         combo.addItem(i18n.t("cmpOtherPreset").format(preset=other), None)
         combo.model().item(combo.count() - 1).setEnabled(False)
         for key, label in items:
             combo.addItem(str(label), str(key))
+            dsp_check.mark_row(combo, combo.count() - 1, (checks or {}).get(key))
     # The open list as wide as its longest line: it wrapped «2.S-shelf — інший пресет» (67, 2).
     view = combo.view()
     view.setMinimumWidth(view.sizeHintForColumn(0) + 24)
@@ -1033,6 +1039,7 @@ def paint_compare_box(box: QComboBox, text: str) -> None:
     box.initStyleOption(option)
     painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
     option.currentText = text
+    option.currentIcon = QIcon()  # a row's mark is for the open list: the box's width is its text's
     item = box.model().item(box.currentIndex()) if box.currentIndex() >= 0 else None
     if item is not None and not item.isEnabled():
         option.state &= ~QStyle.StateFlag.State_Enabled
@@ -1344,7 +1351,7 @@ class DetailPane(QFrame):
     def set_compare_choices(self, versions: list, default: Optional[str], loader,
                             labels: Optional[dict] = None, others: Optional[list] = None,
                             preset: Optional[str] = None, current: Optional[str] = None,
-                            looked_at: bool = False) -> None:
+                            looked_at: bool = False, checks: Optional[dict] = None) -> None:
         """Offer these versions to compare with; `loader(key)` returns that version's view.
 
         `default` is the one selected (the previous configuration, by the window's choice); None,
@@ -1356,7 +1363,8 @@ class DetailPane(QFrame):
         decides whether the control has anything to offer."""
         self._compare_loader = loader
         blocked = self._compare_combo.blockSignals(True)
-        fill_compare_combo(self._compare_combo, versions, labels, others, preset, current, looked_at)
+        fill_compare_combo(self._compare_combo, versions, labels, others, preset, current, looked_at,
+                           checks)
         index = self._compare_combo.findData(default) if default else 0
         self._compare_combo.setCurrentIndex(max(index, 0))
         self._compare_combo.blockSignals(blocked)

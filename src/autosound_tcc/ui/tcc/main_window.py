@@ -105,7 +105,7 @@ from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line, t
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc import process_watch, project_watch, qt_shutdown, rew_status, window_folder
-from autosound_tcc.ui.tcc import shown_version
+from autosound_tcc.ui.tcc import dsp_check, shown_version
 from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order
 from autosound_tcc.ui.tcc.row_rule import table_fields
 from autosound_tcc.ui.tcc.setting_status import group_status
@@ -2324,14 +2324,11 @@ class MainWindow(QMainWindow):
             self._dsp_section.set_dot(None)
             self._dsp_section.set_sub_tip("")
             return
-        state = view.state
         # By the name it was saved under in the device, when it was (hub #198): `SQ-2 · v_006`.
         root = config.state_root()
         standing = ledger_line.config_of(root, view.version)
         said = f"{standing[0]} · {view.version}" if standing else view.version
         self._dsp_section.set_sub(shown_version.sub(self, said))
-        self._dsp_section.set_dot(None if state is None else
-                                  ("wait" if state == "proposed" else "done"))
         counts = dict(view.status_counts)
         tip = i18n.t("dspNowTip").format(
             dsp=processor, version=view.version, preset=view.preset,
@@ -2344,6 +2341,8 @@ class MainWindow(QMainWindow):
                 code=code, slot=rec.get("slot") or "?",
                 preset=i18n.t("dspConfigPreset").format(n=number) if number else "",
                 purpose=f" — {rec['purpose']}" if rec.get("purpose") else "")
+        dot, tip = dsp_check.header(root, view, profile, tip)
+        self._dsp_section.set_dot(dot)
         self._dsp_section.set_sub_tip(tip)
         if getattr(view, "version_mismatch", False):
             self._say_version_mismatch(view)

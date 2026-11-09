@@ -345,6 +345,15 @@ def test_the_dsp_header_names_the_configuration_in_the_processor(tmp_path, monke
     # window build of a project with saved names, so the pin rides here.
     window._offer_compare(root, "SQ", {}, "v_006")
     assert "SQ-1" in window._detail._compare_combo.currentText(), "the saved name reaches the list"
+    # #251: the window's header reads a file recorded after the version was first read.
+    stat = (root / "versions" / "v_006.json").stat()
+    (root / "versions" / "v_006.json").write_text(json.dumps(
+        {"version": "v_006", "preset": "SQ", "channels": {"w-L": {"status": "applied"}},
+         "provenance": {"file": "presets/a.pct6 (md5 ee627ad6…) decoded read-only"}}), encoding="utf-8")
+    os.utime(root / "versions" / "v_006.json", ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
+    window._show_version(view, {"dsp_profile": {"vendor": "Audiotec", "name": "Helix"}})
+    assert window._dsp_section.dot_status() == "checked"
+    assert "md5 ee627ad6…" in window._dsp_section._dot.toolTip()
 
 
 def test_compare_offers_this_preset_first_then_the_others_on_the_old_layout(tmp_path):

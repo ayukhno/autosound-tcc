@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QPushButton, QWidget
 
 from autosound_tcc.core import config
 from autosound_tcc.state import ledger_line
-from autosound_tcc.ui.tcc import i18n
+from autosound_tcc.ui.tcc import dsp_check, i18n
 from autosound_tcc.ui.tcc.detail_pane import is_other_preset
 
 
@@ -88,13 +88,14 @@ def offer_compare(window, load: Callable, root, preset: str, profile: dict,
 
     # One read per version: the pane, the control layout's tabs and the dots all ask for it.
     loader = functools.lru_cache(maxsize=16)(read_one)
-    # `preset`, `current` and `looked_at` ride along after `others` (index 5, 6, 7) so
+    # `preset`, `current`, `looked_at` and the checked marks ride along after `others` (5 to 8) so
     # `control_layout._fill_compare` can head and grey the own group the same way (tcc#103) --
     # appended, not inserted, so the existing `len(args) > 3`/`> 4` reads stay right.
-    window._compare_args = (own, default, loader, labels, others, preset, current, looked_at)
+    checks = dsp_check.marks(root, preset, own, others, profile)
+    window._compare_args = (own, default, loader, labels, others, preset, current, looked_at, checks)
     window._compare_key = default
     window._detail.set_compare_choices(own, default, loader, labels=labels, others=others,
-                                       preset=preset, current=current, looked_at=looked_at)
+                                       preset=preset, current=current, looked_at=looked_at, checks=checks)
     window._sync_status_dots()
 
 

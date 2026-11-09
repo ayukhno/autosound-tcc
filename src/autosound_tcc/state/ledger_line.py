@@ -90,10 +90,40 @@ def versions(root, preset: str) -> list[str]:
     return sorted(names, key=_number)
 
 
-#: `_entry`'s answers, one slot per version file: `{path: ((path, st_mtime_ns, st_size),
-#: (preset, day))}` (#172, #203). A slot is replaced when its file changes — and a version file is
-#: written once.
+#: `_entry`'s answers, one slot per version file: `{path: ((path, st_mtime_ns, st_size), Entry)}`
+#: (#172, #203, #251). A slot is replaced when its file changes: a version may gain its file
+#: record after it was banked, so a version file is not assumed to be written once.
 _ENTRIES: dict = {}
+
+
+class SavedFile(NamedTuple):
+    """A preset file saved from the DSP, as a version records it (#251): the file's name, its md5
+    (what is recorded, short or full), when it was saved and when that was recorded, as «DD.MM.YYYY
+    HH:MM». A field the record does not give is None."""
+
+    name: str
+    md5: Optional[str]
+    saved: Optional[str]
+    recorded: Optional[str]
+
+
+class Entry(NamedTuple):
+    """What a version's own file says of it: the preset it was proposed for, the day it was made,
+    whether every channel row is entered, and the saved files it records."""
+
+    preset: Optional[str] = None
+    day: Optional[str] = None
+    entered: bool = False
+    files: tuple[SavedFile, ...] = ()
+
+
+#: A status past `proposed`: the row was entered (`applied`), and may since have been measured.
+_ENTERED = ("applied", "measured")
+#: Top-level dicts of a version that are not channel tiers.
+_NOT_TIERS = ("channels", "preset_settings", "provenance", "roles")
+_MD5 = re.compile(r"^[0-9a-fA-F]{6,32}$")
+_MD5_IN_TEXT = re.compile(r"\(md5\s+([0-9a-fA-F]{6,32})")
+_FILE_IN_TEXT = re.compile(r"^(.*?\.[A-Za-z0-9]{2,6})(?=\s*\(md5\b|\s|$)")
 
 
 def _day(created) -> Optional[str]:
@@ -111,26 +141,97 @@ def _day(created) -> Optional[str]:
     return moment.strftime("%d.%m")
 
 
-def _entry(path: Path) -> tuple[Optional[str], Optional[str]]:
-    """What a version's own file says of it: the preset it was proposed for and the day it was
-    made (`created`), each None where the file does not say, or cannot be read.
+def _stamp(value) -> Optional[str]:
+    """An ISO timestamp as «DD.MM.YYYY HH:MM», local where it says its zone; None if it is none."""
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value)
+        if moment.tzinfo is not None:
+            moment = moment.astimezone()
+    except (ValueError, OverflowError, OSError):
+        return None
+    return moment.strftime("%d.%m.%Y %H:%M")
+
+
+def _leaf(path: str) -> str:
+    """A file's name without its folders: a hover shows no path, a home path least of all."""
+    return re.split(r"[\\/]", path.strip())[-1]
+
+
+def _saved_file(record, created) -> Optional[SavedFile]:
+    """One saved-file record in either shape, or None where none is usable.
+
+    `provenance.file` is a sentence on today's ledgers — `presets/a.pct6 (md5 ee627ad6…) decoded
+    read-only` — and the method's `source_file` (3.3) is an object of name, path, md5, saved,
+    read_at, compared. A file compared and found different is not one this version was checked
+    against, and a field absent stays absent."""
+    if isinstance(record, str):
+        md5 = _MD5_IN_TEXT.search(record)
+        cut = record[:md5.start()] if md5 else record
+        found = _FILE_IN_TEXT.match(cut) if not md5 else None
+        name = _leaf(found.group(1) if found else cut) if (md5 or found) else ""
+        return SavedFile(name, md5.group(1).lower() if md5 else None, None,
+                         _stamp(created)) if name else None
+    if not isinstance(record, dict):
+        return None
+    compared = record.get("compared")
+    if compared and compared != "no difference":
+        return None
+    name = record.get("name") or (_leaf(record["path"]) if isinstance(record.get("path"), str) else "")
+    if not isinstance(name, str) or not name:
+        return None
+    md5 = record.get("md5")
+    return SavedFile(_leaf(name), md5.lower() if isinstance(md5, str) and _MD5.match(md5) else None,
+                     _stamp(record.get("saved")), _stamp(record.get("read_at")) or _stamp(created))
+
+
+def _saved_files(data: dict) -> tuple[SavedFile, ...]:
+    """The saved files a version records: `provenance.file`, and `preset_settings.source_file`."""
+    created = data.get("created")
+    provenance = data.get("provenance")
+    settings = data.get("preset_settings")
+    found = []
+    if isinstance(provenance, dict) and provenance.get("verified_by_file") is not False:
+        found.append(_saved_file(provenance.get("file"), created))
+    if isinstance(settings, dict):
+        found.append(_saved_file(settings.get("source_file"), created))
+    return tuple(f for f in found if f is not None)
+
+
+def _entered(data: dict) -> bool:
+    """Every channel row entered; a version with no channels is not. Rows of the other tiers count
+    where they state a status: `attest` flips every tier, and the schema's virtual rows carry none."""
+    rows = data.get("channels")
+    if not isinstance(rows, dict) or not rows:
+        return False
+    tiers = [t for k, t in data.items() if k not in _NOT_TIERS and isinstance(t, dict)]
+    stated = [r for t in tiers for r in t.values() if isinstance(r, dict) and "status" in r]
+    return all(isinstance(r, dict) and r.get("status") in _ENTERED for r in [*rows.values(), *stated])
+
+
+def _entry(path: Path) -> Entry:
+    """What a version's own file says of it, each field empty where the file does not say, or
+    cannot be read.
 
     Remembered per file by its path, mtime and size (#172): every reload asks this of every
-    version, on the GUI thread, and each one is a whole DSP state read for two fields."""
+    version, on the GUI thread, and each one is a whole DSP state read for a few fields."""
     try:
         stat = path.stat()
     except OSError:
-        return None, None
+        return Entry()
     key = (str(path), stat.st_mtime_ns, stat.st_size)
     held = _ENTRIES.get(key[0])
     if held is None or held[0] != key:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return None, None
-        preset = data.get("preset") if isinstance(data, dict) else None
-        found = (preset if isinstance(preset, str) and preset else None,
-                 _day(data.get("created")) if isinstance(data, dict) else None)
+            return Entry()
+        if not isinstance(data, dict):
+            data = {}
+        preset = data.get("preset")
+        found = Entry(preset if isinstance(preset, str) and preset else None,
+                      _day(data.get("created")), _entered(data), _saved_files(data))
         held = _ENTRIES[key[0]] = (key, found)
     return held[1]
 
@@ -151,6 +252,46 @@ def created_days(root, preset: str, versions: list[str]) -> dict[str, str]:
         if day:
             days[version] = day
     return days
+
+
+def same_content(one: Optional[str], other: Optional[str]) -> bool:
+    """Two md5s of the same content: equal, or one the short form of the other (a ledger's text
+    keeps eight characters of it)."""
+    return bool(one) and bool(other) and (one.startswith(other) or other.startswith(one))
+
+
+def all_saved_files(root, preset: str) -> list[SavedFile]:
+    """Every saved file any version records, on either layout: what «the same content» is found in."""
+    root = Path(root)
+    if is_project_line(root):
+        return [f for v in versions(root, preset) for f in _entry(version_path(root, preset, v)).files]
+    return [f for p in sorted({*presets(root), preset}) for v in versions(root, p)
+            for f in _entry(version_path(root, p, v)).files]
+
+
+def checked_files(root, preset: str, version: str,
+                  every: Optional[list[SavedFile]] = None) -> tuple[SavedFile, ...]:
+    """The files that make `version` «checked in the DSP» (#251), its own first and then every
+    other one recorded with the same md5; empty when it is not checked. Not checked: a row not
+    entered, no file on record, or two records of different content.
+
+    `every` is `all_saved_files`' answer, passed in as a list reads it once."""
+    entry = _entry(version_path(root, preset, version))
+    own = list(dict.fromkeys(entry.files))
+    if not entry.entered or not own:
+        return ()
+    md5s = [f.md5 for f in own if f.md5]
+    if not all(same_content(md5, md5s[0]) for md5 in md5s):
+        return ()
+    others = all_saved_files(root, preset) if every is None else every
+    if not md5s:
+        return tuple(own)
+    held = {(f.name, f.md5) for f in own}
+    for file in others:
+        if same_content(file.md5, md5s[0]) and (file.name, file.md5) not in held:
+            own.append(file)
+            held.add((file.name, file.md5))
+    return tuple(own)
 
 
 def compare_groups(root, preset: str, current: Optional[str]) -> list[tuple[str, list[str]]]:

@@ -915,10 +915,11 @@ class ControlLayout:
         preset = args[5] if len(args) > 5 else None
         current = args[6] if len(args) > 6 else None
         looked_at = bool(args[7]) if len(args) > 7 else False
+        checks = args[8] if len(args) > 8 else None
         key = getattr(self.window, "_compare_key", None)
         combo = self.compare_combo
         blocked = combo.blockSignals(True)
-        fill_compare_combo(combo, own, labels, others, preset, current, looked_at)
+        fill_compare_combo(combo, own, labels, others, preset, current, looked_at, checks)
         combo.setCurrentIndex(max(combo.findData(key) if key else 0, 0))
         combo.blockSignals(blocked)
         if self._unreadable(key, _compare_now(self.window)[1]):

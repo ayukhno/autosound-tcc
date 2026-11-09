@@ -1545,6 +1545,8 @@ def build_qss(theme: Theme, scale: float = 1.0, font: str = font_looks.DEFAULT) 
     QLabel[class~="tl-wait"] {{ background: {t.yellow}; }}
     QLabel[class~="tl-found"] {{ background: {t.info}; }}
     QLabel[class~="tl-done"] {{ background: {t.ok}; }}
+    /* Entered AND read back from the saved file (#251): the same green, ringed, so a dot that only says «entered» stays told apart. */
+    QLabel[class~="tl-checked"] {{ background: {t.ok}; border: 2px solid {t.text}; border-radius: 4px; }}
     QLabel[class~="tl-bad"] {{ background: {t.warn}; }}
     /* A capture somebody decided against (SCR-034). Grey, not yellow: waiting is work outstanding,
        this is work that will not happen -- and until the skill recorded the decision the two were

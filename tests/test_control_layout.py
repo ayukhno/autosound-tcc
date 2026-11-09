@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 import shiboken6  # noqa: E402
-from PySide6.QtCore import QRect, QSize  # noqa: E402
+from PySide6.QtCore import QRect, QSize, Qt  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QLayout,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 from autosound_tcc.core import config  # noqa: E402
+from autosound_tcc.state import ledger_line  # noqa: E402
 from autosound_tcc.ui.tcc import control_layout, i18n, main_window  # noqa: E402
 
 
@@ -387,6 +388,13 @@ def test_one_compare_drives_every_tab_and_the_dots(tmp_path, monkeypatch):
     layout.compare_combo.setCurrentIndex(layout.compare_combo.findData("SQ/v_004"))
     assert layout._compare_other.isVisibleTo(layout._corner), "another preset, said"
     assert all(p._compare_view is not None for p in panes)
+    # #251: the control layout's list carries the same mark as the pane's.
+    window._compare_args = window._compare_args + (None, None, False, {
+        "v_006": (ledger_line.SavedFile("a.pct6", "ee627ad6", None, None),)})
+    layout._fill_compare()
+    row = layout.compare_combo.findData("v_006")
+    assert not layout.compare_combo.itemIcon(row).isNull()
+    assert "a.pct6" in layout.compare_combo.itemData(row, Qt.ItemDataRole.ToolTipRole)
     layout.leave()
 
 
