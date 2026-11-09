@@ -658,6 +658,7 @@ def test_in_the_dsp_is_drawn_whole_at_the_column_s_floor_in_every_language_and_l
     """In a shown window the sub label had 24 px and the text wanted 143: `v_…`. On its own line,
     as the project's status (#235), the whole text fits the floor; the title and the button stay."""
     from autosound_tcc.ui.tcc import font_looks, i18n
+    from tests.test_detail_pane import _no_real_font
 
     window = _project_with_versions(tmp_path, monkeypatch)
     _record_loaded(tmp_path, "FULL", "v_002", "read back")
@@ -666,6 +667,9 @@ def test_in_the_dsp_is_drawn_whole_at_the_column_s_floor_in_every_language_and_l
     before = i18n.current_language()
     section = window._dsp_section
     try:
+        fontless = _no_real_font(section._sub_label.font())
+        if fontless:
+            pytest.skip(f"a box's width is no font's: {fontless}")
         for look in ("", font_looks.TYPEWRITER):
             window._settings.setValue(font_looks.KEY, look)
             window._restyle()
