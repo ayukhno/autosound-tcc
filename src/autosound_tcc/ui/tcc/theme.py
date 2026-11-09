@@ -1491,6 +1491,12 @@ def build_qss(theme: Theme, scale: float = 1.0, font: str = font_looks.DEFAULT) 
     mark as the covers chip, so the rest of the name reads as one more of the step's own icons. */
     QLabel[class~="step-title-hint"] {{ color: {t.muted}; font-size: 12px; }}
     QLabel[class~="step-title-hint"]:hover {{ color: {t.info}; }}
+    /* .step-note-view — a step's note, opened under its row by the document icon (tcc#248). */
+    QLabel[class~="step-note-view"] {{
+        color: {t.text};
+        font-size: 12px;
+        padding: 2px 0 2px 26px;
+    }}
     QLabel[class~="step-covers-list"] {{
         color: {t.muted};
         font-family: "SF Mono", Menlo, monospace;

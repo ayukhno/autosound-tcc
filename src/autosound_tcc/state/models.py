@@ -12,6 +12,17 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class StepNote:
+    """What a step predicts, and the Arbiter's answer beside it: the method's `note` (its #202,
+    `state/process-schema.md`). Text a session wrote, read and shown, never written back by TCC."""
+
+    do: str = ""
+    expect: str = ""
+    if_not: str = ""
+    answer: str = ""  # his words, once the step is closed; a redo removes it
+
+
+@dataclass(frozen=True)
 class PlanStep:
     id: str  # stable identity for completion/skip tracking (PlanProgress, plan_panel.py)
     name: dict
@@ -25,6 +36,8 @@ class PlanStep:
     # the method, not by a caller — and this is the whole list behind that count. Empty for every
     # step written before the field, and never written back: steps are not rewritten (SCR-004).
     covers: tuple = ()
+    # None for a step with no note, which is every step written before the field.
+    note: "StepNote | None" = None
 
 
 @dataclass(frozen=True)

@@ -26,7 +26,7 @@ from typing import Optional
 
 from autosound_tcc.core import config, vendor_loader
 from autosound_tcc.state import project_view
-from autosound_tcc.state.models import PlanPhase, PlanStep
+from autosound_tcc.state.models import PlanPhase, PlanStep, StepNote
 
 # process-state's step status -> the tag chip the panel already styles.
 _STATUS_TAGS = {
@@ -607,6 +607,20 @@ def to_plan(state: dict, stale: Optional[dict] = None) -> tuple[PlanPhase, ...]:
     return tuple(out)
 
 
+def _step_note(raw: object) -> Optional[StepNote]:
+    """A step's `note` as the panel may show it, or None for nothing to show (the method's #202).
+
+    The method writes a mapping of stripped, non-blank strings under four known keys, and no key at
+    all for a step with no note. Anything else (a hand edit, a later copy's new key) is left out
+    field by field, and a plan with one odd note still draws.
+    """
+    if not isinstance(raw, dict):
+        return None
+    kept = {name: raw[name].strip() for name in StepNote.__dataclass_fields__
+            if isinstance(raw.get(name), str) and raw[name].strip()}
+    return StepNote(**kept) if kept else None
+
+
 def _to_step(step: dict, stale: Optional[dict] = None,
              aliases: Optional[dict] = None, reading: tuple = (None, None)) -> PlanStep:
     tag, tag_class = _STATUS_TAGS.get(step.get("status", "todo"), ("", ""))
@@ -632,6 +646,7 @@ def _to_step(step: dict, stale: Optional[dict] = None,
         skip=bool(step.get("skip")),
         attempt=int(step.get("attempt", 1) or 1),
         covers=tuple(str(c) for c in step.get("covers") or ()),
+        note=_step_note(step.get("note")),
     )
 
 
