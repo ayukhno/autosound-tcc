@@ -1707,13 +1707,16 @@ def test_a_folded_panel_holds_through_the_mode_a_language_and_a_theme(tmp_path, 
         QApplication.processEvents()
     fold, card, head_widgets = window._right_fold, window._meas_card, (
         window._capture_ready_btn, window._meas_rew_dot)
+    head = window._meas_title.parentWidget()
     fold.arrow("focus").click()
     QApplication.processEvents()
 
     def _still_folded(when: str) -> None:
-        QApplication.processEvents()
+        for _ in range(4):
+            QApplication.processEvents()
         assert not window._meas_panel.isVisible(), when
-        assert card.maximumHeight() == card.sizeHint().height(), when
+        assert head.height() >= head.sizeHint().height(), f"{when}: the header is whole"
+        assert card.height() == card.sizeHint().height(), f"{when}: and the card is only that"
         assert all(w.isVisible() for w in head_widgets), when
 
     _still_folded("folded")
@@ -1732,6 +1735,55 @@ def test_a_folded_panel_holds_through_the_mode_a_language_and_a_theme(tmp_path, 
     window._apply_theme("dark" if theme == "light" else "light")
     _still_folded("after a theme")
     window._apply_theme(theme)
+    window._set_zoom(1.5)
+    _still_folded("at a larger zoom: the header grew and the cap with it")
+    window._set_zoom(1.0)
+    window.close()
+
+
+def test_a_request_to_the_folded_focus_card_unfolds_it_and_a_refresh_does_not(tmp_path, monkeypatch):
+    """Tcc#243: a step's measurement icon and the strip's offer both end in the focus card's body,
+    and with the card folded neither showed anything. Data arriving is not a request."""
+    from types import SimpleNamespace
+
+    from autosound_tcc.ui.tcc.measurement_panel import MeasurementPanel
+
+    seen: list = []
+    monkeypatch.setattr(MeasurementPanel, "show_session",
+                        lambda self, session_id: seen.append((session_id, self.isVisible())))
+    monkeypatch.setattr(MeasurementPanel, "open_import",
+                        lambda self: seen.append(("import", self.isVisible())))
+    monkeypatch.setattr(main_window.title_fixes, "offered",
+                        lambda *_a: [SimpleNamespace(wrong="a", right="b")])
+    monkeypatch.setattr(main_window.title_fixes, "summary", lambda _fixes: "a")
+    window = _window(tmp_path, monkeypatch, store={})
+    window.resize(1400, 900)
+    window.show()
+    for _ in range(3):
+        QApplication.processEvents()
+    arrow = window._right_fold.arrow("focus")
+
+    arrow.click()
+    QApplication.processEvents()
+    window._plan_panel.set_plan(None)
+    window._plan_panel.set_sessions([])
+    window._plan_panel.retranslate()
+    window._meas_panel.retranslate()
+    QApplication.processEvents()
+    assert not window._meas_panel.isVisible(), "a refresh is not a request"
+
+    seen.clear()
+    window._plan_panel.sessionRequested.emit("s1")
+    QApplication.processEvents()
+    assert seen == [("s1", True)]
+
+    arrow.click()
+    QApplication.processEvents()
+    window._offer_title_fixes({})
+    seen.clear()
+    window._status_strip.linkActivated.emit("action")
+    QApplication.processEvents()
+    assert seen == [("import", True)]
     window.close()
 
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtWidgets import QFrame, QSplitter, QToolButton, QVBoxLayout, QWidget
@@ -91,12 +91,19 @@ class PanelFold(QObject):
         arrow.clicked.connect(lambda: self._toggle(card))
         self._cards.append(card)
         frame.installEventFilter(self)
-        # The rule holds for a save with both folded in it, too: the first one stands.
-        folded = self._settings.value(_folded_key(name), False, type=bool)
-        self._show_folded(card, bool(folded) and self._folded() is None)
+        # The rule holds for a save with both folded in it, too: the first one stands. The refused
+        # card's key goes, or that card would come up folded once the first is open again.
+        saved = bool(self._settings.value(_folded_key(name), False, type=bool))
+        stands = saved and self._folded() is None
+        if saved and not stands:
+            self._settings.setValue(_folded_key(name), False)
+        self._show_folded(card, stands)
 
     def arrow(self, name: str) -> QToolButton:
-        return next(c.arrow for c in self._cards if c.name == name)
+        return self._card(name).arrow
+
+    def _card(self, name: str) -> _Card:
+        return next(c for c in self._cards if c.name == name)
 
     # ---- the border's memory ---------------------------------------------------
 
@@ -105,9 +112,9 @@ class PanelFold(QObject):
         raw = self._settings.value(RIGHT_SPLIT_KEY, None)
         try:
             sizes = [int(v) for v in json.loads(raw)] if raw else []
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             sizes = []
-        return sizes if len(sizes) == 2 and all(v > 0 for v in sizes) else []
+        return sizes if len(sizes) == 2 and all(0 < v <= _NO_CAP for v in sizes) else []
 
     def remember(self, *_args) -> None:
         """The border's new place. Not while a card is folded: that is the header's height, not
@@ -146,6 +153,23 @@ class PanelFold(QObject):
 
     def retranslate(self) -> None:
         self._dress()
+
+    def reveal(self, name: str) -> None:
+        """Something was asked of `name`'s body: a folded card opens so that it can be seen. At
+        most one card is folded, so opening one breaks no rule; a card already open stays as it is.
+        For a request only: a refresh of the data does not come here and does not unfold."""
+        card = self._card(name)
+        if card.folded:
+            self._unfold(card)
+
+    def revealing(self, name: str, action: Callable[..., None]) -> Callable[..., None]:
+        """`action`, with `reveal(name)` before it: what a signal or an offer is wired to."""
+
+        def run(*args) -> None:
+            self.reveal(name)
+            action(*args)
+
+        return run
 
     def _folded(self) -> Optional[_Card]:
         return next((c for c in self._cards if c.folded), None)
@@ -195,6 +219,9 @@ class PanelFold(QObject):
 
     def _dress(self) -> None:
         folded = self._folded()
+        handle = self._split.handle(1)
+        if handle is not None:  # a folded card's border cannot move, so it does not offer to
+            handle.setCursor(Qt.CursorShape.ArrowCursor if folded else Qt.CursorShape.SplitVCursor)
         for card in self._cards:
             refused = folded is not None and folded is not card
             card.arrow.setText("▸" if card.folded else "▾")

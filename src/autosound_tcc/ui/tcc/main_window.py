@@ -3335,7 +3335,7 @@ class MainWindow(QMainWindow):
 
         # A step's measurement icon opens that capture series in the panel below (user request
         # 2026-07-28).
-        self._plan_panel.sessionRequested.connect(self._meas_panel.show_session)
+        self._plan_panel.sessionRequested.connect(self._right_fold.revealing("focus", self._meas_panel.show_session))
         self._meas_panel.curvesRequested.connect(self._open_curves_from_panel)
         self._meas_panel.protectiveRequested.connect(self._open_protective)
         self._meas_panel.floorChanged.connect(self._fit_right_floor)
@@ -3977,7 +3977,7 @@ class MainWindow(QMainWindow):
         # with these filled in and unticked (the Arbiter, 2026-09-23).
         self._status_strip.notify(
             i18n.t("tfOffer").format(first=title_fixes.summary(fixes), n=len(fixes)), level="warn",
-            action=(i18n.t("tfAction"), self._meas_panel.open_import))
+            action=(i18n.t("tfAction"), self._right_fold.revealing("focus", self._meas_panel.open_import)))
 
     def _on_capture_check_done(self, titles: list, round_id=None) -> None:
         """Put the check's verdict on screen: a line for the captures of `titles` whose verdict in

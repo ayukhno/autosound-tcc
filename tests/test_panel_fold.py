@@ -12,6 +12,8 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest  # noqa: E402
+from PySide6.QtCore import QSettings, Qt  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication, QFrame, QHBoxLayout, QLabel, QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
@@ -47,6 +49,7 @@ class _Column:
         self.split.addWidget(self.focus)
         self.fold.add("plan", self.plan, self.plan_head, self.plan_body)
         self.fold.add("focus", self.focus, self.focus_head, self.focus_body)
+        self.split.splitterMoved.connect(self.fold.remember)  # as `_build_right` does
         self.split.resize(300, height)
         self.split.show()
         QApplication.processEvents()
@@ -108,7 +111,7 @@ def test_unfolding_returns_the_size_it_had_and_folding_saves_no_sizes():
 
 
 def test_the_fold_survives_a_restart_and_the_saved_border_is_no_sliver():
-    settings = _Settings({RIGHT_SPLIT_KEY: json.dumps([300, 500])})
+    settings = _Settings({RIGHT_SPLIT_KEY: json.dumps([200, 600])})
     first = _Column(settings)
     _press(first, "plan")
     first.split.close()
@@ -119,7 +122,7 @@ def test_the_fold_survives_a_restart_and_the_saved_border_is_no_sliver():
     _press(second, "plan")
     assert second.plan_body.isVisible()
     plan, focus = second.split.sizes()
-    assert abs(plan / (plan + focus) - 3 / 8) < 0.02, "the border the person set"
+    assert abs(plan / (plan + focus) - 1 / 4) < 0.02, "the border the person set"
 
 
 def test_folding_the_second_card_is_refused():
@@ -132,6 +135,92 @@ def test_folding_the_second_card_is_refused():
     both = _Column(_Settings({"ui/plan_folded": True, "ui/focus_folded": True}))
     assert not both.plan_body.isVisible()
     assert both.focus_body.isVisible()
+
+
+def test_a_card_refused_at_the_start_does_not_come_up_folded_later():
+    settings = _Settings({"ui/plan_folded": True, "ui/focus_folded": True})
+    _Column(settings)
+    assert settings.data["ui/plan_folded"] is True
+    assert settings.data["ui/focus_folded"] is False, "the refused card's key is cleared"
+
+
+@pytest.mark.parametrize("raw", ["[Infinity, 500]", "[1e999, 500]", "[3000000000, 500]"])
+def test_a_saved_border_out_of_range_is_no_saved_border(raw):
+    column = _Column(_Settings({RIGHT_SPLIT_KEY: raw}))
+    assert column.fold.read() == []
+    plan, focus = column.split.sizes()
+    assert abs(plan / (plan + focus) - 3 / 8) < 0.02, "the first-time column"
+
+
+def test_on_a_real_settings_file_false_is_open_and_an_unfolded_card_stays_unfolded(tmp_path):
+    """QSettings reads a saved `false` back as the word: only `type=bool` makes it false, and the
+    fake above drops `type=`."""
+    QApplication.instance() or QApplication([])
+
+    def from_disk(path) -> QSettings:
+        return QSettings(str(path), QSettings.Format.IniFormat)
+
+    first = tmp_path / "first.ini"
+    first.write_text("[ui]\nplan_folded=false\n", encoding="utf-8")
+    settings = from_disk(first)
+    column = _Column(settings)
+    assert column.plan_body.isVisible(), "a saved false is open"
+
+    _press(column, "focus")
+    _press(column, "focus")
+    settings.sync()
+    column.split.close()
+    # A second file, because Qt shares one parsed copy per path within a process: read through the
+    # same path, the value is still the bool that was set and not the word a restart reads.
+    restarted = tmp_path / "restarted.ini"
+    restarted.write_bytes(first.read_bytes())
+    assert "focus_folded=false" in restarted.read_text(encoding="utf-8")
+    assert _Column(from_disk(restarted)).focus_body.isVisible(), "unfolded, and so after a restart"
+
+
+def test_a_request_unfolds_only_the_folded_card_it_names():
+    settings = _Settings()
+    column = _Column(settings)
+    told = []
+    column.fold.unfolded.connect(lambda: told.append(True))
+
+    column.fold.reveal("focus")
+    assert told == [], "an open card is left alone"
+
+    _press(column, "focus")
+    called = []
+    column.fold.revealing("focus", lambda *args: called.append((args, column.focus_body.isVisible())))("s1")
+    QApplication.processEvents()
+    assert called == [(("s1",), True)], "unfolded before the request runs"
+    assert settings.data["ui/focus_folded"] is False
+    assert _arrow(column, "plan").isEnabled(), "the other card can fold again"
+
+    _press(column, "plan")
+    column.fold.reveal("focus")
+    QApplication.processEvents()
+    assert not column.plan_body.isVisible(), "a request to the open card leaves the folded one folded"
+
+
+def test_after_unfolding_the_arrows_come_back_enabled_with_the_open_glyph():
+    column = _Column(_Settings())
+    _press(column, "plan")
+    assert _arrow(column, "plan").text() == "▸" and not _arrow(column, "focus").isEnabled()
+    _press(column, "plan")
+    for name in ("plan", "focus"):
+        assert _arrow(column, name).isEnabled() and _arrow(column, name).text() == "▾", name
+
+
+def test_the_handle_shows_no_resize_cursor_while_a_card_is_folded():
+    column = _Column(_Settings())
+    handle = column.split.handle(1)
+    assert handle.cursor().shape() == Qt.CursorShape.SplitVCursor
+    _press(column, "plan")
+    assert handle.cursor().shape() == Qt.CursorShape.ArrowCursor
+    _press(column, "plan")
+    assert handle.cursor().shape() == Qt.CursorShape.SplitVCursor
+
+    restored = _Column(_Settings({"ui/focus_folded": True}))
+    assert restored.split.handle(1).cursor().shape() == Qt.CursorShape.ArrowCursor
 
 
 def test_the_arrow_costs_the_header_row_no_width():
