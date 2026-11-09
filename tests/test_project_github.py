@@ -15,6 +15,7 @@ import re
 import subprocess
 import threading
 import time
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -22,10 +23,11 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QSettings, QThread  # noqa: E402
+from PySide6.QtGui import QColor  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget  # noqa: E402
 
 from autosound_tcc.core import config, project_repo, vendor_loader  # noqa: E402
-from autosound_tcc.ui.tcc import copy_menu, github_view, i18n, project_github, qt_shutdown  # noqa: E402
+from autosound_tcc.ui.tcc import copy_menu, github_view, i18n, project_github, qt_shutdown, theme  # noqa: E402
 from autosound_tcc.ui.tcc.sidebar_section import SidebarSection  # noqa: E402
 
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
@@ -1431,3 +1433,110 @@ def test_send_is_off_with_the_reason_when_a_pull_comes_first(repo, host, monkeyp
     button = _send_button(widget)
     assert not button.isEnabled()
     assert button.hover_tip._text == i18n.t("gitSendTipPull").format(n=1)
+
+
+# ── (k) What the review's mutations showed had no test ───────────────────────────────────────────
+
+def test_a_null_alone_is_could_not_read(repo, host, monkeypatch):
+    _status_stub(monkeypatch, ahead=None)
+    widget, panel = _painted(repo, host)
+    assert _state(widget, panel) == ("wait", i18n.t("gitSubUnread"))
+
+
+def test_null_changes_alone_are_could_not_read(repo, host, monkeypatch):
+    _status_stub(monkeypatch, changes=None)
+    widget, panel = _painted(repo, host)
+    assert _state(widget, panel) == ("wait", i18n.t("gitSubUnread"))
+
+
+def test_a_changes_error_alone_is_could_not_read(repo, host, monkeypatch):
+    _status_stub(monkeypatch, changes_error="git could not read the remote's last-known commit")
+    widget, panel = _painted(repo, host)
+    assert _state(widget, panel) == ("wait", i18n.t("gitSubUnread"))
+
+
+def test_no_button_when_one_half_is_null(repo, host, monkeypatch):
+    _status_stub(monkeypatch, changes=None, ahead=[{"hash": "b" * 40, "time": "2026-11-01T10:00:00+00:00", "subject": "x"}])
+    widget, panel = _painted(repo, host)
+    assert _send_button(widget) is None
+
+
+def test_a_method_too_old_for_the_read_stays_on_the_first_paint(repo, host, monkeypatch):
+    monkeypatch.setattr(project_repo, "read", lambda _p: project_repo.RepoResult(False, "", too_old=True))
+    widget, panel = host()
+    panel.show()
+    assert _until(panel.idle)
+    assert panel._read is None and _state(widget, panel) == ("done", i18n.t("gitSubOk")), _state(widget, panel)
+
+
+def test_a_commit_on_a_remote_not_named_origin_is_not_green(repo, host):
+    project, _bare = repo
+    _git(project, "remote", "rename", "origin", "backup")
+    _commit(project, "docs/x.md")
+    widget, panel = _painted(repo, host)
+    assert _state(widget, panel)[0] != "done", _state(widget, panel)
+
+
+def test_a_ledger_older_than_the_push_is_amber(repo, host):
+    project, _bare = repo
+    _write(project, "state/SQ/v_001.json", '{"created": "2020-01-01T10:00:00+00:00"}\n')
+    _git(project, "add", "-A")
+    _git(project, "commit", "-q", "-m", "old version")
+    _git(project, "push", "-q", "origin", "HEAD")
+    _commit(project, "docs/x.md")
+    widget, panel = _painted(repo, host)
+    assert _state(widget, panel) == ("wait", i18n.t("gitSubBehind").format(n=1)), _state(widget, panel)
+
+
+def _ink(label: QLabel) -> str:
+    """The commonest colour of `label` after its ground: the inside of its glyphs. The sheet is built
+    at a large scale so stems are many whole pixels wide and edge smoothing is the minority."""
+    image = label.grab().toImage()
+    seen = Counter(image.pixelColor(x, y).name() for x in range(image.width()) for y in range(image.height()))
+    seen.pop(image.pixelColor(0, 0).name(), None)
+    return seen.most_common(1)[0][0]
+
+
+def _dot_colour(section) -> str:
+    image = section._dot.grab().toImage()
+    return image.pixelColor(image.width() // 2, image.height() // 2).name()
+
+
+def test_the_severity_shows_on_screen(repo, host, monkeypatch):
+    """The sheet, not the property: a re-polished label and the dot's colour, by pixels."""
+    t = theme.get_theme("dark")
+    widget, panel = host()
+    widget.setStyleSheet(theme.build_qss(t, scale=4.0))
+    section = widget._project_section
+    section.set_sub("Not on GitHub")
+    section.set_sub_level(None)
+    QApplication.processEvents()
+    assert _ink(section._sub_label) == QColor(t.faint).name()
+
+    for level, colour in (("bad", t.warn), ("wait", t.yellow)):
+        section.set_sub_level(level)
+        QApplication.processEvents()
+        assert _ink(section._sub_label) == QColor(colour).name(), level
+    section.set_sub_level(None)
+    QApplication.processEvents()
+    assert _ink(section._sub_label) == QColor(t.faint).name(), "the quiet colour comes back too"
+
+    for status, colour in (("bad", t.warn), ("wait", t.yellow), ("done", t.ok)):
+        section.set_dot(status)
+        QApplication.processEvents()
+        assert _dot_colour(section) == QColor(colour).name(), status
+
+
+def test_a_row_of_the_panel_takes_the_severity_on_screen(repo, host):
+    project, _bare = repo
+    _write(project, "state/v_032.json")
+    t = theme.get_theme("dark")
+    widget, panel = host()
+    widget.setStyleSheet(theme.build_qss(t, scale=4.0))
+    panel.show()
+    assert _until(lambda: _settled(panel)), _rows(widget)
+    QApplication.processEvents()
+
+    key, value = _labels(widget, i18n.t("gitChanges"))
+    assert _ink(key) == QColor(t.warn).name()
+    assert _ink(value) == QColor(t.warn).name()
