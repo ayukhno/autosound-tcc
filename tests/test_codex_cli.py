@@ -151,6 +151,49 @@ def test_tccs_own_copy_on_windows_is_under_localappdata(tmp_path):
         str(own), codex_cli.SOURCE_TCC)
 
 
+def test_the_folder_a_terminal_would_use_is_inside_current_down_to_the_binarys(tmp_path):
+    mac = codex_cli.tcc_copy_path(home=tmp_path / "home", environ={}, windows=False)
+    assert codex_cli.current_bin(mac) == mac.parents[3] / "current" / "codex_cli_bin" / "bin"
+    local = tmp_path / "Local"
+    windows = codex_cli.tcc_copy_path(environ={"LOCALAPPDATA": str(local)}, windows=True)
+    assert codex_cli.current_bin(windows) == (
+        local / "autosound-tcc" / "codex" / "current" / "codex_cli_bin" / "bin")
+
+
+def _a_copy_with_current() -> tuple[Path, Path]:
+    """TCC's copy on this test's home and `current` leading to it: (the copy, the terminal's)."""
+    own = _file(codex_cli.tcc_copy_path())
+    (own.parents[3] / codex_cli.CURRENT).symlink_to(codex_cli.PIN, target_is_directory=True)
+    return own, codex_cli.current_bin(own) / own.name
+
+
+@POSIX_ONLY
+def test_a_codex_found_through_current_keeps_its_path_and_is_tccs(tmp_path, monkeypatch):
+    """On PATH through `current`: found as it is on PATH (`Found` is cached by path and a session
+    starts it by it), and one Codex — TCC's — not «your own» beside it."""
+    _own, through = _a_copy_with_current()
+
+    found = _find(tmp_path, path=str(through.parent))
+
+    assert found == Found(str(through), codex_cli.SOURCE_PATH)
+    monkeypatch.setattr(codex_cli, "settled", lambda: (found, (0, 162, 1)))
+    assert codex_cli.standing() == codex_cli.Standing(codex_cli.STANDING_TCC, codex_cli.PIN)
+
+
+@POSIX_ONLY
+def test_a_real_folder_named_current_is_not_tccs(tmp_path, monkeypatch):
+    """A codex the person keeps in a folder of their own, even one named `current` beside TCC's
+    versions: only what leads to a version folder is TCC's."""
+    own = codex_cli.tcc_copy_path()
+    theirs = _file(own.parents[3] / codex_cli.CURRENT / "codex_cli_bin" / "bin" / "codex")
+
+    found = _find(tmp_path, path=str(theirs.parent))
+
+    assert found == Found(str(theirs), codex_cli.SOURCE_PATH)
+    monkeypatch.setattr(codex_cli, "settled", lambda: (found, (0, 170, 2)))
+    assert codex_cli.standing().state == codex_cli.STANDING_OWN
+
+
 def test_a_codex_known_too_old_gives_way_to_tccs_own_copy(tmp_path, monkeypatch):
     """The blocker's advice — install TCC's copy — has to work with an old Codex still on PATH
     (task 9): one whose version was read too old is passed over for TCC's copy, and is still

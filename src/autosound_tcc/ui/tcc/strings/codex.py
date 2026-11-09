@@ -239,6 +239,16 @@ STRINGS: dict[str, dict[str, str]] = {
         'pl': 'Codex {latest} is out; TCC holds {here} (pinned)',
         'de': 'Codex {latest} is out; TCC holds {here} (pinned)',
     },
+    'updCodexCurrentPath': {
+        'en': "This is TCC's own copy. To use it in a terminal, add this folder to PATH yourself "
+              '(TCC does not change PATH):',
+        'uk': "This is TCC's own copy. To use it in a terminal, add this folder to PATH yourself "
+              '(TCC does not change PATH):',
+        'pl': "This is TCC's own copy. To use it in a terminal, add this folder to PATH yourself "
+              '(TCC does not change PATH):',
+        'de': "This is TCC's own copy. To use it in a terminal, add this folder to PATH yourself "
+              '(TCC does not change PATH):',
+    },
     'updCodexOwn': {
         'en': 'Codex {here} — your own Codex',
         'uk': 'Codex {here} — ваш власний Codex',

@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import time
 import zipfile
@@ -191,7 +192,7 @@ def test_the_wheel_is_unpacked_whole_with_its_modes_and_find_sees_tcc_s_copy(
     assert opener.asked == [INDEX_URL, FILE_URL]
     assert seen and seen[-1] == (len(wheel), len(wheel))
     pin = codex_cli.PIN
-    assert _left(target.parents[3]) == sorted([pin] + [f"{pin}/{p}" for p in (
+    assert _left(target.parents[3]) == sorted([codex_cli.CURRENT, pin] + [f"{pin}/{p}" for p in (
         "codex_cli_bin", "codex_cli_bin/__init__.py", "codex_cli_bin/codex-package.json",
         "codex_cli_bin/bin", "codex_cli_bin/bin/codex", "codex_cli_bin/bin/codex-code-mode-host",
         "codex_cli_bin/codex-path", "codex_cli_bin/codex-path/rg", "codex_cli_bin/codex-resources",
@@ -230,7 +231,7 @@ def test_a_new_copy_replaces_an_older_one_only_once_whole(monkeypatch, target):
 
     assert target.is_file()
     assert not (old / "codex_cli_bin" / "stale.txt").exists(), "the old copy is gone, not merged"
-    assert [p.name for p in old.parent.iterdir()] == [codex_cli.PIN]
+    assert sorted(p.name for p in old.parent.iterdir()) == sorted([codex_cli.CURRENT, codex_cli.PIN])
 
 
 @POSIX_ONLY
@@ -624,7 +625,9 @@ def test_a_complete_copy_put_there_by_another_install_is_a_success(monkeypatch, 
     path, _seen = _install(_Opener(wheel), target)
 
     assert path == target and target.is_file()
-    assert [p.name for p in target.parents[3].iterdir()] == [codex_cli.PIN]
+    assert sorted(p.name for p in target.parents[3].iterdir()) == sorted(
+        [codex_cli.CURRENT, codex_cli.PIN])
+    assert _through(target).is_file(), "`current` ends on the whole copy the other install left"
 
 
 # ---- the group fix: a cut download, the Windows wheel, the default target ----------------------
@@ -725,3 +728,332 @@ def test_install_with_no_target_puts_codex_where_tcc_copy_path_says(monkeypatch,
 
     assert path == codex_cli.tcc_copy_path(windows=False) and path.is_file()
     assert str(path).startswith(str(tmp_path))
+
+
+# ---- the fixed folder a terminal can use (#253) ------------------------------------------------
+
+
+def _whole_copy(target: Path, version: str = codex_cli.PIN) -> Path:
+    """A copy on disk as an install leaves it; its binary."""
+    binary = target.parents[3] / version / "codex_cli_bin" / "bin" / target.name
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(_codex_says(version))
+    binary.chmod(0o755)
+    return binary
+
+
+def _current(target: Path) -> Path:
+    return target.parents[3] / codex_cli.CURRENT
+
+
+def _through(target: Path) -> Path:
+    """The binary as a terminal reaches it."""
+    return codex_cli.current_bin(target) / target.name
+
+
+def _dot_files(target: Path) -> list[str]:
+    return sorted(p.name for p in target.parents[3].iterdir() if p.name.startswith("."))
+
+
+@POSIX_ONLY
+def test_an_install_leaves_current_leading_to_the_whole_copy(monkeypatch, target):
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+
+    _install(_Opener(wheel), target)
+
+    link = _current(target)
+    assert link.is_symlink()
+    assert os.path.realpath(link) == os.path.realpath(_version_folder(target))
+    assert _through(target).is_file() and os.access(_through(target), os.X_OK)
+    assert _through(target).read_bytes() == target.read_bytes()
+    # What a terminal does with that folder on its PATH.
+    found = shutil.which("codex", path=str(codex_cli.current_bin(target)))
+    said = subprocess.run([found, "--version"], capture_output=True, text=True, check=True)
+    assert f"codex-cli {codex_cli.PIN}" in said.stdout
+
+
+def test_the_path_a_terminal_would_use_goes_inside_current_down_to_the_binarys_folder(target):
+    assert codex_cli.current_bin(target).parts[-5:] == (
+        "autosound-tcc", "codex", "current", "codex_cli_bin", "bin")
+
+
+@POSIX_ONLY
+def test_an_install_from_before_this_change_gets_current_with_no_reinstall(target):
+    _whole_copy(target)
+
+    said = codex_install.refresh_current(target)
+
+    assert said == str(codex_cli.current_bin(target))
+    assert _through(target).is_file()
+
+
+@POSIX_ONLY
+def test_a_current_already_right_is_not_touched(monkeypatch, target):
+    _whole_copy(target)
+    link = _current(target)
+    link.symlink_to(codex_cli.PIN, target_is_directory=True)
+    before = os.lstat(link).st_ino
+    monkeypatch.setattr(codex_install, "_replace", lambda *_a: pytest.fail("nothing to replace"))
+
+    assert codex_install.refresh_current(target) == str(codex_cli.current_bin(target))
+
+    assert os.lstat(link).st_ino == before
+
+
+@POSIX_ONLY
+def test_moving_current_is_one_rename_and_the_older_copy_stays(monkeypatch, target):
+    """A terminal using `current` during an update finds it at every moment."""
+    older = _whole_copy(target, "0.160.0")
+    _whole_copy(target)
+    link = _current(target)
+    link.symlink_to("0.160.0", target_is_directory=True)
+    renames: list[tuple[str, bool]] = []
+    real = codex_install._replace
+
+    def watched(src, dst):
+        renames.append((Path(dst).name, os.path.lexists(link)))
+        real(src, dst)
+        assert os.path.lexists(link), "`current` went missing"
+
+    monkeypatch.setattr(codex_install, "_replace", watched)
+
+    assert codex_install.refresh_current(target) == str(codex_cli.current_bin(target))
+
+    assert renames == [(codex_cli.CURRENT, True)], "one rename over the old link"
+    assert os.path.realpath(link) == os.path.realpath(_version_folder(target))
+    assert older.read_bytes() == _codex_says("0.160.0"), "what the old link led to is kept"
+    assert _dot_files(target) == [], "no temp link left"
+
+
+@POSIX_ONLY
+def test_a_current_left_dangling_by_tcc_is_moved_to_the_copy(target):
+    _whole_copy(target)
+    link = _current(target)
+    link.symlink_to("0.150.0", target_is_directory=True)
+
+    assert codex_install.refresh_current(target) == str(codex_cli.current_bin(target))
+
+    assert os.path.realpath(link) == os.path.realpath(_version_folder(target))
+
+
+def _a_real_folder(link: Path, _outside: Path) -> Path:
+    link.mkdir()
+    keep = link / "my-notes.txt"
+    keep.write_text("mine")
+    return keep
+
+
+def _a_file(link: Path, _outside: Path) -> Path:
+    link.write_text("mine")
+    return link
+
+
+def _a_link_elsewhere(link: Path, outside: Path) -> Path:
+    outside.mkdir()
+    keep = outside / "my-notes.txt"
+    keep.write_text("mine")
+    link.symlink_to(outside, target_is_directory=True)
+    return keep
+
+
+@POSIX_ONLY
+@pytest.mark.parametrize("make", [_a_real_folder, _a_file, _a_link_elsewhere],
+                         ids=["a real folder", "a file", "a link elsewhere"])
+def test_a_current_that_is_not_tccs_is_left_alone_and_the_log_says_so(
+        monkeypatch, target, tmp_path, caplog, make):
+    _whole_copy(target)
+    link = _current(target)
+    keep = make(link, tmp_path / "mine")
+    long_ago = time.time() - 3 * 3600
+    os.utime(link, (long_ago, long_ago), follow_symlinks=False)  # older than any sweep's limit
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+
+    with caplog.at_level("WARNING"):
+        path, _seen = _install(_Opener(wheel), target)
+        said = codex_install.refresh_current(target)
+
+    assert path == target and target.is_file(), "the install is not failed by it"
+    assert said == "", "no path is said for a folder that is not TCC's"
+    assert keep.read_text() == "mine"
+    assert str(link) in caplog.text and "left alone" in caplog.text
+    assert _dot_files(target) == []
+
+
+@POSIX_ONLY
+def test_a_link_that_cannot_be_made_does_not_fail_the_install(monkeypatch, target, caplog):
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+
+    def refused(_version, _link):
+        raise OSError("this disk takes no links")
+
+    monkeypatch.setattr(codex_install, "_make_link", refused)
+
+    with caplog.at_level("WARNING"):
+        path, _seen = _install(_Opener(wheel), target)
+
+    assert path == target and target.is_file()
+    assert not os.path.lexists(_current(target))
+    assert "takes no links" in caplog.text
+    assert codex_install.refresh_current(target) == "", "and no path is said"
+    assert _dot_files(target) == []
+
+
+@POSIX_ONLY
+def test_current_never_leads_to_a_copy_that_is_not_whole(target):
+    """A version folder with no binary in it: the other TCC's install is between its renames, or
+    it was cut short. `current` stays where it was."""
+    _whole_copy(target, "0.160.0")
+    _version_folder(target).mkdir(parents=True)
+    link = _current(target)
+    link.symlink_to("0.160.0", target_is_directory=True)
+
+    assert codex_install.refresh_current(target) == ""
+
+    assert os.path.realpath(link).endswith("0.160.0")
+
+
+@POSIX_ONLY
+def test_an_install_over_a_stale_current_ends_on_the_new_copy_and_keeps_the_link(
+        monkeypatch, target):
+    """`_sweep` and `_place` work on the version folders and dot-named leftovers: `current` is
+    neither, however old."""
+    older = _whole_copy(target, "0.160.0")
+    link = _current(target)
+    link.symlink_to("0.160.0", target_is_directory=True)
+    long_ago = time.time() - 3 * 3600
+    os.utime(link, (long_ago, long_ago), follow_symlinks=False)
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+
+    _install(_Opener(wheel), target)
+
+    assert link.is_symlink()
+    assert os.path.realpath(link) == os.path.realpath(_version_folder(target))
+    assert older.is_file(), "the folder the old link led to is not swept"
+
+
+@POSIX_ONLY
+def test_two_installs_end_on_one_whole_copy(monkeypatch, target):
+    """The second one's `current` is the same one: nothing to redo, nothing broken."""
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+    _install(_Opener(wheel), target)
+    first = os.path.realpath(_current(target))
+
+    _install(_Opener(wheel), target)
+
+    assert os.path.realpath(_current(target)) == first
+    assert _through(target).read_bytes() == target.read_bytes()
+    assert _dot_files(target) == []
+
+
+@POSIX_ONLY
+def test_a_temp_link_left_by_a_crash_goes_and_what_it_led_to_stays(target):
+    binary = _whole_copy(target)
+    codex_dir = target.parents[3]
+    long_ago = time.time() - 3 * 3600
+    stale_new = codex_dir / ".current-new-abc"
+    stale_old = codex_dir / ".current-old-abc"
+    fresh = codex_dir / ".current-new-another-tcc"
+    for path in (stale_new, stale_old, fresh):
+        path.symlink_to(codex_cli.PIN, target_is_directory=True)
+    for path in (stale_new, stale_old):
+        os.utime(path, (long_ago, long_ago), follow_symlinks=False)
+    not_a_link = codex_dir / ".current-old-mine"
+    not_a_link.mkdir()
+    (not_a_link / "notes.txt").write_text("mine")
+    os.utime(not_a_link, (long_ago, long_ago))
+
+    codex_install.refresh_current(target)
+
+    assert not os.path.lexists(stale_new) and not os.path.lexists(stale_old)
+    assert os.path.lexists(fresh), "another TCC may be between its two steps"
+    assert (not_a_link / "notes.txt").read_text() == "mine", "only a link is removed, ever"
+    assert binary.is_file()
+
+
+@POSIX_ONLY
+def test_removing_a_link_never_removes_what_it_leads_to(target):
+    binary = _whole_copy(target)
+    link = _current(target)
+    link.symlink_to(codex_cli.PIN, target_is_directory=True)
+    assert codex_install._remove_link(link) is True
+    assert not os.path.lexists(link) and binary.is_file()
+
+    folder = target.parents[3] / "mine"
+    folder.mkdir()
+    (folder / "notes.txt").write_text("mine")
+    assert codex_install._remove_link(folder) is False, "not a link: not removed"
+    assert (folder / "notes.txt").read_text() == "mine"
+
+
+# The Windows path, walked on this machine: a symlink stands in for the junction, so these check
+# the order of the steps and what lands on disk; the real junction is the test after them.
+
+
+@pytest.fixture
+def windows_steps(monkeypatch):
+    monkeypatch.setattr(codex_install, "_junctions", lambda: True)
+    monkeypatch.setattr(codex_install, "_make_link", lambda version, link: link.symlink_to(
+        version.name, target_is_directory=True))
+
+
+@POSIX_ONLY
+def test_on_windows_the_old_link_steps_aside_for_the_new_one(windows_steps, target):
+    older = _whole_copy(target, "0.160.0")
+    _whole_copy(target)
+    link = _current(target)
+    link.symlink_to("0.160.0", target_is_directory=True)
+
+    assert codex_install.refresh_current(target) == str(codex_cli.current_bin(target))
+
+    assert os.path.realpath(link) == os.path.realpath(_version_folder(target))
+    assert older.is_file()
+    assert _dot_files(target) == [], "nothing left aside"
+
+
+@POSIX_ONLY
+def test_on_windows_a_new_link_refused_puts_the_old_one_back(
+        windows_steps, monkeypatch, target, caplog):
+    older = _whole_copy(target, "0.160.0")
+    _whole_copy(target)
+    link = _current(target)
+    link.symlink_to("0.160.0", target_is_directory=True)
+    real = codex_install._replace
+    monkeypatch.setattr(codex_install, "RETRY_DELAYS", ())
+
+    def refuses_the_new_one(src, dst):
+        if Path(src).name.startswith(".current-new-"):
+            raise PermissionError("a scan holds it")
+        real(src, dst)
+
+    monkeypatch.setattr(codex_install, "_replace", refuses_the_new_one)
+
+    with caplog.at_level("WARNING"):
+        assert codex_install.refresh_current(target) == ""
+
+    assert os.path.realpath(link).endswith("0.160.0"), "the old link is back"
+    assert older.is_file()
+    assert "a scan holds it" in caplog.text
+    assert _dot_files(target) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="a real junction needs Windows")
+def test_a_real_junction_is_made_moved_and_removed_without_touching_its_target(target):
+    older = _whole_copy(target, "0.160.0")
+    binary = _whole_copy(target)
+    link = _current(target)
+
+    codex_install._make_link(older.parents[2], link)
+    assert codex_install._link_kind(link) == "junction"
+
+    assert codex_install.refresh_current(target) == str(codex_cli.current_bin(target))
+    assert codex_install._link_kind(link) == "junction"
+    assert os.path.samefile(_through(target), binary)
+    assert older.is_file(), "the junction it replaced took nothing with it"
+
+    assert codex_install._remove_link(link) is True
+    assert not os.path.lexists(link) and binary.is_file()

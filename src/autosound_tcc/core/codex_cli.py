@@ -126,6 +126,18 @@ def tcc_copy_path(*, home: Optional[Path] = None, environ: Optional[Mapping[str,
     return base / "autosound-tcc" / "codex" / pin / "codex_cli_bin" / "bin" / "codex"
 
 
+#: The fixed folder beside the version folders: a link to the copy, refreshed by
+#: `codex_install.refresh_current` (#253). TCC edits no PATH and writes nothing into `~/.local/bin`;
+#: the row says this path, and the person adds it to their PATH if they want it.
+CURRENT = "current"
+
+
+def current_bin(copy: Path) -> Path:
+    """`copy` (`tcc_copy_path`) as a terminal reaches it: the binary's folder inside `current`."""
+    folder = copy.parents[2]  # …/codex/<PIN>
+    return folder.parent / CURRENT / copy.parent.relative_to(folder)
+
+
 def _arch_words() -> tuple[str, ...]:
     machine = _platform.machine().lower()
     if machine in ("arm64", "aarch64"):
@@ -477,11 +489,13 @@ class Standing:
     """The Codex TCC would use and its version (`version_text`; "" when none was found). `newer`
     is the release on PyPI past `PIN` (`newer_than_pin`, TCC's own copy only); "" when none is
     known. Not offered: a newer file has no sha256 in `codex_install`, so it comes with a TCC
-    release and its pinned sum."""
+    release and its pinned sum. `current` is the folder a terminal could add to PATH (#253, set by
+    the row once `codex_install.refresh_current` said it); "" when there is none."""
 
     state: str
     version: str = ""
     newer: str = ""
+    current: str = ""
 
     @property
     def offered(self) -> bool:
@@ -490,11 +504,15 @@ class Standing:
 
 
 def _is_tccs_copy(found: Found) -> bool:
-    """`found` is, behind any links, a file in TCC's `codex/` folder: a link on PATH to TCC's copy
-    is found first, as `SOURCE_PATH`, and is still TCC's (#254). `Found.path` stays the link."""
+    """`found` is, behind any links, a file in a version folder of TCC's `codex/` folder: a link on
+    PATH to TCC's copy is found first, as `SOURCE_PATH`, and is still TCC's (#254) — `current` too
+    (#253), which resolves into its version folder. A real folder named `current` does not resolve
+    away: that one is the person's. `Found.path` stays the link."""
     # tcc_copy_path() is <codex folder>/<pin>/codex_cli_bin/bin/codex.
     root = os.path.normcase(os.path.realpath(tcc_copy_path().parents[3]))
-    return os.path.normcase(os.path.realpath(found.path)).startswith(root + os.sep)
+    real = os.path.normcase(os.path.realpath(found.path))
+    return real.startswith(root + os.sep) and not real.startswith(
+        os.path.join(root, CURRENT) + os.sep)
 
 
 def _pypi_json() -> bytes:
@@ -676,7 +694,8 @@ __all__ = [
     "Standing", "standing", "STANDING_MISSING", "STANDING_TOO_OLD", "STANDING_TCC", "STANDING_OWN",
     "find", "forget", "settled", "version", "known_version", "too_old", "usable", "probe", "signed_in",
     "mark_signed_out", "models",
-    "supported_efforts", "efforts_in", "tcc_copy_path", "dock_folders", "tcc_tool_args",
+    "supported_efforts", "efforts_in", "tcc_copy_path", "CURRENT", "current_bin", "dock_folders",
+    "tcc_tool_args",
     "tcc_connection_args", "token_blank_for_shells_args",
     "isolation_args",
     "unsafe_server_names", "unknown_enabled_features", "OFF_FEATURES", "HARMLESS_FEATURES",

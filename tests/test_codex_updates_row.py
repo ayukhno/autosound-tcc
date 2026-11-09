@@ -25,6 +25,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from autosound_tcc.core import codex_cli, codex_install, updates  # noqa: E402
@@ -481,3 +482,128 @@ def test_the_query_asks_pypi_for_the_packages_latest_with_a_timeout(monkeypatch)
     assert _REAL_QUERY is not None and _REAL_QUERY() == b"the body"
     assert calls == [("https://pypi.org/pypi/openai-codex-cli-bin/json", codex_cli.PYPI_TIMEOUT_S)]
     assert 0 < codex_cli.PYPI_TIMEOUT_S <= 10
+
+
+# ---- the path a terminal can use (#253) -----------------------------------------------------------
+
+POSIX_ONLY = pytest.mark.skipif(os.name == "nt", reason="a symlink is made by hand here")
+
+
+def _the_copy(monkeypatch, versions) -> Path:
+    said, _ = versions
+    copy = codex_cli.tcc_copy_path()
+    copy.parent.mkdir(parents=True, exist_ok=True)
+    copy.write_bytes(b"\xcf\xfa\xed\xfe native")
+    copy.chmod(0o755)
+    found = Found(str(copy), codex_cli.SOURCE_TCC)
+    said[found.path] = (0, 162, 1)
+    _finds(monkeypatch, found)
+    return copy
+
+
+def test_tccs_own_copy_says_the_path_and_whose_it_is(monkeypatch, versions):
+    copy = _the_copy(monkeypatch, versions)
+
+    dialog = _shown(_Host())
+    row = dialog._codex_row
+
+    folder = str(codex_cli.current_bin(copy))
+    assert row.standing.current == folder
+    assert _line(dialog) == "Codex 0.162.1 — up to date", "the status line is kept"
+    assert not row.path_label.isHidden() and not row.path_note.isHidden()
+    assert row.path_label.text() == folder, "alone on its line, to select and copy"
+    said = row.path_note.text()
+    assert "TCC's own copy" in said and "PATH" in said and "yourself" in said
+    assert row.button.isHidden(), "#252 kept: a current copy has no button"
+    assert (Path(folder) / copy.name).is_file(), "the path said is one that works"
+
+
+def test_an_install_from_before_this_gets_current_on_the_rows_worker(monkeypatch, versions):
+    """No reinstall, and not on the GUI thread."""
+    copy = _the_copy(monkeypatch, versions)
+    assert not os.path.lexists(copy.parents[3] / codex_cli.CURRENT)
+    threads: list[bool] = []
+    real = codex_install.refresh_current
+
+    def watched(*a, **k):
+        threads.append(threading.current_thread() is threading.main_thread())
+        return real(*a, **k)
+
+    monkeypatch.setattr(codex_install, "refresh_current", watched)
+
+    dialog = _shown(_Host())
+
+    assert threads == [False]
+    assert (codex_cli.current_bin(copy) / copy.name).is_file()
+    assert not dialog._codex_row.path_label.isHidden()
+
+
+def test_is_out_and_the_path_are_said_together(monkeypatch, versions):
+    copy = _the_copy(monkeypatch, versions)
+    _pypi(monkeypatch, _pypi_says("0.165.0"))
+
+    dialog = _shown(_Host())
+
+    assert _line(dialog) == "Codex 0.165.0 is out; TCC holds 0.162.1 (pinned)"
+    assert dialog._codex_row.path_label.text() == str(codex_cli.current_bin(copy))
+
+
+@POSIX_ONLY
+def test_a_current_that_is_not_tccs_keeps_the_row_and_says_no_path(monkeypatch, versions, caplog):
+    copy = _the_copy(monkeypatch, versions)
+    mine = copy.parents[3] / codex_cli.CURRENT
+    mine.mkdir()
+    (mine / "notes.txt").write_text("mine")
+
+    with caplog.at_level("WARNING"):
+        dialog = _shown(_Host())
+
+    row = dialog._codex_row
+    assert _line(dialog) == "Codex 0.162.1 — up to date"
+    assert row.path_label.isHidden() and row.path_note.isHidden() and row.standing.current == ""
+    assert (mine / "notes.txt").read_text() == "mine"
+    assert "left alone" in caplog.text
+
+
+@POSIX_ONLY
+def test_a_link_that_failed_leaves_the_row_as_it_was(monkeypatch, versions):
+    _the_copy(monkeypatch, versions)
+
+    def refused(_version, _link):
+        raise OSError("no links here")
+
+    monkeypatch.setattr(codex_install, "_make_link", refused)
+
+    dialog = _shown(_Host())
+
+    assert _line(dialog) == "Codex 0.162.1 — up to date"
+    assert dialog._codex_row.path_label.isHidden() and dialog._codex_row.path_note.isHidden()
+
+
+def test_the_persons_own_codex_says_no_path(tmp_path, monkeypatch, versions):
+    said, _ = versions
+    _the_copy(monkeypatch, versions)  # TCC's copy is there too, and not the one used
+    mine = Found(_binary(tmp_path), codex_cli.SOURCE_PATH)
+    said[mine.path] = (0, 170, 2)
+    _finds(monkeypatch, mine)
+
+    dialog = _shown(_Host())
+
+    assert _line(dialog) == "Codex 0.170.2 — your own Codex"
+    assert dialog._codex_row.path_label.isHidden() and dialog._codex_row.path_note.isHidden()
+    assert not os.path.lexists(codex_cli.tcc_copy_path().parents[3] / codex_cli.CURRENT)
+
+
+def test_the_long_path_is_not_cut_and_can_be_copied(monkeypatch, versions):
+    copy = _the_copy(monkeypatch, versions)
+    dialog = _shown(_Host())
+    dialog.resize(420, 500)
+    dialog.show()  # offscreen: the module sets the platform above
+    try:
+        _app().processEvents()
+        label = dialog._codex_row.path_label
+        width = label.fontMetrics().horizontalAdvance(str(codex_cli.current_bin(copy)))
+        assert label.width() >= width, "the path is one word: a narrow row must not clip it"
+        assert label.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
+    finally:
+        dialog.close()

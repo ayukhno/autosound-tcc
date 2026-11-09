@@ -20,6 +20,10 @@ What it guarantees:
   complete copy is replaced only then. Any failure — a digest, a cancel, a full disk, a wrong
   version — leaves no temp file and no partial folder, and the older copy as it was; what an
   install cut short by a crash left is swept by the next one.
+* **A fixed folder a terminal can use** (#253, the Arbiter 2026-11-09): `codex/current`, a link to
+  the version folder, refreshed after an install and whenever the Updates row reads a copy that has
+  none. TCC edits no PATH and writes nothing into `~/.local/bin`. A `current` that is not TCC's is
+  left alone, and a link that cannot be made fails nothing: the log says why.
 
 Qt-free. **Worker thread only**: it downloads ~130 MB and runs `codex --version`.
 """
@@ -36,6 +40,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import uuid
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -43,6 +48,9 @@ from typing import Callable, NamedTuple, Optional
 from urllib.parse import urlparse
 
 from autosound_tcc.core import app_log, codex_cli
+
+if sys.platform.startswith("win"):
+    import _winapi
 
 #: The package and the version TCC installs; `codex_cli.PIN` is the one source of the version.
 PACKAGE = "openai-codex-cli-bin"
@@ -63,6 +71,13 @@ RETRY_DELAYS: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0)
 #: A leftover of an install cut short (a crash, a kill) older than this is swept by the next one;
 #: a younger one may be another TCC's install under way.
 STALE_S = 30 * 60
+#: A temp link `refresh_current` makes, and an old one it moved aside on Windows, in `codex/`.
+_LINK_NEW = ".current-new-"
+_LINK_OLD = ".current-old-"
+#: `_link_kind`'s answers.
+_SYMLINK, _JUNCTION, _NOT_A_LINK = "symlink", "junction", "not a link"
+#: `st_reparse_tag` of a junction; `stat` has the constant on Windows only.
+_REPARSE_JUNCTION = 0xA0000003
 
 
 class Wheel(NamedTuple):
@@ -391,6 +406,136 @@ def _complete(binary: Path) -> bool:
     return binary.is_file() and codex_cli.version_text(_reads_pin(binary)) == codex_cli.PIN
 
 
+# --- codex/current, the path a terminal can use (#253) ---------------------------------------------
+
+
+def _junctions() -> bool:
+    """Whether a folder link here is a junction; the seam a test walks Windows' steps by."""
+    return os.name == "nt"
+
+
+def _make_link(version: Path, link: Path) -> None:
+    """`link` leads to the folder `version`. On Windows a junction, which needs neither Developer
+    Mode nor an admin (`vendor_loader.link_skill_into`) and takes an absolute path; elsewhere a
+    relative link, so that moving TCC's data folder does not break it."""
+    if _junctions():
+        _winapi.CreateJunction(os.path.abspath(version), str(link))
+    else:
+        os.symlink(version.name, link, target_is_directory=True)
+
+
+def _link_kind(path: Path) -> Optional[str]:
+    """What is at `path`, the link itself and never where it leads; None when nothing is."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(info.st_mode):
+        return _SYMLINK
+    if getattr(info, "st_reparse_tag", 0) == _REPARSE_JUNCTION:
+        return _JUNCTION
+    return _NOT_A_LINK
+
+
+def _remove_link(path: Path) -> bool:
+    """Remove the link at `path` and nothing behind it; False, with nothing done, when it is no
+    link. A junction goes by `rmdir`, which removes only the junction: a recursive delete can
+    empty what it leads to, so `_remove` is never used on one."""
+    kind = _link_kind(path)
+    if kind == _SYMLINK:
+        os.unlink(path)
+    elif kind == _JUNCTION:
+        os.rmdir(path)
+    else:
+        return False
+    return True
+
+
+def _leads_to(link: Path, folder: Path) -> bool:
+    return os.path.normcase(os.path.realpath(link)) == os.path.normcase(os.path.realpath(folder))
+
+
+def _is_ours(link: Path, root: Path) -> bool:
+    """`link` leads straight to a version folder in TCC's `codex/` folder (`root`), there or gone."""
+    real = Path(os.path.realpath(link))
+    return (os.path.normcase(real.parent) == os.path.normcase(os.path.realpath(root))
+            and real.name != codex_cli.CURRENT and not real.name.startswith("."))
+
+
+def _sweep_links(root: Path) -> None:
+    """Remove the temp links older than `STALE_S` a crash left; only links, and only the links."""
+    now = time.time()
+    for pattern in (f"{_LINK_NEW}*", f"{_LINK_OLD}*"):
+        for path in root.glob(pattern):
+            try:
+                if now - path.lstat().st_mtime > STALE_S and _remove_link(path):
+                    app_log.logger().info("codex: swept %s, left by a refresh cut short", path)
+            except OSError:
+                continue
+
+
+def _swap_junction(temp: Path, link: Path) -> None:
+    """Windows cannot rename over a folder link, so the old one steps aside and the new one takes
+    its name: for the instant between the two renames a terminal starting Codex finds no `current`.
+    Put back when the new one cannot land; removed as a link, never recursively."""
+    aside = link.parent / f"{_LINK_OLD}{uuid.uuid4().hex}"
+    _replace_retrying(link, aside)
+    try:
+        _replace_retrying(temp, link)
+    except OSError:
+        try:
+            _replace_retrying(aside, link)
+        except OSError:
+            app_log.logger().error("codex: the old link is left at %s", aside)
+        raise
+    _remove_link(aside)
+
+
+def _point_current(folder: Path, link: Path, kind: Optional[str]) -> None:
+    """`link` leads to `folder`, by a temp link renamed into place: on macOS and Linux one rename
+    over the old link, so a terminal using `current` finds it at every moment."""
+    temp = link.parent / f"{_LINK_NEW}{uuid.uuid4().hex}"
+    _make_link(folder, temp)
+    try:
+        if kind is not None and _junctions():
+            _swap_junction(temp, link)
+        else:
+            _replace(temp, link)
+    finally:
+        _remove_link(temp)
+
+
+def refresh_current(binary: Optional[Path] = None) -> str:
+    """Make `codex/current` lead to the whole copy at `binary` (`codex_cli.tcc_copy_path()` by
+    default). The folder a terminal could add to PATH (`codex_cli.current_bin`), or "" when there
+    is none, and then the log says why. Never raises: a Codex with no `current` works in TCC just
+    the same. Stat calls and a rename, but on a worker all the same (the retries sleep)."""
+    binary = Path(binary) if binary is not None else codex_cli.tcc_copy_path()
+    folder = binary.parents[2]  # …/codex/<PIN>
+    root = folder.parent
+    link = root / codex_cli.CURRENT
+    log = app_log.logger()
+    try:
+        if not binary.is_file():
+            log.info("codex: no whole copy at %s, so %s is not moved", binary, link)
+            return ""
+        _sweep_links(root)
+        kind = _link_kind(link)
+        if kind == _NOT_A_LINK or (kind is not None and not _is_ours(link, root)):
+            log.warning("codex: %s is not TCC's and is left alone; TCC's Codex works, but a "
+                        "terminal gets no fixed path to it", link)
+            return ""
+        if kind is None or not _leads_to(link, folder):
+            _point_current(folder, link, kind)
+    except Exception as exc:  # noqa: BLE001 — whatever it is, the Codex itself is fine
+        log.warning("codex: %s could not be made (%s); TCC's Codex works, but a terminal gets no "
+                    "fixed path to it", link, exc)
+    # Asked of the disk, not of the steps above: another TCC may have made the same link first.
+    if _leads_to(link, folder) and (codex_cli.current_bin(binary) / binary.name).is_file():
+        return str(codex_cli.current_bin(binary))
+    return ""
+
+
 def install(progress: Callable[[int, int], None], cancelled: Callable[[], bool],
             opener: Callable = urllib.request.urlopen, *, target: Optional[Path] = None,
             platform: Optional[str] = "") -> Path:
@@ -466,6 +611,7 @@ def install(progress: Callable[[int, int], None], cancelled: Callable[[], bool],
     finally:
         _remove(part)
         _remove(staging)
+    refresh_current(binary)
     # Found again from here on; the versions already read are kept — a wipe made `find()` answer
     # an old Codex on PATH again until the next probe ended (task 9's review, M1).
     codex_cli.forget()
@@ -473,4 +619,5 @@ def install(progress: Callable[[int, int], None], cancelled: Callable[[], bool],
     return binary
 
 
-__all__ = ["InstallError", "Wheel", "WHEELS", "INDEX_URL", "PACKAGE", "install", "platform_key"]
+__all__ = ["InstallError", "Wheel", "WHEELS", "INDEX_URL", "PACKAGE", "install", "platform_key",
+           "refresh_current"]

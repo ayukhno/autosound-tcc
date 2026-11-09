@@ -9,7 +9,8 @@ plain thread — it runs `codex --version` — never on the GUI thread) and what
 * only one known too old → «0.152.0 → 0.162.1 (TCC's own copy)», the same button;
 * TCC's own copy, a link to it included → «up to date», or, when PyPI has a newer release, «0.165.0
   is out; TCC holds 0.162.1 (pinned)» — said, never offered: a new version comes only with a TCC
-  release and its pinned sum (#254);
+  release and its pinned sum (#254); under it, the folder inside `codex/current` a terminal could
+  use and that the person adds it to PATH themselves, when that link is there (#253);
 * the person's own Codex, new enough → «<version> — your own Codex», no button: their winget, npm
   or Homebrew Codex is theirs to update, and the tooltip says so.
 
@@ -24,9 +25,9 @@ from dataclasses import replace
 from typing import Any, Callable, Optional
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from autosound_tcc.core import codex_cli
+from autosound_tcc.core import codex_cli, codex_install
 from autosound_tcc.ui.tcc import codex_menu, i18n
 
 _POLL_MS = 100
@@ -46,7 +47,11 @@ class _Check:
     def _run(self) -> None:
         try:
             codex_cli.forget()  # Re-check looks again: a Codex installed since is seen
-            found = self.result = codex_cli.standing()
+            found = codex_cli.standing()
+            if found.state == codex_cli.STANDING_TCC:
+                # Here and not only after an install: a copy from before #253 has no `current`.
+                found = replace(found, current=codex_install.refresh_current())
+            self.result = found
             if found.state == codex_cli.STANDING_TCC:
                 self.result = replace(found, newer=codex_cli.newer_than_pin())
         except Exception as exc:  # noqa: BLE001 — an answer on the row, not a dead thread
@@ -77,7 +82,23 @@ class CodexToolRow(QWidget):
         self.label = QLabel("")
         self.label.setWordWrap(True)
         self.label.setProperty("class", "mn")
-        line.addWidget(self.label, stretch=1)
+        column = QVBoxLayout()
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(2)
+        column.addWidget(self.label)
+        self.path_note = QLabel("")
+        self.path_note.setWordWrap(True)
+        self.path_note.setProperty("class", "mn")
+        self.path_note.setHidden(True)
+        column.addWidget(self.path_note)
+        # Selectable, for the person's own PATH (#253), and unwrapped: a path is one word, which a
+        # wrapped label clips; this one holds the page's width and the tab scrolls.
+        self.path_label = QLabel("")
+        self.path_label.setProperty("class", "mn")
+        self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.path_label.setHidden(True)
+        column.addWidget(self.path_label)
+        line.addLayout(column, stretch=1)
         self.button = QPushButton(i18n.t("codexInstall"))
         self.button.setProperty("class", "reason-btn")
         self.button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -122,10 +143,19 @@ class CodexToolRow(QWidget):
             return i18n.t("updToolCurrent").format(name="Codex", here=found.version)
         return i18n.t("updCodexOwn").format(here=found.version)
 
+    def _terminal_path(self) -> str:
+        found = self.standing
+        return "" if self._error or self._installing or found is None else found.current
+
     def _draw(self) -> None:
         if not self._installing:
             text = self._text()
             self.label.setText(f"{text}\n{self._receipt}" if self._receipt else text)
+        path = self._terminal_path()
+        self.path_note.setText(i18n.t("updCodexCurrentPath") if path else "")
+        self.path_note.setHidden(not path)
+        self.path_label.setText(path)
+        self.path_label.setHidden(not path)
         own = self.standing is not None and self.standing.state == codex_cli.STANDING_OWN
         self.label.setToolTip(i18n.t("updCodexOwnTip") if own else "")
         current = self.standing is not None and self.standing.state == codex_cli.STANDING_TCC
