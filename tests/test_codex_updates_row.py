@@ -607,3 +607,76 @@ def test_the_long_path_is_not_cut_and_can_be_copied(monkeypatch, versions):
         assert label.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
     finally:
         dialog.close()
+
+
+# ---- a copy of TCC's behind the pin: `current` on PATH, and a TCC that pins a newer one (#253) ---
+
+OLDER = "0.162.0"
+
+
+def _behind_the_pin(monkeypatch, versions, read=(0, 162, 0)) -> tuple[Found, Path, Path]:
+    """What a pin bump leaves: `current` on the person's PATH, still at the old pin's folder.
+    (what `find` answers, the copy the new pin names, the link)."""
+    said, _ = versions
+    copy = codex_cli.tcc_copy_path()
+    older = copy.parents[3] / OLDER / "codex_cli_bin" / "bin" / copy.name
+    older.parent.mkdir(parents=True)
+    older.write_bytes(b"\xcf\xfa\xed\xfe native")
+    older.chmod(0o755)
+    link = copy.parents[3] / codex_cli.CURRENT
+    link.symlink_to(OLDER, target_is_directory=True)
+    found = Found(str(codex_cli.current_bin(copy) / copy.name), codex_cli.SOURCE_PATH)
+    said[found.path] = read
+    _finds(monkeypatch, found)
+    return found, copy, link
+
+
+@POSIX_ONLY
+def test_a_link_to_an_older_tcc_folder_says_its_real_version_and_offers_the_install(
+        monkeypatch, versions):
+    """Said «up to date» before, with no way to install: `find` stops at the PATH hit and never
+    reaches the new pin's path."""
+    _found, _copy, link = _behind_the_pin(monkeypatch, versions)
+
+    got = codex_cli.standing()
+    dialog = _shown(_Host())
+    row = dialog._codex_row
+
+    assert got == codex_cli.Standing(codex_cli.STANDING_TOO_OLD, OLDER) and got.offered
+    assert _line(dialog) == f"Codex {OLDER} → {codex_cli.PIN} (TCC's own copy)"
+    assert not row.button.isHidden() and row.button.isEnabled() and row.offered
+    assert row.path_label.isHidden(), "the folder leads to the old copy: not said as current"
+    assert os.readlink(link) == OLDER, "a read does not move it"
+
+
+@POSIX_ONLY
+def test_an_unread_copy_behind_the_pin_is_named_by_its_folder(monkeypatch, versions):
+    _behind_the_pin(monkeypatch, versions, read=None)
+    assert codex_cli.standing() == codex_cli.Standing(codex_cli.STANDING_TOO_OLD, OLDER)
+
+
+@POSIX_ONLY
+def test_the_install_offered_moves_current_and_the_row_ends_up_to_date(monkeypatch, versions):
+    """`install()` itself moving a live `current` is `test_an_install_over_a_stale_current_…`."""
+    said, _ = versions
+    found, copy, link = _behind_the_pin(monkeypatch, versions)
+
+    def install(_progress, _cancelled, **_kw):
+        copy.parent.mkdir(parents=True)
+        copy.write_bytes(b"\xcf\xfa\xed\xfe native, the new pin's")
+        copy.chmod(0o755)
+        said[found.path] = (0, 162, 1)
+        codex_install.refresh_current(copy, repoint=True)
+        return copy
+
+    monkeypatch.setattr(codex_install, "install", install)
+    monkeypatch.setattr(codex_menu, "after_install", lambda: None)
+    dialog = _shown(_Host())
+    assert _line(dialog) == f"Codex {OLDER} → {codex_cli.PIN} (TCC's own copy)"
+
+    dialog._codex_row.button.click()
+    _until(lambda: _line(dialog) == "Codex 0.162.1 — up to date")
+
+    assert os.readlink(link) == codex_cli.PIN
+    assert dialog._codex_row.button.isHidden()
+    assert dialog._codex_row.path_label.text() == str(codex_cli.current_bin(copy))

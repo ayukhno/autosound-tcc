@@ -6,8 +6,9 @@ plain thread — it runs `codex --version` — never on the GUI thread) and what
 
 * none found → «not installed», and «Install Codex», which is `codex_menu.install` — the same
   worker, progress and receipt as the menu line, on the main window's status strip;
-* only one known too old → «0.152.0 → 0.162.1 (TCC's own copy)», the same button;
-* TCC's own copy, a link to it included → «up to date», or, when PyPI has a newer release, «0.165.0
+* only one known too old, or TCC's own copy behind the pin (`current` on PATH after a TCC update
+  moved the pin) → «0.152.0 → 0.162.1 (TCC's own copy)», the same button, which moves `current`;
+* TCC's own copy at the pin, a link to it included → «up to date», or, when PyPI has a newer release, «0.165.0
   is out; TCC holds 0.162.1 (pinned)» — said, never offered: a new version comes only with a TCC
   release and its pinned sum (#254); under it, the folder inside `codex/current` a terminal could
   use and that the person adds it to PATH themselves, when that link is there (#253);

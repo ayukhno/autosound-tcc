@@ -5,7 +5,8 @@ work when it closes (`menu_registry.stop_workers`). The Arbiter (2026-10-14): a 
 installed is used; with none, TCC installs it from the official source; every user signs in to
 their own Codex account through a TCC button that opens the browser.
 
-* **Install** — offered while `codex_cli.usable()` is None (not found, or known too old). The
+* **Install** — offered while `codex_cli.usable()` is None (not found, or known too old) or the
+  Codex found is a copy of TCC's behind the pin (`codex_cli.behind_pin`, as the Updates row). The
   work runs on `workers.CodexInstallWorker`, its progress on the status strip with a «Cancel»; the
   result, done or the `InstallError`'s sentence, lands there too.
 * **Sign in** — offered while Codex is usable and not known to be signed in. The work runs on
@@ -51,8 +52,9 @@ def _busy(host) -> bool:
 
 
 def can_install(host) -> bool:
-    """No usable Codex (none found, or one known too old), and no job running."""
-    return not _busy(host) and codex_cli.usable() is None
+    """No usable Codex (none found, or one known too old), or TCC's own copy behind the pin, which
+    still runs but is what the install replaces; and no job running."""
+    return not _busy(host) and (codex_cli.usable() is None or codex_cli.behind_pin(codex_cli.find()))
 
 
 def can_sign_in(host) -> bool:

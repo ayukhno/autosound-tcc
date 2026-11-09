@@ -181,6 +181,23 @@ def test_a_codex_found_through_current_keeps_its_path_and_is_tccs(tmp_path, monk
 
 
 @POSIX_ONLY
+def test_a_codex_found_through_current_on_an_older_folder_is_behind_the_pin(tmp_path, monkeypatch):
+    """A pin bump with `current` on PATH: the PATH hit is what `find` answers, and the new pin's
+    path is never reached, so the folder behind the link is what says how old it is."""
+    own = codex_cli.tcc_copy_path()
+    older = _file(own.parents[3] / "0.162.0" / "codex_cli_bin" / "bin" / own.name)
+    (own.parents[3] / codex_cli.CURRENT).symlink_to(older.parents[2].name, target_is_directory=True)
+    through = codex_cli.current_bin(own) / own.name
+
+    found = _find(tmp_path, path=str(through.parent))
+
+    assert found == Found(str(through), codex_cli.SOURCE_PATH)
+    assert codex_cli.behind_pin(found) and not codex_cli.behind_pin(None)
+    monkeypatch.setattr(codex_cli, "settled", lambda: (found, (0, 162, 0)))
+    assert codex_cli.standing() == codex_cli.Standing(codex_cli.STANDING_TOO_OLD, "0.162.0")
+
+
+@POSIX_ONLY
 def test_a_real_folder_named_current_is_not_tccs(tmp_path, monkeypatch):
     """A codex the person keeps in a folder of their own, even one named `current` beside TCC's
     versions: only what leads to a version folder is TCC's."""

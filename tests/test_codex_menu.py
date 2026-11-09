@@ -114,6 +114,23 @@ def test_install_is_offered_when_the_codex_found_is_known_to_be_too_old(
     assert not _entry("codex_sign_in").enabled(host)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a symlink is made by hand here")
+@pytest.mark.parametrize("folder, offered", [("0.162.0", True), (codex_cli.PIN, False)])
+def test_install_is_offered_for_tccs_copy_only_when_it_is_behind_the_pin(
+        monkeypatch, no_subprocess, folder, offered):
+    """The Updates row and this line say one thing about `current` on PATH (#253). Asked of the
+    disk: the state of a menu line runs nothing."""
+    copy = codex_cli.tcc_copy_path()
+    binary = copy.parents[3] / folder / "codex_cli_bin" / "bin" / copy.name
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"\xcf\xfa\xed\xfe native")
+    (copy.parents[3] / codex_cli.CURRENT).symlink_to(folder, target_is_directory=True)
+    found = Found(str(codex_cli.current_bin(copy) / copy.name), codex_cli.SOURCE_PATH)
+    monkeypatch.setattr(codex_cli, "find", lambda **_kw: found)
+
+    assert bool(_entry("codex_install").enabled(_host())) is offered
+
+
 @pytest.mark.parametrize("signed_in, offered", [(None, True), (False, True), (True, False)])
 def test_sign_in_is_offered_while_a_usable_codex_is_not_known_to_be_signed_in(
         tmp_path, monkeypatch, no_subprocess, signed_in, offered):

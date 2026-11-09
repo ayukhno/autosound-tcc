@@ -818,7 +818,7 @@ def test_moving_current_is_one_rename_and_the_older_copy_stays(monkeypatch, targ
 
     monkeypatch.setattr(codex_install, "_replace", watched)
 
-    assert codex_install.refresh_current(target) == str(codex_cli.current_bin(target))
+    assert codex_install.refresh_current(target, repoint=True) == str(codex_cli.current_bin(target))
 
     assert renames == [(codex_cli.CURRENT, True)], "one rename over the old link"
     assert os.path.realpath(link) == os.path.realpath(_version_folder(target))
@@ -835,6 +835,86 @@ def test_a_current_left_dangling_by_tcc_is_moved_to_the_copy(target):
     assert codex_install.refresh_current(target) == str(codex_cli.current_bin(target))
 
     assert os.path.realpath(link) == os.path.realpath(_version_folder(target))
+
+
+@POSIX_ONLY
+def test_two_tccs_with_different_pins_do_not_move_current_by_reading(target):
+    """Each read of the Updates tab moved it to that TCC's own pin, back and forth. A read makes a
+    missing link or repairs a dangling one; only an install moves a live one."""
+    older = _whole_copy(target, "0.160.0")
+    _whole_copy(target)
+    link = _current(target)
+    link.symlink_to("0.160.0", target_is_directory=True)
+
+    for _ in range(3):
+        assert codex_install.refresh_current(target) == "", "it leads elsewhere: no path to say"
+        assert codex_install.refresh_current(older) != "", "and for the other TCC it is still right"
+        assert os.readlink(link) == "0.160.0"
+
+
+@POSIX_ONLY
+def test_a_final_check_refused_fails_neither_a_read_nor_a_finished_install(monkeypatch, target):
+    """`Path.is_file` re-raises EACCES: out of `refresh_current` a finished install would say
+    «unexpected», and the promise was «never raises»."""
+    wheel = _wheel()
+    _pin(monkeypatch, wheel)
+    real = Path.is_file
+
+    def refused(self):
+        if codex_cli.CURRENT in self.parts:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real(self)
+
+    monkeypatch.setattr(Path, "is_file", refused)
+
+    path, _seen = _install(_Opener(wheel), target)
+
+    assert path == target and target.is_file()
+    assert codex_install.refresh_current(target) == ""
+
+
+@POSIX_ONLY
+def test_a_current_left_alone_is_logged_once_not_on_every_read(target, caplog):
+    _whole_copy(target)
+    _current(target).mkdir()
+
+    with caplog.at_level("WARNING"):
+        for _ in range(3):
+            assert codex_install.refresh_current(target) == ""
+
+    assert caplog.text.count("left alone") == 1
+
+
+@POSIX_ONLY
+def test_a_link_refused_is_logged_once_per_cause_and_again_once_fixed(monkeypatch, target, caplog):
+    """The temp link's name is new on every try, so the words of one refusal are never the same
+    twice: what stays the same is the kind of refusal."""
+    _whole_copy(target)
+    refusal = [(13, "Permission denied")]
+    real = codex_install._make_link
+
+    def link_maker(version, link):
+        if refusal[0] is None:
+            real(version, link)
+        else:
+            raise OSError(*refusal[0], str(link))
+
+    monkeypatch.setattr(codex_install, "_make_link", link_maker)
+
+    def reads() -> int:
+        with caplog.at_level("WARNING"):
+            for _ in range(3):
+                codex_install.refresh_current(target)
+        return caplog.text.count("could not be made")
+
+    assert reads() == 1
+    refusal[0] = (28, "No space left on device")
+    assert reads() == 2, "another cause is another state"
+    refusal[0] = None
+    assert codex_install.refresh_current(target) != "" and reads() == 2
+    os.unlink(_current(target))
+    refusal[0] = (13, "Permission denied")
+    assert reads() == 3, "fixed, then broken again: a new state"
 
 
 def _a_real_folder(link: Path, _outside: Path) -> Path:
@@ -1008,7 +1088,7 @@ def test_on_windows_the_old_link_steps_aside_for_the_new_one(windows_steps, targ
     link = _current(target)
     link.symlink_to("0.160.0", target_is_directory=True)
 
-    assert codex_install.refresh_current(target) == str(codex_cli.current_bin(target))
+    assert codex_install.refresh_current(target, repoint=True) == str(codex_cli.current_bin(target))
 
     assert os.path.realpath(link) == os.path.realpath(_version_folder(target))
     assert older.is_file()
@@ -1033,7 +1113,7 @@ def test_on_windows_a_new_link_refused_puts_the_old_one_back(
     monkeypatch.setattr(codex_install, "_replace", refuses_the_new_one)
 
     with caplog.at_level("WARNING"):
-        assert codex_install.refresh_current(target) == ""
+        assert codex_install.refresh_current(target, repoint=True) == ""
 
     assert os.path.realpath(link).endswith("0.160.0"), "the old link is back"
     assert older.is_file()
@@ -1050,7 +1130,7 @@ def test_a_real_junction_is_made_moved_and_removed_without_touching_its_target(t
     codex_install._make_link(older.parents[2], link)
     assert codex_install._link_kind(link) == "junction"
 
-    assert codex_install.refresh_current(target) == str(codex_cli.current_bin(target))
+    assert codex_install.refresh_current(target, repoint=True) == str(codex_cli.current_bin(target))
     assert codex_install._link_kind(link) == "junction"
     assert os.path.samefile(_through(target), binary)
     assert older.is_file(), "the junction it replaced took nothing with it"

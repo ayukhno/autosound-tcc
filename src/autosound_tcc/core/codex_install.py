@@ -21,9 +21,10 @@ What it guarantees:
   version — leaves no temp file and no partial folder, and the older copy as it was; what an
   install cut short by a crash left is swept by the next one.
 * **A fixed folder a terminal can use** (#253, the Arbiter 2026-11-09): `codex/current`, a link to
-  the version folder, refreshed after an install and whenever the Updates row reads a copy that has
-  none. TCC edits no PATH and writes nothing into `~/.local/bin`. A `current` that is not TCC's is
-  left alone, and a link that cannot be made fails nothing: the log says why.
+  the version folder. An install moves it; the Updates row's read only makes a missing one or
+  repairs a dangling one, so two TCCs with different pins do not move it back and forth. TCC edits
+  no PATH and writes nothing into `~/.local/bin`. A `current` that is not TCC's is left alone, and
+  a link that cannot be made fails nothing: the log says why, once per state.
 
 Qt-free. **Worker thread only**: it downloads ~130 MB and runs `codex --version`.
 """
@@ -78,6 +79,9 @@ _LINK_OLD = ".current-old-"
 _SYMLINK, _JUNCTION, _NOT_A_LINK = "symlink", "junction", "not a link"
 #: `st_reparse_tag` of a junction; `stat` has the constant on Windows only.
 _REPARSE_JUNCTION = 0xA0000003
+#: What `refresh_current` last warned of, per link: the row reads on every visit to the tab, and a
+#: permanent state is one line in the log, not one per read (the way `codex_cli` keeps a version).
+_WARNED: dict[Path, tuple] = {}
 
 
 class Wheel(NamedTuple):
@@ -505,11 +509,26 @@ def _point_current(folder: Path, link: Path, kind: Optional[str]) -> None:
         _remove_link(temp)
 
 
-def refresh_current(binary: Optional[Path] = None) -> str:
-    """Make `codex/current` lead to the whole copy at `binary` (`codex_cli.tcc_copy_path()` by
-    default). The folder a terminal could add to PATH (`codex_cli.current_bin`), or "" when there
-    is none, and then the log says why. Never raises: a Codex with no `current` works in TCC just
-    the same. Stat calls and a rename, but on a worker all the same (the retries sleep)."""
+def _warn_once(link: Path, state: tuple, message: str, *args) -> None:
+    """A warning, unless `state` is what was last warned of for `link`. `state` holds no words of
+    the exception: a temp link's name is new on every try."""
+    if _WARNED.get(link) != state:
+        _WARNED[link] = state
+        app_log.logger().warning(message, *args)
+
+
+def _cause(exc: Exception) -> tuple:
+    return type(exc).__name__, getattr(exc, "errno", None)
+
+
+def refresh_current(binary: Optional[Path] = None, *, repoint: bool = False) -> str:
+    """`codex/current` for the whole copy at `binary` (`codex_cli.tcc_copy_path()` by default): made
+    when missing, repaired when dangling, and moved off another live version folder only with
+    `repoint` — that is `install()`; a read leaving a live link alone is what keeps two TCCs with
+    different pins from moving it back and forth. The folder a terminal could add to PATH
+    (`codex_cli.current_bin`), or "" when `current` does not lead to this copy, and then the log
+    says why if it is a fault, once per state. Never raises: a Codex with no `current` works in
+    TCC just the same. Stat calls and a rename, but on a worker all the same (the retries sleep)."""
     binary = Path(binary) if binary is not None else codex_cli.tcc_copy_path()
     folder = binary.parents[2]  # …/codex/<PIN>
     root = folder.parent
@@ -522,17 +541,23 @@ def refresh_current(binary: Optional[Path] = None) -> str:
         _sweep_links(root)
         kind = _link_kind(link)
         if kind == _NOT_A_LINK or (kind is not None and not _is_ours(link, root)):
-            log.warning("codex: %s is not TCC's and is left alone; TCC's Codex works, but a "
-                        "terminal gets no fixed path to it", link)
+            _warn_once(link, ("not ours",), "codex: %s is not TCC's and is left alone; TCC's Codex "
+                       "works, but a terminal gets no fixed path to it", link)
             return ""
-        if kind is None or not _leads_to(link, folder):
+        dangling = kind is not None and not os.path.exists(link)
+        if kind is None or dangling or (repoint and not _leads_to(link, folder)):
             _point_current(folder, link, kind)
     except Exception as exc:  # noqa: BLE001 — whatever it is, the Codex itself is fine
-        log.warning("codex: %s could not be made (%s); TCC's Codex works, but a terminal gets no "
-                    "fixed path to it", link, exc)
-    # Asked of the disk, not of the steps above: another TCC may have made the same link first.
-    if _leads_to(link, folder) and (codex_cli.current_bin(binary) / binary.name).is_file():
-        return str(codex_cli.current_bin(binary))
+        _warn_once(link, _cause(exc), "codex: %s could not be made (%s); TCC's Codex works, but a "
+                   "terminal gets no fixed path to it", link, exc)
+    try:
+        # Asked of the disk, not of the steps above: another TCC may have made the same link first.
+        if _leads_to(link, folder) and (codex_cli.current_bin(binary) / binary.name).is_file():
+            _WARNED.pop(link, None)
+            return str(codex_cli.current_bin(binary))
+    except Exception as exc:  # noqa: BLE001 — `Path.is_file` re-raises EACCES; the Codex is fine
+        _warn_once(link, _cause(exc), "codex: %s could not be read (%s); TCC's Codex works, but a "
+                   "terminal gets no fixed path to it", link, exc)
     return ""
 
 
@@ -611,7 +636,7 @@ def install(progress: Callable[[int, int], None], cancelled: Callable[[], bool],
     finally:
         _remove(part)
         _remove(staging)
-    refresh_current(binary)
+    refresh_current(binary, repoint=True)
     # Found again from here on; the versions already read are kept — a wipe made `find()` answer
     # an old Codex on PATH again until the next probe ended (task 9's review, M1).
     codex_cli.forget()

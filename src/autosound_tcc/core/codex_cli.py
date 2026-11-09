@@ -479,8 +479,8 @@ def settled() -> tuple[Optional[Found], Optional[tuple]]:
 
 #: `standing()`'s answers: which Codex TCC would use, as the Updates tab says it (tcc#181).
 STANDING_MISSING = "missing"    # none found: TCC's install is offered
-STANDING_TOO_OLD = "too_old"    # only one known older than MIN_VERSION: TCC's own copy is offered
-STANDING_TCC = "tcc"            # TCC's own copy, at PIN: up to date
+STANDING_TOO_OLD = "too_old"    # only one older than MIN_VERSION, or TCC's copy behind PIN: offered
+STANDING_TCC = "tcc"            # TCC's own copy in the folder of PIN: up to date
 STANDING_OWN = "own"            # the person's own Codex, new enough (or unread): theirs to update
 
 
@@ -503,16 +503,31 @@ class Standing:
         return self.state in (STANDING_MISSING, STANDING_TOO_OLD)
 
 
-def _is_tccs_copy(found: Found) -> bool:
-    """`found` is, behind any links, a file in a version folder of TCC's `codex/` folder: a link on
-    PATH to TCC's copy is found first, as `SOURCE_PATH`, and is still TCC's (#254) — `current` too
-    (#253), which resolves into its version folder. A real folder named `current` does not resolve
-    away: that one is the person's. `Found.path` stays the link."""
+def _tccs_folder(found: Found) -> str:
+    """The version folder of TCC's `codex/` folder that `found` is a file of, behind any links; ""
+    when it is not TCC's. A link on PATH to TCC's copy is found first, as `SOURCE_PATH`, and is
+    still TCC's (#254) — `current` too (#253), which resolves into its version folder. A real
+    folder named `current` does not resolve away: that one is the person's. `Found.path` stays the
+    link."""
     # tcc_copy_path() is <codex folder>/<pin>/codex_cli_bin/bin/codex.
     root = os.path.normcase(os.path.realpath(tcc_copy_path().parents[3]))
     real = os.path.normcase(os.path.realpath(found.path))
-    return real.startswith(root + os.sep) and not real.startswith(
-        os.path.join(root, CURRENT) + os.sep)
+    if not real.startswith(root + os.sep):
+        return ""
+    folder = real[len(root) + 1:].split(os.sep, 1)[0]
+    return "" if folder == CURRENT else folder
+
+
+def _is_tccs_copy(found: Found) -> bool:
+    return bool(_tccs_folder(found))
+
+
+def behind_pin(found: Optional[Found]) -> bool:
+    """`found` is a copy of TCC's in a version folder other than `PIN`'s: what `current` on the
+    person's PATH leads to after a TCC update moved the pin, until the install moves it (#253).
+    Stat calls only, for a menu line's state too."""
+    folder = _tccs_folder(found) if found is not None else ""
+    return bool(folder) and folder != PIN
 
 
 def _pypi_json() -> bytes:
@@ -538,14 +553,16 @@ def newer_than_pin() -> str:
 
 def standing() -> Standing:
     """`settled()` said as one of the `STANDING_*` answers. **Worker thread only** (it reads the
-    version). TCC's own copy lives in a folder named after `PIN`, so a copy found is at `PIN`. A
-    version of the person's own Codex that could not be read is theirs all the same (the
-    Arbiter's rule: unknown is not a block)."""
+    version). A copy of TCC's outside `PIN`'s folder is too old whatever it can still do: the
+    install is what moves `current` on to the new pin (#253). A version of the person's own Codex
+    that could not be read is theirs all the same (the Arbiter's rule: unknown is not a block)."""
     found, read = settled()
     if found is None:
         return Standing(STANDING_MISSING)
     if read is not None and read < MIN_VERSION:
         return Standing(STANDING_TOO_OLD, version_text(read))
+    if behind_pin(found):
+        return Standing(STANDING_TOO_OLD, version_text(read) if read else _tccs_folder(found))
     if found.source == SOURCE_TCC or _is_tccs_copy(found):
         return Standing(STANDING_TCC, version_text(read) if read else PIN)
     return Standing(STANDING_OWN, version_text(read))
@@ -692,7 +709,8 @@ def unknown_enabled_features(config_read: Mapping) -> list[str]:
 __all__ = [
     "Found", "Probe", "MIN_VERSION", "PIN", "SOURCE_PATH", "SOURCE_FOLDER", "SOURCE_TCC",
     "Standing", "standing", "STANDING_MISSING", "STANDING_TOO_OLD", "STANDING_TCC", "STANDING_OWN",
-    "find", "forget", "settled", "version", "known_version", "too_old", "usable", "probe", "signed_in",
+    "find", "forget", "settled", "version", "known_version", "too_old", "usable", "behind_pin", "probe",
+    "signed_in",
     "mark_signed_out", "models",
     "supported_efforts", "efforts_in", "tcc_copy_path", "CURRENT", "current_bin", "dock_folders",
     "tcc_tool_args",
