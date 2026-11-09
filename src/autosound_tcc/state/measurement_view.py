@@ -234,7 +234,7 @@ def _round_groups(round_: dict, naming, glossary) -> list[dict]:
 
     carried = [
         {"label": str(g.get("label") or g.get("method") or ""), "method": g.get("method"),
-         "names": [spelled(n) for n in g.get("names") or []]}
+         "kind": g.get("kind"), "names": [spelled(n) for n in g.get("names") or []]}
         for g in round_.get("groups") or [] if isinstance(g, dict) and g.get("names")
     ]
     return carried or groups_from_titles([spelled(t) for t in round_.get("expected") or []])
@@ -853,7 +853,8 @@ def build_session(
                  protective=protective_for(name), ambiguous=ambiguous_for(name))
             for name in spec["names"]
         )
-        groups.append(MeasGroup(type=spec["label"], items=items, method=spec.get("method")))
+        groups.append(MeasGroup(type=spec["label"], items=items, method=spec.get("method"),
+                                kind=spec.get("kind")))
 
     extras = _extras(naming, glossary, parsed, groups_spec, version, taken_keys, retake_keys)
     # An extra the round took and the check called unusable is red with its words, as a listed

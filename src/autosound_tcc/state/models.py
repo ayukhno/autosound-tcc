@@ -78,6 +78,10 @@ class MeasItem:
     ambiguous: tuple = ()
 
 
+#: The method's word for the column of hand-held points (`naming.KIND_POINTS`, skill #198).
+KIND_POINTS = "points"
+
+
 @dataclass(frozen=True)
 class MeasGroup:
     type: str  # column header — a literal label, not translated in the prototype either
@@ -88,6 +92,9 @@ class MeasGroup:
     # groups, and the fourth would have raised IndexError while rendering. None keeps the old
     # index convention, so the mock and its tests are unaffected.
     method: "str | None" = None
+    # What the round's own list calls this column (`naming.group_setup`'s `kind`): solo, group,
+    # points. None where the column was grouped by method alone, which is every past round.
+    kind: "str | None" = None
 
 
 @dataclass(frozen=True)

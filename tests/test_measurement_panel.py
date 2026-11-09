@@ -5,6 +5,7 @@ real QThread."""
 
 from __future__ import annotations
 
+import json
 import os
 import time
 
@@ -3385,3 +3386,116 @@ def test_a_cancelled_switch_leaves_import_and_refresh_writing_into_the_window_s_
         assert seen.get(name), f"{name} was not reached"
         assert all(Path(got) == a for got in seen[name]), \
             f"{name} got {seen[name]}: the window shows {a}, the process's folder is {b}"
+
+
+# ---- the nine hand-held points: their fixed order, beside the column that lists them (#259) ----
+
+_NINE_POINTS = [f"m-L p{n}_1 (sw)" for n in range(1, 10)]
+
+
+def _session_of_a_round(tmp_path, monkeypatch, titles):
+    """What the panel gets for an open round whose columns the method's own writer placed."""
+    from autosound_tcc.core import vendor_loader
+    from autosound_tcc.state import measurement_view, process_view
+    from tests import _rounds
+
+    if not vendor_loader.is_available():
+        pytest.skip("rew_tool submodule not checked out")
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    _rounds.write_round(tmp_path, expected=titles, pad=False)
+    (tmp_path / "glossary.json").write_text(json.dumps(
+        {"schema_version": 1, "channels": [{"code": "m-L", "active": True}]}), encoding="utf-8")
+    naming = vendor_loader.load_naming()
+    state_path = process_view.process_dir(tmp_path) / "process-state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["capture"]["groups"] = naming.place_in_groups(
+        [], titles, naming.Glossary.for_project(str(tmp_path)))
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    return measurement_view.build_session("0", 1, [], tmp_path)
+
+
+def _panel_showing(session) -> MeasurementPanel:
+    panel = MeasurementPanel()
+    panel.set_sessions([session], version=1)
+    return panel
+
+
+@pytest.mark.parametrize("titles, offered", [
+    (["m-L_1 (sw)", *_NINE_POINTS], True),
+    (["m-L_1 (sw)", "m-L_1 (rta)"], False),
+])
+def test_the_points_column_alone_offers_the_order_of_the_points(
+        tmp_path, monkeypatch, titles, offered):
+    """Finding 192: the nine points have a fixed order and the person had to recall it while
+    measuring. The way to it sits on the head of the column that lists them, and a round with no
+    points has nothing to explain."""
+    from PySide6.QtWidgets import QLabel, QPushButton
+
+    _app()
+    panel = _panel_showing(_session_of_a_round(tmp_path, monkeypatch, titles))
+
+    way_in = panel.findChild(QPushButton, "ninePointsOrder")
+    assert (way_in is not None) is offered
+    if offered:
+        beside = way_in.parentWidget().findChild(QLabel)
+        assert beside.text() == "Points (sw)"
+
+
+def test_the_order_opens_as_a_popover_with_the_method_s_words_and_nine_marks(tmp_path, monkeypatch):
+    """Not a window to dismiss: the person is in the car holding a microphone. p1, p5 and p9 are
+    one place, and left is left as seen from the seat (the capture sheet's own drawing)."""
+    from PySide6.QtWidgets import QLabel, QPushButton
+
+    from autosound_tcc.ui.tcc.nine_points import NinePointsFigure, NinePointsPopover
+
+    _app()
+    panel = _panel_showing(_session_of_a_round(tmp_path, monkeypatch, _NINE_POINTS))
+
+    panel.findChild(QPushButton, "ninePointsOrder").click()
+
+    popover = panel.findChild(NinePointsPopover)
+    try:
+        assert popover.isVisible() and not popover.isModal()
+        assert QApplication.activeModalWidget() is None
+        words = " ".join(label.text() for label in popover.findChildren(QLabel))
+        assert "parallel to the windscreen" in words and "10–15 cm" in words
+        marks = popover.findChild(NinePointsFigure).marks()
+        assert list(marks) == [f"p{n}" for n in range(1, 10)]
+        assert marks["p1"] == marks["p5"] == marks["p9"]
+        assert marks["p2"].x() < marks["p1"].x() < marks["p6"].x()
+        assert marks["p3"].y() < marks["p2"].y() < marks["p4"].y()
+        assert marks["p7"].y() < marks["p6"].y() < marks["p8"].y()
+    finally:
+        popover.close()
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_the_drawing_shows_each_mark_on_a_clean_ground_in_either_theme(monkeypatch, mode):
+    """Proved by pixels: something is drawn at each of the nine places, and a corner nothing
+    belongs in holds the theme's ground and nothing else."""
+    from PySide6.QtGui import QColor
+
+    from autosound_tcc.ui.tcc.nine_points import NinePointsFigure
+    from autosound_tcc.ui.tcc.theme import PALETTE_DARK, PALETTE_LIGHT
+    from tests import _windows
+
+    _app()
+    figure = NinePointsFigure()
+    _windows.theme_on(monkeypatch, figure, mode)
+    figure.ensurePolished()
+    figure.resize(figure.sizeHint())
+    image = figure.grab().toImage()
+    scale = image.width() / figure.width()
+    ground = QColor((PALETTE_DARK if mode == "dark" else PALETTE_LIGHT)["panel"])
+
+    def drawn_around(x: float, y: float, reach: int = 6) -> int:
+        return sum(
+            1
+            for dx in range(-reach, reach + 1)
+            for dy in range(-reach, reach + 1)
+            if image.pixelColor(round((x + dx) * scale), round((y + dy) * scale)) != ground
+        )
+
+    for name, place in figure.marks().items():
+        assert drawn_around(place.x(), place.y()) > 20, name
+    assert all(image.pixelColor(x, y) == ground for x in range(8) for y in range(8))

@@ -41,11 +41,13 @@ from autosound_tcc.core import (app_log, capture_import, level_base, level_calib
 from autosound_tcc.core import rew_bridge
 from autosound_tcc.core.rew_bridge import RewBridge
 from autosound_tcc.state import process_view
+from autosound_tcc.state.models import KIND_POINTS
 from autosound_tcc.ui.tcc import discard, i18n, qt_shutdown, window_folder
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.capture_import_dialog import CaptureImportDialog
 from autosound_tcc.ui.tcc.flow_layout import FlowLayout as _FlowLayout
 from autosound_tcc.ui.tcc.mock_data import MeasItem, MeasSession, MEAS_SESSIONS, PLAN
+from autosound_tcc.ui.tcc.nine_points import NinePointsPopover
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 from autosound_tcc.ui.tcc.labels import ElidedButton
 from autosound_tcc.ui.tcc.theme import current_theme, mini_combo
@@ -1181,9 +1183,7 @@ class MeasurementPanel(QWidget):
         if empty_phase:
             self._no_project_label.setText(i18n.t("measPhaseNoCapture"))
         for c, group in enumerate(session.groups):
-            header = QLabel(group.type)
-            header.setProperty("class", "mcol-h")
-            self._cols_layout.addWidget(header, 0, c)
+            self._cols_layout.addWidget(self._column_head(group), 0, c)
             # Every column gets the same share of the width there is: without this the first group
             # takes the width its longest name asks for and the rest crowd (user, 2026-09-06).
             # Narrower than the names, the columns scroll sideways instead (2026-09-23).
@@ -1199,6 +1199,32 @@ class MeasurementPanel(QWidget):
         # than its content the rows and the headers spread out to fill it (finding 49, tcc#60).
         if session.groups:
             self._cols_layout.setRowStretch(max(self._col_next_row), 1)
+
+    def _column_head(self, group) -> QWidget:
+        """A column's name; the hand-held points' also carries the way to their order (#259)."""
+        header = QLabel(group.type)
+        header.setProperty("class", "mcol-h")
+        if group.kind != KIND_POINTS:
+            return header
+        holder = QWidget()
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        row.addWidget(header)
+        way_in = QPushButton("?")
+        way_in.setObjectName("ninePointsOrder")
+        way_in.setProperty("class", "meas-icon-btn")
+        way_in.setFixedSize(18, 18)
+        attach_tip(way_in, i18n.t("measPointsOrder"))
+        way_in.clicked.connect(lambda: self._open_points_order(way_in))
+        row.addWidget(way_in)
+        row.addStretch(1)
+        return holder
+
+    def _open_points_order(self, anchor: QWidget) -> None:
+        """One popover for the panel: a column head is rebuilt with every refresh, this is not."""
+        popover = self.findChild(NinePointsPopover) or NinePointsPopover(self)
+        popover.open_at(anchor)
 
     def event(self, event) -> bool:  # noqa: N802 (Qt override)
         """Says when the panel's own floor moved (`floorChanged`): a layout request is what a
