@@ -55,14 +55,17 @@ class RowMark(NamedTuple):
 def marks(root, preset: str, own: list, others: list, profile: dict) -> dict[str, RowMark]:
     """`{compare key: its mark}` for the rows that carry one, as plain data: the text is made when
     a row is filled, so a list filled in one language stays in it until the next load refills it.
-    The tick needs a DSP whose file TCC reads; the claim is the method's on any DSP."""
+    The tick needs a DSP whose file TCC reads; the claim is the method's on any DSP. A row says «in
+    the DSP» only for a version its own slot holds: the words are about that slot's preset, and a
+    version another slot holds is not in this one."""
     every = ledger_line.all_saved_files(root, preset) if reads_save_file(profile) else None
     claims = ledger_line.loaded_by_version(root)
     found = {}
     for of, version, key in _keys(preset, own, others):
         files = () if every is None else ledger_line.checked_files(root, of, version, every)
-        if files or version in claims:
-            found[key] = RowMark(files, claims.get(version, ()))
+        held_here = tuple(claim for claim in claims.get(version, ()) if claim.slot == of)
+        if files or held_here:
+            found[key] = RowMark(files, held_here)
     return found
 
 
@@ -107,7 +110,8 @@ def _loaded_sentence(claim: Loaded) -> str:
 
 def mark_row(combo: QComboBox, index: int, mark: Optional[RowMark]) -> None:
     """The tick and/or the words «in the DSP» on one row, and the hover saying each; a row with
-    neither gets nothing."""
+    neither gets nothing. `<qt>` in every path: a lone claim carries no tag of its own, and Qt would
+    show its escaping as `&#x27;`."""
     if mark is None:
         return
     said = []
@@ -117,7 +121,7 @@ def mark_row(combo: QComboBox, index: int, mark: Optional[RowMark]) -> None:
     if mark.loaded:
         combo.setItemText(index, i18n.t("dspLoadedRow").format(label=combo.itemText(index)))
         said.extend(html.escape(_loaded_sentence(claim)) for claim in mark.loaded)
-    combo.setItemData(index, "<br><br>".join(said), Qt.ItemDataRole.ToolTipRole)
+    combo.setItemData(index, f"<qt>{'<br><br>'.join(said)}</qt>", Qt.ItemDataRole.ToolTipRole)
 
 
 def now_in_dsp(root, view, slot: Optional[str], head: str) -> tuple[str, str]:

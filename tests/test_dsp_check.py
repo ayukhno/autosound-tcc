@@ -10,6 +10,8 @@ from types import SimpleNamespace
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtGui import QTextDocument  # noqa: E402
+from PySide6 import QtGui  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import pytest  # noqa: E402
@@ -407,3 +409,119 @@ def test_the_slots_file_is_read_once_and_a_change_is_seen(tmp_path, monkeypatch)
     history.record_loaded("v_001", "read back from the device")
     claim = ledger_line.loaded_in_dsp(root, "FULL")
     assert (claim.version, claim.source) == ("v_001", "read back from the device")
+
+
+def _seen(markup: str) -> str:
+    """What a tooltip puts in front of a person: read as rich text only where Qt would read it so."""
+    if not QtGui.Qt.mightBeRichText(markup):
+        return markup
+    document = QTextDocument()
+    document.setHtml(markup)
+    return document.toPlainText()
+
+
+#: The `source` is what a session wrote; a rich-text hover would otherwise run it (`<img>` reads files).
+HOSTILE = "<img src='file:///etc/hosts'> & the Arbiter's <b>word"
+
+
+def _other_slot(project):
+    """SQ beside `_method_line`'s FULL, with one version of its own."""
+    history = vendor_loader.load_dsp_state().PresetHistory(str(project / "state"), "SQ", project_dir=str(project))
+    history.snapshot({"preset": "SQ", "sample_rate": 96000, "note": "fixture", "provenance": {"decision": "by ear"},
+                      "channels": {"w-L": {"hp": None, "lp": None, "gain_db": -7.5, "ta_ms": 1.5,
+                                           "polarity": "NORM", "status": "applied"}}})
+    return history, history.head()
+
+
+def test_a_claim_alone_on_a_row_reads_as_words_with_no_entities(tmp_path):
+    """One claim and no tick had no tag in it, so Qt showed it as plain text: `пам&#x27;ять`."""
+    root, history = _method_line(tmp_path)
+    history.record_loaded("v_002", "the Arbiter's memory 3")
+    hover = _row(_line_combo(root), "v_002")[1]
+    assert QtGui.Qt.mightBeRichText(hover), hover
+    assert "the Arbiter's memory 3" in _seen(hover) and "&#x27;" not in _seen(hover)
+
+
+def test_a_rows_claim_is_text_and_never_markup(tmp_path):
+    root, history = _method_line(tmp_path)
+    history.record_loaded("v_002", HOSTILE)
+    hover = _row(_line_combo(root), "v_002")[1]
+    assert "<img" not in hover and "<b>word" not in hover, hover
+    assert HOSTILE in _seen(hover)
+
+
+def test_the_headers_claim_is_text_and_never_markup(tmp_path):
+    _bank(tmp_path, "v_001", statuses=("applied", "proposed"))
+    dot, hover = dsp_check.header(tmp_path, _head_view(state="proposed"), HELIX, "base <1>", now=HOSTILE)
+    assert dot == "wait"
+    assert "<img" not in hover and "<b>word" not in hover and "base &lt;1&gt;" in hover, hover
+    assert HOSTILE in _seen(hover) and "base <1>" in _seen(hover)
+
+
+def test_a_checked_helix_version_s_hover_keeps_the_claim_beside_the_file(tmp_path):
+    i18n.set_language("en")
+    _bank(tmp_path, "v_001", **_with_file())
+    dot, hover = dsp_check.header(tmp_path, _head_view(), HELIX, "base <1>", now="In the DSP now, since 09.11.2026")
+    assert dot == "checked"
+    said = _seen(hover)
+    assert "In the DSP now, since 09.11.2026" in said and "base <1>" in said and "md5 ee627ad6…" in said, said
+
+
+def test_each_slot_answers_for_itself_and_a_version_in_two_presets_carries_both_claims(tmp_path):
+    root, full = _method_line(tmp_path)
+    sq, sq_head = _other_slot(tmp_path)
+    full.record_loaded("v_002", "said of FULL")
+    sq.record_loaded(sq_head, "said of SQ")
+
+    assert ledger_line.loaded_in_dsp(root, "FULL").source == "said of FULL"
+    assert ledger_line.loaded_in_dsp(root, "SQ").source == "said of SQ"
+
+    sq.record_loaded("v_002", "SQ holds it too")
+    held = ledger_line.loaded_by_version(root)["v_002"]
+    assert {claim.slot: claim.source for claim in held} == {"FULL": "said of FULL", "SQ": "SQ holds it too"}
+
+
+def test_the_header_asks_for_the_slot_the_window_loaded_not_the_view_s_own(tmp_path):
+    root, full = _method_line(tmp_path)
+    sq, sq_head = _other_slot(tmp_path)
+    full.record_loaded("v_001", "said of FULL")
+    sq.record_loaded(sq_head, "said of SQ")
+    made_for_full = SimpleNamespace(preset="FULL", version="v_003", file_version=None)
+
+    assert dsp_check.now_in_dsp(root, made_for_full, "SQ", "head")[1].count("said of SQ") == 1
+    assert "said of FULL" in dsp_check.now_in_dsp(root, made_for_full, None, "head")[1], "no slot: the view's"
+
+
+def test_a_row_says_in_the_dsp_only_for_a_version_its_own_slot_holds(tmp_path):
+    root, full = _method_line(tmp_path)
+    sq, sq_head = _other_slot(tmp_path)
+
+    sq.record_loaded("v_002", "only SQ holds it")
+    combo = _line_combo(root)
+    assert "in the DSP" not in _text_of(combo, "v_002"), "another slot holds it, not this row's"
+    assert not _row(combo, "v_002")[1], "and the row's hover has nothing to say"
+
+    full.record_loaded("v_002", "FULL holds it")
+    sq.record_loaded(sq_head, "SQ holds its own")
+    combo = _line_combo(root)
+    assert "in the DSP" in _text_of(combo, "v_002")
+    hover = _row(combo, "v_002")[1]
+    assert "FULL holds it" in hover and "only SQ holds it" not in hover and "SQ holds its own" not in hover
+    assert "in the DSP" in _text_of(combo, sq_head), "SQ's own row, in FULL's list, is SQ's to say"
+    assert "SQ holds its own" in _row(combo, sq_head)[1]
+
+
+@pytest.mark.parametrize("torn", ['{"slots": {"FULL": {"loaded"', "", "[1,"], ids=["cut", "empty", "not-json"])
+def test_a_torn_slots_file_is_no_claim_and_the_next_whole_one_is_read(tmp_path, torn):
+    root, history = _method_line(tmp_path)
+    history.record_loaded("v_002", "first")
+    path = root / "slots.json"
+    whole = path.read_text(encoding="utf-8")
+    assert ledger_line.loaded_in_dsp(root, "FULL").version == "v_002"
+
+    path.write_text(torn, encoding="utf-8")
+    assert ledger_line.loaded_in_dsp(root, "FULL") is None
+    assert ledger_line.loaded_by_version(root) == {}
+
+    path.write_text(whole, encoding="utf-8")
+    assert ledger_line.loaded_in_dsp(root, "FULL").source == "first", "a torn read is not remembered"
