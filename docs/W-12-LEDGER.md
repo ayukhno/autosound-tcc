@@ -28,6 +28,10 @@ site. Sent to the hub by ticket at the wave's end.
 | 2026-11-09 | narrow re-review (opus · high), 5 min, 118K | #255's fix round | 8 | 8 | 0 | 0 | 8 | 0 / 2 / 6 |
 | 2026-11-09 | silent-failure seat (opus · high), 9 min, 219K | the DSP view group (#249, #251) | 10 | checked in the fix round | | | | 0 / 4 / 6 |
 | 2026-11-09 | test seat (opus · high) | the DSP view group | 19 | each proved by a mutation run; 2 are code bugs | | | | 0 / 16 / 3 |
+| 2026-11-09 | silent-failure seat (opus · high), 9 min, 224K | #248, #251 part 2, #259 | 10 | checked in the fix round | | | | 0 / 3 / 7 |
+| 2026-11-09 | test seat (opus · high), 15 min, 215K | the same | 12 | each proved by a run | | | | 0 / 8 / 4 |
+| 2026-11-09 | Opus seat (`feature-dev:code-reviewer`, opus · high), covering silent failures too, 9 min, 199K | #235 | 11 | checked in the fix round | | | | 1 / 5 / 5 |
+| 2026-11-09 | test seat (opus · high), 20 min | #235 | 15 | each proved by a run; 1 live bug | | | | 0 / 10 / 5 |
 
 #255's Blocker came from the test seat, not the code seat: `.gitignore` rewritten during a rebase, so `git rebase --continue` then failed.
 
@@ -41,6 +45,9 @@ The first two seats found the same Important on their own (a pin bump leaves a p
 - #255: a `post-commit` hook outlasting the 10 s budget: the commit landed, the strip says it did not finish.
 - #255: during an operation on a never-taught project, nothing keeps `.mcp.json` out of a `git add -A`.
 - #255: healing misses a partial commit on top, or a subject a `commit-msg` hook rewrote; raw Python text in `{behind}`; the GUI bound can be 2 × 2 s in `mcp_key`.
+- #235, for the skill: between TCC's last check and `save` listing its files (a fetch of up to 60 s) a session can bank something that was never asked about. `save` would have to accept the promised list and refuse a mismatch.
+- #248, for the skill: `process-schema.md` says «TCC reads none of these keys»; it reads `note` now.
+- #251, for the skill: a person's word on a DSP whose file TCC cannot read has no per-version field, so those DSPs get no green mark.
 - #247, for the live test: after a TCC restart the key holds and the MCP session id does not (`404`). Does Claude Code re-initialize?
 
 The re-review paid: four of its five Important are what #247's own fix round made (a brief of mine asked to refuse `.mcp.json` when git

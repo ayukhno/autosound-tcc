@@ -358,7 +358,7 @@ def test_a_session_writing_refreshes_the_note_and_keeps_the_folds_and_the_scroll
                    if any("early step number 3" in w.text() for w in r.findChildren(QLabel)))
     assert earlier._steps_container.isHidden()
     earlier._toggle(None)
-    _icons(_row(panel, "listen to the voice"))[0].mousePressEvent(None)
+    _icons(_found(panel, "listen to the voice"))[0].mousePressEvent(None)
     QApplication.processEvents()
     QApplication.processEvents()
     bar = panel.verticalScrollBar()
@@ -404,12 +404,12 @@ def test_an_unchanged_plan_does_not_rebuild_the_rows(process, project):
     """A write that changes nothing on screen leaves the rows alone: a selection, a tip, the lot."""
     process.add_step("2.1", "listen to the voice", note=NOTE)
     panel = _panel(project)
-    before = _row(panel, "listen to the voice")
+    before = _found(panel, "listen to the voice")
 
     panel.set_plan(_plan(project))
     panel.set_open_questions(())
 
-    assert _row(panel, "listen to the voice") is before
+    assert _found(panel, "listen to the voice") is before
 
 
 def test_a_change_to_the_note_alone_reaches_the_row(process, project):
@@ -491,7 +491,7 @@ def test_another_project_does_not_inherit_the_phases_opened_or_closed(process, p
 def test_another_project_does_not_inherit_what_was_opened(process, project, tmp_path, monkeypatch):
     process.add_step("2.1", "listen to the voice", note=NOTE)
     panel = _panel(project)
-    _icons(_row(panel, "listen to the voice"))[0].mousePressEvent(None)
+    _icons(_found(panel, "listen to the voice"))[0].mousePressEvent(None)
     plan = _plan(project)
 
     other = tmp_path / "another-project"
@@ -500,13 +500,13 @@ def test_another_project_does_not_inherit_what_was_opened(process, project, tmp_
     panel.set_plan(plan[:-1] + plan[-1:])  # same steps, another folder: nothing to inherit
     panel.retranslate()
 
-    assert _row(panel, "listen to the voice")._note_view.isHidden()
+    assert _found(panel, "listen to the voice")._note_view.isHidden()
 
 
 def test_a_covers_list_stays_open_through_a_reload_too(process, project):
     process.add_step("2.1", "close the fields", covers=["project.json:a"])
     panel = _panel(project)
-    row = _row(panel, "close the fields")
+    row = _found(panel, "close the fields")
     chip = next(w for w in row.findChildren(QLabel)
                 if "step-covers-chip" in (w.property("class") or ""))
     chip.mousePressEvent(None)
@@ -514,7 +514,7 @@ def test_a_covers_list_stays_open_through_a_reload_too(process, project):
     process.add_step("2.2", "one more")
     panel.set_plan(_plan(project))
 
-    assert not _row(panel, "close the fields")._covers_list.isHidden()
+    assert not _found(panel, "close the fields")._covers_list.isHidden()
 
 
 def test_a_step_with_a_note_is_not_folded_into_a_run(process, project):
