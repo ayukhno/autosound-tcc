@@ -24,11 +24,16 @@ from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.theme import current_theme
 
 
+def is_helix(vendor, name) -> bool:
+    """A Helix-family DSP, told by vendor and name together: a profile may say only the vendor."""
+    said = f"{vendor or ''} {name or ''}".lower()
+    return "audiotec" in said or "helix" in said
+
+
 def reads_save_file(profile: dict) -> bool:
     """Whether TCC can read this DSP's save file: today only the Helix's (the Arbiter, 2026-11-09)."""
     prof = profile.get("dsp_profile", profile) if isinstance(profile, dict) else {}
-    name = prof.get("name") if isinstance(prof, dict) else None
-    return isinstance(name, str) and "helix" in name.lower()
+    return isinstance(prof, dict) and is_helix(prof.get("vendor"), prof.get("name"))
 
 
 def _keys(preset: str, own: list, others: list) -> list[tuple[str, str, str]]:
@@ -41,7 +46,7 @@ def _keys(preset: str, own: list, others: list) -> list[tuple[str, str, str]]:
 
 def marks(root, preset: str, own: list, others: list, profile: dict) -> dict[str, tuple[SavedFile, ...]]:
     """`{compare key: its files}` for the rows that carry the mark, as plain data: the text is made
-    when a row is filled, so a language switch says it again."""
+    when a row is filled, so a list filled in one language stays in it until the next load refills it."""
     if not reads_save_file(profile):
         return {}
     every = ledger_line.all_saved_files(root, preset)
@@ -92,15 +97,21 @@ def mark_row(combo: QComboBox, index: int, files: Optional[tuple[SavedFile, ...]
     combo.setItemData(index, tip(files), Qt.ItemDataRole.ToolTipRole)
 
 
-def header(root, view, profile: dict, base_tip: str) -> tuple[Optional[str], str]:
+def header(root, view, profile: dict, base_tip: str,
+           loaded: Optional[str] = None) -> tuple[Optional[str], str]:
     """The dot before HEAD's name and its hover: `checked` where the mark stands, otherwise what
     the dot always said — yellow while anything is proposed, green once all of it is entered.
 
-    Asked of `view`, HEAD: the version only looked at has its own row in the list."""
+    Asked of `view`, HEAD: the version only looked at has its own row in the list. `view.preset` may
+    be null on an old layout: `loaded` is the slot the window loaded it as, and with neither there
+    is no mark, never a raise."""
     state = view.state
     dot = None if state is None else ("wait" if state == "proposed" else "done")
     if dot != "done" or not reads_save_file(profile):
         return dot, base_tip
+    preset = view.preset if isinstance(view.preset, str) else loaded
+    if not isinstance(preset, str):
+        return dot, base_tip
     version = getattr(view, "file_version", None) or view.version
-    files = ledger_line.checked_files(root, view.preset, version)
+    files = ledger_line.checked_files(root, preset, version)
     return ("checked", f"{html.escape(base_tip)}<br><br>{tip(files)}") if files else (dot, base_tip)

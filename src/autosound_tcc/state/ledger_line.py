@@ -120,10 +120,15 @@ class Entry(NamedTuple):
 #: A status past `proposed`: the row was entered (`applied`), and may since have been measured.
 _ENTERED = ("applied", "measured")
 #: Top-level dicts of a version that are not channel tiers.
-_NOT_TIERS = ("channels", "preset_settings", "provenance", "roles")
+_NOT_TIERS = ("channels", "preset_settings", "provenance", "roles", "banked_ear_verdicts", "virtual_eq_ptr")
 _MD5 = re.compile(r"^[0-9a-fA-F]{6,32}$")
-_MD5_IN_TEXT = re.compile(r"\(md5\s+([0-9a-fA-F]{6,32})")
-_FILE_IN_TEXT = re.compile(r"^(.*?\.[A-Za-z0-9]{2,6})(?=\s*\(md5\b|\s|$)")
+#: The one sentence the ledgers really write: `<path>.pct6 (md5 <hex>…)`, then at most «decoded
+#: read-only». Anything else is prose about a file, which is no record of having read it.
+_RECORD_IN_TEXT = re.compile(
+    r"^\s*((?:(?!\.pct6).)+\.pct6)\s*\(md5\s+([0-9a-fA-F]{6,32})(?:…|\.\.\.)?\)"
+    r"(?:\s+decoded read-only)?\s*$", re.IGNORECASE)
+#: `verified_by_file` said false, in any of the spellings a ledger has.
+_NOT_VERIFIED = {"false", "0", "no"}
 
 
 def _day(created) -> Optional[str]:
@@ -142,11 +147,13 @@ def _day(created) -> Optional[str]:
 
 
 def _stamp(value) -> Optional[str]:
-    """An ISO timestamp as «DD.MM.YYYY HH:MM», local where it says its zone; None if it is none."""
+    """An ISO timestamp, or the `DDMMYYYYHHMM` the method records for a saved file (rc1:
+    `"291020261232"`), as «DD.MM.YYYY HH:MM», local where it says its zone; None if it is neither."""
     if not isinstance(value, str):
         return None
     try:
-        moment = datetime.fromisoformat(value)
+        moment = (datetime.strptime(value, "%d%m%Y%H%M") if re.fullmatch(r"\d{12}", value)
+                  else datetime.fromisoformat(value))
         if moment.tzinfo is not None:
             moment = moment.astimezone()
     except (ValueError, OverflowError, OSError):
@@ -160,42 +167,53 @@ def _leaf(path: str) -> str:
 
 
 def _saved_file(record, created) -> Optional[SavedFile]:
-    """One saved-file record in either shape, or None where none is usable.
+    """One saved-file record in either shape, or None where it is no record: a real file name and
+    a real md5, or nothing.
 
     `provenance.file` is a sentence on today's ledgers — `presets/a.pct6 (md5 ee627ad6…) decoded
     read-only` — and the method's `source_file` (3.3) is an object of name, path, md5, saved,
-    read_at, compared. A file compared and found different is not one this version was checked
-    against, and a field absent stays absent."""
+    read_at, compared. A field absent stays absent."""
     if isinstance(record, str):
-        md5 = _MD5_IN_TEXT.search(record)
-        cut = record[:md5.start()] if md5 else record
-        found = _FILE_IN_TEXT.match(cut) if not md5 else None
-        name = _leaf(found.group(1) if found else cut) if (md5 or found) else ""
-        return SavedFile(name, md5.group(1).lower() if md5 else None, None,
-                         _stamp(created)) if name else None
+        found = _RECORD_IN_TEXT.match(record)
+        return SavedFile(_leaf(found.group(1)), found.group(2).lower(), None, _stamp(created)) if found else None
     if not isinstance(record, dict):
         return None
-    compared = record.get("compared")
-    if compared and compared != "no difference":
-        return None
-    name = record.get("name") or (_leaf(record["path"]) if isinstance(record.get("path"), str) else "")
-    if not isinstance(name, str) or not name:
-        return None
+    name = record.get("name") or (record["path"] if isinstance(record.get("path"), str) else "")
+    name = _leaf(name) if isinstance(name, str) else ""
     md5 = record.get("md5")
-    return SavedFile(_leaf(name), md5.lower() if isinstance(md5, str) and _MD5.match(md5) else None,
-                     _stamp(record.get("saved")), _stamp(record.get("read_at")) or _stamp(created))
+    if not name or not isinstance(md5, str) or not _MD5.match(md5):
+        return None
+    return SavedFile(name, md5.lower(), _stamp(record.get("saved")),
+                     _stamp(record.get("read_at")) or _stamp(created))
+
+
+def _differs(compared) -> bool:
+    """A comparison on record that is no statement of no difference: rc1 writes the string
+    `"no difference"`, or a list of the differences. Nothing written is nothing compared."""
+    if compared in (None, "", []):
+        return False
+    return not (isinstance(compared, str) and compared.strip().lower() == "no difference")
+
+
+def _not_verified(value) -> bool:
+    """`verified_by_file` false in any form (`false`, `"false"`, `0`); absent says nothing."""
+    if value is None:
+        return False
+    return not value or (isinstance(value, str) and value.strip().lower() in _NOT_VERIFIED)
 
 
 def _saved_files(data: dict) -> tuple[SavedFile, ...]:
-    """The saved files a version records: `provenance.file`, and `preset_settings.source_file`."""
+    """The saved files a version records: `provenance.file`, and `preset_settings.source_file`.
+    Any negative record — not verified by file, or compared and found different — vetoes the whole
+    version: a good record beside it does not undo what the ledger says."""
     created = data.get("created")
-    provenance = data.get("provenance")
-    settings = data.get("preset_settings")
-    found = []
-    if isinstance(provenance, dict) and provenance.get("verified_by_file") is not False:
-        found.append(_saved_file(provenance.get("file"), created))
-    if isinstance(settings, dict):
-        found.append(_saved_file(settings.get("source_file"), created))
+    provenance = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
+    settings = data.get("preset_settings") if isinstance(data.get("preset_settings"), dict) else {}
+    source = settings.get("source_file")
+    if (_not_verified(provenance.get("verified_by_file"))
+            or (isinstance(source, dict) and _differs(source.get("compared")))):
+        return ()
+    found = (_saved_file(provenance.get("file"), created), _saved_file(source, created))
     return tuple(f for f in found if f is not None)
 
 
@@ -280,18 +298,36 @@ def checked_files(root, preset: str, version: str,
     own = list(dict.fromkeys(entry.files))
     if not entry.entered or not own:
         return ()
-    md5s = [f.md5 for f in own if f.md5]
-    if not all(same_content(md5, md5s[0]) for md5 in md5s):
+    md5 = own[0].md5
+    if not all(same_content(f.md5, md5) for f in own):
         return ()
     others = all_saved_files(root, preset) if every is None else every
-    if not md5s:
-        return tuple(own)
     held = {(f.name, f.md5) for f in own}
     for file in others:
-        if same_content(file.md5, md5s[0]) and (file.name, file.md5) not in held:
+        if same_content(file.md5, md5) and (file.name, file.md5) not in held:
             own.append(file)
             held.add((file.name, file.md5))
     return tuple(own)
+
+
+def line_mark(root, preset: Optional[str]) -> tuple:
+    """`(HEAD of preset, every version on the line)` (#249): two equal marks mean no version came
+    or went and HEAD did not move, whatever else was written. HEAD is None where it cannot be read
+    now (a `slots.json` being rewritten reads as empty); `moved` does not take that for a change."""
+    root = Path(root)
+    if is_project_line(root):
+        entry = (slots(root).get("slots") or {}).get(preset)
+        return (entry.get("version") if isinstance(entry, dict) else None), tuple(versions(root, preset))
+    try:
+        head = (root / preset / "HEAD").read_text(encoding="utf-8").strip() or None if preset else None
+    except OSError:
+        head = None
+    return head, tuple(f"{p}/{v}" for p in presets(root) for v in versions(root, p))
+
+
+def moved(before: tuple, now: tuple) -> bool:
+    """Whether HEAD or the set of versions differ between two `line_mark`s."""
+    return now[1] != before[1] or (now[0] is not None and now[0] != before[0])
 
 
 def compare_groups(root, preset: str, current: Optional[str]) -> list[tuple[str, list[str]]]:

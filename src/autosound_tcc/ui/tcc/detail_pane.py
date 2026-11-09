@@ -619,8 +619,7 @@ _ORDER_GAIN_FIRST = ("freq", "gain", "q")
 
 
 def eq_field_order(vendor: Optional[str], name: Optional[str] = "") -> tuple:
-    said = f"{vendor or ''} {name or ''}".lower()
-    return _ORDER_GAIN_FIRST if ("audiotec" in said or "helix" in said) else _ORDER_DEFAULT
+    return _ORDER_GAIN_FIRST if dsp_check.is_helix(vendor, name) else _ORDER_DEFAULT
 
 
 def _band_kind(kind: Optional[str]) -> str:
