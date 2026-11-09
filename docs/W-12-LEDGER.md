@@ -26,6 +26,8 @@ site. Sent to the hub by ticket at the wave's end.
 | 2026-11-09 | Opus seat (`feature-dev:code-reviewer`, opus · high), covering silent failures too, 9 min, 160K | #255 | 11 | checked in the fix round | | | | 0 / 2 / 9 |
 | 2026-11-09 | test seat (opus · high) | #255 | 12 | each proved by a run; 2 are defects with no mutation | | | | 1 / 9 / 2 |
 | 2026-11-09 | narrow re-review (opus · high), 5 min, 118K | #255's fix round | 8 | 8 | 0 | 0 | 8 | 0 / 2 / 6 |
+| 2026-11-09 | silent-failure seat (opus · high), 9 min, 219K | the DSP view group (#249, #251) | 10 | checked in the fix round | | | | 0 / 4 / 6 |
+| 2026-11-09 | test seat (opus · high) | the DSP view group | 19 | each proved by a mutation run; 2 are code bugs | | | | 0 / 16 / 3 |
 
 #255's Blocker came from the test seat, not the code seat: `.gitignore` rewritten during a rebase, so `git rebase --continue` then failed.
 
