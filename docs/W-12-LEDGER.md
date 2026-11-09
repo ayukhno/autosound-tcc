@@ -67,6 +67,7 @@ round: opus · medium, three commits (`385b30bb`, `247d9193`, `41578365`).
 The first group's Important was checked by an offscreen `grab()` with the real sheet and a red control cell: no item background paints in a
 `ptable`. The check found one more, which the seat had not: `QColor(t.mix(…))` is invalid, since `mix` returns `rgb(r, g, b)`,
 so the test compared two invalid colours and passed.
+- Acceptance (`docs/W-12-ACCEPTANCE.md`), for the next wave: #235's remainder (the Send button off with its reason, tcc #265, the Arbiter's word), the minors A1 to A4 (tcc #266), the Windows race (tcc #262).
 
 ## The Sonnet trial (per task)
 
@@ -130,3 +131,9 @@ in `ayukhno/hub-kit`, each with its evidence. No write to hub-kit before that.
 14. **From the skill's W-12, taken here:** acceptance on the exact head after the last code change; the reviewer's brief
    (a quote at `path:line`, every site of a class, «checked → clean», what could not be checked). Their result in this wave
    goes here when the wave has one.
+15. **A wave's tests should meet the other systems before the end.** W-12's PR took five full CI runs, `1377f024` to `68aa0109`,
+    about 20 minutes each; of the 19 tests that went red, one showed a defect in the product (a Windows path in the Send question).
+    The rest were a box font on the Windows runner, tests depending on the order of files, one flaky race, and one fix of ours
+    (`e8c07f90`) that cured nothing and broke Linux. The cost was the loop: a one-to-three-test fix could only be tried through a
+    whole run. Proposed: a fast run of named tests (tcc #263), real fonts on the Windows runner (tcc #264), and, **for the review
+    between waves, on the Arbiter's word only:** one CI run halfway through the wave, through a draft of the same PR.
