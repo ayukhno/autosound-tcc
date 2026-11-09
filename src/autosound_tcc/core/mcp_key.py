@@ -20,6 +20,7 @@ Qt-free: the MCP server and the CLI use it.
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import secrets
@@ -43,6 +44,10 @@ FILE_NAME = "mcp-token"
 #: What `secrets.token_urlsafe` makes, and all a header can carry. The lower bound is what a write
 #: cut short would fail: the rename makes that impossible for TCC's writes, not for anyone else's.
 _SHAPE = re.compile(r"[A-Za-z0-9_-]{32,128}")
+
+#: The most that is ever read from the key's file. Runs on the GUI thread at start: what is there
+#: is not this code's to trust, and an enormous file must not fill the memory.
+_MOST_READ = 4096
 
 #: What must never travel out of a project folder. `.mcp.json` and `.tcc/mcp-token` carry the
 #: session's key; `.tcc/` is also TCC's own per-project state, including the picked models and the
@@ -105,21 +110,16 @@ def load(project_dir: Optional[Path]) -> Key:
         return Key(_fresh(), NO_FOLDER)
     path = _path(project_dir)
     try:
-        raw = path.read_bytes()
+        token = _read_saved(path)
     except FileNotFoundError:
         return _made(project_dir, MADE)
     except (OSError, ValueError) as exc:
         # There and refused: the bytes may be perfectly good, so nothing is written over them
         # (`own_store`'s rule). A reset is the person asking, and it may.
         return _run_only(f"{path}: {_why(exc)}")
-    try:
-        token = raw.decode("ascii").strip()
-    except ValueError:
-        token = ""
-    if not _SHAPE.fullmatch(token):
+    if not token:
         # Not a key at all, so nothing is lost; left as it is, every start would make another.
         return _made(project_dir, REPLACED)
-    _close(path)
     return Key(token)
 
 
@@ -169,14 +169,49 @@ def _keep(project_dir: Path, token: str) -> str:
     return ""
 
 
-def _close(path: Path) -> None:
+def _read_saved(path: Path) -> str:
+    """The key saved at `path`, or "" when what is there is not one. Raises what the read raised.
+
+    Only TCC's own plain file, in TCC's own folder: a `.tcc` or a key file that is a link would
+    have the key read from, and closed in, somewhere else. Not opened blind either: a FIFO would
+    wait for a writer that never comes, on the GUI thread, so it is opened not to wait and looked
+    at through the open file. No more than `_MOST_READ` is taken in.
+
+    Windows has neither `O_NOFOLLOW` nor FIFOs: there the link is looked at before the open."""
+    if path.parent.is_symlink() or (not hasattr(os, "O_NOFOLLOW") and path.is_symlink()):
+        raise OSError(errno.ELOOP, "a link where TCC's own file or folder should be")
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+             | getattr(os, "O_BINARY", 0))
+    handle = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(handle).st_mode):
+            raise OSError(errno.EINVAL, "not a plain file")
+        token = _as_token(os.read(handle, _MOST_READ))
+        if token:
+            _close(handle, path)
+        return token
+    finally:
+        os.close(handle)
+
+
+def _as_token(raw: bytes) -> str:
+    """The key in `raw`, or "" when that is not one."""
+    try:
+        token = raw.decode("ascii").strip()
+    except ValueError:
+        return ""
+    return token if _SHAPE.fullmatch(token) else ""
+
+
+def _close(handle: int, path: Path) -> None:
     """A key others can read — restored from a backup, set by hand — goes back to the owner's
-    alone. Only a file already known to hold a key: nothing is changed about any other. Windows
-    keeps its own ACLs, inherited from the project folder, as for `.mcp.json`."""
+    alone: through the open file, which follows no link. Only a file already known to hold a key:
+    nothing is changed about any other. Windows keeps its own ACLs, inherited from the project
+    folder, as for `.mcp.json`."""
     if os.name == "nt":
         return
     try:
-        if stat.S_IMODE(path.stat().st_mode) & 0o077:
-            os.chmod(path, 0o600)
+        if stat.S_IMODE(os.fstat(handle).st_mode) & 0o077:
+            os.fchmod(handle, 0o600)
     except OSError as exc:
         app_log.logger().warning("could not restrict %s: %s", path, _why(exc))

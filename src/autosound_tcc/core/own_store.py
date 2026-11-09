@@ -28,6 +28,7 @@ Light and Qt-free: the MCP server and the CLI read these stores too.
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import tempfile
@@ -160,8 +161,11 @@ def write_secret(path: Path, text: str) -> None:
     0600 said rather than inherited: `mkstemp` happens to create at that, which is not a decision
     anybody took and not one that survives a refactor. Set before the rename, so the name never
     points at a file others can read. Windows keeps its own ACLs, inherited from the folder.
-    Raises what the write raised, and says nothing."""
+    Raises what the write raised, and says nothing. A folder that is a link is refused: it would
+    put the secret wherever the link points."""
     path = Path(path)
+    if path.parent.is_symlink():
+        raise OSError(errno.ELOOP, "a link where the folder should be", str(path.parent))
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.stem}-", suffix=".tmp")
     try:

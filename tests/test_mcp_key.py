@@ -18,6 +18,8 @@ import os
 import socket
 import stat
 import subprocess
+import threading
+import tracemalloc
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -25,7 +27,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from autosound_tcc.core import app_log, config, mcp_server, own_store, vendor_loader
+from autosound_tcc.core import app_log, config, mcp_key, mcp_server, own_store, vendor_loader
 from autosound_tcc.core.mcp_server import TccMcpServer
 from autosound_tcc.ui.tcc import i18n, mcp_view, menu_registry
 from tests.test_project_seed import _source
@@ -362,6 +364,88 @@ def test_a_read_only_folder_still_gets_a_guarded_server(folder):
         server.stop()
         os.chmod(folder, 0o700)
     assert not _key_file(folder).exists()
+
+
+# ---- only a plain file, TCC's own, in TCC's own folder ----
+
+
+_A_KEY = "k" * 40
+
+
+def _elsewhere(tmp_path: Path) -> Path:
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    (other / "mcp-token").write_text(_A_KEY + "\n", encoding="utf-8")
+    return other
+
+
+@_POSIX_ONLY
+@pytest.mark.parametrize("act", [mcp_key.load, mcp_key.reset], ids=["load", "reset"])
+def test_a_tcc_folder_that_is_a_link_is_neither_read_nor_written_through(folder, tmp_path, act):
+    """Whoever can plant the link would have read the key from, or put it into, a folder of theirs."""
+    other = _elsewhere(tmp_path)
+    (folder / ".tcc").symlink_to(other, target_is_directory=True)
+
+    key = act(folder)
+
+    assert key.note == "run_only" and key.token != _A_KEY and key.problem
+    assert sorted(p.name for p in other.iterdir()) == ["mcp-token"]
+    assert (other / "mcp-token").read_text(encoding="utf-8").strip() == _A_KEY
+
+
+@_POSIX_ONLY
+def test_a_key_file_that_is_a_link_is_not_followed_and_its_target_keeps_its_mode(folder, tmp_path):
+    other = _elsewhere(tmp_path)
+    os.chmod(other / "mcp-token", 0o644)
+    _key_file(folder).parent.mkdir()
+    _key_file(folder).symlink_to(other / "mcp-token")
+
+    key = mcp_key.load(folder)
+
+    assert key.note == "run_only" and key.token != _A_KEY
+    assert _key_file(folder).is_symlink(), "left where it is"
+    assert stat.S_IMODE((other / "mcp-token").stat().st_mode) == 0o644, "chmod followed the link"
+
+
+@_POSIX_ONLY
+def test_a_link_to_a_device_is_not_read_and_not_replaced(folder):
+    _key_file(folder).parent.mkdir()
+    _key_file(folder).symlink_to(os.devnull)
+
+    key = mcp_key.load(folder)
+
+    assert key.note == "run_only" and _key_file(folder).is_symlink()
+
+
+@_POSIX_ONLY
+def test_a_fifo_where_the_key_should_be_does_not_hang_the_start(folder):
+    """This runs on the GUI thread: a plain `open` of a FIFO waits for a writer that never comes."""
+    _key_file(folder).parent.mkdir()
+    os.mkfifo(_key_file(folder))
+    got: list = []
+    reader = threading.Thread(target=lambda: got.append(mcp_key.load(folder)), daemon=True)
+    reader.start()
+    reader.join(20)
+    if reader.is_alive():  # lets a thread stuck on the FIFO go; the test has already failed
+        os.close(os.open(_key_file(folder), os.O_RDWR | os.O_NONBLOCK))
+    assert got and got[0].note == "run_only", "the start hung on a FIFO"
+    assert stat.S_ISFIFO(_key_file(folder).lstat().st_mode), "left where it is"
+
+
+def test_an_enormous_file_is_not_read_whole(folder):
+    """Sparse, so the test costs no disk: what is measured is what the read took into memory."""
+    _key_file(folder).parent.mkdir()
+    with open(_key_file(folder), "wb") as fh:
+        fh.truncate(64 * 1024 * 1024)
+    tracemalloc.start()
+    try:
+        key = mcp_key.load(folder)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert peak < 1024 * 1024, f"read {peak} bytes into memory"
+    assert key.note == "replaced", "a file that big is not a key"
 
 
 @pytest.mark.parametrize("dies_in", ["fsync", "replace"])
