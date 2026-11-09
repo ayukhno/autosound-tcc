@@ -6673,6 +6673,7 @@ def test_the_title_fix_offer_is_said_again_once_a_failed_checks_line_goes(monkey
     strip = StatusStrip()
     host = SimpleNamespace(
         _status_strip=strip, _on_rew_titles_changed=lambda: None,
+        _right_fold=SimpleNamespace(revealing=lambda _name, action: action),
         _capture_check=SimpleNamespace(titles=list(typed),
                                        round_id=process.load()["capture"]["id"]),
         _meas_panel=SimpleNamespace(rew_titles=lambda: ["wL_01 (sw)"], open_import=lambda: None,
