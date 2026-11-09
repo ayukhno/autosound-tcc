@@ -25,6 +25,7 @@ site. Sent to the hub by ticket at the wave's end.
 | 2026-11-09 | narrow re-review (opus · high), 4 min, 108K | the Codex group's fix round | 3 | 3 | 0 | 0 | 3 | 0 / 2 / 1 |
 | 2026-11-09 | Opus seat (`feature-dev:code-reviewer`, opus · high), covering silent failures too, 9 min, 160K | #255 | 11 | checked in the fix round | | | | 0 / 2 / 9 |
 | 2026-11-09 | test seat (opus · high) | #255 | 12 | each proved by a run; 2 are defects with no mutation | | | | 1 / 9 / 2 |
+| 2026-11-09 | narrow re-review (opus · high), 5 min, 118K | #255's fix round | 8 | 8 | 0 | 0 | 8 | 0 / 2 / 6 |
 
 #255's Blocker came from the test seat, not the code seat: `.gitignore` rewritten during a rebase, so `git rebase --continue` then failed.
 
@@ -35,6 +36,9 @@ The first two seats found the same Important on their own (a pin bump leaves a p
 - #247: a `.gitignore` TCC cannot teach (read-only, not UTF-8) **and** git not answering: the key lands un-ignored, and a Git backup in that state would commit it. Rare, and the key only opens a loopback port. Left: a third fix round on one corner was not worth it.
 - #247: a refused key that cannot be removed stays on disk with only a log line (`_discard` would say it).
 - #247: a reset still refused can leave a stale `.mcp.json` warning queued behind the standing line.
+- #255: a `post-commit` hook outlasting the 10 s budget: the commit landed, the strip says it did not finish.
+- #255: during an operation on a never-taught project, nothing keeps `.mcp.json` out of a `git add -A`.
+- #255: healing misses a partial commit on top, or a subject a `commit-msg` hook rewrote; raw Python text in `{behind}`; the GUI bound can be 2 × 2 s in `mcp_key`.
 - #247, for the live test: after a TCC restart the key holds and the MCP session id does not (`404`). Does Claude Code re-initialize?
 
 The re-review paid: four of its five Important are what #247's own fix round made (a brief of mine asked to refuse `.mcp.json` when git

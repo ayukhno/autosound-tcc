@@ -384,6 +384,21 @@ def test_a_key_already_on_disk_is_not_used_once_git_would_take_it(repo, text):
     assert not _key_file(repo).exists(), "`git add -A` would carry a key nothing uses"
 
 
+def test_a_key_is_not_removed_because_a_git_operation_stopped_the_teaching(repo):
+    """A bisect or a stopped rebase sits on a commit older than TCC's lines, and `.gitignore` may
+    not be taught then. The key lasts this run only, and comes back when the operation is over."""
+    key = TccMcpServer(project_dir=repo).token
+    (repo / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    (repo / ".git" / "BISECT_LOG").write_text("", encoding="utf-8")
+
+    again = TccMcpServer(project_dir=repo)
+
+    assert again.token != key and again.key_note == "run_only"
+    assert _key_file(repo).read_text(encoding="utf-8").strip() == key, "it is still the project's"
+    (repo / ".git" / "BISECT_LOG").unlink()
+    assert TccMcpServer(project_dir=repo).token == key
+
+
 def test_a_definite_no_is_a_key_for_this_run_and_the_entry_still_written(repo):
     """A refusal is only «no key file». The entry carries this run's key, which dies with the run,
     as it did before #247; left unwritten, the old entry named a key the server no longer took."""

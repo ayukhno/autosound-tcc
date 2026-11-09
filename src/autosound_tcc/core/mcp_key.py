@@ -241,10 +241,11 @@ def load(project_dir: Optional[Path]) -> Key:
         return _made(project_dir, REPLACED)
     problem = keep_out_of_git(Path(project_dir))
     if problem:  # git would carry the file, and nothing uses it now: it goes, so `add -A` cannot
-        try:
-            path.unlink()
-        except OSError as exc:
-            app_log.logger().warning("could not remove the MCP key %s: %s", path, in_words(exc))
+        if not _operation_under_way(Path(project_dir), None):  # …unless a bisect or a rebase only
+            try:  # stands on an older `.gitignore` for now: the key is good again after it
+                path.unlink()
+            except OSError as exc:
+                app_log.logger().warning("could not remove the MCP key %s: %s", path, in_words(exc))
         return _run_only(problem)
     return Key(token)
 
