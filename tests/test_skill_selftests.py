@@ -74,6 +74,12 @@ def _params():
     return [pytest.param(module, argv, id=module) for module, argv in _SELFTESTS]
 
 
+#: A selftest slower than the general bound, in seconds. `joint_search.py`: 41-76 s on the author's
+#: Mac, past 180 s on windows-latest (PR #261's run 42677312857, where this whole file ran at over
+#: four times the Mac's pace). 600 s is over three times the likely slowest seen.
+_TIMEOUT_S = {"joint_search.py": 600}
+
+
 @pytest.mark.parametrize("module,argv", _params())
 def test_skill_selftest_passes(module, argv):
     """Each run as TCC runs the method (`vendor_loader.child_env`): UTF-8 on every platform. With
@@ -88,7 +94,7 @@ def test_skill_selftest_passes(module, argv):
         encoding="utf-8",
         errors="replace",
         env=vendor_loader.child_env(),
-        timeout=180,
+        timeout=_TIMEOUT_S.get(module, 180),
     )
     # Both streams: some of them print their summary on stdout and their failures on stderr, and a
     # bare "exit 1" tells whoever reads CI nothing they can act on.
