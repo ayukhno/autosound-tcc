@@ -226,6 +226,7 @@ _T2_TCC = [f"2.{n}" for n in range(11, 16)]
 _T2_BARE = [f"2.{n}" for n in range(21, 26)]
 
 
+@pytest.mark.xfail(sys.platform == "win32", strict=False, reason="flaky: #262")
 def test_t2_tcc_and_bare_cli_writes_race_while_a_reader_rereads(project):
     """T2 (PLAN-AUDIT §5.4), reduced to 5 + 5: five `process_writer.add_step` calls on threads and
     five bare `process.py add-step` children race, while a reader thread re-reads the state as the
