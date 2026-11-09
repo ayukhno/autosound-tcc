@@ -117,3 +117,12 @@ Counts from `docs/W-12-LEDGER.md` (B/I/M = blocker/important/minor) and this run
 - **#251, Decision 7:** waits on a per-version field in the method for a person's word on a non-Helix DSP (hub #331).
 - **A1 to A4:** tcc #266.
 - Only the test above and the bookkeeping (this act, the ledger, `docs/TODO.md`) changed after `68aa0109`; no product code.
+
+## The Arbiter's live test (2026-11-09, at `3517db34`)
+
+Installed from the branch by `uv tool install --upgrade` (the Windows VM from 1.2.0, the Mac from an earlier 1.2.1). All passed, on his word and screenshots:
+
+- **Windows VM:** the four font looks, Segoe UI included, headings whole; the Codex row and `…\codex\current\codex_cli_bin\bin\codex.exe --version` = `codex-cli 0.162.1`.
+- **Mac:** a running Claude Code session called `get_tcc_state` through MCP after TCC was restarted, so it re-initializes by itself (#247's open question); the font looks and panel folds held through a restart; the project panel's hover and status; a changed INV blue with an orange frame, in the table and on the tree's pill.
+
+**Not walked yet:** the installer path (`WAVES.md` §3.1). It takes a tag to install, so it goes against the candidate.
