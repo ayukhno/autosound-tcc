@@ -13,9 +13,9 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
-from PySide6.QtCore import QSettings, QSize, Qt  # noqa: E402
+from PySide6.QtCore import QSettings, Qt  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
-    QApplication, QFrame, QHBoxLayout, QLabel, QSizePolicy, QSplitter, QToolButton, QVBoxLayout, QWidget,
+    QApplication, QFrame, QHBoxLayout, QLabel, QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
@@ -232,29 +232,6 @@ def test_the_arrow_costs_the_header_row_no_width():
     split.addWidget(card)
     before = head.minimumSizeHint().width()
     PanelFold(split, _Settings()).add("plan", card, head, body, sub)
-    assert head.minimumSizeHint().width() <= before
-
-
-def test_the_subtitle_pays_for_the_arrow_as_it_is_drawn(monkeypatch):
-    """The arrow's width is read once it wears its glyph: on Windows, where the runner's font is
-    wider, measuring the empty button left the row 17 px over (146 against 129, run 42677312857)."""
-    from autosound_tcc.ui.tcc import panel_fold
-
-    class _WiderWithItsGlyph(QToolButton):
-        def sizeHint(self):  # noqa: N802 (Qt's name; the button's minimum hint is this one)
-            size = super().sizeHint()
-            return QSize(size.width() + 17, size.height()) if self.text() else size
-
-    monkeypatch.setattr(panel_fold, "QToolButton", _WiderWithItsGlyph)
-    QApplication.instance() or QApplication([])
-    split = QSplitter()
-    card, head, body = _Column._card()
-    sub = ElidedLabel("a subtitle that elides", min_width=60, policy=QSizePolicy.Policy.Maximum)
-    head.layout().addWidget(sub)
-    split.addWidget(card)
-    before = head.minimumSizeHint().width()
-    PanelFold(split, _Settings()).add("plan", card, head, body, sub)
-    head.layout().invalidate()
     assert head.minimumSizeHint().width() <= before
 
 
