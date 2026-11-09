@@ -250,7 +250,12 @@ def link_skill_into(project_dir: Path) -> Optional[Path]:
     """
     link = _ensure_link(project_dir)
     if link is not None:
-        method_link_git.keep_out(project_dir)
+        try:
+            method_link_git.keep_out(project_dir)
+        except Exception as exc:  # noqa: BLE001 — git trouble never stops a session having its method
+            from autosound_tcc.core import app_log
+
+            app_log.logger().warning("could not keep the method link out of git in %s: %s", project_dir, exc)
     return link
 
 
