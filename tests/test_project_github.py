@@ -22,8 +22,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QSettings, QThread  # noqa: E402
-from PySide6.QtGui import QColor  # noqa: E402
+from PySide6.QtCore import QSettings, Qt, QThread  # noqa: E402
+from PySide6.QtGui import QColor, QImage, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget  # noqa: E402
 
 from autosound_tcc.core import config, project_repo, vendor_loader  # noqa: E402
@@ -1530,12 +1530,32 @@ def test_a_ledger_older_than_the_push_is_amber(repo, host):
 
 
 def _ink(label: QLabel) -> str:
-    """The commonest colour of `label` after its ground: the inside of its glyphs. The sheet is built
-    at a large scale so stems are many whole pixels wide and edge smoothing is the minority."""
+    """The commonest fully opaque colour of `label`: the inside of its glyphs, the transparent ground
+    and the edge smoothing left out. The sheet is built at a large scale so stems are many whole
+    pixels wide. Not "everything but pixel (0, 0)": where glyphs are boxes that pixel is ink."""
     image = label.grab().toImage()
-    seen = Counter(image.pixelColor(x, y).name() for x in range(image.width()) for y in range(image.height()))
-    seen.pop(image.pixelColor(0, 0).name(), None)
+    seen = Counter(image.pixelColor(x, y).name() for x in range(image.width()) for y in range(image.height())
+                   if image.pixelColor(x, y).alpha() == 255)
     return seen.most_common(1)[0][0]
+
+
+def test_the_ink_is_found_where_the_first_pixel_is_ink_too():
+    """Windows' offscreen Qt draws every glyph as a box, so pixel (0, 0) can be ink: taking that
+    pixel for the ground threw the ink away and read the transparent ground as `#000000`
+    (CI, run 42677312857)."""
+    _ = QApplication.instance() or QApplication([])
+    image = QImage(12, 12, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    for x in range(0, 5):
+        for y in range(0, 12):
+            image.setPixelColor(x, y, QColor("#7d8999"))
+
+    class Grabbed:
+        @staticmethod
+        def grab():
+            return QPixmap.fromImage(image)
+
+    assert _ink(Grabbed()) == "#7d8999"
 
 
 def _dot_colour(section) -> str:
