@@ -27,7 +27,8 @@ class SidebarSection(QWidget):
     QSettings, same convention as `dsp_tree.TreeGroupSection`/`ParamsSection`."""
 
     def __init__(
-        self, section_id: str, title: str, settings: QSettings, default_collapsed: bool = True
+        self, section_id: str, title: str, settings: QSettings, default_collapsed: bool = True,
+        sub_below: bool = False,
     ) -> None:
         super().__init__()
         self._id = section_id
@@ -47,9 +48,13 @@ class SidebarSection(QWidget):
         # at stretch factor 0 (verified empirically). Fixed makes that impossible regardless of
         # collapse state, so the header always stays pinned to its own sizeHint.
         self._header.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        head_layout = QHBoxLayout(self._header)
-        head_layout.setContentsMargins(12, 8, 12, 8)
+        column = QVBoxLayout(self._header)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        head_layout = QHBoxLayout()
+        head_layout.setContentsMargins(12, 8, 12, 2 if sub_below else 8)
         head_layout.setSpacing(8)
+        column.addLayout(head_layout)
         self._twist = QLabel()
         self._twist.setProperty("class", "tw")
         head_layout.addWidget(self._twist)
@@ -69,10 +74,18 @@ class SidebarSection(QWidget):
         self._dot = QLabel()
         self._dot.setFixedSize(9, 9)
         self._dot.setVisible(False)
-        head_layout.addWidget(self._dot)
         self._sub_label = ElidedLabel("")
         self._sub_label.setProperty("class", "phead-sub")
-        head_layout.addWidget(self._sub_label, 1)
+        # `sub_below`: the dot and the sub on a line of their own, where a section's status must
+        # read whole at the column's narrowest (tcc#235: «не ві…»).
+        sub_layout = head_layout
+        if sub_below:
+            sub_layout = QHBoxLayout()
+            sub_layout.setContentsMargins(12, 0, 12, 8)
+            sub_layout.setSpacing(6)
+            column.addLayout(sub_layout)
+        sub_layout.addWidget(self._dot)
+        sub_layout.addWidget(self._sub_label, 1)
         head_layout.addStretch(1)
         self._head_layout = head_layout
         self._header.mousePressEvent = self._on_header_clicked  # type: ignore[assignment]

@@ -1,6 +1,6 @@
 """The widgets that give ground instead of demanding room — `ElidedLabel`, `ElidedButton`.
 
-Its own module because both the left panel's rows (`main_window._kv_row`, the channel switches)
+Its own module because both the left panel's rows (`kv_row`, the channel switches)
 and the panel's section headers (`sidebar_section`) need it, and `sidebar_section` is imported by
 `main_window` rather than the other way round.
 """
@@ -14,14 +14,17 @@ from typing import Optional
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetricsF
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
     QStyle,
     QStyleOptionButton,
     QStylePainter,
+    QWidget,
 )
 
+from autosound_tcc.ui.tcc import copy_menu
 from autosound_tcc.ui.tcc.rounded_tooltip import attach
 
 
@@ -283,3 +286,40 @@ class ElidedButton(QPushButton):
         wanted = self._full if cut else ""
         if self.toolTip() != wanted:
             self.setToolTip(wanted)
+
+
+def kv_row(key: str, value: str, trailing: QWidget | None = None) -> QWidget:
+    """A single `key -> value` display row, styled like the DSP tree's `.paramrow`/`.pk`/`.pv`
+    (dsp_tree._ParamRow) so a lone fact (e.g. System params' REW port) reads consistently with the
+    rest of the app without depending on that module-private class. `trailing` is an optional
+    extra widget after the value (the REW-online dot)."""
+    row = QWidget()
+    row.setProperty("class", "paramrow")
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(12, 5, 12, 5)
+    layout.setSpacing(6)
+    # Both sides give ground, in proportion, and neither can widen the panel. The value used to
+    # refuse to shrink at all, on the grounds that it is the fact the row exists to show -- and one
+    # model id (`google/deep-research-preview-04-2026`, 314 px against a 198 px viewport) then made
+    # the whole left column scroll sideways, putting every row's right-hand end past the edge, the
+    # channel ON/OFF switches included. Letting the key take the whole cut is no better: "По…" and
+    # "D…" name nothing. Whatever is cut on either side is in the tooltip.
+    k = ElidedLabel(key, min_width=40)
+    k.setProperty("class", "pk")
+    layout.addWidget(k, stretch=5)
+    v = ElidedLabel(value, min_width=40)
+    v.setProperty("class", "pv")
+    v.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    layout.addWidget(v, stretch=6)
+    if trailing is not None:
+        layout.addWidget(trailing)
+    # Right-click, not selection: a selectable label captures the mouse, and these rows sit in
+    # panels where a click means something. `ElidedLabel` is asked for its FULL text, so what lands
+    # on the clipboard is the fact rather than whatever survived the elide.
+    copy_menu.enable_copy(
+        row,
+        value=lambda: copy_menu.full_text(v),
+        row=lambda: f"{copy_menu.full_text(k)}: {copy_menu.full_text(v)}",
+        hint=lambda: v.toolTip() or k.toolTip(),
+    )
+    return row

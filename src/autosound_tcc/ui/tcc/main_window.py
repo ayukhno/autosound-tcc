@@ -104,7 +104,7 @@ from autosound_tcc.ui.tcc.generator_check_view import GeneratorCheckView
 from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line, terminal_menu
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
-from autosound_tcc.ui.tcc import process_watch, project_watch, qt_shutdown, rew_status, window_folder
+from autosound_tcc.ui.tcc import github_view, process_watch, project_github, project_watch, qt_shutdown, rew_status, window_folder
 from autosound_tcc.ui.tcc import dsp_check, shown_version
 from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order
 from autosound_tcc.ui.tcc.row_rule import table_fields
@@ -121,7 +121,7 @@ from autosound_tcc.ui.tcc.control_layout import ControlLayout
 from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.resonalyze_import_dialog import ResonalyzeImportDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
-from autosound_tcc.ui.tcc.labels import ElidedButton, ElidedLabel
+from autosound_tcc.ui.tcc.labels import ElidedButton, ElidedLabel, kv_row as _kv_row
 from autosound_tcc.ui.tcc.panel_fold import PanelFold
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip, tip_html
@@ -400,43 +400,6 @@ def _tier_count(total: int, off: int) -> str:
     )
 
 
-def _kv_row(key: str, value: str, trailing: QWidget | None = None) -> QWidget:
-    """A single `key -> value` display row, styled like the DSP tree's `.paramrow`/`.pk`/`.pv`
-    (dsp_tree._ParamRow) so a lone fact (e.g. System params' REW port) reads consistently with the
-    rest of the app without depending on that module-private class. `trailing` is an optional
-    extra widget after the value (the REW-online dot)."""
-    row = QWidget()
-    row.setProperty("class", "paramrow")
-    layout = QHBoxLayout(row)
-    layout.setContentsMargins(12, 5, 12, 5)
-    layout.setSpacing(6)
-    # Both sides give ground, in proportion, and neither can widen the panel. The value used to
-    # refuse to shrink at all, on the grounds that it is the fact the row exists to show -- and one
-    # model id (`google/deep-research-preview-04-2026`, 314 px against a 198 px viewport) then made
-    # the whole left column scroll sideways, putting every row's right-hand end past the edge, the
-    # channel ON/OFF switches included. Letting the key take the whole cut is no better: "По…" and
-    # "D…" name nothing. Whatever is cut on either side is in the tooltip.
-    k = ElidedLabel(key, min_width=40)
-    k.setProperty("class", "pk")
-    layout.addWidget(k, stretch=5)
-    v = ElidedLabel(value, min_width=40)
-    v.setProperty("class", "pv")
-    v.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-    layout.addWidget(v, stretch=6)
-    if trailing is not None:
-        layout.addWidget(trailing)
-    # Right-click, not selection: a selectable label captures the mouse, and these rows sit in
-    # panels where a click means something. `ElidedLabel` is asked for its FULL text, so what lands
-    # on the clipboard is the fact rather than whatever survived the elide.
-    copy_menu.enable_copy(
-        row,
-        value=lambda: copy_menu.full_text(v),
-        row=lambda: f"{copy_menu.full_text(k)}: {copy_menu.full_text(v)}",
-        hint=lambda: v.toolTip() or k.toolTip(),
-    )
-    return row
-
-
 def _breakable(text: str) -> str:
     """Give a path somewhere to wrap: a zero-width space after every `\\` and `/`.
 
@@ -445,13 +408,6 @@ def _breakable(text: str) -> str:
     column that holds the label inherits it.
     """
     return text.replace("\\", "\\\u200b").replace("/", "/\u200b")
-
-
-def _backup_label(step: int) -> str:
-    """«Back up to GitHub (1/2)»: the backup is two presses — the repository, then the private copy
-    on GitHub — and the first one looked like all of it (finding 145). The step comes from the
-    folder (`_show_git_state`), never from a count of presses."""
-    return f"{i18n.t('gitBackupBtn')} ({step}/2)"
 
 
 def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel, QLabel | None]:
@@ -804,6 +760,7 @@ class MainWindow(QMainWindow):
         splitter.setChildrenCollapsible(False)
         # The control layout (F-069) hides this and puts its panels elsewhere, then back.
         self._main_splitter = splitter
+        self._github = project_github.ProjectGithub(self)
         self._left = self._build_left()
         self._center = self._build_center()
         self._right = self._build_right()
@@ -2015,7 +1972,8 @@ class MainWindow(QMainWindow):
         # reverses the 2026-07-28 order, which put the setup block on top before there was any
         # project content to compete with it).
         self._project_section = SidebarSection(
-            "project_params", i18n.t("projectParams"), self._settings, default_collapsed=True
+            "project_params", i18n.t("projectParams"), self._settings, default_collapsed=True,
+            sub_below=True,
         )
         layout.addWidget(self._project_section)
 
@@ -2804,66 +2762,6 @@ class MainWindow(QMainWindow):
         self._dialog.clear_for_no_project()
         self._refresh_process()
 
-    def _show_git_state(self, reuse: bool = False) -> None:
-        section = self._project_section
-        self._backup_step = None
-        if config.chosen_project_dir() is None:
-            section.set_sub("")
-            section.set_dot(None)
-            section.set_sub_tip("")
-            return
-        git = project_view.git_status(reuse=reuse)
-        if not git.works:
-            sub, tip = i18n.t("gitSubBroken"), i18n.t("gitTipBroken")
-        elif not git.repo:
-            # The button by its own label, never written out (review of finding 145, M12).
-            sub, tip = i18n.t("gitSubNoRepo"), i18n.t("gitTipNoRepo").format(
-                button=_backup_label(0))
-        elif not git.remote:
-            sub, tip = i18n.t("gitSubNoRemote"), i18n.t("gitTipNoRemote").format(
-                name=config.chosen_project_dir().name)
-        elif git.unpushed or not git.counted:  # not counted is «?», never «backed up» (#172)
-            n, said = git.unpushed or "?", i18n.t("gitTipBehind" if git.counted else "gitTipUncounted")
-            sub, tip = i18n.t("gitSubBehind").format(n=n), said.format(n=n, remote=git.remote)
-        else:
-            sub, tip = i18n.t("gitSubOk"), i18n.t("gitTipOk").format(remote=git.remote)
-        section.set_sub(sub)
-        section.set_dot(git.level)
-        section.set_sub_tip(tip)
-        body = section.body_layout()
-        # One button, two steps, read from the folder (finding 145): no repository is 0/2 and makes
-        # one; a repository with no remote is 1/2 and offers the GitHub copy; a backup, no button.
-        if not git.works or not git.repo:
-            body.addWidget(_kv_row(i18n.t("gitRow"), sub))
-            if git.works:
-                self._backup_step = 0
-                body.addWidget(self._git_button(_backup_label(0), "gitInitTip", self._on_git_init))
-            return
-        body.addWidget(_kv_row(i18n.t("gitRow"), git.branch or "—"))
-        if git.changed is not None:
-            body.addWidget(_kv_row(i18n.t("gitChanges"),
-                                   str(git.changed) if git.changed else i18n.t("gitClean")))
-        body.addWidget(_kv_row(i18n.t("gitBackup"), git.remote or i18n.t("gitNone")))
-        if git.unpushed or not git.counted:
-            body.addWidget(_kv_row(i18n.t("gitUnpushed"), str(git.unpushed or "?")))
-        if not git.remote:
-            self._backup_step = 1
-            body.addWidget(self._git_button(_backup_label(1), "gitBackupTip", self._on_git_backup))
-
-    def _git_button(self, text: str, tip_key: str, slot) -> QWidget:
-        """A one-click fix under the git rows: the method's own command, run on the click."""
-        row = QWidget()
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(12, 2, 12, 6)
-        button = QPushButton(text)
-        button.setProperty("class", "link-btn")
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
-        attach_tip(button, i18n.t(tip_key))
-        button.clicked.connect(slot)
-        layout.addWidget(button)
-        layout.addStretch(1)
-        return row
-
     def _after_git(self, ok: bool, said: str, too_old: bool = False,
                    first_step: bool = False) -> None:
         # The panel first: the line below names the step the folder is at now.
@@ -2874,7 +2772,7 @@ class MainWindow(QMainWindow):
         elif ok and first_step and self._backup_step == 1:
             # The first press looked like the whole backup (finding 145): it says the second.
             self._status_strip.notify(i18n.t("gitStep1Done").format(
-                said=last, button=_backup_label(1)))
+                said=last, button=github_view.backup_label(1)))
         elif ok:
             self._status_strip.notify(i18n.t("gitDone").format(said=last))
         else:
@@ -2949,7 +2847,7 @@ class MainWindow(QMainWindow):
         # (the Arbiter, 2026-09-23: «добре бачити чи є репо для проекту, чи є гіт взагалі»), and
         # the facts as rows. The folder was silent when it was not a repository — and the live
         # project was exactly that, with no history and no backup (F-074).
-        self._show_git_state(reuse=reuse_git)
+        self._github.show(reuse=reuse_git)
         # The channel-tier summary used to render here; it is a fact about the rig, so it moved to
         # System params (`_rebuild_system_params`, 2026-09-06).
         open_questions = project_view.load_open_questions() if view else ()
@@ -5686,6 +5584,9 @@ class MainWindow(QMainWindow):
             gate.cancel()
         qt_shutdown.stop_or_detach(gate, 3000)
         qt_shutdown.stop_or_detach(getattr(self, "_capture_check", None), 5000)
+        github = getattr(self, "_github", None)  # a send past the wait goes on, handed over (#235)
+        if github is not None:
+            github.stop()
         menu_registry.stop_workers(self)  # a feature's own work: Codex's install or sign-in (#181)
         if getattr(self, "_gen_check", None) is not None:
             self._gen_check.stop()  # the main AI's check (tcc#222)

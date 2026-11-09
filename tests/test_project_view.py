@@ -418,7 +418,7 @@ def _detached(tmp_path):
     _git("-C", str(project), "checkout", "-q", "--detach", "HEAD~1")
     # The old `rev-parse --short HEAD`: git's own length, seven digits in a repository this small.
     head = _git("-C", str(project), "rev-parse", "HEAD")[:7]
-    return project, dict(branch=head, changed=0, remote=remote, unpushed=None)
+    return project, dict(branch=head, changed=0, remote=remote, unpushed=None, detached=True)
 
 
 def _no_upstream(tmp_path):

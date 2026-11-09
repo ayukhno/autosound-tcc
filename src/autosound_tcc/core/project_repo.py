@@ -29,6 +29,10 @@ _TIMEOUT_S = 600
 #: The method's command, relative to its `rew_tool/`.
 _SCRIPT = "project_repo.py"
 
+#: `status --json --fetch`: the method's fetch (60 s) and its local reads, `gh auth status`
+#: (30 s) among them. Off the GUI thread only (`read`).
+_READ_TIMEOUT_S = 240
+
 
 @dataclass(frozen=True)
 class RepoResult:
@@ -54,7 +58,7 @@ def available() -> bool:
     return script_path().is_file()
 
 
-def _run(project: Path, args: list[str]) -> tuple[int, str, str]:
+def _run(project: Path, args: list[str], timeout_s: float = _TIMEOUT_S) -> tuple[int, str, str]:
     """`project_repo.py *args` of the copy `project` is bound to, through `method_cli.spawn`:
     bounded, in that copy's environment, and with no lock — the lock's own `process/` has no place
     in a folder being made a repository. Raises `method_cli.ProcessWriterError`: `ScriptMissing`
@@ -62,7 +66,7 @@ def _run(project: Path, args: list[str]) -> tuple[int, str, str]:
     `method_cli`), any other for a run that did not come back."""
     try:
         # `project_repo.py` takes no lock of the method's either: no lock wait in its bound.
-        return method_cli.spawn(project, _SCRIPT, args, timeout_s=_TIMEOUT_S, lock=False, holds=0)
+        return method_cli.spawn(project, _SCRIPT, args, timeout_s=timeout_s, lock=False, holds=0)
     except method_cli.Refused:
         raise
     except method_cli.ProcessWriterError as exc:
@@ -89,8 +93,18 @@ def backup_status(project: Path) -> dict | RepoResult:
     TCC will not run (#169); the method's own words for a run that failed or did not answer with a
     status. So «gh is not signed in» follows only from the method saying so: a failure read as an
     empty status said it."""
+    return _status(project, ["--json"], _TIMEOUT_S)
+
+
+def read(project: Path) -> dict | RepoResult:
+    """The window's live read (#235): `status --json --fetch`, what `backup_status` says of a run
+    that failed. It goes to the remote, so it is for a worker thread and never the GUI's."""
+    return _status(project, ["--json", "--fetch"], _READ_TIMEOUT_S)
+
+
+def _status(project: Path, flags: list[str], timeout_s: float) -> dict | RepoResult:
     try:
-        code, out, err = _run(project, ["status", str(project), "--json"])
+        code, out, err = _run(project, ["status", str(project), *flags], timeout_s)
     except method_cli.ScriptMissing:
         return RepoResult(False, "", too_old=True)
     except method_cli.ProcessWriterError as exc:

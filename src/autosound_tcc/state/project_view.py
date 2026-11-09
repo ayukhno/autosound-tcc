@@ -395,6 +395,8 @@ class GitStatus:
     #: False when git could not count them: `status` failed and `rev-list` too (review of #172,
     #: I-1). Not counted is never «backed up».
     counted: bool = True
+    #: HEAD is on no branch: `branch` is then the commit's first digits (#235).
+    detached: bool = False
 
     @property
     def level(self) -> str:
@@ -513,7 +515,8 @@ def _read_git(project: Path) -> GitStatus:
         ahead = int(count) if counted else None
     return GitStatus(works=True, repo=True, branch=branch, changed=changed,
                      remote=_remote_label(url) if url else "",
-                     unpushed=ahead if url and not detached else None, counted=counted)
+                     unpushed=ahead if url and not detached else None, counted=counted,
+                     detached=detached)
 
 
 def _backup_url(remotes: str) -> str:
