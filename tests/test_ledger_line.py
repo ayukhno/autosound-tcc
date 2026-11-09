@@ -595,6 +595,28 @@ def _compare_row(window, version) -> str:
     return next(combo.itemText(i) for i in range(combo.count()) if combo.itemText(i).startswith(version))
 
 
+def _drawn_sub(window, width: int = 200) -> str:
+    """The DSP header's text as it is drawn: the window shown, the left column at `width` (200 is
+    its floor). A label never laid out holds its whole text at any width and proves nothing."""
+    window.show()
+    window._left.setFixedWidth(width)
+    QApplication.processEvents()
+    QApplication.processEvents()
+    return window._dsp_section._sub_label.text()
+
+
+def _seen(markup: str) -> str:
+    """What a tooltip puts in front of a person: read as rich text only where Qt would read it so."""
+    from PySide6 import QtGui
+    from PySide6.QtGui import QTextDocument
+
+    if not QtGui.Qt.mightBeRichText(markup):
+        return markup
+    document = QTextDocument()
+    document.setHtml(markup)
+    return document.toPlainText()
+
+
 def test_a_loaded_version_behind_head_is_said_dated_and_head_is_not_claimed(tmp_path, monkeypatch):
     from autosound_tcc.ui.tcc import i18n
 
@@ -603,7 +625,7 @@ def test_a_loaded_version_behind_head_is_said_dated_and_head_is_not_claimed(tmp_
     claim = _record_loaded(tmp_path, "FULL", "v_002", "SQ-2.pct6 loaded, read back on the screen")
     window._safe_load_project()
 
-    assert window._dsp_section.sub_text() == "v_003 · in the DSP: v_002"
+    assert _drawn_sub(window) == "v_003 · in the DSP: v_002"
     hover = window._dsp_section._dot.toolTip()
     assert "v_002" in hover and _dated(claim) in hover and "SQ-2.pct6 loaded, read back on the screen" in hover
     assert "in the processor" not in hover.lower(), "the slot's version is not what the DSP holds"
@@ -615,7 +637,7 @@ def test_with_no_loaded_the_header_says_it_is_not_known_and_no_row_claims_it(tmp
 
     i18n.set_language("en")
     window = _project_with_versions(tmp_path, monkeypatch)
-    assert window._dsp_section.sub_text() == "v_003", "no claim, and HEAD is not one"
+    assert _drawn_sub(window) == "v_003", "no claim, and HEAD is not one"
     hover = window._dsp_section._dot.toolTip()
     assert i18n.t("dspLoadedUnknown") in hover and "in the processor" not in hover.lower()
     assert all("in the DSP" not in _compare_row(window, v) for v in ("v_001", "v_002", "v_003"))
@@ -628,8 +650,64 @@ def test_loaded_on_head_is_said_in_the_header(tmp_path, monkeypatch):
     window = _project_with_versions(tmp_path, monkeypatch)
     _record_loaded(tmp_path, "FULL", "v_003", "attest")
     window._safe_load_project()
-    assert window._dsp_section.sub_text() == "v_003 · in the DSP"
+    assert _drawn_sub(window) == "v_003 · in the DSP"
     assert "attest" in window._dsp_section._dot.toolTip()
+
+
+def test_in_the_dsp_is_drawn_whole_at_the_column_s_floor_in_every_language_and_look(tmp_path, monkeypatch):
+    """In a shown window the sub label had 24 px and the text wanted 143: `v_…`. On its own line,
+    as the project's status (#235), the whole text fits the floor; the title and the button stay."""
+    from autosound_tcc.ui.tcc import font_looks, i18n
+
+    window = _project_with_versions(tmp_path, monkeypatch)
+    _record_loaded(tmp_path, "FULL", "v_002", "read back")
+    window._safe_load_project()
+    window.show()
+    before = i18n.current_language()
+    section = window._dsp_section
+    try:
+        for look in ("", font_looks.TYPEWRITER):
+            window._settings.setValue(font_looks.KEY, look)
+            window._restyle()
+            for lang in ("en", "uk", "pl", "de"):
+                i18n.set_language(lang)
+                window._retranslate()
+                floor = max(200, font_looks.left_floor(window))
+                drawn = _drawn_sub(window, floor)
+                text = i18n.t("dspLoadedSubOther").format(head="v_003", version="v_002")
+                assert drawn == text, (look, lang, section._sub_label.width())
+                label = section._sub_label
+                seen = label.visibleRegion().boundingRect().width()
+                assert label.fontMetrics().horizontalAdvance(text) <= seen, (look, lang, seen, "drawn, not clipped")
+                assert section._title_label.text() == section._title_label._full, (look, lang)
+    finally:
+        i18n.set_language(before)
+        window._retranslate()
+
+
+def test_the_header_text_s_hover_keeps_the_claim_through_every_resize(tmp_path, monkeypatch):
+    """The label's own eliding wrote over a plain `setToolTip` on the next resize: the claim's date,
+    source and caveat were gone. Cut, the full text stands above it, and it is still rich text."""
+    from autosound_tcc.ui.tcc import i18n
+
+    i18n.set_language("en")
+    window = _project_with_versions(tmp_path, monkeypatch)
+    claim = _record_loaded(tmp_path, "FULL", "v_002", "SQ-2.pct6 read back")
+    window._safe_load_project()
+    label = window._dsp_section._sub_label
+
+    for width in (200, 420, 200):
+        _drawn_sub(window, width)
+        said = _seen(label.toolTip())
+        assert _dated(claim) in said and "SQ-2.pct6 read back" in said, (width, said)
+        assert "A dated record" in said and "<br>" not in said, (width, said)
+
+    long_text = "v_003 · a header text far longer than the column can draw"
+    window._dsp_section.set_sub(long_text)
+    window._dsp_section.set_sub_tip("<b>since</b> 09.11.2026<br>the claim stays")
+    assert _drawn_sub(window, 200) != long_text, "the fixture must cut it"
+    said = _seen(label.toolTip())
+    assert long_text in said and "since 09.11.2026" in said and "the claim stays" in said and "<br>" not in said, said
 
 
 def test_a_version_looked_at_does_not_move_what_the_dsp_is_said_to_hold(tmp_path, monkeypatch):
@@ -643,8 +721,8 @@ def test_a_version_looked_at_does_not_move_what_the_dsp_is_said_to_hold(tmp_path
     _pick(window, "v_001")
 
     assert window._view.version == "v_003", "the actors' view stays HEAD"
-    assert window._dsp_section.sub_text().startswith("v_003 · in the DSP: v_002")
-    assert "v_001" in window._dsp_section.sub_text(), "and what is looked at is named"
+    assert _drawn_sub(window).startswith("v_003 · in the DSP: v_002")
+    assert "v_001" in _drawn_sub(window, 520), "and what is looked at is named"
     assert "in the DSP" in _compare_row(window, "v_002") and "in the DSP" not in _compare_row(window, "v_001")
 
 

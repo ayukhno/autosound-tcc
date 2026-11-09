@@ -1990,7 +1990,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._audio_section)
 
         self._dsp_section = SidebarSection(
-            "dsp", i18n.t("dspPanel"), self._settings, default_collapsed=False
+            "dsp", i18n.t("dspPanel"), self._settings, default_collapsed=False, sub_below=True
         )
         # «Збережено в DSP…» (hub #198): the name this configuration went into the device under.
         # Shown on the per-project line, where the method records it, and only with a version.

@@ -137,7 +137,9 @@ class SidebarSection(QWidget):
             self._dot.style().polish(self._dot)
 
     def set_sub_tip(self, text: str) -> None:
-        self._sub_label.setToolTip(text)
+        """Set after the sub it is about: `set_tip` keeps it through the resizes that re-cut the
+        label, where `setToolTip` lasted until the next one."""
+        self._sub_label.set_tip(text)
         self._dot.setToolTip(text)
 
     def dot_status(self) -> Optional[str]:

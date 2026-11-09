@@ -8,6 +8,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+from PySide6 import QtGui  # noqa: E402
+from PySide6.QtGui import QTextDocument  # noqa: E402
 from PySide6.QtWidgets import QApplication, QSizePolicy  # noqa: E402
 
 from autosound_tcc.ui.tcc import i18n  # noqa: E402
@@ -65,6 +67,29 @@ def test_a_tip_of_the_labels_own_survives_every_re_cut():
             assert (label._full in label.toolTip()) == cut, (width, label.toolTip())
         label.set_tip("")
         assert label.toolTip() == "", "and a tip taken back is gone"
+    finally:
+        label.close()
+
+
+def test_a_rich_tip_stays_rich_with_the_cut_text_above_it_and_a_plain_one_stays_plain():
+    """Plain text, a blank line, then a rich tip: `mightBeRichText` stops at the newline and says
+    no, so the person read a literal `<br>`. The whole text goes above it as text, in the tip's form."""
+    full = "v_003 <in the DSP> & more of it"
+    label = ElidedLabel(full, min_width=10, policy=QSizePolicy.Policy.Maximum)
+    label.set_tip("<b>since</b> 09.11.2026<br>a dated record")
+    label.show()
+    try:
+        label.resize(40, label.sizeHint().height())
+        assert label.text() != full, "the fixture must cut it"
+        assert QtGui.Qt.mightBeRichText(label.toolTip()), label.toolTip()
+        document = QTextDocument()
+        document.setHtml(label.toolTip())
+        seen = document.toPlainText()
+        assert full in seen and "since 09.11.2026" in seen and "a dated record" in seen and "<br>" not in seen, seen
+        assert "<in the DSP>" not in label.toolTip(), "the text is text, not markup"
+
+        label.set_tip("a plain tip, 1 < 2")
+        assert label.toolTip() == f"{full}\n\na plain tip, 1 < 2", "a plain tip is left as it was"
     finally:
         label.close()
 

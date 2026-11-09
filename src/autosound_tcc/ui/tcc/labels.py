@@ -11,6 +11,7 @@ import html
 import math
 from typing import Optional
 
+from PySide6 import QtGui
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetricsF
 from PySide6.QtWidgets import (
@@ -26,6 +27,15 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.ui.tcc import copy_menu
 from autosound_tcc.ui.tcc.rounded_tooltip import attach
+
+
+def _text_above_tip(cut: str, tip: str) -> str:
+    """The cut text above the owner's tip, in the tip's own form: `"plain\\n\\n<b>tip</b>"` is not
+    rich text to Qt (`mightBeRichText` stops at the first newline), so a rich tip's `<br>` was read
+    as letters. Escaped, so a `<` in the text is a letter."""
+    if cut and tip and QtGui.Qt.mightBeRichText(tip):
+        return f"<qt>{html.escape(cut)}<br><br>{tip}</qt>"
+    return "\n\n".join(part for part in (cut, tip) if part)
 
 
 class ElidedLabel(QLabel):
@@ -142,8 +152,7 @@ class ElidedLabel(QLabel):
         # attach` leaves it as `hover_tip`): those are not Qt tooltips, so setting a native one
         # here would put TWO hints on the same widget, in two different shapes.
         if self._native_tooltip and getattr(self, "hover_tip", None) is None:
-            cut = self._full if shown != self._full else ""
-            self.setToolTip("\n\n".join(part for part in (cut, self._tip) if part))
+            self.setToolTip(_text_above_tip(self._full if shown != self._full else "", self._tip))
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         super().resizeEvent(event)
