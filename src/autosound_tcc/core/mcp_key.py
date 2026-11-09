@@ -65,6 +65,16 @@ _MOST_READ = 4096
 #: match a symlink.
 _IGNORE_LINES = (".mcp.json", ".tcc/", ".mcp-*.tmp", ".claude/skills/autosound-tuning")
 
+#: What git leaves in its folder while it is in the middle of something. `sequencer/` is a paused
+#: multi-commit cherry-pick or revert, with no `*_HEAD` once a step of it has been committed by hand.
+_GIT_OPERATIONS = (("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"),
+                   ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect"),
+                   ("sequencer", "cherry-pick or revert"))
+
+#: Point git at a repository other than the one it is asked about. TCC started from a hook or from
+#: an editor's terminal inherits them, and they would answer for that repository instead.
+_GIT_PLACE_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
+
 
 #: How long git gets to answer, all its questions together. `load` and `reset` run on the GUI
 #: thread, which waits for them: a hung git costs this much, once, and counts as no git.
@@ -78,7 +88,7 @@ class Key:
     problem: str = ""
 
 
-def teach_git_to_ignore(project_dir: Path) -> None:
+def teach_git_to_ignore(project_dir: Path, *, give_up: Optional[float] = None) -> None:
     """Add our lines to the project's `.gitignore`, keeping everything already in it.
 
     The method's README tells the user to back this folder up to a private GitHub, and TCC is what
@@ -90,10 +100,16 @@ def teach_git_to_ignore(project_dir: Path) -> None:
     each time is a file somebody eventually deletes in annoyance. Never raises: a project whose
     `.gitignore` cannot be read or written still deserves a running server, and whether the key
     would travel is git's to say (`keep_out_of_git`), not this file's.
+
+    Not during a merge, rebase, cherry-pick, revert or bisect, for any caller: a `.gitignore` changed
+    then stops `rebase --continue`, and lands inside a conflict on the file. Git is asked only when
+    a line is missing, within `give_up` when a caller already holds a bound. Line endings stay the
+    file's: `newline=""`, or a CRLF file comes back LF and its whole diff goes into a commit.
     """
     path = Path(project_dir) / ".gitignore"
     try:
-        existing = path.read_text(encoding="utf-8")
+        with open(path, encoding="utf-8", newline="") as file:
+            existing = file.read()
     except FileNotFoundError:
         existing = ""
     except (OSError, ValueError) as exc:  # unreadable, or not UTF-8: a file never rewritten blind
@@ -104,13 +120,59 @@ def teach_git_to_ignore(project_dir: Path) -> None:
     missing = [line for line in _IGNORE_LINES if line not in present]
     if not missing:
         return
-    block = "" if not existing or existing.endswith("\n") else "\n"
-    block += "\n# TCC: the session's token and TCC's own project state — neither travels.\n"
-    block += "".join(f"{line}\n" for line in missing)
+    operation = _operation_under_way(Path(project_dir), give_up)
+    if operation:
+        app_log.logger().info("git is in the middle of a %s in %s: .gitignore is left as it is",
+                              operation, project_dir)
+        return
+    eol = "\r\n" if "\r\n" in existing else "\n"
+    block = "" if not existing or existing.endswith("\n") else eol
+    block += f"{eol}# TCC: the session's token and TCC's own project state — neither travels.{eol}"
+    block += "".join(f"{line}{eol}" for line in missing)
     try:
-        path.write_text(existing + block, encoding="utf-8")
+        path.write_text(existing + block, encoding="utf-8", newline="")
     except OSError as exc:
         app_log.logger().warning("could not add %s to %s: %s", ", ".join(missing), path, exc)
+
+
+def git_env() -> dict[str, str]:
+    """The environment for git asked about a project, without what would point it elsewhere."""
+    return {name: value for name, value in os.environ.items() if name not in _GIT_PLACE_VARS}
+
+
+def git_operation_in(git_dir: Path) -> str:
+    """What git is in the middle of in `git_dir` (`rev-parse --absolute-git-dir`, for a linked
+    worktree's folder as well), or "" when nothing."""
+    for marker, operation in _GIT_OPERATIONS:
+        if (git_dir / marker).exists():
+            return operation
+    return ""
+
+
+def _has_git(project_dir: Path) -> bool:
+    return any(os.path.lexists(there / ".git")
+               for there in (project_dir.absolute(), *project_dir.absolute().parents))
+
+
+def _operation_under_way(project_dir: Path, give_up: Optional[float]) -> str:
+    """What git is in the middle of here, "" when nothing or when git did not answer: only a
+    definite answer stops the write. A git that cannot say (a broken `.git`, dubious ownership)
+    still needs these lines there, since the key is kept in that case (`_git_would_take_it`)."""
+    if not _has_git(project_dir):
+        return ""
+    limit = give_up if give_up is not None else time.monotonic() + _GIT_WAIT_S
+    try:
+        done = child.run_bounded(["git", "-C", str(project_dir), "rev-parse", "--absolute-git-dir"],
+                                 timeout=max(0.0, limit - time.monotonic()), text=True, encoding="utf-8",
+                                 errors="replace", env=git_env(), **child.quiet())
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        app_log.logger().info("git did not answer where its folder is in %s: %s", project_dir, in_words(exc))
+        return ""
+    if done.returncode != 0 or not (done.stdout or "").strip():
+        app_log.logger().info("git did not answer where its folder is in %s (exit %s)", project_dir,
+                              done.returncode)
+        return ""
+    return git_operation_in(Path(done.stdout.strip()))
 
 
 def keep_out_of_git(project_dir: Path) -> str:
@@ -129,8 +191,7 @@ def _git_would_take_it(project_dir: Path) -> str:
     Only exit 1 is a no, from `check-ignore` as from a `ls-files` that found the path tracked (exit
     0): every other way this ends is git not answering. A broken repository is no reason to take
     away the terminal routes, and its `.git` carries nothing out of here either."""
-    if not any(os.path.lexists(there / ".git")
-               for there in (project_dir.absolute(), *project_dir.absolute().parents)):
+    if not _has_git(project_dir):
         return ""
     give_up = time.monotonic() + _GIT_WAIT_S
     try:
@@ -155,7 +216,7 @@ def _ask_git(project_dir: Path, give_up: float, *question: str) -> int:
     """Git's exit code for `question`. `child.run_bounded`: `subprocess.run` can outwait its own
     timeout on Windows, and this holds the GUI thread."""
     return child.run_bounded(["git", "-C", str(project_dir), *question],
-                             timeout=max(0.0, give_up - time.monotonic()),
+                             timeout=max(0.0, give_up - time.monotonic()), env=git_env(),
                              **child.quiet()).returncode
 
 
