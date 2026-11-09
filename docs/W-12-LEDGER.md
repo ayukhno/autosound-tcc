@@ -12,7 +12,13 @@ site. Sent to the hub by ticket at the wave's end.
 |---|---|---|---|---|---|---|---|---|
 | 2026-11-09 | Opus seat (`feature-dev:code-reviewer`, opus · high), 9 min, 178K | hygiene + small fixes (#233, #252, #250, #244, #236) | 2 | 2 | 0 | 0 | 2 | 0 / 1 / 1 |
 
-The Important was checked by an offscreen `grab()` with the real sheet and a red control cell: no item background paints in a
+| 2026-11-09 | silent-failure seat (opus · high), 7 min, 185K | the window group (#245, #243, #237) | 7 | 6 (each by a red test) | 0 | 0 | 7 | 0 / 2 / 5 |
+| 2026-11-09 | test seat (opus · high), 10 min, 163K | the window group | 16 | 12 taken and red on the seat's mutation; 1 Minor taken; 3 Minor left | 0 | 0 | 16 | 0 / 12 / 4 |
+
+The silent-failure seat's seventh (a setting written before the restyle) was left: no raiser exists today. The window group's fix
+round: opus · medium, three commits (`385b30bb`, `247d9193`, `41578365`).
+
+The first group's Important was checked by an offscreen `grab()` with the real sheet and a red control cell: no item background paints in a
 `ptable`. The check found one more, which the seat had not: `QColor(t.mix(…))` is invalid, since `mix` returns `rgb(r, g, b)`,
 so the test compared two invalid colours and passed.
 
@@ -69,6 +75,9 @@ in `ayukhno/hub-kit`, each with its evidence. No write to hub-kit before that.
     grabs of the actual window (a throwaway test, no window on the screen), in his language. Each round cost seconds and
     changed the design: a text list of looks had looked fine to everybody, and his final pick was a crop of one picture beside
     a crop of another.
-12. **From the skill's W-12, taken here:** acceptance on the exact head after the last code change; the reviewer's brief
+12. **A test seat that proves each gap by a mutation.** The seat broke the product in memory and ran only the file concerned:
+    «green» then means a real regression would pass. 12 Important, among them a signal nobody connected, a saved value equal
+    to the default, and a look compared with itself; one live defect came out of it. Worth writing into the seat's brief.
+13. **From the skill's W-12, taken here:** acceptance on the exact head after the last code change; the reviewer's brief
    (a quote at `path:line`, every site of a class, «checked → clean», what could not be checked). Their result in this wave
    goes here when the wave has one.

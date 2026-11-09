@@ -261,6 +261,8 @@ at the session's pace, plus the PR's CI (~35–40 min per run) and the skill's v
 
 ## Ledger
 
+Step 3's group: seats and one fix round done (`385b30bb`, `247d9193`, `41578365`). For step 9, the window's left over: `stripCopyAll` is gone (reused `copyMessage`).
+
 | issue | state | implementer | commits | review | note |
 |---|---|---|---|---|---|
 | the plan | written 2026-10-30, updated 2026-11-09 (hub #331, #333; acceptance, the brief, #259, #260; the eight decisions taken); the Arbiter's «го» 2026-11-09 | — | this | — | — |
