@@ -10,6 +10,7 @@ No `QWidget` here: the strip and the window's host are stand-ins, so nothing can
 
 from __future__ import annotations
 
+import http.client
 import importlib
 import json
 import logging
@@ -83,6 +84,17 @@ def _git(project: Path, *args: str) -> subprocess.CompletedProcess:
                           check=False)
 
 
+@pytest.fixture
+def repo(folder, tmp_path, monkeypatch) -> Path:
+    """A real repository in `folder`, which this machine's own git settings cannot speak for: a
+    global excludes file naming `.tcc/` would make a project git does not ignore look ignored."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "no-global-gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-xdg"))
+    assert _git(folder, "init", "-q").returncode == 0
+    return folder
+
+
 # ---- one key per project, across restarts ----
 
 
@@ -121,6 +133,26 @@ def test_a_session_s_key_still_opens_the_restarted_server_and_nothing_else_does(
         assert _answer(after, "") == 401, "an empty key was let through"
     finally:
         after.stop()
+
+
+@pytest.mark.parametrize("value", [b"\xff\xfe not ascii", "тест".encode("utf-8")],
+                         ids=["latin1", "utf8"])
+def test_a_key_header_that_is_not_ascii_is_refused_not_a_crash(folder, value):
+    server = _server(folder)
+    server.start()
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=20)
+        try:
+            connection.putrequest("POST", "/mcp")
+            connection.putheader("X-TCC-Token", value)
+            connection.putheader("Content-Length", "2")
+            connection.endheaders(b"{}")
+            assert connection.getresponse().status == 401
+        finally:
+            connection.close()
+        assert _answer(server, server.token) != 401, "and the right key still opens it"
+    finally:
+        server.stop()
 
 
 # ---- an explicit reset ----
@@ -197,6 +229,14 @@ def test_no_key_is_written_where_git_could_not_be_told(folder, broken):
 
     assert not _key_file(folder).exists()
     assert server.token and server.key_note == "run_only" and ".gitignore" in server.key_problem
+
+
+def test_a_temp_file_left_by_a_kill_is_ignored_too(repo):
+    """`.mcp.json` is written through `.mcp-XXXX.tmp` in the project's root: killed between the
+    write and the rename, that file holds the key, and only `.tcc/` and `.mcp.json` were named."""
+    TccMcpServer(project_dir=repo)
+
+    assert _git(repo, "check-ignore", "-q", ".mcp-abc123.tmp").returncode == 0
 
 
 def test_the_method_s_git_init_does_not_take_the_key(folder):

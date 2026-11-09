@@ -46,8 +46,9 @@ _SHAPE = re.compile(r"[A-Za-z0-9_-]{32,128}")
 
 #: What must never travel out of a project folder. `.mcp.json` and `.tcc/mcp-token` carry the
 #: session's key; `.tcc/` is also TCC's own per-project state, including the picked models and the
-#: packages sent to the reviewer.
-_IGNORE_LINES = (".mcp.json", ".tcc/")
+#: packages sent to the reviewer. `.mcp-*.tmp` is `.mcp.json` on its way through a temp file in the
+#: project's root: a kill between the write and the rename leaves the key in it.
+_IGNORE_LINES = (".mcp.json", ".tcc/", ".mcp-*.tmp")
 
 
 @dataclass(frozen=True)

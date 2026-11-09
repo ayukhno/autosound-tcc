@@ -54,6 +54,7 @@ import contextvars
 import ctypes
 import dataclasses
 import functools
+import hmac
 import json
 import logging
 import os
@@ -1731,8 +1732,11 @@ class _TokenGuard:
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         if scope.get("type") == "http":
-            headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers") or []}
-            if headers.get(_TOKEN_HEADER) != self.token:
+            # Compared as the raw bytes that came in: a header nobody can decode is a wrong key,
+            # and a decode that raised was a 500 instead of a refusal.
+            headers = {k.lower(): v for k, v in scope.get("headers") or []}
+            presented = headers.get(_TOKEN_HEADER.encode("ascii"))
+            if presented is None or not hmac.compare_digest(presented, self.token.encode("utf-8")):
                 await send(
                     {
                         "type": "http.response.start",
