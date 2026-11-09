@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from autosound_tcc.ui.tcc import i18n, menu_registry, theme  # noqa: E402
 from tests import _windows  # noqa: E402
 from tests.test_control_layout import _window  # noqa: E402
+from tests.test_detail_pane import _no_real_font  # noqa: E402
 
 MONO = "SF Mono"
 ALL_LOOKS = ("normal", "light", "rounded", "typewriter")
@@ -188,6 +189,10 @@ def test_no_heading_is_cut_at_the_normal_size_in_ukrainian(tmp_path, monkeypatch
     for _ in range(4):
         QApplication.processEvents()
 
+    fontless = _no_real_font(window._meas_title.font())
+    if fontless:
+        window.hide()
+        pytest.skip(f"a box's width is no font's: {fontless}")
     for title in (window._plan_title, window._meas_title, window._preset_field_lbl):
         assert title.width() >= title.fontMetrics().horizontalAdvance(title.text()) - 1, title.text()
     for section in (window._project_section, window._system_section, window._audio_section):
