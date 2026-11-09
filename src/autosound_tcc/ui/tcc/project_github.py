@@ -19,7 +19,7 @@ import shiboken6
 from PySide6.QtCore import QFileSystemWatcher, QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QHBoxLayout, QMessageBox, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
-from autosound_tcc.core import app_log, config, project_repo
+from autosound_tcc.core import app_log, project_repo
 from autosound_tcc.state import project_view
 from autosound_tcc.ui.tcc import github_view, i18n, labels, process_watch, qt_shutdown, window_folder
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
@@ -82,7 +82,7 @@ class ProjectGithub(QObject):
         Unless `reuse`, a live read follows."""
         section = self._window._project_section
         self._window._backup_step = None
-        chosen = config.chosen_project_dir()
+        chosen = self._folder()
         if chosen is None:
             self._read, self._read_of = None, None
             self._box = None
@@ -91,7 +91,7 @@ class ProjectGithub(QObject):
             section.set_dot(None)
             section.set_sub_tip("")
             return
-        self._git = project_view.git_status(reuse=reuse)
+        self._git = project_view.git_status(chosen, reuse=reuse)
         if self._read_of != chosen:
             self._read, self._read_of = None, None
         if not self._box_alive() or self._box.parentWidget() is None:  # the rebuild cleared it
@@ -105,6 +105,11 @@ class ProjectGithub(QObject):
         if not reuse:
             self._mark = github_view.refs_mark(chosen / ".git")
             self.request()
+
+    def _folder(self) -> Optional[Path]:
+        """The folder this window shows, its question and its Send's: after a cancelled switch the
+        one it was built on, with the process's already the next project's (`window_folder`)."""
+        return window_folder.shown(self._window)
 
     def _box_alive(self) -> bool:
         return self._box is not None and shiboken6.isValid(self._box)
@@ -126,10 +131,9 @@ class ProjectGithub(QObject):
             layout.addWidget(self._button(github_view.backup_label(view.step),
                                           i18n.t("gitInitTip" if view.step == 0 else "gitBackupTip"), slot))
         elif view.send is not None or self._send is not None:
-            sending = self._send is not None
-            row = self._button(i18n.t("gitSendingBtn" if sending else "gitSendBtn"),
+            row = self._button(i18n.t("gitSendingBtn" if self._send == "sending" else "gitSendBtn"),
                                view.send or i18n.t("gitSendTip"), self._on_send)
-            row.findChild(QPushButton).setEnabled(not sending)
+            row.findChild(QPushButton).setEnabled(self._send is None and not view.send_off)
             layout.addWidget(row)
 
     @staticmethod
@@ -182,15 +186,19 @@ class ProjectGithub(QObject):
             return
         if not self._window.isVisible() or not window_folder.may_reread(self._window, "the GitHub read"):
             return
-        folder = config.chosen_project_dir()
+        folder = self._folder()
         if folder is None:
             return
-        root = config.state_root()
+        folder, root = Path(folder), window_folder.state_root(self._window)
 
         def work():
-            return folder, project_repo.read(folder), github_view.newest_version_time(root)
+            answer = project_repo.read(folder)
+            git = project_view.git_status(folder)  # after the fetch: what the remote has now counts
+            if isinstance(answer, project_repo.RepoResult):
+                return git, (None if answer.too_old else github_view.unread(answer.said))
+            return git, github_view.from_status(answer, github_view.newest_version_time(root))
 
-        self._run(work, self._read_landed)
+        self._run(work, lambda result: self._read_landed(folder, result))
 
     def _run(self, work: Callable[[], object], on_answer: Callable) -> None:
         job = _Job(work)
@@ -210,20 +218,19 @@ class ProjectGithub(QObject):
             self._again = False
             self._timer.start()
 
-    def _read_landed(self, result) -> None:
-        folder, answer, newest = result
-        chosen = config.chosen_project_dir()
-        if chosen is None or Path(chosen) != Path(folder):
+    def _read_landed(self, folder: Path, result) -> None:
+        chosen = self._folder()
+        if chosen is None or Path(chosen) != folder:
             return
-        if isinstance(answer, project_repo.RepoResult):
-            read = None if answer.too_old else github_view.unread(answer.said)
+        if isinstance(result, project_repo.RepoResult):  # the job raised (`_Job.run`): said as unread
+            read = github_view.unread(result.said)
         else:
-            read = github_view.from_status(answer, newest)
-        self._read, self._read_of = read, Path(folder)
-        self._mark = github_view.refs_mark(Path(folder) / ".git")  # what this read has already seen
+            self._git, read = result
+        self._read, self._read_of = read, folder
+        self._mark = github_view.refs_mark(folder / ".git")  # what this read has already seen
         if self._box_alive():
-            self._paint(Path(folder))
-        self._arm(Path(folder))
+            self._paint(folder)
+        self._arm(folder)
 
     # ── sending ──────────────────────────────────────────────────────────────────────────────
 
@@ -231,14 +238,18 @@ class ProjectGithub(QObject):
         """«Відправити»: the method's `save`, on a worker, asked before each send. The question
         opens here, on the person's press, from the last read; what it promised is checked again
         on the worker, so a session's write in the meantime is said rather than sent unasked."""
-        folder = config.chosen_project_dir()
+        folder = self._folder()
         read = self._read
         if self._send is not None or self._stopped or folder is None or read is None:
             return
+        if not window_folder.ours(self._window, "the Send button"):  # says so on a line that stays up
+            return
+        folder = Path(folder)
+        promised = github_view.fingerprint(read, folder)  # the files as they are when the question opens
         box = QMessageBox(self._window)
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle(i18n.t("gitSendBtn"))
-        box.setText(github_view.confirm_text(read, self._git.remote if self._git else ""))
+        box.setText(github_view.confirm_text(read))
         box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
         self._send = "asked"
@@ -249,10 +260,9 @@ class ProjectGithub(QObject):
             self._send = None
             self._repaint()
             return
-        self._send = "sending"
+        self._send = "queued"
         self._repaint()
-        promised = github_view.fingerprint(read)
-        self._when_free(lambda: self._start_send(Path(folder), promised))
+        self._when_free(lambda: self._start_send(folder, promised))
 
     def _when_free(self, then: Callable[[], None]) -> None:
         if self._job is None:
@@ -261,26 +271,44 @@ class ProjectGithub(QObject):
             self._after_job = then
 
     def _start_send(self, folder: Path, promised: tuple) -> None:
+        self._send = "sending"
+        self._repaint()
+
         def work():
             status = project_repo.backup_status(folder)
             now = github_view.from_status(status) if isinstance(status, dict) else None
-            if now is None or github_view.fingerprint(now) != promised:
+            if now is None or github_view.fingerprint(now, folder) != promised:
                 return ("changed", None, status)
+            # A close during the status: no push starts. `_stopped` too, for a job closed before it
+            # was scheduled, which `stop_or_detach` does not ask.
+            if self._stopped or QThread.currentThread().isInterruptionRequested():
+                return ("stopped", None, None)
             return ("sent", project_repo.save(folder), None)
 
-        self._run(work, lambda result: self._sent(folder, *result))
+        self._run(work, lambda result: self._sent(folder, result))
 
-    def _sent(self, folder: Path, what: str, answer, status) -> None:
+    def _sent(self, folder: Path, result) -> None:
+        """The outcome in words, the button back whatever happens, and a fresh read. A job that
+        raised came back as its `RepoResult` (`_Job.run`)."""
+        try:
+            self._say(self._outcome(result))
+        finally:
+            self._send = None
+            self._repaint()
+            if Path(self._folder() or "") == folder:
+                self._mark = github_view.refs_mark(folder / ".git")
+                self.request()
+
+    @staticmethod
+    def _outcome(result) -> project_repo.RepoResult:
+        if isinstance(result, project_repo.RepoResult):
+            return result
+        what, answer, status = result
         if what == "sent":
-            self._finish(folder, answer)
-        elif isinstance(status, project_repo.RepoResult):
-            self._finish(folder, status)
-        else:
-            self._finish(folder, project_repo.RepoResult(False, i18n.t("gitSendChanged")))
+            return answer
+        return status if isinstance(status, project_repo.RepoResult) else project_repo.RepoResult(False, i18n.t("gitSendChanged"))
 
-    def _finish(self, folder: Path, result: project_repo.RepoResult) -> None:
-        """The method's outcome in its own words, the button back, and a fresh read."""
-        self._send = None
+    def _say(self, result: project_repo.RepoResult) -> None:
         strip = self._window._status_strip
         if result.too_old:
             strip.notify(i18n.t("gitTooOld"), level="warn")
@@ -288,13 +316,9 @@ class ProjectGithub(QObject):
             strip.notify(i18n.t("gitSendDone").format(said=result.said))
         else:
             strip.notify(i18n.t("gitSendRefused").format(said=result.said or "—"), level="warn")
-        self._repaint()
-        if Path(config.chosen_project_dir() or "") == folder:
-            self._mark = github_view.refs_mark(folder / ".git")
-            self.request()
 
     def _repaint(self) -> None:
-        chosen = config.chosen_project_dir()
+        chosen = self._folder()
         if chosen is not None and self._git is not None and self._box_alive():
             self._paint(Path(chosen))
 
@@ -312,7 +336,7 @@ class ProjectGithub(QObject):
                 process_watch.add(self._watcher, sorted(new))
 
     def _on_git_changed(self, *_args) -> None:
-        chosen = config.chosen_project_dir()
+        chosen = self._folder()
         if chosen is None or self._stopped:
             return
         self._arm(chosen)  # an atomic write drops the path it replaced
@@ -321,12 +345,47 @@ class ProjectGithub(QObject):
             self._mark = mark
             self.request()
 
+    def may_close(self) -> bool:
+        """Whether the window may go. A send still under way is asked about, the default keeping
+        it (`_ask_abandon_save`'s rule); `_closing` is already up, so what Cancel's branch of the
+        window's close puts back goes back here too."""
+        if self._send not in ("queued", "sending") or self._stopped:
+            return True
+        box = QMessageBox(self._window)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(i18n.t("gitSendingBtn"))
+        box.setText(i18n.t("gitSendCloseAsk"))
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        if box.exec() == QMessageBox.StandardButton.Yes:
+            return True
+        self._window._closing = False
+        for name in ("_agent_refresh_timer", "_project_reload"):  # skipped while the question was up
+            timer = getattr(self._window, name, None)
+            if timer is not None:
+                timer.start()
+        return False
+
     def stop(self) -> None:
         """A closing window's: nothing starts after this, and what runs is handed over rather than
-        dropped (`qt_shutdown`). Twice is fine."""
+        dropped (`qt_shutdown`). No wait: neither job answers a request to stop soon, so waiting
+        was only a freeze. Twice is fine."""
         self._stopped = True
         self._timer.stop()
         self._hold(set(), set())
         job, self._job = self._job, None
         if job is not None:
-            qt_shutdown.stop_or_detach(job, qt_shutdown.QUIT_WAIT_MS, mute=(job.done,))
+            qt_shutdown.stop_or_detach(job, 0, mute=(job.done,))
+
+
+def may_close(window) -> bool:
+    """The window's close asks its panel; out here so `main_window.py` does not grow."""
+    panel = getattr(window, "_github", None)
+    return panel is None or panel.may_close()
+
+
+def stop_panel(window) -> None:
+    """A window may be stopped half-built: no panel yet is nothing to stop."""
+    panel = getattr(window, "_github", None)
+    if panel is not None:
+        panel.stop()

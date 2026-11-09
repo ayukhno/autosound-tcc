@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from autosound_tcc.state import ledger_line
-from autosound_tcc.state.project_view import GitStatus
+from autosound_tcc.state.project_view import GitStatus, _remote_label
 from autosound_tcc.ui.tcc import i18n
 
 
@@ -237,6 +237,8 @@ class Panel:
     step: Optional[int]
     #: The Send button's tip when it is offered, else None.
     send: Optional[str] = None
+    #: Offered but off, the tip saying why (a pull comes first).
+    send_off: bool = False
 
 
 def panel(git: GitStatus, read: Optional[Read], name: str) -> Panel:
@@ -297,25 +299,47 @@ def _verdict(git: GitStatus, read: Read, name: str) -> tuple[str, str, str]:
     return "done", i18n.t("gitSubOk"), i18n.t("gitTipOk").format(remote=remote)
 
 
-def _send_tip(git: GitStatus, read: Read) -> Optional[str]:
-    """The button's tip, or None when it is not offered: only for a remote the method can send to,
-    on a branch, with what is to go read and not empty. Who sends is the method's word, and it
-    does not take the button away: «the session; TCC's button is the spare» (`project_seed`, the
+def _send_offer(git: GitStatus, read: Read) -> tuple[Optional[str], bool]:
+    """(the button's tip or None when it is not offered, whether it is offered but off): offered
+    only for a remote the method can send to, on a branch, with what is to go read and not empty;
+    off when the read shows the remote ahead, where `save` would refuse (a branch with no upstream
+    the read cannot tell, and the method's own refusal stands). Who sends is the method's word, and
+    it does not take the button away: «the session; TCC's button is the spare» (`project_seed`, the
     Arbiter 2026-11-08); the panel says who sends in its own row, and the spare's tip says so."""
     if not read.remote or read.failed or git.detached:
-        return None
+        return None, False
     if read.tuning is None or read.ahead is None or not (read.tuning or read.ahead):
-        return None
-    return i18n.t("gitSendTipSpare" if read.sends == "session" else "gitSendTip")
+        return None, False
+    if git.behind:
+        return i18n.t("gitSendTipPull").format(n=git.behind), True
+    return i18n.t("gitSendTipSpare" if read.sends == "session" else "gitSendTip"), False
 
 
-def fingerprint(read: Read) -> tuple:
-    """What a confirmation promised: the same files and commits or the person is asked again."""
-    return (read.tuning, tuple(c.hash for c in read.ahead or ()))
+def _stamp(path: Path) -> tuple:
+    """(size, mtime) of a named file as it is now; a path that is gone has none."""
+    try:
+        stat = path.lstat()
+    except OSError:
+        return (None, None)
+    return (stat.st_size, stat.st_mtime_ns)
 
 
-def confirm_text(read: Read, remote: str) -> str:
-    """The question: how many files and commits, to which remote, and the names."""
+def fingerprint(read: Read, folder: Path) -> tuple:
+    """What a confirmation promised, taken when it is asked: the same remote, the same commits and
+    the same files, each as it was then (a name alone passes a rewrite of a named file), or the
+    person is asked again. Stats only, so it can run on the GUI thread."""
+    files = tuple((path, *_stamp(folder / path)) for path in read.tuning or ())
+    return (read.remote, files, tuple(c.hash for c in read.ahead or ()))
+
+
+def _capped(names: list[str]) -> list[str]:
+    """`names` to `NAMES_IN_TIP`, and how many more: the hover's cut, said the same way."""
+    more = len(names) - NAMES_IN_TIP
+    return names[:NAMES_IN_TIP] + ([i18n.t("gitTipMore").format(n=more)] if more > 0 else [])
+
+
+def confirm_text(read: Read) -> str:
+    """The question: how many files and commits, to which remote (this read's), and the names."""
     lines = []
     if read.tuning:
         lines.append(i18n.t("gitSendFilesLine").format(n=len(read.tuning)))
@@ -323,9 +347,10 @@ def confirm_text(read: Read, remote: str) -> str:
         lines.append(i18n.t("gitSendCommitsLine").format(n=len(read.ahead)))
     if read.housekeeping:
         lines.append(i18n.t("gitSendHousekeepingLine").format(n=len(read.housekeeping)))
-    names = [p for p in (read.tuning or ())[:NAMES_IN_TIP]]
-    names += [f"{_short(c.hash)} {c.subject}" for c in (read.ahead or ())[:NAMES_IN_TIP]]
-    return i18n.t("gitSendAsk").format(remote=remote, lines="\n".join(lines), names="\n".join(names))
+    names = _capped(list(read.tuning or ())) + _capped([f"{_short(c.hash)} {c.subject}" for c in read.ahead or ()])
+    asked = i18n.t("gitSendAsk").format(remote=_remote_label(read.remote or ""), lines="\n".join(lines),
+                                        names="\n".join(names))
+    return f"{asked}\n\n{i18n.t('gitSendLeftOut')}"
 
 
 def _facts(read: Read) -> list[str]:
@@ -363,4 +388,5 @@ def _from_read(git: GitStatus, read: Read, name: str) -> Panel:
     elif read.ahead:
         rows.append(Row(i18n.t("gitUnpushed"), str(len(read.ahead)), ahead_tip(read),
                         "bad" if read.ledger_newer else "wait", count=True))
-    return Panel(sub, level, tip, tuple(rows), None if git.remote else 1, _send_tip(git, read))
+    send, send_off = _send_offer(git, read)
+    return Panel(sub, level, tip, tuple(rows), None if git.remote else 1, send, send_off)

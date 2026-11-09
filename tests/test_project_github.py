@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
 import subprocess
 import threading
 import time
@@ -290,6 +291,7 @@ def test_an_answer_for_another_folder_is_dropped(repo, host, monkeypatch, tmp_pa
     other.mkdir()
     monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: other)
     monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: other)
+    widget._built_on = other  # the window itself moved on; a cancelled switch is the next section's
     release.set()
 
     assert _until(panel.idle)
@@ -699,8 +701,7 @@ def test_the_method_session_rule_keeps_the_button_as_the_spare(repo, host):
 
     assert panel._read.sends == "session"
     assert _rows(widget)[i18n.t("gitSendsRow")] == i18n.t("gitSendsSession")
-    assert _send_button(widget).toolTip() == i18n.t("gitSendTipSpare") or \
-        getattr(_send_button(widget), "hover_tip", None) is not None
+    assert _send_button(widget).hover_tip._text == i18n.t("gitSendTipSpare")
 
 
 def test_a_project_seeded_before_the_rule_says_the_person_sends(repo, host):
@@ -729,6 +730,8 @@ def test_the_confirmation_names_the_files_the_commits_and_the_remote(repo, host,
     assert i18n.t("gitSendFilesLine").format(n=2) in text
     assert i18n.t("gitSendCommitsLine").format(n=1) in text
     assert panel._git.remote in text
+    for name in ("state/v_020.json", "process/journal.jsonl", "a commit already made"):
+        assert name in text, (name, text)
 
 
 def test_no_sends_nothing(repo, host, monkeypatch):
@@ -747,6 +750,7 @@ def test_no_sends_nothing(repo, host, monkeypatch):
 
 def test_yes_sends_the_tuning_files_and_the_outcome_is_the_methods_words(repo, host, monkeypatch):
     project, bare = repo
+    before = set(_on_remote(bare))
     widget, panel = _ready(repo, host)
     asked = _answer(monkeypatch, YES)
 
@@ -755,7 +759,7 @@ def test_yes_sends_the_tuning_files_and_the_outcome_is_the_methods_words(repo, h
     assert _until(lambda: _send_button(widget) is None and panel.idle()), widget._status_strip.said
     assert len(asked) == 1
     assert _git(bare, "rev-parse", "HEAD") == _git(project, "rev-parse", "HEAD")
-    assert {"state/v_020.json", "process/journal.jsonl"} <= set(_on_remote(bare))
+    assert set(_on_remote(bare)) == before | {"state/v_020.json", "process/journal.jsonl"}
     said = _strip(widget)
     assert said.startswith(i18n.t("gitSendDone").format(said="").rstrip()) and "sent to origin" in said
     assert not said.startswith("✓")
@@ -773,8 +777,11 @@ def test_the_key_the_link_and_the_logs_never_go(repo, host, monkeypatch):
     _git(project, "add", "-A")
     _git(project, "commit", "-q", "-m", "an older project: no .gitignore")
     _git(project, "push", "-q", "origin", "HEAD")
+    before = set(_on_remote(bare))
     _write(project, ".tcc/mcp-token", "secret\n")
     _write(project, ".sessions.log", "log\n")
+    _write(project, ".agents/note.md", "a session's own\n")
+    _write(project, ".autosound/state.json", "{}\n")
     link = project / ".claude" / "skills" / "autosound-tuning"
     link.parent.mkdir(parents=True)
     try:
@@ -788,9 +795,7 @@ def test_the_key_the_link_and_the_logs_never_go(repo, host, monkeypatch):
     _send_button(widget).click()
     assert _until(lambda: _send_button(widget) is None and panel.idle()), widget._status_strip.said
 
-    sent = _on_remote(bare)
-    assert "state/v_022.json" in sent
-    assert not [p for p in sent if p.startswith((".tcc", ".claude")) or p == ".sessions.log"], sent
+    assert set(_on_remote(bare)) == before | {"state/v_020.json", "state/v_022.json", "process/journal.jsonl"}
 
 
 def test_asked_before_each_send(repo, host, monkeypatch):
@@ -859,6 +864,7 @@ def test_what_changed_after_the_yes_is_said_and_not_sent(repo, host, monkeypatch
     It goes nowhere, it is said, and the next press asks about what is there."""
     project, bare = repo
     head = _git(bare, "rev-parse", "HEAD")
+    before = set(_on_remote(bare))
     widget, panel = _ready(repo, host)
 
     def yes_and_a_new_file(_box):
@@ -874,7 +880,8 @@ def test_what_changed_after_the_yes_is_said_and_not_sent(repo, host, monkeypatch
     assert _until(lambda: _settled(panel) and _send_button(widget) is not None and _send_button(widget).isEnabled())
     _send_button(widget).click()
     assert _until(lambda: _send_button(widget) is None and panel.idle())
-    assert len(asked) == 2 and "state/v_024.json" in _on_remote(bare)
+    assert len(asked) == 2
+    assert set(_on_remote(bare)) == before | {"state/v_020.json", "process/journal.jsonl", "state/v_024.json"}
 
 
 def test_closing_during_the_question_sends_nothing(repo, host, monkeypatch):
@@ -922,9 +929,13 @@ def test_closing_mid_send_hands_the_thread_over_and_takes_no_answer(repo, host, 
     assert widget._status_strip.said == said_before
 
 
-def test_the_save_bound_is_above_a_fetch_and_a_push(repo, monkeypatch):
-    """A fetch of up to 60 s and a push of up to 600 s (the method's own): `save` gets more."""
-    assert project_repo._SAVE_TIMEOUT_S > 60 + 600
+def test_the_save_bound_is_above_the_sum_of_the_methods_steps(repo, monkeypatch):
+    """The method's own bounds, read from its copy: reset, add and push of `PUSH_SECONDS` each, a
+    fetch and a look at the remote's branches of `FETCH_SECONDS` each, a commit of 60 s."""
+    text = (vendor_loader.REW_TOOL_DIR / "project_repo.py").read_text(encoding="utf-8")
+    push = int(re.search(r"^PUSH_SECONDS = (\d+)", text, re.M).group(1))
+    fetch = int(re.search(r"^FETCH_SECONDS = (\d+)", text, re.M).group(1))
+    assert project_repo._SAVE_TIMEOUT_S > 3 * push + 2 * fetch + 60
     seen = []
     real = project_repo.method_cli.spawn
 
@@ -981,3 +992,442 @@ def test_the_window_shows_the_read_and_a_read_starts_no_reload(repo, monkeypatch
         window._github.stop()
         for worker in list(qt_shutdown.live()) + list(qt_shutdown.detached()):
             worker.wait(20000)
+
+
+# ── (e) The panel's folder is the window's: a cancelled switch (#235's review) ───────────────────
+
+def _second_project(tmp_path):
+    """(project, bare): another repository with its own remote, what a switch points the process at."""
+    other, bare = tmp_path / "other-car", tmp_path / "other.git"
+    other.mkdir()
+    _write(other, "project.json", "{}\n")
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True, capture_output=True, timeout=60)
+    assert project_repo.init(other).ok
+    _git(other, "remote", "add", "origin", str(bare))
+    _git(other, "push", "-q", "-u", "origin", "HEAD")
+    return other, bare
+
+
+def _process_folder_is(monkeypatch, folder) -> None:
+    """What Open folder does before the close that Cancel then stops (`window_folder`)."""
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: folder)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: folder)
+
+
+def test_after_a_cancelled_switch_send_is_refused_and_nothing_goes(repo, host, monkeypatch, tmp_path):
+    project, bare = repo
+    widget, panel = _ready(repo, host)
+    other, other_bare = _second_project(tmp_path)
+    _write(other, "state/v_900.json")
+    heads = _git(bare, "rev-parse", "HEAD"), _git(other_bare, "rev-parse", "HEAD")
+    _process_folder_is(monkeypatch, other)
+    asked = _answer(monkeypatch, YES)
+
+    _send_button(widget).click()
+    assert _until(panel.idle)
+
+    assert asked == [], "the question of one project, the push of another"
+    assert (_git(bare, "rev-parse", "HEAD"), _git(other_bare, "rev-parse", "HEAD")) == heads
+    assert i18n.t("projectStillShows").format(old=project, new=other) in [said for said, _level in widget._status_strip.said]
+
+
+def test_after_a_cancelled_switch_the_rows_stay_this_windows(repo, host, monkeypatch, tmp_path):
+    """A rebuild, with or without a fresh read, paints this window's folder; no read of either."""
+    widget, panel = _painted(repo, host)
+    other, _other_bare = _second_project(tmp_path)
+    _write(other, "state/v_900.json")
+    starts = []
+    monkeypatch.setattr(project_repo, "read", lambda p: starts.append(p) or {})
+    _process_folder_is(monkeypatch, other)
+
+    panel.show(reuse=True)
+    assert _rows(widget)[i18n.t("gitChanges")] == i18n.t("gitClean"), _rows(widget)
+    panel.show()
+    assert _rows(widget)[i18n.t("gitChanges")] == i18n.t("gitClean"), _rows(widget)
+    assert _until(panel.idle)
+    _until(lambda: False, 0.2)
+
+    assert starts == [], "a window pinned to one folder reads neither after the switch"
+
+
+def test_a_read_landing_after_a_cancelled_switch_is_the_windows_own(repo, host, monkeypatch, tmp_path):
+    project, _bare = repo
+    release, entered = threading.Event(), threading.Event()
+    real = project_repo.read
+
+    def held(where):
+        entered.set()
+        assert release.wait(15)
+        return real(where)
+
+    monkeypatch.setattr(project_repo, "read", held)
+    widget, panel = host()
+    panel.show()
+    assert _until(entered.is_set)
+    other, _other_bare = _second_project(tmp_path)
+    _process_folder_is(monkeypatch, other)
+    release.set()
+
+    assert _until(panel.idle)
+    assert panel._read is not None and panel._read_of == project
+
+
+def test_a_switch_drops_the_stored_read(repo, host, monkeypatch, tmp_path):
+    widget, panel = _ready(repo, host)
+    other, _other_bare = _second_project(tmp_path)
+    _process_folder_is(monkeypatch, other)
+    widget._built_on = other
+
+    panel.show()
+
+    assert _send_button(widget) is None, "a Send button holding the old project's read"
+    assert _rows(widget)[i18n.t("gitChanges")] == i18n.t("gitClean"), _rows(widget)
+    assert _until(panel.idle)
+
+
+def test_a_switch_during_a_send_reads_nothing_of_the_new_folder(repo, host, monkeypatch, tmp_path):
+    widget, panel = _ready(repo, host)
+    other, _other_bare = _second_project(tmp_path)
+    starts = []
+    real_read = project_repo.read
+    release, entered = _held_save(monkeypatch)  # no commit, so no event of `.git` starts a read either
+    monkeypatch.setattr(project_repo, "read", lambda p: starts.append(Path(p)) or real_read(p))
+    _answer(monkeypatch, YES)
+    _send_button(widget).click()
+    assert _until(entered.is_set)
+
+    _process_folder_is(monkeypatch, other)
+    widget._built_on = other
+    release.set()
+
+    assert _until(lambda: panel._send is None and panel.idle(), 15), widget._status_strip.said
+    _until(lambda: False, 0.2)
+    assert other not in starts, starts
+
+
+# ── (f) A job that raises, a shape nobody expected ───────────────────────────────────────────────
+
+def test_a_worker_raising_in_a_send_says_it_and_gives_the_button_back(repo, host, monkeypatch):
+    widget, panel = _ready(repo, host)
+    _answer(monkeypatch, YES)
+
+    def boom(_where, dry_run=False):
+        raise RuntimeError("the method fell over")
+
+    monkeypatch.setattr(project_repo, "save", boom)
+    _send_button(widget).click()
+
+    assert _until(lambda: panel._send is None and panel.idle(), 8), (panel._send, widget._status_strip.said)
+    assert "the method fell over" in _strip(widget) and widget._status_strip.said[-1][1] == "warn"
+    assert _send_button(widget).isEnabled()
+
+
+def test_a_read_that_raises_says_it_could_not_read(repo, host, monkeypatch):
+    def boom(_where):
+        raise RuntimeError("the method fell over")
+
+    monkeypatch.setattr(project_repo, "read", boom)
+    widget, panel = _painted(repo, host)
+
+    assert _state(widget, panel) == ("wait", i18n.t("gitSubUnread"))
+    assert "the method fell over" in widget._project_section._sub_label.toolTip()
+
+
+def test_an_answer_of_an_unexpected_shape_is_could_not_read(repo, host, monkeypatch):
+    _status_stub(monkeypatch, ahead=[1, 2])
+    widget, panel = _painted(repo, host)
+
+    assert _state(widget, panel) == ("wait", i18n.t("gitSubUnread"))
+
+
+# ── (g) The read refreshes what the header stands on ─────────────────────────────────────────────
+
+def test_a_sessions_checkout_moves_the_header(repo, host):
+    project, _bare = repo
+    widget, panel = _painted(repo, host)
+    assert _state(widget, panel)[0] == "done"
+
+    _git(project, "checkout", "-q", "--detach")
+
+    assert _until(lambda: _state(widget, panel) == ("wait", i18n.t("gitSubDetached"))), _state(widget, panel)
+
+
+def test_a_remote_added_outside_the_window_reaches_the_rows(repo, host):
+    """`gh repo create --push`, what a session runs: the row said «none» until a reload."""
+    project, bare = repo
+    _git(project, "remote", "remove", "origin")
+    widget, panel = _painted(repo, host)
+    assert _rows(widget)[i18n.t("gitBackup")] == i18n.t("gitNone"), _rows(widget)
+
+    _git(project, "remote", "add", "origin", str(bare))
+    panel.request()
+
+    assert _until(lambda: panel.idle() and _rows(widget)[i18n.t("gitBackup")] != i18n.t("gitNone")), _rows(widget)
+
+
+def test_the_question_names_the_remote_of_the_last_read(repo, host, monkeypatch, tmp_path):
+    project, bare = repo
+    widget, panel = _ready(repo, host)
+    other_bare = tmp_path / "moved-copy.git"  # the same history: a remote that moved, not a pull to make
+    subprocess.run(["git", "clone", "-q", "--bare", str(bare), str(other_bare)], check=True, capture_output=True, timeout=60)
+    _git(project, "remote", "set-url", "origin", str(other_bare))
+    panel.request()
+    assert _until(lambda: panel.idle() and str(panel._read.remote) == str(other_bare))
+    asked = _answer(monkeypatch, NO)
+
+    _send_button(widget).click()
+
+    assert asked and str(other_bare)[:-4] in asked[0], asked
+
+
+def test_a_remote_repointed_after_the_yes_is_not_sent_to(repo, host, monkeypatch, tmp_path):
+    project, bare = repo
+    head = _git(bare, "rev-parse", "HEAD")
+    widget, panel = _ready(repo, host)
+    empty = tmp_path / "elsewhere.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(empty)], check=True, capture_output=True, timeout=60)
+
+    def yes_and_repoint(_box):
+        _git(project, "remote", "set-url", "origin", str(empty))
+        return YES
+
+    _answer(monkeypatch, yes_and_repoint)
+    _send_button(widget).click()
+
+    assert _until(lambda: i18n.t("gitSendChanged") in _strip(widget)), widget._status_strip.said
+    assert _git(bare, "rev-parse", "HEAD") == head
+    assert _git(empty, "rev-list", "--all", "--count") == "0"
+
+
+# ── (h) What the question promises ───────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("rewrite", [
+    lambda path: path.write_text("rewritten, longer than it was\n", encoding="utf-8"),
+    lambda path: os.utime(path, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000)),
+], ids=["size", "mtime"])
+def test_a_named_file_rewritten_after_the_question_is_not_sent(repo, host, monkeypatch, rewrite):
+    project, bare = repo
+    head = _git(bare, "rev-parse", "HEAD")
+    widget, panel = _ready(repo, host)
+
+    def yes_and_rewrite(_box):
+        rewrite(project / "state/v_020.json")
+        return YES
+
+    _answer(monkeypatch, yes_and_rewrite)
+    _send_button(widget).click()
+
+    assert _until(lambda: i18n.t("gitSendChanged") in _strip(widget)), widget._status_strip.said
+    assert _git(bare, "rev-parse", "HEAD") == head
+
+
+def test_the_question_says_how_many_names_it_left_out_and_what_it_cannot_list():
+    answer = {"repo": True, "remote": "git@github.com:o/car.git",
+              "changes": {"tuning": [f"m{i}.txt" for i in range(30)], "housekeeping": []},
+              "ahead": [{"hash": f"{i:040d}", "time": "2026-11-01T10:00:00+00:00", "subject": f"c{i}"} for i in range(14)],
+              "remote_head": None, "sends": "person"}
+
+    text = github_view.confirm_text(github_view.from_status(answer))
+
+    assert "github.com/o/car" in text
+    assert "m0.txt" in text and "m29.txt" not in text
+    assert i18n.t("gitTipMore").format(n=18) in text
+    assert i18n.t("gitTipMore").format(n=2) in text
+    assert i18n.t("gitSendLeftOut") in text
+
+
+def test_a_commit_made_after_the_yes_is_not_sent(repo, host, monkeypatch):
+    project, bare = repo
+    head = _git(bare, "rev-parse", "HEAD")
+    widget, panel = _ready(repo, host)
+
+    def yes_and_commit(_box):
+        _commit(project, "docs/late.md", "made after the question")
+        return YES
+
+    _answer(monkeypatch, yes_and_commit)
+    _send_button(widget).click()
+
+    assert _until(lambda: panel._send is None and panel.idle(), 15), widget._status_strip.said
+    assert _git(bare, "rev-parse", "HEAD") == head, _on_remote(bare)
+
+
+def test_a_failed_recheck_sends_nothing_and_says_why(repo, host, monkeypatch):
+    _project, bare = repo
+    head = _git(bare, "rev-parse", "HEAD")
+    widget, panel = _ready(repo, host)
+    monkeypatch.setattr(project_repo, "backup_status", lambda _p: project_repo.RepoResult(False, "the method broke"))
+    _answer(monkeypatch, YES)
+
+    _send_button(widget).click()
+
+    assert _until(lambda: panel._send is None and panel.idle(), 15), widget._status_strip.said
+    assert _git(bare, "rev-parse", "HEAD") == head
+    assert "the method broke" in _strip(widget)
+
+
+# ── (i) Closing during a send ────────────────────────────────────────────────────────────────────
+
+def _held_save(monkeypatch):
+    release, entered = threading.Event(), threading.Event()
+
+    def held(_where, dry_run=False):
+        entered.set()
+        assert release.wait(20)
+        return project_repo.RepoResult(True, "sent to origin: something")
+
+    monkeypatch.setattr(project_repo, "save", held)
+    return release, entered
+
+
+def test_closing_the_real_window_during_a_send_asks_first(repo, monkeypatch):
+    """Keep waiting keeps the window and the send, and the outcome is still said."""
+    from tests.test_project_repo import _window
+
+    project, _bare = repo
+    _write(project, "state/v_030.json")
+    window = _window(project, monkeypatch)
+    window.show()
+    panel = window._github
+    release, entered = _held_save(monkeypatch)
+    try:
+        window._set_project_params(None)
+        assert _until(lambda: _settled(panel) and _send_button(window) is not None)
+        asked = _answer(monkeypatch, YES, NO)
+        _send_button(window).click()
+        assert _until(entered.is_set)
+
+        assert window.close() is False, "a send under way is asked about"
+        assert len(asked) == 2 and i18n.t("gitSendCloseAsk") in asked[1], asked
+        assert window.isVisible() and not window._closing
+
+        release.set()
+        assert _until(lambda: panel._send is None and panel.idle(), 10)
+        assert "sent to origin" in window._status_strip.text()
+    finally:
+        release.set()
+        window._github.stop()
+        for worker in list(qt_shutdown.live()) + list(qt_shutdown.detached()):
+            worker.wait(20000)
+
+
+def test_a_close_answered_yes_lets_the_window_go(repo, host, monkeypatch):
+    widget, panel = _ready(repo, host)
+    release, entered = _held_save(monkeypatch)
+    asked = _answer(monkeypatch, YES, YES)
+    _send_button(widget).click()
+    assert _until(entered.is_set)
+
+    assert project_github.may_close(widget) is True
+    assert len(asked) == 2
+    release.set()
+
+
+def test_no_question_at_close_with_no_send_under_way(repo, host, monkeypatch):
+    widget, panel = _ready(repo, host)
+    asked = _answer(monkeypatch)
+
+    assert project_github.may_close(widget) is True
+    assert asked == []
+
+
+def test_a_close_during_the_status_starts_no_push(repo, host, monkeypatch):
+    project, bare = repo
+    head = _git(bare, "rev-parse", "HEAD")
+    widget, panel = _ready(repo, host)
+    real, release, entered, saves = project_repo.backup_status, threading.Event(), threading.Event(), []
+
+    def held(where):
+        entered.set()
+        assert release.wait(20)
+        return real(where)
+
+    monkeypatch.setattr(project_repo, "backup_status", held)
+    monkeypatch.setattr(project_repo, "save", lambda *a, **k: saves.append(a) or project_repo.RepoResult(True, "x"))
+    monkeypatch.setattr(qt_shutdown, "QUIT_WAIT_MS", 50)
+    _answer(monkeypatch, YES)
+    _send_button(widget).click()
+    assert _until(entered.is_set)
+
+    panel.stop()
+    release.set()
+
+    assert _until(lambda: not qt_shutdown.detached() and not qt_shutdown.live())
+    assert saves == [] and _git(bare, "rev-parse", "HEAD") == head
+
+
+def test_stopping_mid_send_does_not_sit_on_the_thread(repo, host, monkeypatch):
+    """The push can take minutes; the wait froze the window on its way out for nothing."""
+    widget, panel = _ready(repo, host)
+    release, entered = _held_save(monkeypatch)
+    monkeypatch.setattr(qt_shutdown, "QUIT_WAIT_MS", 4000)
+    _answer(monkeypatch, YES)
+    _send_button(widget).click()
+    assert _until(entered.is_set)
+
+    began = time.monotonic()
+    panel.stop()
+    took = time.monotonic() - began
+    release.set()
+
+    assert took < 2, took
+
+
+# ── (j) The button's word and its reason ─────────────────────────────────────────────────────────
+
+def test_the_button_says_sending_only_while_sending(repo, host, monkeypatch):
+    widget, panel = _ready(repo, host)
+    seen = []
+
+    def repainted_during_the_question(_box):
+        panel.show(reuse=True)  # a window action repaints the rows under the open question
+        seen.append(_send_button(widget).text())
+        return NO
+
+    _answer(monkeypatch, repainted_during_the_question)
+    _send_button(widget).click()
+
+    assert seen == [i18n.t("gitSendBtn")], seen
+
+
+def test_a_yes_during_a_read_waits_without_saying_sending_and_still_sends(repo, host, monkeypatch):
+    project, bare = repo
+    before = set(_on_remote(bare))
+    widget, panel = _ready(repo, host)
+    release, entered = threading.Event(), threading.Event()
+    real = project_repo.read
+
+    def held(where):
+        entered.set()
+        assert release.wait(15)
+        return real(where)
+
+    monkeypatch.setattr(project_repo, "read", held)
+    panel.request()
+    assert _until(entered.is_set)
+    _answer(monkeypatch, YES)
+
+    _send_button(widget).click()
+    queued = _send_button(widget)
+    assert queued.text() == i18n.t("gitSendBtn") and not queued.isEnabled(), queued.text()
+
+    release.set()
+    assert _until(lambda: _send_button(widget) is None and panel.idle(), 8), (panel._send, widget._status_strip.said)
+    assert set(_on_remote(bare)) == before | {"state/v_020.json", "process/journal.jsonl"}
+
+
+def test_send_is_off_with_the_reason_when_a_pull_comes_first(repo, host, monkeypatch, tmp_path):
+    project, bare = repo
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", str(bare), str(other)], check=True, capture_output=True, timeout=60)
+    _commit(other, "from-elsewhere.txt")
+    _git(other, "push", "-q", "origin", "HEAD")
+    _write(project, "state/v_031.json")
+
+    widget, panel = host()
+    panel.show()
+    assert _until(lambda: _settled(panel) and _send_button(widget) is not None), (_rows(widget), panel._read)
+
+    button = _send_button(widget)
+    assert not button.isEnabled()
+    assert button.hover_tip._text == i18n.t("gitSendTipPull").format(n=1)

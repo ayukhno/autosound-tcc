@@ -5584,9 +5584,7 @@ class MainWindow(QMainWindow):
             gate.cancel()
         qt_shutdown.stop_or_detach(gate, 3000)
         qt_shutdown.stop_or_detach(getattr(self, "_capture_check", None), 5000)
-        github = getattr(self, "_github", None)  # a send past the wait goes on, handed over (#235)
-        if github is not None:
-            github.stop()
+        project_github.stop_panel(self)  # a send still running goes on, handed over (#235)
         menu_registry.stop_workers(self)  # a feature's own work: Codex's install or sign-in (#181)
         if getattr(self, "_gen_check", None) is not None:
             self._gen_check.stop()  # the main AI's check (tcc#222)
@@ -5647,6 +5645,8 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 — a diagnostic must never be able to block a close
             pass
 
+        if not project_github.may_close(self):  # a send still running is asked about first (#235)
+            return event.ignore()
         # A live session holds things only the model can write down. Quitting used to shut it down
         # mid-thought without a word (user, 2026-08-07): whatever it had not yet put on disk was
         # gone, and nothing said so. Asking rather than saving on its own is deliberate — the save
