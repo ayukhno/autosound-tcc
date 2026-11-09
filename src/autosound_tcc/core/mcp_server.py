@@ -1736,7 +1736,8 @@ class _TokenGuard:
             # and a decode that raised was a 500 instead of a refusal.
             headers = {k.lower(): v for k, v in scope.get("headers") or []}
             presented = headers.get(_TOKEN_HEADER.encode("ascii"))
-            if presented is None or not hmac.compare_digest(presented, self.token.encode("utf-8")):
+            # Empty counts as absent: two empty strings compare equal, whatever got the key emptied.
+            if not presented or not hmac.compare_digest(presented, self.token.encode("utf-8")):
                 await send(
                     {
                         "type": "http.response.start",

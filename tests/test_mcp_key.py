@@ -10,6 +10,7 @@ No `QWidget` here: the strip and the window's host are stand-ins, so nothing can
 
 from __future__ import annotations
 
+import asyncio
 import errno
 import http.client
 import importlib
@@ -19,14 +20,18 @@ import os
 import socket
 import stat
 import subprocess
+import tempfile
 import threading
 import tracemalloc
 import urllib.error
 import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 
 import pytest
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
 from autosound_tcc.core import app_log, config, mcp_key, mcp_server, own_store, vendor_loader
 from autosound_tcc.core.mcp_server import TccMcpServer
@@ -60,8 +65,8 @@ def _spare_port() -> int:
         return sock.getsockname()[1]
 
 
-def _server(project: Path) -> TccMcpServer:
-    return TccMcpServer(project_dir=project, preferred_port=_spare_port())
+def _server(project: Path, port: Optional[int] = None) -> TccMcpServer:
+    return TccMcpServer(project_dir=project, preferred_port=port or _spare_port())
 
 
 def _answer(server: TccMcpServer, token) -> int:
@@ -78,6 +83,34 @@ def _answer(server: TccMcpServer, token) -> int:
         return exc.code
 
 
+def _status_in(exc: BaseException) -> Optional[int]:
+    """The HTTP status an `httpx` error inside `exc` carries: the client raises them in groups."""
+    if isinstance(exc, BaseExceptionGroup):
+        return next(filter(None, map(_status_in, exc.exceptions)), None)
+    return getattr(getattr(exc, "response", None), "status_code", None)
+
+
+def _client(server: TccMcpServer, token) -> int:
+    """How a real `mcp` client fares, as a terminal's session would: 200 when `list_tools` answered
+    with tools, else the HTTP status that stopped it. `{}` to the bare URL proves only «not 401»;
+    this is the handshake and a real call. Whatever else goes wrong is raised."""
+    headers = {} if token is None else {"X-TCC-Token": token}
+
+    async def listed() -> int:
+        async with asyncio.timeout(30):
+            async with streamablehttp_client(server.url, headers=headers) as (read, write, _sid):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    return len((await session.list_tools()).tools)
+
+    try:
+        return 200 if asyncio.run(listed()) else 0
+    except BaseException as exc:  # noqa: BLE001 — the client's errors come as groups
+        if (status := _status_in(exc)) is None:
+            raise
+        return status
+
+
 def _advertised(project: Path):
     return json.loads((project / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"].get("tcc")
 
@@ -88,12 +121,17 @@ def _git(project: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 @pytest.fixture
-def repo(folder, tmp_path, monkeypatch) -> Path:
-    """A real repository in `folder`, which this machine's own git settings cannot speak for: a
-    global excludes file naming `.tcc/` would make a project git does not ignore look ignored."""
+def isolated_git(tmp_path, monkeypatch) -> None:
+    """This machine's own git settings cannot speak for a project here: a global excludes file
+    naming `.tcc/` would make a project git does not ignore look ignored."""
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "no-global-gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-xdg"))
+
+
+@pytest.fixture
+def repo(folder, isolated_git) -> Path:
+    """A real repository in `folder`."""
     assert _git(folder, "init", "-q").returncode == 0
     return folder
 
@@ -120,22 +158,66 @@ def test_another_folder_has_another_key(tmp_path):
     assert _key_file(tmp_path / "b").read_text(encoding="utf-8").strip() == b.token
 
 
-def test_a_session_s_key_still_opens_the_restarted_server_and_nothing_else_does(folder):
-    """The defect itself, as the terminal's session meets it, and `_TokenGuard` over real HTTP."""
-    before = _server(folder)
+def test_a_real_client_is_refused_then_let_in_across_a_restart_and_a_reset(folder):
+    """The defect itself, as the terminal's session meets it, over real HTTP with a real client: a
+    restart on the same port with the same key lets a fresh client straight in, and a reset does
+    what it says. Asserts the handshake and `list_tools`, not merely «not 401»."""
+    port = _spare_port()
+    before = _server(folder, port)
     before.start()
-    held_by_the_session = before.token
-    before.stop()
+    try:
+        held_by_the_session = before.token
+        assert _client(before, None) == 401, "no key at all was let through"
+        assert _client(before, "not-" + held_by_the_session) == 401, "a wrong key was let through"
+        assert _client(before, held_by_the_session) == 200, "the right key did not reach the tools"
+    finally:
+        before.stop()
 
-    after = _server(folder)
+    after = _server(folder, port)
     after.start()
     try:
-        assert _answer(after, held_by_the_session) != 401, "the session's key was refused"
-        assert _answer(after, None) == 401, "no key at all was let through"
-        assert _answer(after, "not-" + held_by_the_session) == 401, "a wrong key was let through"
+        assert after.port == port and after.token == held_by_the_session
+        assert _client(after, held_by_the_session) == 200, "the session's key was refused"
+        assert _client(after, None) == 401
         assert _answer(after, "") == 401, "an empty key was let through"
+
+        after.reset_token()
+
+        assert _client(after, held_by_the_session) == 401, "the revoked key still opens it"
+        assert _client(after, after.token) == 200, "the new key does not"
     finally:
         after.stop()
+
+
+def test_an_empty_header_opens_no_guard_even_one_holding_an_empty_key():
+    """`Key("")` never comes out (`mcp_key`), and this is what stands behind that if one did."""
+    reached: list[int] = []
+
+    async def inner(_scope, _receive, _send) -> None:
+        reached.append(1)
+
+    async def send(_message) -> None:
+        pass
+
+    guard = mcp_server._TokenGuard(inner, "")
+    asyncio.run(guard({"type": "http", "headers": [(b"x-tcc-token", b"")]}, None, send))
+
+    assert reached == []
+
+
+def test_a_key_file_another_tcc_left_empty_is_never_handed_out(folder, monkeypatch):
+    """`_made_first` lost the race and reads the winner's file, which on a folder with no hard links
+    can be empty for a moment. An empty key would be a guard an empty header opens."""
+    def beaten(path, _text, **_kwargs):
+        Path(path).parent.mkdir(exist_ok=True)
+        Path(path).write_bytes(b"")
+        raise FileExistsError(errno.EEXIST, "File exists", str(path))
+
+    monkeypatch.setattr(own_store, "write_secret", beaten)
+
+    key = mcp_key.load(folder)
+
+    assert len(key.token) >= 32 and key.note == "run_only" and key.problem
 
 
 @pytest.mark.parametrize("value", [b"\xff\xfe not ascii", "тест".encode("utf-8")],
@@ -198,9 +280,9 @@ def test_a_reset_that_cannot_be_saved_still_changes_the_key_and_says_so(folder):
 # ---- never committed, never carried ----
 
 
-def test_the_key_is_ignored_by_git_before_it_is_written(folder, monkeypatch):
+def test_the_key_is_ignored_by_git_before_it_is_written(repo, monkeypatch):
     """Looked at the moment the file lands: `git status` a second later cannot tell the order."""
-    assert _git(folder, "init", "-q").returncode == 0
+    folder = repo
     (folder / ".gitignore").write_text("*.log\n", encoding="utf-8")
     landed: list[bool] = []
 
@@ -395,10 +477,9 @@ def test_a_git_that_cannot_answer_is_no_git_at_all(repo, monkeypatch, answer):
 
 
 @pytest.mark.parametrize("broken", ["stale-file", "empty-folder"])
-def test_a_git_folder_git_cannot_read_is_no_git_at_all(folder, tmp_path, monkeypatch, broken):
+def test_a_git_folder_git_cannot_read_is_no_git_at_all(folder, tmp_path, monkeypatch, isolated_git,
+                                                       broken):
     """The real thing, not a stand-in for it: git itself exits 128 here."""
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "no-global-gitconfig"))
-    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
     if broken == "stale-file":
         (folder / ".git").write_text("gitdir: /nowhere/at/all\n", encoding="utf-8")
@@ -452,15 +533,28 @@ def test_with_no_git_on_the_machine_the_text_of_gitignore_is_all_there_is(repo, 
     assert server.key_note == "made" and _key_file(repo).is_file()
 
 
-def test_a_temp_file_left_by_a_kill_is_ignored_too(repo):
-    """`.mcp.json` is written through `.mcp-XXXX.tmp` in the project's root: killed between the
-    write and the rename, that file holds the key, and only `.tcc/` and `.mcp.json` were named."""
-    TccMcpServer(project_dir=repo)
+def test_a_temp_file_left_by_a_kill_is_ignored_too(repo, monkeypatch):
+    """`.mcp.json` is written through a temp file in the project's root: killed between the write
+    and the rename, that file holds the key. The name the writer really used, not one like it."""
+    made: list[Path] = []
+    real = tempfile.mkstemp
 
-    assert _git(repo, "check-ignore", "-q", ".mcp-abc123.tmp").returncode == 0
+    def spy(*args, **kwargs):
+        handle, name = real(*args, **kwargs)
+        made.append(Path(name))
+        return handle, name
+
+    monkeypatch.setattr(tempfile, "mkstemp", spy)
+
+    mcp_server.write_mcp_config(repo, 8765, "t" * 40)
+
+    in_the_root = [path.name for path in made if path.parent == repo]
+    assert in_the_root
+    for name in in_the_root:
+        assert _git(repo, "check-ignore", "-q", name).returncode == 0, name
 
 
-def test_the_method_s_git_init_does_not_take_the_key(folder):
+def test_the_method_s_git_init_does_not_take_the_key(folder, isolated_git):
     """`project_repo.init` is `git add -A` on the folder (TCC's Git backup, and a seed's last act),
     and it leaves an existing `.gitignore` alone, so `.tcc/` must have been added to it already."""
     if not vendor_loader.is_available():
