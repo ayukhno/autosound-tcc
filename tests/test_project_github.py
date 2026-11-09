@@ -604,6 +604,9 @@ def test_the_status_is_whole_at_the_narrowest_column_in_every_language(repo, mon
     window = _window(project, monkeypatch)
     window.show()
     panel = window._github
+    # The panel's own read answers late on a Windows runner and wrote «backed up» over a sub being tried.
+    assert _until(lambda: panel.idle() and panel._read is not None)
+    panel._timer.stop()
     window._settings.setValue(font_looks.KEY, font_looks.TYPEWRITER)
     window._restyle()
     section = window._project_section
