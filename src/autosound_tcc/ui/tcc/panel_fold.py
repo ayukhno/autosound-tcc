@@ -77,16 +77,13 @@ class PanelFold(QObject):
         shell_layout.addWidget(body)
         layout.insertWidget(index, shell, stretch)
 
+        room_before = head.layout().minimumSize().width()
         arrow = QToolButton(head)
         arrow.setProperty("class", "panel-fold")
         arrow.setAutoRaise(True)
         arrow.setCursor(Qt.CursorShape.PointingHandCursor)
         attach_tip(arrow)
         head.layout().insertWidget(0, arrow)
-        if gives_ground is not None:
-            room = arrow.sizeHint().width() + head.layout().spacing()
-            gives_ground.set_min_width(max(0, gives_ground.minimumWidth() - room))
-
         card = _Card(name, frame, shell, arrow)
         arrow.clicked.connect(lambda: self._toggle(card))
         self._cards.append(card)
@@ -98,6 +95,10 @@ class PanelFold(QObject):
         if saved and not stands:
             self._settings.setValue(_folded_key(name), False)
         self._show_folded(card, stands)
+        if gives_ground is not None:  # measured once the arrow wears its glyph: a style's own spacing and font decide
+            head.layout().invalidate()
+            room = head.layout().minimumSize().width() - room_before
+            gives_ground.set_min_width(max(0, gives_ground.minimumWidth() - room))
 
     def arrow(self, name: str) -> QToolButton:
         return self._card(name).arrow
