@@ -939,7 +939,8 @@ def test_withdrawing_an_advertisement_that_is_not_there_is_not_an_error(
     TccMcpServer(project_dir=tmp_path).stop()  # and a quit's own withdrawal
 
     assert path.read_bytes() == damaged, "left where it is, byte for byte"
-    assert not list(tmp_path.glob(".tcc/*")), "nothing under .tcc/"
+    assert [p.name for p in tmp_path.glob(".tcc/*")] == ["mcp-token"], (
+        "nothing moved under .tcc/: only the key the server made for itself (#247)")
     assert app_log_told == [], "nothing said: at quit the strip is unhooked already"
     assert any(str(path) in r.getMessage() for r in app_log_warnings), "logged"
 
@@ -1045,7 +1046,7 @@ def test_a_withdrawal_reads_an_mcp_json_saved_with_a_byte_order_mark(tmp_path, m
     body = json.dumps({"mcpServers": {"theirs": theirs, "tcc": ours}}, indent=2)
     path.write_bytes(b"\xef\xbb\xbf" + body.encode("utf-8"))
 
-    mcp_server.forget_mcp_config(tmp_path, port=8765, token="tok")
+    mcp_server.forget_mcp_config(tmp_path, port=8765)
 
     written = path.read_bytes()
     assert b'"tcc"' not in written, "this instance's entry is taken out"
@@ -1151,7 +1152,7 @@ def test_a_lone_surrogate_in_the_user_s_config_is_written_escaped(tmp_path, monk
 def test_a_stop_survives_an_advertisement_it_cannot_withdraw(tmp_path, monkeypatch):
     """`stop()` runs on the way out: whatever withdrawing raises is logged there, not let through
     into the window's close."""
-    def broken(project_dir, port=None, token=None):
+    def broken(project_dir, port=None):
         raise ValueError("not this time")
 
     monkeypatch.setattr(mcp_server, "forget_mcp_config", broken)
@@ -3764,7 +3765,7 @@ def test_an_mcp_servers_of_null_is_taken_for_absent(tmp_path, monkeypatch, app_l
 def test_one_instance_s_stop_leaves_another_instance_s_advertisement(tmp_path, monkeypatch):
     """Two TCCs on one project folder share the one `"tcc"` key. B's start wrote over A's entry,
     and A's quit then took B's out: a CLI started in the folder afterwards found no server while B
-    was still serving one. A's stop takes out only the entry that names its own port and token."""
+    was still serving one. A's stop takes out only the entry that names its own port."""
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     path = tmp_path / ".mcp.json"
     a = TccMcpServer(project_dir=tmp_path, preferred_port=8930)
@@ -3787,20 +3788,17 @@ def test_one_instance_s_stop_leaves_another_instance_s_advertisement(tmp_path, m
         "and B's own stop takes it")
 
 
-@pytest.mark.parametrize("port, token", [(8766, "tok"), (8765, "not-tok")],
-                         ids=["another-port", "another-token"])
-def test_a_withdrawal_takes_only_the_entry_that_names_its_port_and_token(tmp_path, monkeypatch,
-                                                                         port, token):
-    """Both halves are compared, the token too: a server that stops gives its port back before it
-    withdraws its entry, and the next TCC can take that port and write its own entry in between."""
+def test_a_withdrawal_takes_only_the_entry_that_names_its_port(tmp_path, monkeypatch):
+    """The port, not the token: two TCCs on one folder hold one key (#247), so an entry naming
+    another port is another instance's whatever key it carries."""
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     path = write_mcp_config(tmp_path, 8765, "tok")
 
-    mcp_server.forget_mcp_config(tmp_path, port=port, token=token)
+    mcp_server.forget_mcp_config(tmp_path, port=8766)
     assert "tcc" in json.loads(path.read_text(encoding="utf-8"))["mcpServers"], (
         "another instance's entry stays")
 
-    mcp_server.forget_mcp_config(tmp_path, port=8765, token="tok")
+    mcp_server.forget_mcp_config(tmp_path, port=8765)
     assert "tcc" not in json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
 
 
@@ -3848,7 +3846,7 @@ def test_an_mcp_json_that_cannot_be_read_is_not_written_over(tmp_path, monkeypat
     try:
         with pytest.raises(OSError) as refused:
             write_mcp_config(tmp_path, 8765, "tok")
-        mcp_server.forget_mcp_config(tmp_path, port=8765, token="tok")
+        mcp_server.forget_mcp_config(tmp_path, port=8765)
     finally:
         path.chmod(0o600)
 
@@ -3872,7 +3870,7 @@ def test_an_mcp_json_that_cannot_be_opened_is_refused_on_every_platform(tmp_path
     with pytest.raises(OSError) as refused:
         write_mcp_config(tmp_path, 8765, "tok")
     assert refused.type is own_store.StoreUnreadable, "refused as the store's own failure"
-    mcp_server.forget_mcp_config(tmp_path, port=8765, token="tok")
+    mcp_server.forget_mcp_config(tmp_path, port=8765)
 
     assert (path / "inside").read_text(encoding="utf-8") == "kept", "never written over"
     assert not list(tmp_path.glob(".mcp*.tmp")) and not list(tmp_path.rglob("*.corrupt-*")), (

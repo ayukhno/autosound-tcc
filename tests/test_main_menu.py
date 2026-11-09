@@ -13,7 +13,7 @@ from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
 from PySide6.QtGui import QDesktopServices  # noqa: E402
 from PySide6.QtWidgets import QApplication, QToolButton  # noqa: E402
 
-from autosound_tcc.ui.tcc import i18n, main_menu, menu_registry, rounded_tooltip  # noqa: E402
+from autosound_tcc.ui.tcc import i18n, main_menu, mcp_view, menu_registry, rounded_tooltip  # noqa: E402
 from autosound_tcc.ui.tcc.main_menu import MainMenu  # noqa: E402
 from autosound_tcc.ui.tcc.menu_registry import MenuEntry  # noqa: E402
 from tests import _menu_pin  # noqa: E402
@@ -132,6 +132,17 @@ def test_the_window_s_lines_draw_today_s_menu():
     drawn = menu.render()
     assert _menu_pin.rows_of(drawn) == _menu_pin.pinned_rows()
     assert menu.button.menu() is drawn and drawn.property("class") == "support-menu"
+
+
+def test_the_reset_key_line_is_drawn_after_the_reviewer_s_key():
+    """#247. It comes from a provider, which the pin above does not cover: an `after=` that named
+    no line would put it somewhere else with nothing said."""
+    entries = menu_registry.window_entries() + mcp_view.menu_entries()
+    drawn = _menu(entries).render()
+
+    texts = [action.text() for action in _every_action(drawn)]
+    assert texts[texts.index(i18n.t("menuReviewerKey")) + 1] == i18n.t("menuMcpKeyReset")
+    assert menu_registry.problems(entries, set(i18n.T["en"])) == []
 
 
 def _every_action(menu):

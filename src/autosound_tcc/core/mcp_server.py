@@ -57,7 +57,6 @@ import functools
 import json
 import logging
 import os
-import secrets
 import socket
 import stat
 import tempfile
@@ -76,6 +75,7 @@ from autosound_tcc.core import (
     car_library,
     config,
     critic,
+    mcp_key,
     model_choices,
     own_store,
     process_writer,
@@ -1727,12 +1727,12 @@ class _TokenGuard:
 
     def __init__(self, app: Any, token: str) -> None:
         self._app = app
-        self._token = token
+        self.token = token  # replaced by a reset, while serving: one reference swapped, no lock
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         if scope.get("type") == "http":
             headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers") or []}
-            if headers.get(_TOKEN_HEADER) != self._token:
+            if headers.get(_TOKEN_HEADER) != self.token:
                 await send(
                     {
                         "type": "http.response.start",
@@ -1770,46 +1770,6 @@ _CONFIG_WRITE_TRIES = 3
 _CONFIG_WRITE_PAUSE_S = 0.3
 
 
-#: What must never travel out of a project folder. `.mcp.json` carries the session's token;
-#: `.tcc/` is TCC's own per-project state, including the picked models and the packages sent to
-#: the reviewer.
-_IGNORE_LINES = (".mcp.json", ".tcc/")
-
-
-def _teach_git_to_ignore(project_dir: Path) -> None:
-    """Add our two lines to the project's `.gitignore`, keeping everything already in it.
-
-    The method's README tells the user to back this folder up to a private GitHub, and TCC is what
-    puts a token in it — so TCC is what says it must not travel (HUB-026). Measured on the user's
-    machine 2026-09-06: of 11 such files, 9 were outside git and 2 ignored, by hand.
-
-    Merged, never clobbered — the same rule `.mcp.json` itself follows: the file is the user's.
-    Idempotent, because a server restarts many times in a session and a file that grows a line
-    each time is a file somebody eventually deletes in annoyance. Never raises: a project whose
-    `.gitignore` cannot be written is a project that still deserves a running server.
-    """
-    path = Path(project_dir) / ".gitignore"
-    try:
-        existing = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        existing = ""
-    except (OSError, ValueError) as exc:  # unreadable, or not UTF-8: a file never rewritten blind
-        app_log.logger().warning("could not read %s (%s: %s); TCC's lines are not added to it",
-                                 path, type(exc).__name__, exc)
-        return
-    present = {line.strip() for line in existing.splitlines()}
-    missing = [line for line in _IGNORE_LINES if line not in present]
-    if not missing:
-        return
-    block = "" if not existing or existing.endswith("\n") else "\n"
-    block += "\n# TCC: the session's token and TCC's own project state — neither travels.\n"
-    block += "".join(f"{line}\n" for line in missing)
-    try:
-        path.write_text(existing + block, encoding="utf-8")
-    except OSError as exc:
-        app_log.logger().warning("could not add %s to %s: %s", ", ".join(missing), path, exc)
-
-
 def _config_body(data: dict) -> str:
     """`.mcp.json`'s text for `data`: as written by hand, or escaped when the user's file carries
     a lone surrogate (a string cut mid-emoji), which UTF-8 cannot hold. Both directions use it: a
@@ -1837,7 +1797,7 @@ def _read_config(project_dir: Path) -> dict:
     nothing may be written over it.
 
     The copy goes into `.tcc/`, not beside the file (ruling 9): it carries the old `X-TCC-Token`,
-    and git ignores `.tcc/` whole but `.mcp.json` by that exact name only (`_IGNORE_LINES`), so a
+    and git ignores `.tcc/` whole but `.mcp.json` by that exact name only (`mcp_key`), so a
     `.mcp.json.corrupt-…` beside it would travel with the project."""
     return own_store.read_json(config.mcp_config_path(project_dir),
                                misshapen=_misshapen_config,
@@ -1855,40 +1815,28 @@ def _misshapen_config(data: dict) -> str:
     return "" if servers is None or isinstance(servers, dict) else '"mcpServers" is not an object'
 
 
-def _names_this_instance(entry: Any, port: Optional[int], token: Optional[str]) -> bool:
-    """Whether TCC's entry in `.mcp.json` names this `port` and this `token` — each one given is
-    compared. Neither given: any entry of TCC's, which is what a withdrawal always took."""
-    if port is None and token is None:
+def _names_this_instance(entry: Any, port: Optional[int]) -> bool:
+    """Whether TCC's entry in `.mcp.json` names this `port`. No port given: any entry of TCC's,
+    which is what a withdrawal always took."""
+    if port is None:
         return True
-    if not isinstance(entry, dict):
-        return False
-    if port is not None and entry.get("url") != _url(port):
-        return False
-    if token is not None:
-        headers = entry.get("headers")
-        # By the header's name in any case, as `_TokenGuard` hears it.
-        sent = ({name.lower(): value for name, value in headers.items()}
-                if isinstance(headers, dict) else {})
-        if sent.get(_TOKEN_HEADER) != token:
-            return False
-    return True
+    return isinstance(entry, dict) and entry.get("url") == _url(port)
 
 
-def forget_mcp_config(project_dir: Path, port: Optional[int] = None,
-                      token: Optional[str] = None) -> None:
+def forget_mcp_config(project_dir: Path, port: Optional[int] = None) -> None:
     """Take TCC's entry back out of `.mcp.json` when the server goes down.
 
     The file is an advertisement for something LISTENING. Left behind, it names a port nothing
     answers on — so a CLI started in this folder tomorrow connects to nothing, or to whatever took
     that port in the meantime, and neither failure says what it is (SKL-028).
 
-    **Only this instance's**, given its `port` and `token` — which is how `stop()` calls it. Two
-    TCCs on one project folder share the one `"tcc"` key: B's start writes over A's entry, and A's
-    quit then took B's out, so a CLI started there found no server while B was serving one (#173,
-    F16-6). An entry naming another port or another token is another instance's, and stays.
-    Given the folder alone, it takes whatever entry of TCC's is there, as it always did. Both are
-    compared, the token too: a server that stops gives its port back before it gets here, and the
-    next TCC can take that port and write its own entry in between.
+    **Only this instance's**, given its `port` — which is how `stop()` calls it. Two TCCs on one
+    project folder share the one `"tcc"` key: B's start writes over A's entry, and A's quit then
+    took B's out, so a CLI started there found no server while B was serving one (#173, F16-6). An
+    entry naming another port is another instance's, and stays. Given the folder alone, it takes
+    whatever entry of TCC's is there, as it always did. The port alone tells them apart: two TCCs
+    on one folder hold one key (#247), so the token says nothing, and `stop()` comes here while it
+    still holds the port, so no other TCC can have written an entry naming it.
 
     Same rule as writing it: the file is the user's, so only our own key is removed and everything
     else is left exactly as it was. **Read plainly, never set aside** (the review of Task 19, I1):
@@ -1918,7 +1866,7 @@ def forget_mcp_config(project_dir: Path, port: Optional[int] = None,
     servers = data.get("mcpServers")
     if not isinstance(servers, dict) or SERVER_NAME not in servers:
         return
-    if not _names_this_instance(servers[SERVER_NAME], port, token):
+    if not _names_this_instance(servers[SERVER_NAME], port):
         return  # another instance's advertisement, for a server that may well be up
     servers.pop(SERVER_NAME)
     try:
@@ -1944,7 +1892,7 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
     honest, and it is logged.
     """
     path = config.mcp_config_path(project_dir)
-    _teach_git_to_ignore(Path(project_dir))
+    mcp_key.teach_git_to_ignore(Path(project_dir))
     data = _read_config(project_dir)
     servers = data.get("mcpServers")
     if servers is None:  # absent or null; any other shape that is not an object was set aside
@@ -2074,6 +2022,10 @@ class TccMcpServer:
     #: (`own_store.StoreNotSetAside`) — so not written over either. It opened fine: its advice is
     #: to fix or remove it, or to make the folder writable (the re-review of Task 19, N2).
     config_unmoved: Optional[Path] = None
+    #: What became of the key at the last load or reset (`mcp_key`'s notes), and, when it lasts this
+    #: run only, why. Neither holds the key. The window turns them into a line (`mcp_view`).
+    key_note: str = mcp_key.KEPT
+    key_problem: str = ""
 
     def __init__(
         self,
@@ -2086,12 +2038,20 @@ class TccMcpServer:
         self.bus = SignalBus(self.tcc_dir)
         self.registry = SessionRegistry(self.tcc_dir)
         self.bridge: UiBridge = bridge or HeadlessBridge(self.project_dir)
-        self.token = secrets.token_urlsafe(24)
+        self._guard: Optional[_TokenGuard] = None
+        #: Where the key is kept: the folder given, or the one the person chose. Never
+        #: `config.project_dir()`'s last resort, a folder nobody picked (`mcp_key.load`).
+        self._key_folder = Path(project_dir) if project_dir else config.chosen_project_dir()
+        self._take_key(mcp_key.load(self._key_folder))
         self.port: Optional[int] = None
         self._preferred_port = preferred_port
         self._thread: Optional[threading.Thread] = None
         self._server: Any = None
         self._ready = threading.Event()
+        #: Whether this start was to write `.mcp.json`, and whether an entry of this instance's is
+        #: there to withdraw: one that never wrote any has nothing of its own in that file.
+        self._write_config = False
+        self._advertised = False
         #: What killed the serving thread, when something did. The thread cannot raise into
         #: `start()` — it is a different stack — so a death there used to be invisible: the caller
         #: held a server object that answered nothing (`start()` sets `_ready` BEFORE serving, so
@@ -2102,16 +2062,34 @@ class TccMcpServer:
     def url(self) -> Optional[str]:
         return _url(self.port) if self.port else None
 
+    def _take_key(self, key: mcp_key.Key) -> None:
+        self.token, self.key_note, self.key_problem = key.token, key.note, key.problem
+        if self._guard is not None:
+            self._guard.token = key.token
+
+    def reset_token(self) -> None:
+        """A new key, on the person's word: saved, enforced from the next request, advertised.
+
+        Every session already running holds the old one and is refused until it reconnects — that
+        is what a reset is — so the window says so (`mcp_view.reset_key`). Never raises: a key that
+        cannot be saved still replaces the old one for this run (`key_note`)."""
+        self._take_key(mcp_key.reset(self._key_folder))
+        if self._write_config and self._thread is not None:
+            self._advertise()
+
     def start(self, write_config: bool = True) -> int:
         """Bind a port, start serving on a background thread, and return the port."""
         import uvicorn
 
         if self._thread is not None:
             raise RuntimeError("server already started")
-        self.tcc_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.tcc_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:  # a read-only folder still deserves a running, guarded server
+            app_log.logger().warning("could not make %s: %s", self.tcc_dir, exc)
         self.port = _free_port(self._preferred_port)
         mcp = build_server(self.project_dir, self.bridge, self.bus, self.registry)
-        app = _TokenGuard(mcp.streamable_http_app(), self.token)
+        self._guard = app = _TokenGuard(mcp.streamable_http_app(), self.token)
         uvicorn_config = uvicorn.Config(
             app, host="127.0.0.1", port=self.port, log_level="warning", access_log=False,
             # `log_config=None`, and it is not a tidy-up: uvicorn's DEFAULT log config builds a
@@ -2153,25 +2131,33 @@ class TccMcpServer:
         self._thread.start()
         self._ready.wait(timeout=5.0)
         self._wait_until_serving()
+        self._write_config = write_config
         if write_config:
-            # NOT fatal, and this is the whole correction (2026-09-06). The server is SERVING by
-            # the time this runs; `.mcp.json` is an advertisement for a CLI launched in the
-            # project folder, and the in-app session connects by port and token without ever
-            # reading it. A `PermissionError` on that file used to escape `start()`, so the window
-            # reported "the MCP server did not start" — about a server that was up — and the
-            # session then ran with no tools at all, with one line in the log as the only sign.
-            try:
-                write_mcp_config(self.project_dir, self.port, self.token)
-            except Exception as exc:  # noqa: BLE001 — the server is up; only the advert failed
-                self.config_error = f"{type(exc).__name__}: {exc}"
-                if isinstance(exc, own_store.StoreNotSetAside):
-                    self.config_unmoved = config.mcp_config_path(self.project_dir)
-                elif isinstance(exc, own_store.StoreUnreadable):
-                    self.config_unreadable = config.mcp_config_path(self.project_dir)
-                app_log.logger().warning("mcp config not written (%s): %s — the server is up; a "
-                                         "CLI started in the project folder will not find it",
-                                         type(exc).__name__, exc, exc_info=True)
+            self._advertise()
         return self.port
+
+    def _advertise(self) -> None:
+        """Write this server's entry into `.mcp.json`; a failure is kept, not raised.
+
+        NOT fatal, and this is the whole correction (2026-09-06). The server is SERVING by the time
+        this runs; `.mcp.json` is an advertisement for a CLI launched in the project folder, and
+        the in-app session connects by port and token without ever reading it. A `PermissionError`
+        on that file used to escape `start()`, so the window reported "the MCP server did not
+        start" — about a server that was up — and the session then ran with no tools at all, with
+        one line in the log as the only sign."""
+        self.config_error, self.config_unreadable, self.config_unmoved = "", None, None
+        try:
+            write_mcp_config(self.project_dir, self.port, self.token)
+            self._advertised = True
+        except Exception as exc:  # noqa: BLE001 — the server is up; only the advert failed
+            self.config_error = f"{type(exc).__name__}: {exc}"
+            if isinstance(exc, own_store.StoreNotSetAside):
+                self.config_unmoved = config.mcp_config_path(self.project_dir)
+            elif isinstance(exc, own_store.StoreUnreadable):
+                self.config_unreadable = config.mcp_config_path(self.project_dir)
+            app_log.logger().warning("mcp config not written (%s): %s — the server is up; a "
+                                     "CLI started in the project folder will not find it",
+                                     type(exc).__name__, exc, exc_info=True)
 
     def _wait_until_serving(self, timeout: float = 5.0) -> None:
         """Return once uvicorn says it is up — or raise with what stopped it.
@@ -2219,17 +2205,21 @@ class TccMcpServer:
         return bool(getattr(self._server, "started", False)) and self.stopped_reason is None
 
     def stop(self, timeout: float = 5.0) -> None:
+        # The advertisement goes first, this one's only: another TCC on the same folder may have
+        # advertised itself over it since (F16-6). First because the port is all that tells two
+        # TCCs on one folder apart (#247): while this server holds it, an entry naming it is this
+        # server's; given back, the next TCC can take it and write an entry that looks the same.
+        # Guarded: this runs on the way out, and a raise here skipped the rest of the window's
+        # close (the branch review). Once, and only by a server that wrote one.
+        if self._advertised:
+            self._advertised = False
+            try:
+                forget_mcp_config(self.project_dir, port=self.port)
+            except Exception:  # noqa: BLE001 — logged; the close goes on
+                app_log.logger().exception("the MCP advertisement could not be withdrawn")
         if self._server is not None:
             self._server.should_exit = True
         if self._thread is not None:
             self._thread.join(timeout=timeout)
         self._thread = None
         self._server = None
-        # The advertisement goes down with the thing it advertises — this one's only: another TCC
-        # on the same folder may have advertised itself over it since (F16-6). Guarded: this runs
-        # on the way out, and a raise here skipped the rest of the window's close (the branch
-        # review).
-        try:
-            forget_mcp_config(self.project_dir, port=self.port, token=self.token)
-        except Exception:  # noqa: BLE001 — logged; the close goes on
-            app_log.logger().exception("the MCP advertisement could not be withdrawn")

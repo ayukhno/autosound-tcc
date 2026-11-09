@@ -153,6 +153,30 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     _forget_aside(path)  # a fresh file is there now
 
 
+def write_secret(path: Path, text: str) -> None:
+    """A secret, the way `write_json` writes a store — temp file, fsync, rename — and the owner's
+    alone: so no reader ever finds half of it, and a write that dies leaves the old one whole.
+
+    0600 said rather than inherited: `mkstemp` happens to create at that, which is not a decision
+    anybody took and not one that survives a refactor. Set before the rename, so the name never
+    points at a file others can read. Windows keeps its own ACLs, inherited from the folder.
+    Raises what the write raised, and says nothing."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.stem}-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if os.name != "nt":
+            os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
 def _set_aside(path: Path, why: str, aside_dir: Optional[Path] = None) -> dict[str, Any]:
     """Move a broken store out of the way — beside it, or into `aside_dir` — keeping its bytes,
     and say so. `{}` once it is moved.
