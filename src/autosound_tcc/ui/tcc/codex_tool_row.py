@@ -120,7 +120,8 @@ class CodexToolRow(QWidget):
             self.label.setText(f"{text}\n{self._receipt}" if self._receipt else text)
         own = self.standing is not None and self.standing.state == codex_cli.STANDING_OWN
         self.label.setToolTip(i18n.t("updCodexOwnTip") if own else "")
-        self.button.setHidden(own)
+        current = self.standing is not None and self.standing.state == codex_cli.STANDING_TCC
+        self.button.setHidden(own or current)
         self.button.setEnabled(self.offered)
 
     def retranslate(self) -> None:

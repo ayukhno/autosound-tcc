@@ -199,7 +199,7 @@ def test_tccs_own_copy_at_the_pin_is_up_to_date(tmp_path, monkeypatch, versions)
     dialog = _shown(_Host())
 
     assert _line(dialog) == "Codex 0.162.1 — up to date"
-    assert not dialog._codex_row.button.isEnabled() and not dialog._codex_row.offered
+    assert dialog._codex_row.button.isHidden() and not dialog._codex_row.offered
 
 
 def test_the_persons_own_codex_is_theirs_to_update(tmp_path, monkeypatch, versions):
