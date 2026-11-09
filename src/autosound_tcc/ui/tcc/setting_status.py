@@ -112,6 +112,21 @@ def field_status(groups: Iterable[ProfileGroup], field: str,
     return _status(has, changed)
 
 
+def preset_status(view, compared_view=None, compared: bool = False) -> Optional[str]:
+    """The dot of the version's `preset_settings` (#256): the tree's section and the control tab.
+
+    Set by what is really stated (the method's `_preset_stated`), changed by `changes_against`,
+    which reads the two versions as the method's diff does, «unknown» against «off» aside. `None`
+    with no version: the dot goes with the section."""
+    settings = getattr(view, "preset_settings", None)
+    if settings is None:
+        return None
+    if not compared:
+        return _status(settings.any_stated, False)
+    changes = settings.changes_against(getattr(compared_view, "preset_settings", None))
+    return _status(settings.any_stated, any(changes.values()))
+
+
 class StatusDot(QWidget):
     """The dot: painted small, hovered large, with its meaning on hover."""
 

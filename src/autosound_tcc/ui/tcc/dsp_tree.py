@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.core import eq_export
 from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup, ProjectView, leg_label
-from autosound_tcc.ui.tcc import copy_menu, discard, i18n, rounded_tooltip
+from autosound_tcc.ui.tcc import copy_menu, discard, i18n, preset_tab, rounded_tooltip
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import RoundedTooltip
@@ -45,7 +45,7 @@ from autosound_tcc.ui.tcc.row_rule import (
     column_title,
     table_fields,
 )
-from autosound_tcc.ui.tcc.setting_status import StatusDot
+from autosound_tcc.ui.tcc.setting_status import StatusDot, preset_status
 from autosound_tcc.ui.tcc.theme import apply_caps, current_theme
 
 # Short, translatable header labels for the known DSP tiers (matches the prototype's T.virtual /
@@ -117,11 +117,18 @@ class _SubLine(ElidedLabel):
         self.setProperty("class", "cline2")
         self.setTextFormat(Qt.TextFormat.RichText)
         self._parts: list = []
+        #: The colour of the parts that did not change, or None for the theme's own (the preset
+        #: section's greyed defaults, #256).
+        self._plain: Optional[str] = None
 
     def set_parts(self, parts: list) -> None:
         """`[(text, changed)]`, said one after another with « · » between."""
         self._parts = list(parts)
         self.setText(" · ".join(text for text, _ in self._parts))
+
+    def set_plain_colour(self, colour: Optional[str]) -> None:
+        self._plain = colour
+        self._elide()
 
     def parts(self) -> list:
         return list(self._parts)
@@ -160,8 +167,10 @@ class _SubLine(ElidedLabel):
                 n -= 1
             if n:
                 piece = escape(text[:n])
-                out.append(f'<span style="color:{colour};font-weight:700">{piece}</span>'
-                           if lit else piece)
+                if lit:
+                    out.append(f'<span style="color:{colour};font-weight:700">{piece}</span>')
+                else:
+                    out.append(f'<span style="color:{self._plain}">{piece}</span>' if self._plain else piece)
             if n < len(text):
                 break
             room -= wide
@@ -583,6 +592,142 @@ class ParamsSection(QWidget):
         self._twist.setText("▸" if collapsed else "▾")
 
 
+class _PresetRow(QWidget):
+    """One setting of the version's «ПРЕСЕТ» section: its name, its value, what its hover adds."""
+
+    def __init__(self, line: preset_tab.PresetLine) -> None:
+        super().__init__()
+        self.setProperty("class", "paramrow")
+        self.line = line
+        #: What the copy reads: a list, so its closures hold no reference back to this row.
+        held = self._held = [line]
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 3, 8, 3)
+        layout.setSpacing(6)
+        key = QLabel(line.label)
+        key.setProperty("class", "pk")
+        layout.addWidget(key)
+        # Elided and right-aligned: the column is narrow, and the value is the fact.
+        self._value = _SubLine()
+        self._value.setProperty("class", "pv")
+        self._value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._value, 1)
+        self._tip = rounded_tooltip.attach(self, "")
+        copy_menu.enable_copy(self, value=lambda: held[0].copy or held[0].text,
+                              row=lambda: f"{held[0].label}: {held[0].text}")
+        self.show_line(line)
+
+    def show_line(self, line: preset_tab.PresetLine) -> None:
+        """Draw `line`: grey for what nobody stated, blue and bold for what changed."""
+        self.line = self._held[0] = line
+        self._value.set_plain_colour(None if line.changed else preset_tab.colour_of(line.reading, False))
+        self._value.set_parts([(line.text, line.changed)])
+        self._tip.set_text(line.tip)
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """The colour is written into the text; a theme switch writes it again (tcc#122)."""
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.StyleChange, QEvent.Type.PaletteChange):
+            self.show_line(self.line)
+
+
+class _PresetHeader(QWidget):
+    """The section's header: a press toggles it. A signal, not `header.mousePressEvent = …`: a
+    child holding its parent's bound method is a reference cycle over a widget that is rebuilt."""
+
+    clicked = Signal()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        event.accept()
+        self.clicked.emit()
+
+
+class PresetSection(QWidget):
+    """The version's own settings under the tiers (#256): the same rows the tab draws, the tab's
+    dot, a line that opens it. Folded by default like the sections beside it."""
+
+    tableRequested = Signal(str)
+
+    def __init__(self, view, settings: QSettings) -> None:
+        super().__init__()
+        self._view_of = view
+        self._settings = settings
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        self._header = _PresetHeader()
+        self._header.setProperty("class", "ghead")
+        self._header.setCursor(Qt.CursorShape.PointingHandCursor)
+        head_layout = QHBoxLayout(self._header)
+        head_layout.setContentsMargins(8, 4, 8, 4)
+        head_layout.setSpacing(6)
+        self._twist = QLabel()
+        self._twist.setProperty("class", "tw")
+        head_layout.addWidget(self._twist)
+        self._title = QLabel(i18n.t("preset").upper())
+        self._title.setProperty("class", "sec-title")
+        apply_caps(self._title, spacing_px=1.0)
+        head_layout.addWidget(self._title)
+        self.dot = StatusDot()
+        head_layout.addWidget(self.dot)
+        head_layout.addStretch(1)
+        self._header.clicked.connect(self._on_header_clicked)
+        outer.addWidget(self._header)
+
+        self._children = QWidget()
+        children = QVBoxLayout(self._children)
+        children.setContentsMargins(0, 0, 0, 0)
+        children.setSpacing(0)
+        self._params_row = _ParamsOpenRow()
+        self._params_row.clicked.connect(self._on_open)
+        children.addWidget(self._params_row)
+        self._rows: dict[str, _PresetRow] = {}
+        for line in preset_tab.section_lines(view):
+            row = _PresetRow(line)
+            self._rows[line.key] = row
+            children.addWidget(row)
+        outer.addWidget(self._children)
+        self._set_collapsed(settings.value(_collapsed_key("preset"), True, type=bool))
+        self.set_compared(None)
+
+    def _on_open(self) -> None:
+        self.tableRequested.emit("preset")
+
+    def _on_header_clicked(self) -> None:
+        self._set_collapsed(not self._children.isHidden())
+        self._settings.setValue(_collapsed_key("preset"), self._children.isHidden())
+
+    def _set_collapsed(self, collapsed: bool) -> None:
+        self._children.setHidden(collapsed)
+        self._twist.setText("▸" if collapsed else "▾")
+
+    def set_compared(self, compared_view, said: str = "") -> None:
+        """Against the compared version: its changed rows and the dot; `None` clears."""
+        for line in preset_tab.section_lines(self._view_of, compared_view):
+            self._rows[line.key].show_line(line)
+        self.dot.set_status(preset_status(self._view_of, compared_view, compared_view is not None), said)
+
+    def set_active(self, what: Optional[str]) -> None:
+        _light(self._params_row, what == "params")
+
+    def title(self) -> str:
+        return self._title.text()
+
+    def values(self) -> dict:
+        """`{the row's name: its value}`, as drawn."""
+        return {row.line.label: row.line.text for row in self._rows.values()}
+
+    def is_grey(self, label: str) -> bool:
+        return self._row_named(label).line.reading in ("default", "unknown", "dash")
+
+    def is_changed(self, label: str) -> bool:
+        return self._row_named(label).line.changed
+
+    def _row_named(self, label: str) -> _PresetRow:
+        return next(row for row in self._rows.values() if row.line.label == label)
+
+
 class TreeGroupSection(QWidget):
     """One collapsible group section (PARAMS / VIRTUAL / OUTPUT / ... — whatever the profile
     declares). Collapse state persists per group id via QSettings."""
@@ -712,6 +857,8 @@ class DspTreeWidget(QWidget):
         self._layout.setSpacing(2)
         self._layout.addStretch(1)
         self._sections: dict[str, TreeGroupSection] = {}
+        self._preset: Optional[PresetSection] = None
+        self._status_said = ""
         self._active: tuple = (None, None)
 
     def set_active(self, group_id: Optional[str], what: Optional[str]) -> None:
@@ -719,29 +866,39 @@ class DspTreeWidget(QWidget):
         self._active = (group_id, what) if group_id else (None, None)
         for gid, section in self._sections.items():
             section.set_active(what if gid == group_id else None)
+        if self._preset is not None:
+            self._preset.set_active(what if group_id == "preset" else None)
 
     def active(self) -> tuple:
         return self._active
 
     def set_status(self, statuses: dict, version: str = "") -> None:
         """`{group id: "none" | "set" | "chg"}` — the dot beside each tier's name."""
+        self._status_said = version
         for group_id, section in self._sections.items():
             section.dot.set_status(statuses.get(group_id), version)
 
-    def set_compared(self, groups) -> None:
+    def set_compared(self, groups, compared_view=None) -> None:
         """The compared version's groups, or None when nothing is compared: each channel's band
-        changes beside its EQ chip (finding 74)."""
+        changes beside its EQ chip (finding 74). `compared_view`, the same version whole, for the
+        «ПРЕСЕТ» section: its settings are no tier's rows (#256)."""
         by_id = {g.id: g for g in groups or ()}
         for group_id, section in self._sections.items():
             section.set_compared(by_id.get(group_id), groups is not None)
+        if self._preset is not None:
+            self._preset.set_compared(compared_view, self._status_said)
 
     def status_dots(self) -> dict:
-        return {group_id: section.dot for group_id, section in self._sections.items()}
+        dots = {group_id: section.dot for group_id, section in self._sections.items()}
+        if self._preset is not None:
+            dots["preset"] = self._preset.dot
+        return dots
 
     def set_view(self, view: ProjectView) -> None:
         # A rebuild (preset switch) can happen while a row's hover popup is showing -- hide it so
         # it doesn't linger over a now-destroyed row.
         RoundedTooltip.instance().hide_tip()
+        self._preset = None  # dropped below with the other sections
         while self._layout.count() > 1:
             item = self._layout.takeAt(0)
             widget = item.widget()
@@ -765,3 +922,9 @@ class DspTreeWidget(QWidget):
             section.tableRequested.connect(self.tableRequested.emit)
             section.toggleRequested.connect(self.toggleRequested.emit)
             self._layout.insertWidget(self._layout.count() - 1, section)
+        if getattr(view, "preset_settings", None) is not None:
+            self._preset = PresetSection(view, self._settings)
+            if self._active[0] == "preset":
+                self._preset.set_active(self._active[1])
+            self._preset.tableRequested.connect(self.tableRequested.emit)
+            self._layout.insertWidget(self._layout.count() - 1, self._preset)

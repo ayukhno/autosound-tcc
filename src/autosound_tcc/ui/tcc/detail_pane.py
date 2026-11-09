@@ -1177,6 +1177,11 @@ class DetailPane(QFrame):
             tab.clicked.connect(lambda _checked=False, f=field: self.open_param(f))
             head_layout.addWidget(tab)
             self._param_tabs[field] = tab
+        # The version's own settings, beside the channels' (#256).
+        self._tab_preset = _DTab(i18n.t("preset"))
+        self._tab_preset.clicked.connect(self.open_preset)
+        self._tab_preset.setVisible(False)
+        head_layout.addWidget(self._tab_preset)
         # The first thing in this row to give way (fix round 5): what it says, the table below
         # says too. Who gives next, and who never does, is `_fit_head`'s.
         self._title = _FitLabel("", holds=False)
@@ -1253,13 +1258,16 @@ class DetailPane(QFrame):
         self._tab_table.setText(i18n.t("tabTable"))
         for field, tab in getattr(self, "_param_tabs", {}).items():
             tab.setText(_PARAM_TABS[field]())
+        self._tab_preset.setText(i18n.t("preset"))
         self._close_btn.setText(i18n.t("close"))
         # With a group open, `refresh_with` rewrites this button (and the per-row ones) anyway.
         # With the pane closed it does not run, and the button kept the language the pane was
         # built in until it was next opened — invisible, and wrong the moment it appeared (F-033).
         self._eq_copy.setText(i18n.t("copyEqBank"))
         self._cmp_btn.setText(i18n.t("cmpRowBtn"))
-        if self._group is not None:
+        if self._mode == "preset":
+            self.open_preset()
+        elif self._group is not None:
             self.refresh_with(self._group)
 
     # ---- public API ----------------------------------------------------
@@ -1316,7 +1324,16 @@ class DetailPane(QFrame):
             return self._group.id, self._row.id
         if self._mode == "table" and self._group is not None:
             return self._group.id, self._selected or "params"
+        if self._mode == "preset":
+            return "preset", "params"
         return None, None
+
+    def open_from_tree(self, group_id: str, group: Optional[ProfileGroup]) -> None:
+        """The tree's «params»: a tier's table, or the version's own settings (#256)."""
+        if group_id == "preset":
+            self.open_preset()
+        elif group is not None:
+            self.open_table(group)
 
     def open_table(self, group: ProfileGroup, select_row_id: Optional[str] = None) -> None:
         self._group, self._row, self._mode = group, None, "table"
@@ -1347,6 +1364,8 @@ class DetailPane(QFrame):
         self._sync_param_tabs()
         if self._mode == "param" and self._param:
             self.open_param(self._param)
+        elif self._mode == "preset":
+            self.open_preset() if self._has_preset() else self.close_pane()
 
     def set_compare_choices(self, versions: list, default: Optional[str], loader,
                             labels: Optional[dict] = None, others: Optional[list] = None,
@@ -1410,6 +1429,8 @@ class DetailPane(QFrame):
     def _rerender(self) -> None:
         if self._mode == "param" and self._param:
             self.open_param(self._param)
+        elif self._mode == "preset":
+            self.open_preset()
         elif self._mode == "table" and self._group is not None:
             self.open_table(self._group)
         elif self._mode == "eq" and self._group is not None and self._row is not None:
@@ -1444,6 +1465,26 @@ class DetailPane(QFrame):
         for field, tab in self._param_tabs.items():
             tab.setVisible(not self._embedded and bool(self._param_groups(field)))
             tab.set_on(self._mode == "param" and self._param == field)
+        self._tab_preset.setVisible(not self._embedded and self._has_preset())
+        self._tab_preset.set_on(self._mode == "preset")
+
+    def _has_preset(self) -> bool:
+        return getattr(self._view, "preset_settings", None) is not None
+
+    def open_preset(self) -> None:
+        """The version's own settings (#256): the same compare as the tables, greyed defaults.
+        `preset_tab` is imported here because it builds on this module's table."""
+        if not self._has_preset():
+            return
+        from autosound_tcc.ui.tcc import preset_tab
+
+        self._mode, self._row = "preset", None
+        self._back = None
+        self._title.setText("")  # the tab beside it already says it
+        self._scroll.setWidget(preset_tab.page(self._view, self._compare_view, self._copy_on_right_click))
+        self._sync_tabs()
+        self.setVisible(True)
+        self.focusChanged.emit(*self.focus())
 
     def open_param(self, field: str) -> None:
         """One control, every channel, both tiers, in one table.
@@ -1498,6 +1539,9 @@ class DetailPane(QFrame):
         if self._mode == "param" and self._param:
             # Its rows come from the whole view, which `set_view` has already replaced.
             self.open_param(self._param)
+            return
+        if self._mode == "preset":
+            self.open_preset()
             return
         if self._group is None:
             return

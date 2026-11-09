@@ -71,7 +71,7 @@ from autosound_tcc.ui.tcc.detail_pane import (
 )
 from autosound_tcc.ui.tcc.labels import ElidedLabel
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
-from autosound_tcc.ui.tcc.setting_status import DotTabBar, field_status, group_status, tip_for
+from autosound_tcc.ui.tcc.setting_status import DotTabBar, field_status, group_status, preset_status, tip_for
 
 #: How many journal events the feed shows, newest last.
 _FEED_EVENTS = 80
@@ -219,6 +219,12 @@ def _table_tab(window, view, group_id: str, empty_key: str) -> QWidget:
 def _param_tab(window, view, field: str) -> QWidget:
     pane = _embedded(window, view)
     pane.open_param(field)
+    return pane
+
+
+def _preset_tab(window, view) -> QWidget:
+    pane = _embedded(window, view)
+    pane.open_preset()
     return pane
 
 
@@ -794,6 +800,8 @@ class ControlLayout:
         self._add("eq", _eq_tab(w, view), "EQ")
         for field, key in (("gain_db", "tabGain"), ("ta_ms", "tabDelay"), ("phase_deg", "tabPhase")):
             self._add(field, _param_tab(w, view, field), i18n.t(key))
+        if getattr(view, "preset_settings", None) is not None:
+            self._add("preset", _preset_tab(w, view), i18n.t("preset"))
         for key, index in self._index.items():
             page = self.tabs.widget(index)
             if not isinstance(page, DetailPane):
@@ -1046,7 +1054,9 @@ class ControlLayout:
         for key, index in self._index.items():
             if key == "monitor":
                 continue
-            if key in ("virtual_channels", "physical_outputs", "inputs"):
+            if key == "preset":
+                status = preset_status(view, compared_view, compared)
+            elif key in ("virtual_channels", "physical_outputs", "inputs"):
                 group = _group(view, key)
                 status = (group_status(group, _group(compared_view, key), compared)
                           if group is not None else None)

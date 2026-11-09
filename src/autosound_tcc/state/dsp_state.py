@@ -36,6 +36,7 @@ import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
+from autosound_tcc.state import preset_settings as preset_model
 from autosound_tcc.state import project_view
 
 @dataclass(frozen=True)
@@ -438,6 +439,8 @@ class ProjectView:
     #: The name the snapshot was READ by — its file, `v_011.json` → `v_011`. `version` is the
     #: file's own field, and the two can disagree (tcc#50).
     file_version: Optional[str] = None
+    #: The version's `preset_settings` (#256), read by `state.preset_settings`; None with no version.
+    preset_settings: Optional[preset_model.PresetSettings] = None
 
     @property
     def version_mismatch(self) -> bool:
@@ -454,10 +457,15 @@ class ProjectView:
     def state(self) -> Optional[str]:
         """`proposed` while any channel of this version waits to be entered in the DSP, else
         `applied`; None for a view with no channels. `attest` is what turns one into the other
-        (the skill's `apply.attest`), and the header's dot reads exactly this (F-070)."""
+        (the skill's `apply.attest`), and the header's dot reads exactly this (F-070). A trim held
+        by `preset_settings.status` waits the same way as a row (#256): the rows alone read it as
+        entered, and it is not."""
         counts = dict(self.status_counts)
-        if not counts:
+        waiting = self.preset_settings is not None and self.preset_settings.waiting
+        if not counts and not waiting:
             return None
+        if waiting:
+            return "proposed"
         return "proposed" if counts.get("proposed") else "applied"
 
     @classmethod
@@ -537,6 +545,9 @@ class ProjectView:
             slot_label=raw.get("slot_label"),
             save=raw.get("save"),
             status_counts=tuple(sorted(statuses.items())),
+            preset_settings=(preset_model.read(raw.get("preset_settings"),
+                                               preset_model.is_audiotec(prof.get("vendor"), prof.get("name")))
+                             if raw.get("version") else None),
         )
 
 

@@ -19,7 +19,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import QComboBox
 
-from autosound_tcc.state import ledger_line
+from autosound_tcc.state import ledger_line, preset_settings
 from autosound_tcc.state.ledger_line import Loaded, SavedFile
 from autosound_tcc.ui.tcc import i18n
 from autosound_tcc.ui.tcc.theme import current_theme
@@ -27,8 +27,7 @@ from autosound_tcc.ui.tcc.theme import current_theme
 
 def is_helix(vendor, name) -> bool:
     """A Helix-family DSP, told by vendor and name together: a profile may say only the vendor."""
-    said = f"{vendor or ''} {name or ''}".lower()
-    return "audiotec" in said or "helix" in said
+    return preset_settings.is_audiotec(vendor, name)
 
 
 def reads_save_file(profile: dict) -> bool:
@@ -147,6 +146,10 @@ def header(root, view, profile: dict, base_tip: str,
     state = view.state
     dot = None if state is None else ("wait" if state == "proposed" else "done")
     said = f"{html.escape(base_tip)}<br><br>{html.escape(now)}" if now else base_tip
+    settings = getattr(view, "preset_settings", None)
+    if settings is not None and settings.waiting:
+        # The rows' count in the hover reads 0 proposed on a trim-only proposal (#256).
+        said = f"{said if now else html.escape(base_tip)}<br><br>{html.escape(i18n.t('presetWaitingTip'))}"
     preset = view.preset if isinstance(view.preset, str) else loaded
     if dot != "done" or not reads_save_file(profile) or not isinstance(preset, str):
         return dot, said

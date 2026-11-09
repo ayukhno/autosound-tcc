@@ -166,6 +166,18 @@ def _leaf(path: str) -> str:
     return re.split(r"[\\/]", path.strip())[-1]
 
 
+def _file_name(record: dict) -> str:
+    """The file's own name in a `source_file` record: its `name`, else the leaf of its `path`."""
+    name = record.get("name") or (record["path"] if isinstance(record.get("path"), str) else "")
+    return _leaf(name) if isinstance(name, str) else ""
+
+
+def _file_md5(record: dict) -> Optional[str]:
+    """The record's md5, lower-cased, or None where it is not one."""
+    md5 = record.get("md5")
+    return md5.lower() if isinstance(md5, str) and _MD5.match(md5) else None
+
+
 def _saved_file(record, created) -> Optional[SavedFile]:
     """One saved-file record in either shape, or None where it is no record: a real file name and
     a real md5, or nothing.
@@ -178,13 +190,63 @@ def _saved_file(record, created) -> Optional[SavedFile]:
         return SavedFile(_leaf(found.group(1)), found.group(2).lower(), None, _stamp(created)) if found else None
     if not isinstance(record, dict):
         return None
-    name = record.get("name") or (record["path"] if isinstance(record.get("path"), str) else "")
-    name = _leaf(name) if isinstance(name, str) else ""
-    md5 = record.get("md5")
-    if not name or not isinstance(md5, str) or not _MD5.match(md5):
+    name, md5 = _file_name(record), _file_md5(record)
+    if not name or md5 is None:
         return None
-    return SavedFile(name, md5.lower(), _stamp(record.get("saved")),
+    return SavedFile(name, md5, _stamp(record.get("saved")),
                      _stamp(record.get("read_at")) or _stamp(created))
+
+
+class SourceFile(NamedTuple):
+    """`preset_settings.source_file` as a whole (#256), read by the same rules as the mark's
+    `SavedFile`. A field the record does not hold is None."""
+
+    name: str
+    path: Optional[str]
+    md5: Optional[str]
+    saved: Optional[str]
+    read_at: Optional[str]
+    pctool: Optional[str]
+    device: Optional[str]
+    #: A comparison is on record at all (`compared` not empty).
+    compared: bool
+    #: What the comparison found, or empty where it found nothing or none was made.
+    differences: tuple[str, ...]
+    #: A field was not what the method writes (a non-string name, a `compared` that is neither a
+    #: string nor a list of strings): shown as far as it reads, and a word in the log (`preset_settings`).
+    malformed: bool = False
+
+
+def _when(record: dict, field: str) -> Optional[str]:
+    """A timestamp field as `_stamp` says it, or the words the record holds where it is none."""
+    value = record.get(field)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return _stamp(value) or value.strip()
+
+
+def source_file(record) -> Optional[SourceFile]:
+    """`preset_settings.source_file`, whole, or None where the record is not an object at all."""
+    if not isinstance(record, dict):
+        return None
+
+    def text(field: str) -> Optional[str]:
+        value = record.get(field)
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    compared = record.get("compared")
+    if isinstance(compared, str):
+        differences = (compared.strip(),) if _differs(compared) else ()
+    elif isinstance(compared, (list, tuple)):
+        differences = tuple(str(line) for line in compared)
+    else:
+        differences = () if compared is None else (str(compared)[:200],)
+    malformed = ((record.get("name") is not None and not isinstance(record.get("name"), str))
+                 or (record.get("md5") is not None and _file_md5(record) is None)
+                 or (compared is not None and not isinstance(compared, (str, list, tuple))))
+    return SourceFile(_file_name(record), text("path"), _file_md5(record), _when(record, "saved"),
+                      _when(record, "read_at"), text("pctool"), text("device"),
+                      compared not in (None, "", [], ()), differences, malformed)
 
 
 def _differs(compared) -> bool:
@@ -217,11 +279,20 @@ def _saved_files(data: dict) -> tuple[SavedFile, ...]:
     return tuple(f for f in found if f is not None)
 
 
+def preset_waiting(status) -> bool:
+    """A `preset_settings.status` of the method's that has not been entered in the DSP."""
+    return status in ("candidate", "proposed")
+
+
 def _entered(data: dict) -> bool:
     """Every channel row entered; a version with no channels is not. Rows of the other tiers count
-    where they state a status: `attest` flips every tier, and the schema's virtual rows carry none."""
+    where they state a status: `attest` flips every tier, and the schema's virtual rows carry none.
+    A proposed trim is not entered either (`preset_settings.status`, #256)."""
     rows = data.get("channels")
     if not isinstance(rows, dict) or not rows:
+        return False
+    settings = data.get("preset_settings")
+    if isinstance(settings, dict) and preset_waiting(settings.get("status")):
         return False
     tiers = [t for k, t in data.items() if k not in _NOT_TIERS and isinstance(t, dict)]
     stated = [r for t in tiers for r in t.values() if isinstance(r, dict) and "status" in r]

@@ -2388,7 +2388,7 @@ class MainWindow(QMainWindow):
         statuses = {g.id: group_status(g, next((o for o in old if o.id == g.id), None), compared)
                     for g in groups}
         self._tree.set_status(statuses, self._compare_said())
-        self._tree.set_compared(list(old) if compared else None)
+        self._tree.set_compared(list(old) if compared else None, compared_view)
         control = getattr(self, "_control_layout", None)
         if control is not None and control.active:
             control.sync_dots()
@@ -2912,9 +2912,7 @@ class MainWindow(QMainWindow):
         if self._control_active():
             self._control_layout.show_table(group_id)
             return
-        group = self._find_group(group_id)
-        if group is not None:
-            self._detail.open_table(group)
+        self._detail.open_from_tree(group_id, self._find_group(group_id))
 
     def _on_channel_clicked(self, group_id: str, row_id: str) -> None:
         if self._control_active():
