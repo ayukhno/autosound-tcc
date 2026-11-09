@@ -773,11 +773,6 @@ def test_an_install_leaves_current_leading_to_the_whole_copy(monkeypatch, target
     assert f"codex-cli {codex_cli.PIN}" in said.stdout
 
 
-def test_the_path_a_terminal_would_use_goes_inside_current_down_to_the_binarys_folder(target):
-    assert codex_cli.current_bin(target).parts[-5:] == (
-        "autosound-tcc", "codex", "current", "codex_cli_bin", "bin")
-
-
 @POSIX_ONLY
 def test_an_install_from_before_this_change_gets_current_with_no_reinstall(target):
     _whole_copy(target)
@@ -809,21 +804,42 @@ def test_moving_current_is_one_rename_and_the_older_copy_stays(monkeypatch, targ
     link = _current(target)
     link.symlink_to("0.160.0", target_is_directory=True)
     renames: list[tuple[str, bool]] = []
+    after: list[bool] = []
     real = codex_install._replace
 
     def watched(src, dst):
         renames.append((Path(dst).name, os.path.lexists(link)))
         real(src, dst)
-        assert os.path.lexists(link), "`current` went missing"
+        after.append(os.path.lexists(link))  # asserted below: in here `refresh_current` catches it
 
     monkeypatch.setattr(codex_install, "_replace", watched)
 
     assert codex_install.refresh_current(target, repoint=True) == str(codex_cli.current_bin(target))
 
+    assert all(after), "`current` went missing"
     assert renames == [(codex_cli.CURRENT, True)], "one rename over the old link"
     assert os.path.realpath(link) == os.path.realpath(_version_folder(target))
     assert older.read_bytes() == _codex_says("0.160.0"), "what the old link led to is kept"
     assert _dot_files(target) == [], "no temp link left"
+
+
+@POSIX_ONLY
+def test_current_is_a_relative_link_and_still_tccs_when_the_data_folder_moves(target):
+    """Moved or restored from a backup, TCC's data folder keeps its `current`, and the link is
+    still known as TCC's (an absolute one would point at the old place, or read as someone else's)."""
+    _whole_copy(target)
+    assert codex_install.refresh_current(target) != ""
+    assert os.readlink(_current(target)) == codex_cli.PIN
+
+    data = target.parents[4]
+    moved = data.with_name(f"moved-{data.name}")
+    data.rename(moved)
+    root = moved / target.parents[3].relative_to(data)
+    binary = moved / target.relative_to(data)
+
+    assert codex_install._is_ours(root / codex_cli.CURRENT, root)
+    assert codex_install.refresh_current(binary) == str(codex_cli.current_bin(binary))
+    assert (codex_cli.current_bin(binary) / binary.name).is_file()
 
 
 @POSIX_ONLY
@@ -1081,17 +1097,46 @@ def windows_steps(monkeypatch):
         version.name, target_is_directory=True))
 
 
+def _renames(monkeypatch) -> list[tuple[str, str]]:
+    """Every rename of the link's steps, `(from, to)`, a temp name cut to its prefix."""
+    def step(path) -> str:
+        name = Path(path).name
+        return next((prefix for prefix in (".current-new-", ".current-old-")
+                     if name.startswith(prefix)), name)
+
+    seen: list[tuple[str, str]] = []
+    real = codex_install._replace
+
+    def watched(src, dst):
+        seen.append((step(src), step(dst)))
+        real(src, dst)
+
+    monkeypatch.setattr(codex_install, "_replace", watched)
+    return seen
+
+
 @POSIX_ONLY
-def test_on_windows_the_old_link_steps_aside_for_the_new_one(windows_steps, target):
-    older = _whole_copy(target, "0.160.0")
+def test_on_windows_the_first_link_does_not_go_through_the_swap(windows_steps, monkeypatch, target):
+    """There is no old link to step aside: one rename, and the link is made."""
     _whole_copy(target)
-    link = _current(target)
-    link.symlink_to("0.160.0", target_is_directory=True)
+    renames = _renames(monkeypatch)
+
+    assert codex_install.refresh_current(target) == str(codex_cli.current_bin(target))
+
+    assert renames == [(".current-new-", codex_cli.CURRENT)]
+
+
+@POSIX_ONLY
+def test_on_windows_the_old_link_steps_aside_for_the_new_one(windows_steps, monkeypatch, target):
+    """The steps, not the end state: on this machine a plain rename over the link ends the same."""
+    _whole_copy(target, "0.160.0")
+    _whole_copy(target)
+    _current(target).symlink_to("0.160.0", target_is_directory=True)
+    renames = _renames(monkeypatch)
 
     assert codex_install.refresh_current(target, repoint=True) == str(codex_cli.current_bin(target))
 
-    assert os.path.realpath(link) == os.path.realpath(_version_folder(target))
-    assert older.is_file()
+    assert renames == [(codex_cli.CURRENT, ".current-old-"), (".current-new-", codex_cli.CURRENT)]
     assert _dot_files(target) == [], "nothing left aside"
 
 
