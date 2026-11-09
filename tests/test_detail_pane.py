@@ -743,6 +743,44 @@ def test_pair_mode_survives_a_channel_that_has_no_pair():
     assert len(headings()) == 2, "back on a pair, the pair is shown again"
 
 
+def test_a_changed_cell_is_a_background_and_bold_and_keeps_the_values_own_colour():
+    """The Arbiter, 2026-11-09 (#250): a changed INV is not blue (it read as another polarity);
+    «changed» is the background plus bold text. Any other changed value reads the same way."""
+    from PySide6.QtGui import QColor
+
+    from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
+    from autosound_tcc.ui.tcc import detail_pane
+    from autosound_tcc.ui.tcc.detail_pane import DetailPane
+    from autosound_tcc.ui.tcc.theme import get_theme
+
+    _app()
+
+    def outputs(pol, delay):
+        return ProfileGroup(id="physical_outputs", label="Output", fields=("polarity", "ta_ms"),
+                            rows=(GroupRow(id="m-L", name="m-L", slot="E",
+                                           raw={"polarity": pol, "ta_ms": delay}),))
+
+    before = type("V", (), {"groups": (outputs("NORM", 1.0),)})()
+    pane = DetailPane()
+    pane.set_compare_choices(["v_006"], "v_006", lambda _v: before)
+    now = outputs("INV", 2.0)
+    for mode in ("dark", "light"):
+        t = get_theme(mode)
+        row = now.rows[0]
+        inv = pane._styled_cell("polarity", row, t, now.id)
+        assert inv.data(detail_pane.CHANGED_ROLE) is True, mode
+        assert inv.foreground().color().name() == t.inv, mode
+        assert inv.font().bold(), mode
+        assert inv.background().color().name(QColor.NameFormat.HexArgb) == \
+            QColor(t.mix("info", 14, "panel")).name(QColor.NameFormat.HexArgb), mode
+        delay = pane._styled_cell("ta_ms", row, t, now.id)
+        assert delay.data(detail_pane.CHANGED_ROLE) is True, mode
+        assert delay.font().bold(), mode
+        assert delay.background().color().name(QColor.NameFormat.HexArgb) == \
+            inv.background().color().name(QColor.NameFormat.HexArgb), mode
+        assert delay.foreground().color().name() != t.info, mode
+
+
 def test_a_moved_band_marks_the_eq_cell_even_with_the_same_count():
     from autosound_tcc.state.dsp_state import GroupRow, ProfileGroup
     from autosound_tcc.ui.tcc import detail_pane

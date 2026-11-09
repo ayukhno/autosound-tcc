@@ -1225,10 +1225,11 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         color: {t.off};
         background: {t.mix('off', 16)};
     }}
-    /* A pill whose value differs from «порівняти з» — the colours of the table's changed cells
-    (tcc#104, finding 113). Two attributes, so it wins over the pill's own kind. */
+    /* A pill whose value differs from «порівняти з»: a frame and a background, the font colour
+    left to the pill's own kind so a changed INV stays orange (tcc#104, finding 113; #250).
+    Two attributes, so it wins over the pill's own background. */
     QLabel[class~="pill"][class~="chg"] {{
-        color: {t.info};
+        border: 1px solid {t.info};
         background: {t.mix('info', 14, 'panel')};
     }}
     QLabel[class~="eq-chip"] {{

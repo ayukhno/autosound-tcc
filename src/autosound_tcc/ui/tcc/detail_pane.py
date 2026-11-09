@@ -1895,9 +1895,9 @@ class DetailPane(QFrame):
         if compared and field_changed(field, row, old):
             before = self._cell_text(field, old) if old is not None else None
             item.setData(CHANGED_ROLE, True)
-            # Blue and bold: the table's stylesheet paints over an item's background, and the
-            # change has to read at a glance — blue is the window's "new" (in REW, import it).
-            item.setForeground(QColor(t.info))
+            # A background and bold, the font colour left to the value (#250): a changed INV
+            # that turned blue read as another polarity. The table's stylesheet paints over an
+            # item's background, so it is set here, and the change reads at a glance.
             item.setBackground(QColor(t.mix("info", 14, "panel")))
             font = item.font()
             font.setBold(True)

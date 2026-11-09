@@ -279,18 +279,29 @@ def test_a_cut_line_with_a_bold_part_still_fits_its_width(themed):
     assert any(heavy for _text, heavy in _drawn(line)[0]), "the cut kept the bold on what is left"
 
 
-def test_a_changed_pill_is_bold_as_well_as_blue():
-    """Every pill is drawn bold (`QLabel[class~="pill"]`), so a changed NORM is bold already; this
-    holds it there beside the line's bold (tcc#108)."""
-    from autosound_tcc.ui.tcc.theme import current_theme
+def test_a_changed_inversion_pill_keeps_its_own_colour_and_wears_a_frame_and_background():
+    """The Arbiter, 2026-11-09 (#250): «changed» is a frame plus a background on the pill; the
+    font stays the value's own, so an INV that changed is still orange, not a blue «other
+    polarity». Bold stays, as every pill is bold."""
+    from autosound_tcc.ui.tcc.theme import build_qss, get_theme
 
     _app()
-    tree = _themed(_compared_tree())
-    pill = _row_of(tree, "physical_outputs", "m-R")._pill
-    pill.ensurePolished()
-    assert "chg" in pill.property("class").split()
-    assert pill.font().bold()
-    assert pill.palette().windowText().color().name() == current_theme().info
+    for mode in ("dark", "light"):
+        t = get_theme(mode)
+        tree = _compared_tree()  # m-R is INV in the compared version, NORM now
+        tree.set_view(_rig({"f": 25, "type": "BW", "slope": 24}, 0.0, "INV", -1.0, 90))
+        tree.set_compared(list(_rig(_HP20, 4.19, "NORM", -3.0, 90).groups))
+        tree.setStyleSheet(build_qss(t))
+        pill = _row_of(tree, "physical_outputs", "m-R")._pill
+        pill.ensurePolished()
+        classes = pill.property("class").split()
+        assert "chg" in classes and "pill-inv" in classes, mode
+        assert pill.palette().windowText().color().name() == t.inv, mode
+        assert pill.font().bold(), mode
+        qss = build_qss(t)
+        block = qss[qss.index('QLabel[class~="pill"][class~="chg"]'):]
+        block = block[:block.index("}")]
+        assert "border:" in block and "background:" in block and "color:" not in block, mode
 
 
 def test_the_tree_marks_exactly_the_cells_the_table_marks():
