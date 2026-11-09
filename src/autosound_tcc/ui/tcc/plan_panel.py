@@ -631,10 +631,13 @@ class PlanPanel(QScrollArea):
         """The project's real capture series, live first (see `measurement_view.build_sessions`).
 
         Until they arrive the per-step measurement icon falls back to the mock's own linkage, which
-        is what the design fixture needs and what a real project never matches.
+        is what the design fixture needs and what a real project never matches. Sessions as they
+        were leave the rows alone, as `set_plan` does: every write of the state arrives here.
         """
-        self._sessions = tuple(sessions or ())
-        self.retranslate()
+        sessions = tuple(sessions or ())
+        if sessions != self._sessions:
+            self._sessions = sessions
+            self.retranslate()
 
     def _sessions_for_step(self, step_id: str):
         if not self._sessions:

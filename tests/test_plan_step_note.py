@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -20,7 +21,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
 
 from autosound_tcc.core import vendor_loader  # noqa: E402
 from autosound_tcc.state import process_view  # noqa: E402
-from autosound_tcc.state.models import StepNote  # noqa: E402
+from autosound_tcc.state.models import MeasSession, StepNote  # noqa: E402
 from autosound_tcc.ui.tcc import i18n, theme  # noqa: E402
 from autosound_tcc.ui.tcc.plan_panel import _PhaseRow, _PhaseStepRow, PlanPanel  # noqa: E402
 from tests import _intake  # noqa: E402
@@ -79,9 +80,15 @@ def _show(panel: PlanPanel, width: int = 200, height: int = 500) -> None:
     QApplication.processEvents()
 
 
+def _found(panel: PlanPanel, title: str) -> _PhaseStepRow:
+    """The row, for a test whose panel outlives it (and rebuilds its rows): `held_panel` ties the
+    row to the panel, and a cycle over a rebuilt panel is what the collector dies on (.ips 09.11)."""
+    return next(row for row in panel.widget().findChildren(_PhaseStepRow)
+                if any(title in label.text() for label in row.findChildren(QLabel)))
+
+
 def _row(panel: PlanPanel, title: str) -> _PhaseStepRow:
-    found = next(row for row in panel.widget().findChildren(_PhaseStepRow)
-                 if any(title in label.text() for label in row.findChildren(QLabel)))
+    found = _found(panel, title)
     found.held_panel = panel  # the panel owns the row: collected, it would take the row with it
     return found
 
@@ -403,6 +410,82 @@ def test_an_unchanged_plan_does_not_rebuild_the_rows(process, project):
     panel.set_open_questions(())
 
     assert _row(panel, "listen to the voice") is before
+
+
+def test_a_change_to_the_note_alone_reaches_the_row(process, project):
+    """A late `done --heard` on a step already closed: `finish_step` writes only `note.answer`, so
+    nothing else about the row differs, and the row must still be redrawn from it."""
+    process.add_step("2.1", "listen to the voice", note=NOTE)
+    process.start_attempt("2.1")
+    process.finish_step("2.1", ["v_003"])
+    panel = _panel(project)
+    closed = _plan(project)
+
+    process.finish_step("2.1", ["v_003"], heard="heard it late")
+    later = _plan(project)
+    panel.set_plan(later)
+
+    def _step(plan):
+        return next(s for p in plan for s in p.steps if s.id == "2.1")
+
+    assert replace(_step(later), note=None) == replace(_step(closed), note=None), "the note alone changed"
+    row = _found(panel, "listen to the voice")
+    assert "heard it late" in _tip(row) and "heard it late" in _seen(row._note_view.text())
+
+
+def _session(*steps: str) -> MeasSession:
+    return MeasSession(version={"en": "series 1", "uk": "серія 1"}, groups=(), id="cap_001", used_in_steps=steps)
+
+
+def test_a_write_that_leaves_the_sessions_as_they_were_leaves_the_rows_alone(process, project):
+    """Every write of the state reached `set_sessions`: a selection in an open note went, and the
+    hover over it closed, while a session wrote."""
+    process.add_step("2.1", "listen to the voice", note=NOTE)
+    panel = _panel(project)
+    _show(panel, 300)
+    panel.set_sessions([_session()])
+    before = _found(panel, "listen to the voice")
+    _icons(before)[0].mousePressEvent(None)
+    before._note_view.setSelection(0, 6)
+    QApplication.processEvents()
+    assert before._note_view.selectedText(), "the fixture selects"
+
+    panel.set_sessions([_session()])  # another list, the same sessions
+    QApplication.processEvents()
+
+    row = _found(panel, "listen to the voice")
+    assert row is before, "the row is the same row"
+    assert row._note_view.selectedText(), "and what he selected in the note is still selected"
+    panel.close()
+
+
+def test_sessions_that_changed_still_redraw_the_rows(process, project):
+    """The other half of the guard: a step that a capture series now belongs to gets its link."""
+    process.add_step("2.1", "listen to the voice", note=NOTE)
+    panel = _panel(project)
+    panel.set_sessions([_session()])
+    before = _found(panel, "listen to the voice")
+
+    panel.set_sessions([_session("2.1")])
+
+    assert _found(panel, "listen to the voice") is not before
+
+
+def test_another_project_does_not_inherit_the_phases_opened_or_closed(process, project, tmp_path, monkeypatch):
+    process.add_step("2.1", "listen to the voice", note=NOTE)
+    panel = _panel(project)
+    current = next(r for r in panel.widget().findChildren(_PhaseRow) if not r._steps_container.isHidden())
+    current._toggle(None)
+    assert current._steps_container.isHidden(), "the fixture folds the current phase"
+    plan = _plan(project)
+
+    other = tmp_path / "another-project"
+    other.mkdir()
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(other))
+    panel.set_plan(plan)
+
+    row = _found(panel, "listen to the voice")
+    assert not row.parentWidget().isHidden(), "the other project's phase follows its own plan"
 
 
 def test_another_project_does_not_inherit_what_was_opened(process, project, tmp_path, monkeypatch):
