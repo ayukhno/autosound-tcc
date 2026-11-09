@@ -610,8 +610,6 @@ def _git_rows(section) -> dict[str, str]:
     return {key: value for key, value in zip(keys, values) if key in git}
 
 
-# Quarantine: a slow runner's header read from the step before can land after the spy is in.
-@pytest.mark.xfail(strict=False, reason="flaky: #233")
 def test_the_project_header_says_each_state_of_the_history_and_its_backup(tmp_path, monkeypatch,
                                                                           unhurried_git):
     """A folder with no history, then one with no backup, read from real git. A language switch
@@ -642,6 +640,16 @@ def test_the_project_header_says_each_state_of_the_history_and_its_backup(tmp_pa
     _git("init", "-q", str(tmp_path))
     window._set_project_params(None)
     assert window._project_section.sub_text() == i18n.t("gitSubNoRemote"), "a reload reads"
+    # Nothing of the window's own may read git inside the spy's window (#233). Every read here is
+    # on the GUI thread, and `_on_language_selected` runs the event loop once on its way out
+    # (`_switch`). What that loop can still deliver is the project watcher's reload: `git init`
+    # above touched the watched folder, and the 400 ms debounce (`_project_reload`) ends into
+    # `_reload_project_files`, a fresh `git status` + `remote -v`. On a slow runner it ends there.
+    # The watcher is cut and the timer stopped, and the events already queued are delivered
+    # first, so the test does not wait on a clock.
+    window._project_watcher.blockSignals(True)
+    window._project_reload.stop()
+    QApplication.processEvents()
     started = _children(monkeypatch)
     try:
         window._on_language_selected("uk")
