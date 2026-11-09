@@ -80,31 +80,36 @@ and CI instead of repeating them, changes nothing in the tree and decides nothin
 - **Who found what:** stage, found, critical, its fate. The alarm is a critical found only here, or by a person after the tag.
 - **Not checked:** said by name.
 
-## Decisions the plan makes — the Arbiter's word before «го»
+## Decisions — all eight taken with the Arbiter, one by one, 2026-11-09
 
-1. **#236:** the whole bottom bar hides in Control mode, the thanks and feedback buttons with it (they live in it).
-   Alternative: keep those two in the header. Advice: hide the bar — Control mode is the terminal's.
-2. **#250:** «changed» becomes background + bold in the outputs table, the font colour stays the value's (orange INV);
-   on the tree pill a frame + background. A real frame in a table cell needs a custom delegate (+S). Advice: background
-   + bold in the table, frame on the pill.
-3. **#237:** which 2–3 looks. A light weight shows only if the family ships one on both systems. Advice: «Звичайний»
-   (today), «Легкий» (the system font, light weight: SF Pro on macOS, Segoe UI Light on Windows), «Округлий» (one more
-   family present on both) — shown on a screenshot first, his pick, then built.
-4. **#253:** TCC does not edit a PATH or put files in `~/.local/bin`. It keeps a fixed folder
-   `…/autosound-tcc/codex/current` (a link, a junction on Windows) refreshed on install, and the row says that path and
-   that the copy is TCC's. Advice: this; a PATH write is the user's.
-5. **#254:** a link to TCC's copy counts as TCC's (realpath under TCC's `codex/`); the row reads PyPI's latest on the
-   worker and says «0.165.0 is out; TCC holds 0.162.1 (pinned)»; offline keeps today's text. Updating the pin itself
-   is a release's job, not the button's.
-6. **#255:** TCC adds the link to `.gitignore` and takes an already tracked one out of the index (`git rm --cached`),
-   once, and says «commit this once»; TCC does not commit. The second Mac still needs «Перепривʼязати» once.
-7. **#251:** «checked in the DSP» = every channel row `applied` and `provenance.file` present; the mark and hover go on
-   the «Порівняти з» rows and the header dot (there is no separate list widget). «In the DSP now» only from hub #325's
-   field.
-8. **#235** is an epic: split into (a) a live read — re-read on `.git/HEAD`/refs change and after every ledger write;
-   (b) names on hover — files by kind, commits ahead, «на GitHub до <hash> · <time>»; (c) the dot and labels by
-   severity, the label not cut; (d) «Відправити» through the method's save verb (hub #326), on a worker, asked once.
-   (a)–(c) need the method's `status --json` fields; all four wait for hub #326.
+1. **#236 — decided (the Arbiter, 2026-11-09):** in Control mode the bar's in-app session pickers and status hide; «Купити каву»
+   and «Відгук» stay, where they are (the bar's right end).
+2. **#250 — decided (the Arbiter, 2026-11-09):** «changed» is background + bold in the outputs table, the font colour stays
+   the value's (orange INV); on the tree pill a frame + background.
+3. **#237 — decided (the Arbiter, 2026-11-09):** three looks: «Звичайний» (today), «Легкий» (the system font, light weight:
+   SF Pro on macOS, Segoe UI Light on Windows), «Округлий» (one more family present on both). A light weight shows only if
+   the family ships one on both systems. Shown on a screenshot first, his pick, then built.
+4. **#253 — decided (the Arbiter, 2026-11-09):** TCC does not edit a PATH or put files in `~/.local/bin`. It keeps a fixed
+   folder `…/autosound-tcc/codex/current` (a link, a junction on Windows) refreshed on install, and the row says that path
+   and that the copy is TCC's. He first chose a PATH write, and dropped it once #254 kept no newer-version button.
+5. **#254 — decided (the Arbiter, 2026-11-09):** a link to TCC's copy counts as TCC's (realpath under TCC's `codex/`); the row
+   reads PyPI's latest on the worker and says «0.165.0 is out; TCC holds 0.162.1 (pinned)»; offline keeps today's text. No
+   button to a newer version: he picked one, then dropped it on hearing that a newer file has no sha256 pinned in TCC's
+   source (`codex_install.py`), so only PyPI would vouch for it. A new version comes with a TCC release and its pinned sum.
+6. **#255 — decided (the Arbiter, 2026-11-09):** TCC adds the link to `.gitignore`, takes an already tracked one out of the
+   index (`git rm --cached`), once, **and commits that itself**. Rules for the build: the commit holds only those two paths
+   (the person's staged or unfinished changes stay out), no push, nothing during a merge or rebase, and TCC says what it
+   committed. The second Mac still needs «Перепривʼязати» once.
+7. **#251 — decided (the Arbiter, 2026-11-09):** «checked in the DSP» depends on the DSP. Where we can read that DSP's save
+   file (today only the Helix): every channel row `applied` and the file recorded (`provenance.file`; check its shape against
+   rc1's `source_file`). On any other DSP: the user's explicit word, and the hover says it was his word, not a file. The mark
+   and hover go on the «Порівняти з» rows and the header dot (there is no separate list widget). «In the DSP now» only from
+   hub #325's field, `slots[slot].loaded`.
+8. **#235 — decided (the Arbiter, 2026-11-09): all four parts in W-12.** It is an epic, split into (a) a live read — re-read on
+   `.git/HEAD`/refs change and after every ledger write; (b) names on hover — files by kind, commits ahead, «на GitHub до
+   <hash> · <time>»; (c) the dot and labels by severity, the label not cut; (d) «Відправити» through the method's save verb
+   (`project_repo.py save`), on a worker, asked before each send. (a)–(c) read `status --json` of rc1, where `null` is a failed
+   read; the save call needs a bound above TCC's 600 s (hub #331).
 
 ## The code maps (2026-10-30, `main` at `fdb45747`)
 
@@ -250,4 +255,4 @@ at the session's pace, plus the PR's CI (~35–40 min per run) and the skill's v
 
 | issue | state | implementer | commits | review | note |
 |---|---|---|---|---|---|
-| the plan | written 2026-10-30, updated 2026-11-09 (hub #331, #333; acceptance, the brief, #259, #260); waits for the Arbiter's word on «Decisions» and «го» | — | this | — | — |
+| the plan | written 2026-10-30, updated 2026-11-09 (hub #331, #333; acceptance, the brief, #259, #260; the eight decisions taken); waits for the Arbiter's «го» | — | this | — | — |
