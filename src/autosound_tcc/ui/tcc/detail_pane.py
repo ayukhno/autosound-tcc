@@ -906,7 +906,7 @@ class _ChangedInvFrame(QStyledItemDelegate):
 
 def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] = None,
                        others: Optional[list] = None, preset: Optional[str] = None,
-                       current: Optional[str] = None) -> None:
+                       current: Optional[str] = None, looked_at: bool = False) -> None:
     """«Порівняти з»: «—», this preset's versions under its own heading, then each other preset's
     under its.
 
@@ -918,7 +918,10 @@ def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] 
 
     `others` is `[(preset, [(key, label), …]), …]` (finding 66). The key of another preset's
     version carries that preset (`SQ/v_004`) because on the old layout each preset numbers its
-    own, and the loader has to know where to read it from."""
+    own, and the loader has to know where to read it from.
+
+    `looked_at`: `current` is a version somebody is only looking at (#249), so its row reads
+    «shown», not «now», which says the current configuration."""
     combo.clear()
     combo.addItem("—", None)
     if preset is not None:
@@ -927,7 +930,8 @@ def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] 
     for version in versions:
         label = str((labels or {}).get(version, version))
         if version == current:
-            combo.addItem(i18n.t("cmpCurrentVersion").format(version=label), None)
+            word = "cmpShownVersion" if looked_at else "cmpCurrentVersion"
+            combo.addItem(i18n.t(word).format(version=label), None)
             combo.model().item(combo.count() - 1).setEnabled(False)
         else:
             combo.addItem(label, str(version))
@@ -1339,7 +1343,8 @@ class DetailPane(QFrame):
 
     def set_compare_choices(self, versions: list, default: Optional[str], loader,
                             labels: Optional[dict] = None, others: Optional[list] = None,
-                            preset: Optional[str] = None, current: Optional[str] = None) -> None:
+                            preset: Optional[str] = None, current: Optional[str] = None,
+                            looked_at: bool = False) -> None:
         """Offer these versions to compare with; `loader(key)` returns that version's view.
 
         `default` is the one selected (the previous configuration, by the window's choice); None,
@@ -1351,7 +1356,7 @@ class DetailPane(QFrame):
         decides whether the control has anything to offer."""
         self._compare_loader = loader
         blocked = self._compare_combo.blockSignals(True)
-        fill_compare_combo(self._compare_combo, versions, labels, others, preset, current)
+        fill_compare_combo(self._compare_combo, versions, labels, others, preset, current, looked_at)
         index = self._compare_combo.findData(default) if default else 0
         self._compare_combo.setCurrentIndex(max(index, 0))
         self._compare_combo.blockSignals(blocked)

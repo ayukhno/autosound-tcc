@@ -11,7 +11,6 @@ section gets wired to real data, but the outer structure built here should not n
 from __future__ import annotations
 
 import atexit
-import functools
 import os
 import signal
 import threading
@@ -106,7 +105,8 @@ from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line, t
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc import process_watch, project_watch, qt_shutdown, rew_status, window_folder
-from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order, is_other_preset
+from autosound_tcc.ui.tcc import shown_version
+from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order
 from autosound_tcc.ui.tcc.row_rule import table_fields
 from autosound_tcc.ui.tcc.setting_status import group_status
 from autosound_tcc.ui.tcc.diagnostics_panel import DiagnosticsDialog
@@ -2108,6 +2108,7 @@ class MainWindow(QMainWindow):
             self._bank_first_btn, alignment=Qt.AlignmentFlag.AlignCenter
         )
 
+        self._dsp_section.body_layout().addWidget(shown_version.row(self))
         self._tree = DspTreeWidget()
         self._tree.setVisible(False)
         # Connected once here (not in _load_project, which can now run multiple times across a
@@ -2230,6 +2231,7 @@ class MainWindow(QMainWindow):
             self._bank_first_btn.setVisible(True)
             self._tree.setVisible(True)
             self._view = rig
+            shown_version.clear(self)
             self._rebuild_system_params()
             self._rebuild_acoustics()
             self._tree.set_view(rig)
@@ -2279,8 +2281,9 @@ class MainWindow(QMainWindow):
         # switch, and never again -- so a flaw the skill recorded mid-session only appeared after
         # a restart (user, 2026-08-21). Its own docstring already claimed this call existed.
         self._rebuild_acoustics()
-        self._tree.set_view(view)
-        self._detail.set_view(view)
+        drawn = shown_version.read(self, load_project_view, root, profile)
+        self._tree.set_view(drawn)
+        self._detail.set_view(drawn)
         self._set_project_params(view)
         self._refresh_open_detail()
 
@@ -2311,9 +2314,10 @@ class MainWindow(QMainWindow):
         (`attest`) — and the processor's name with the counts on hover (F-070; placed there by the
         Arbiter, 2026-09-23: «в шапці розділу ДСП в лівій панелі як поточний в процесорі»)."""
         self._version_shown = (view, profile)  # a language switch re-says the tooltip
+        shown_version.sync(self)
         prof = profile.get("dsp_profile", profile)
         processor = f"{prof.get('vendor', '?')} {prof.get('name', '?')}"
-        self._cfg_btn.setVisible(bool(view.version)
+        self._cfg_btn.setVisible(bool(view.version) and shown_version.key_of(self) is None
                                  and ledger_line.is_project_line(config.state_root()))
         if not view.version:
             self._dsp_section.set_sub(processor)
@@ -2324,7 +2328,8 @@ class MainWindow(QMainWindow):
         # By the name it was saved under in the device, when it was (hub #198): `SQ-2 · v_006`.
         root = config.state_root()
         standing = ledger_line.config_of(root, view.version)
-        self._dsp_section.set_sub(f"{standing[0]} · {view.version}" if standing else view.version)
+        said = f"{standing[0]} · {view.version}" if standing else view.version
+        self._dsp_section.set_sub(shown_version.sub(self, said))
         self._dsp_section.set_dot(None if state is None else
                                   ("wait" if state == "proposed" else "done"))
         counts = dict(view.status_counts)
@@ -2375,33 +2380,7 @@ class MainWindow(QMainWindow):
         self._dsp_section.set_dot(None)
 
     def _offer_compare(self, root, preset: str, profile: dict, current: Optional[str]) -> None:
-        """«Порівняти з» for the channel tables: the other versions, newest first, each with the
-        names it was saved under in the device; selected by default is the PREVIOUS one (the
-        Arbiter, 2026-09-23: «за замовчанням попередній»).
-
-        Previous is the ancestry, never the number below (hub #198): SQ-2 (v_006) is compared with
-        SQ-1 (v_003) even with v_004 and v_005 banked for another preset between them. The method
-        stores that at save time; `ledger_line.previous_of` reads it.
-
-        After this preset's versions come the other presets' (the Arbiter, 2026-09-25, finding 66:
-        «порівнювати не тільки v_xxx в поточній конфігурації, але і з іншими конфігураціями»),
-        keyed `SQ/v_004` so the loader reads each from its own preset."""
-        own, default, labels, others = ledger_line.compare_offer(root, preset, current)
-
-        def load(key: str, _root=str(root), _preset=preset, _profile=profile):
-            of, version = key.split("/", 1) if is_other_preset(key) else (_preset, key)
-            return load_project_view(_root, of, _profile, version=version)
-
-        # One read per version: the pane, the control layout's tabs and the dots all ask for it.
-        loader = functools.lru_cache(maxsize=16)(load)
-        # `preset` and `current` ride along after `others` (index 5, 6) so `control_layout.
-        # _fill_compare` can head and grey the own group the same way (tcc#103) -- appended, not
-        # inserted, so the existing `len(args) > 3`/`> 4` reads of `labels`/`others` stay right.
-        self._compare_args = (own, default, loader, labels, others, preset, current)
-        self._compare_key = default
-        self._detail.set_compare_choices(own, default, loader, labels=labels, others=others,
-                                         preset=preset, current=current)
-        self._sync_status_dots()
+        shown_version.offer_compare(self, load_project_view, root, preset, profile, current)
 
     def _compare_view_now(self):
         """The version «порівняти з» names now, loaded — or None when nothing is compared."""
@@ -2447,7 +2426,7 @@ class MainWindow(QMainWindow):
     def _sync_status_dots(self) -> None:
         """Grey, green or blue beside each DSP group in the tree, and on the control layout's
         tabs (the Arbiter, 2026-09-25, finding 65)."""
-        groups = getattr(getattr(self, "_view", None), "groups", ()) or ()
+        groups = getattr(shown_version.on_screen(self), "groups", ()) or ()
         compared_view = self._compare_view_now()
         old = getattr(compared_view, "groups", ()) or ()
         compared = compared_view is not None
@@ -2776,6 +2755,7 @@ class MainWindow(QMainWindow):
         if not preset or preset == self._preset_override:
             return
         self._preset_override = preset
+        shown_version.clear(self)
         self._settings.setValue("ui/preset", preset)
         self._load_project()
 
@@ -2811,6 +2791,7 @@ class MainWindow(QMainWindow):
         consulted about the process.
         """
         self._has_project = False
+        shown_version.clear(self)
         self._tree.setVisible(False)
         # `again` is how to SAY this message in the language of the moment, kept so `_retranslate`
         # can ask for it later. The two branches that have no `again` are the load failures, whose
@@ -3006,9 +2987,8 @@ class MainWindow(QMainWindow):
     # ---- detail-pane wiring --------------------------------------------
 
     def _find_group(self, group_id: str):
-        if self._view is None:
-            return None
-        return next((g for g in self._view.groups if g.id == group_id), None)
+        groups = getattr(shown_version.on_screen(self), "groups", ()) or ()
+        return next((g for g in groups if g.id == group_id), None)
 
     def _refresh_open_detail(self) -> None:
         """Keep an already-open table/EQ view in sync after a project reload (preset switch, "New
@@ -3180,7 +3160,7 @@ class MainWindow(QMainWindow):
         the ones on screen, over this rig's real rows with the sample values in the named columns
         -- bold, as a changed value is drawn (`DetailPane._styled_cell`)."""
         best = 0
-        for group in getattr(self._view, "groups", None) or ():
+        for group in getattr(shown_version.on_screen(self), "groups", None) or ():
             fields = table_fields(group)
             if not group.rows_visible() or not set(fields) & set(_FLOOR_CELLS):
                 continue
@@ -3560,7 +3540,7 @@ class MainWindow(QMainWindow):
         if not window_folder.may_reread(self, "the watcher's reload"):  # F-053; #206's switch
             return
         self._arm_project_watcher()
-        self._safe_load_project()
+        shown_version.reload_at_head(self, self._safe_load_project)
         self._check_intake_gate()
 
     def _refresh_process(self, *_args) -> None:
@@ -6011,7 +5991,7 @@ class MainWindow(QMainWindow):
         self._dialog.retranslate()
         # The tree builds its group headers / params-row labels from i18n at set_view() time and
         # has no live binding, so rebuild it in the new language (cheap -- a handful of widgets).
-        if self._view is not None:
-            self._tree.set_view(self._view)
+        if shown_version.on_screen(self) is not None:
+            self._tree.set_view(shown_version.on_screen(self))
             # A rebuilt tree has no dots and no band changes until told again.
             self._sync_status_dots()

@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
 
 from autosound_tcc.ui.tcc import i18n, window_folder
 from autosound_tcc.ui.tcc.discard import drop
+from autosound_tcc.ui.tcc import shown_version
 from autosound_tcc.ui.tcc.detail_pane import (
     cell_width,
     DetailPane,
@@ -759,7 +760,7 @@ class ControlLayout:
         self._index[key] = self.tabs.addTab(page, text)
 
     def _fill_tabs(self) -> None:
-        view = getattr(self.window, "_view", None)
+        view = shown_version.on_screen(self.window)
         current = self.tabs.currentIndex()
         while self.tabs.count():
             page = self.tabs.widget(0)
@@ -814,7 +815,7 @@ class ControlLayout:
         if self.tabs is None or index is None:
             return
         page = self.tabs.widget(index)
-        group = _group(getattr(self.window, "_view", None), group_id)
+        group = _group(shown_version.on_screen(self.window), group_id)
         if row_id is not None and isinstance(page, DetailPane) and group is not None:
             page.open_table(group, select_row_id=row_id)
             self._hold_table()
@@ -824,7 +825,7 @@ class ControlLayout:
         """The EQ tab on this channel. From a tab's row, «← <that tab>» leads back to it; from
         the tree there is no table to go back to (finding 47, 5)."""
         index = self._index.get("eq")
-        group = _group(getattr(self.window, "_view", None), group_id)
+        group = _group(shown_version.on_screen(self.window), group_id)
         row = next((r for r in group.rows if r.id == row_id), None) if group is not None else None
         pane = self.tabs.widget(index) if self.tabs is not None and index is not None else None
         if not isinstance(pane, DetailPane) or row is None:
@@ -913,10 +914,11 @@ class ControlLayout:
         others = args[4] if len(args) > 4 else None
         preset = args[5] if len(args) > 5 else None
         current = args[6] if len(args) > 6 else None
+        looked_at = bool(args[7]) if len(args) > 7 else False
         key = getattr(self.window, "_compare_key", None)
         combo = self.compare_combo
         blocked = combo.blockSignals(True)
-        fill_compare_combo(combo, own, labels, others, preset, current)
+        fill_compare_combo(combo, own, labels, others, preset, current, looked_at)
         combo.setCurrentIndex(max(combo.findData(key) if key else 0, 0))
         combo.blockSignals(blocked)
         if self._unreadable(key, _compare_now(self.window)[1]):
@@ -1022,7 +1024,7 @@ class ControlLayout:
         """Grey, green or blue on each tab that shows the DSP (finding 65)."""
         if self.tabs is None:
             return
-        view = getattr(self.window, "_view", None)
+        view = shown_version.on_screen(self.window)
         groups = getattr(view, "groups", ()) or ()
         _key, compared_view, said = _compare_now(self.window)
         old = getattr(compared_view, "groups", ()) or ()

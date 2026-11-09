@@ -1462,6 +1462,20 @@ def test_the_table_s_columns_are_sized_to_their_content_and_share_the_rest():
         table.close()
 
 
+def test_the_list_says_shown_when_its_left_side_is_a_looked_at_version():
+    """#249: a looked-at version's greyed row must not read as «the current one»."""
+    from PySide6.QtWidgets import QComboBox
+
+    from autosound_tcc.ui.tcc.detail_pane import fill_compare_combo
+
+    _app()
+    combo = QComboBox()
+    fill_compare_combo(combo, ["v_006"], current="v_006", looked_at=True)
+    assert combo.itemText(combo.count() - 1) == "v_006 — shown"
+    fill_compare_combo(combo, ["v_006"], current="v_006")
+    assert combo.itemText(combo.count() - 1) == "v_006 — now"
+
+
 def test_the_compare_row_tooltip_survives_a_paint():
     """tcc#96, finding 105 -- IMPORTANT 2, an opus reviewer's pass on the first fix:
     `_DTab.paintEvent` used to call `setToolTip` on every single paint -- `""` when the text fit,

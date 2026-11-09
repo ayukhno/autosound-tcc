@@ -18,6 +18,14 @@ from autosound_tcc.state import ledger_line  # noqa: E402
 from tests import _reads  # noqa: E402
 
 
+def _new_window():
+    """The one full-window build in this file (the ratchet counts it once)."""
+    from autosound_tcc.ui.tcc.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    return MainWindow()
+
+
 def _arbiter_example(root):
     """The Arbiter's own example (2026-09-23): v_003 saved into preset 1 as SQ-1; FULL-1 into
     preset 2 as v_004, its rear changed into v_005; back on SQ-1, refined into SQ-2 = v_006."""
@@ -322,15 +330,13 @@ def test_the_dsp_header_names_the_configuration_in_the_processor(tmp_path, monke
     from types import SimpleNamespace
 
     from autosound_tcc.core import config
-    from autosound_tcc.ui.tcc.main_window import MainWindow
 
-    QApplication.instance() or QApplication([])
     monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
     monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
     root = tmp_path / "ledger"
     _arbiter_example(root)
     monkeypatch.setattr(config, "state_root", lambda *_a, **_k: root)
-    window = MainWindow()
+    window = _new_window()
     view = SimpleNamespace(version="v_006", state="applied", status_counts=(), preset="SQ")
     window._show_version(view, {"dsp_profile": {"vendor": "Audiotec", "name": "Helix"}})
     assert window._dsp_section.sub_text() == "SQ-2 · v_006"
@@ -456,9 +462,7 @@ def test_the_arbiter_s_project_offers_every_other_preset_s_both_versions(tmp_pat
 def test_the_window_offers_other_presets_versions_after_its_own(tmp_path, monkeypatch):
     from autosound_tcc.core import config
     from autosound_tcc.ui.tcc import main_window
-    from autosound_tcc.ui.tcc.main_window import MainWindow
 
-    QApplication.instance() or QApplication([])
     monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
     monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
     loaded = []
@@ -466,7 +470,7 @@ def test_the_window_offers_other_presets_versions_after_its_own(tmp_path, monkey
                         lambda root, preset, profile, version=None: loaded.append((preset, version)))
     root = tmp_path / "ledger"
     _old_layout(root)
-    window = MainWindow()
+    window = _new_window()
     window._offer_compare(root, "SQ", {}, "v_003")
     combo = window._detail._compare_combo
     keys = [combo.itemData(i) for i in range(combo.count())]
@@ -483,3 +487,195 @@ def test_the_window_offers_other_presets_versions_after_its_own(tmp_path, monkey
     combo.setCurrentIndex(combo.findData("FULL/v_002"))
     assert loaded[-1] == ("FULL", "v_002"), "another preset's version is read from that preset"
     assert window._detail._compare_other.isVisibleTo(window._detail)
+
+
+# ---- «Показати версію…» (#249): one version looked at in the DSP tree, read-only ---------------
+
+
+def _project_with_versions(tmp_path, monkeypatch):
+    """FULL at v_003 with v_001 and v_002 behind it, SQ at v_004 (one line per project), through
+    the skill's writers."""
+    from tests import _intake
+
+    _intake.seed(tmp_path)
+    state = vendor_loader.load_dsp_state()
+    full = state.PresetHistory(str(tmp_path / "state"), "FULL", project_dir=str(tmp_path))
+
+    def snap(history, preset, gain):
+        history.snapshot({"preset": preset, "sample_rate": 96000,
+                          "channels": {"w-L": {"hp": None, "lp": None, "gain_db": gain, "ta_ms": 0.0,
+                                               "polarity": "NORM"}}}, note="fixture")
+
+    snap(full, "FULL", -1.5)
+    snap(full, "FULL", -4.5)
+    sq = state.PresetHistory(str(tmp_path / "state"), "SQ", project_dir=str(tmp_path))
+    snap(sq, "SQ", -7.5)
+    monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOSOUND_STATE_ROOT", str(tmp_path / "state"))
+    window = _new_window()
+    assert window._loaded_preset == "FULL" and window._view.version == "v_003", "the fixture opens"
+    return window
+
+
+def _table_text(pane) -> str:
+    from PySide6.QtWidgets import QTableWidget
+
+    tables = [t for t in pane.findChildren(QTableWidget) if not t.isHidden()]
+    return " ".join(t.item(r, c).text() for t in tables for r in range(t.rowCount())
+                    for c in range(t.columnCount()) if t.item(r, c) is not None)
+
+
+def _shown_text(window) -> str:
+    """What the person reads in the channel table, opened as the tree's «params» opens it."""
+    window._on_table_requested("physical_outputs")
+    return _table_text(window._detail)
+
+
+def _pick(window, text_start):
+    """Press the row of «Показати версію…» that reads `text_start`."""
+    from autosound_tcc.ui.tcc import shown_version
+
+    menu = shown_version.picker_menu(window)
+    action = next(a for a in menu.actions() if a.text().startswith(text_start))
+    assert action.isEnabled(), f"{action.text()!r} can be picked"
+    action.trigger()
+
+
+def test_any_version_can_be_shown_read_only_with_a_mark_and_one_way_back(tmp_path, monkeypatch):
+    window = _project_with_versions(tmp_path, monkeypatch)
+    assert window._shown_mark.isHidden() and window._shown_back.isHidden(), "HEAD carries no mark"
+    assert "-4.5" in _shown_text(window)
+
+    _pick(window, "v_001")
+
+    assert "0" in _shown_text(window) and "-4.5" not in _shown_text(window), "the tree shows v_001"
+    assert not window._shown_mark.isHidden() and "v_001" in window._shown_mark.text()
+    assert "not the current" in window._shown_mark.text()
+    # The header's dot and version say what is in the processor, HEAD, and name what is looked at.
+    assert window._dsp_section.sub_text().startswith("v_003") and "v_001" in window._dsp_section.sub_text()
+
+    window._shown_back.click()
+    assert window._shown_mark.isHidden() and "-4.5" in _shown_text(window), "one way back to HEAD"
+
+
+def test_nothing_acts_on_a_looked_at_version_as_head(tmp_path, monkeypatch):
+    """The listening and protective dialogs, «Saved in the DSP», the delay panel's present values,
+    the measurement panel's preset and what is published to a session all stay on HEAD."""
+    from types import SimpleNamespace
+
+    from autosound_tcc.ui.tcc import listening_dialog, protective_dialog
+
+    window = _project_with_versions(tmp_path, monkeypatch)
+    monkeypatch.setattr(ledger_line, "is_project_line", lambda _root: True)  # «Збережено в DSP…» lives there
+    published = {}
+    window._bridge = type("B", (), {"set_snapshot": lambda _s, **f: published.update(f)})()
+    _pick(window, "v_001")
+
+    assert window._view.version == "v_003", "the actors' view is HEAD"
+    assert window._cfg_btn.isHidden(), "«Збережено в DSP…» is not offered over an old version"
+    assert published["preset"] == "FULL", "the session is told what HEAD is"
+    window._publish_snapshot()
+    assert published["preset"] == "FULL"
+    assert window._meas_panel._preset_provider() == "FULL"
+    sent = []
+    monkeypatch.setattr(listening_dialog, "open_for", lambda _p, view, *a, **k: sent.append(view.version)
+                        or (None, "x"))
+    monkeypatch.setattr(protective_dialog, "open_for", lambda _p, view, *a, **k: sent.append(view.version)
+                        or SimpleNamespace(exec=lambda: 0, written=[]))
+    window._open_listening()
+    window._open_protective()
+    assert sent == ["v_003", "v_003"], "a verdict or protection is never stamped on the shown one"
+
+
+def test_a_shown_version_gone_says_so_and_goes_back_to_head(tmp_path, monkeypatch):
+    window = _project_with_versions(tmp_path, monkeypatch)
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **_k: said.append(text))
+    _pick(window, "v_001")
+    (tmp_path / "state" / "versions" / "v_001.json").unlink()
+
+    window._reload_from_disk()
+
+    assert any("v_001" in line and "could not be read" in line for line in said), said
+    assert window._shown_mark.isHidden() and "-4.5" in _shown_text(window), "back on HEAD, no crash"
+
+
+def test_a_session_writing_while_a_version_is_shown_resets_and_says_once(tmp_path, monkeypatch):
+    window = _project_with_versions(tmp_path, monkeypatch)
+    said = []
+    monkeypatch.setattr(window._status_strip, "notify", lambda text, **_k: said.append(text))
+    _pick(window, "v_001")
+
+    window._reload_project_files()
+    window._reload_project_files()
+
+    told = [line for line in said if "current version" in line]
+    assert len(told) == 1 and "v_003" in told[0], said
+    assert window._shown_mark.isHidden() and "-4.5" in _shown_text(window)
+
+
+def test_a_preset_switch_goes_back_to_head(tmp_path, monkeypatch):
+    window = _project_with_versions(tmp_path, monkeypatch)
+    _pick(window, "v_001")
+
+    window._preset_combo.setCurrentIndex(window._preset_combo.findData("SQ"))
+
+    assert window._shown_mark.isHidden()
+    assert window._view.preset == "SQ" and "-7.5" in _shown_text(window)
+
+
+def test_a_version_of_another_slot_is_named_and_compared_from_that_slot(tmp_path, monkeypatch):
+    window = _project_with_versions(tmp_path, monkeypatch)
+
+    _pick(window, "v_001")
+    window._shown_back.click()
+    menu_row = "SQ/v_004"
+    from autosound_tcc.ui.tcc import shown_version
+
+    shown_version.show(window, menu_row)
+
+    assert "-7.5" in _shown_text(window), "the other slot's values are on screen"
+    assert "SQ" in window._shown_mark.text() and "not the current" in window._shown_mark.text()
+    assert window._loaded_preset == "FULL" and window._view.version == "v_003", "HEAD did not move"
+    args = window._compare_args
+    assert args[5] == "SQ" and args[6] == "v_004", "the compare list is the shown slot's"
+
+
+def test_compare_has_the_shown_view_on_the_left_and_never_itself(tmp_path, monkeypatch):
+    window = _project_with_versions(tmp_path, monkeypatch)
+    _pick(window, "v_002")
+
+    combo = window._detail._compare_combo
+    row = next(i for i in range(combo.count()) if combo.itemText(i).startswith("v_002"))
+    assert not combo.model().item(row).isEnabled(), "a version is not compared with itself"
+    assert combo.itemText(row).endswith("shown"), "greyed as what is shown, not as the current one"
+    assert window._compare_key == "v_001", "the previous of the SHOWN one is the default"
+    assert window._detail._compare_view is not None and window._detail._view.version == "v_002"
+    # HEAD can be chosen against the shown version: the row of v_003 is an ordinary one.
+    assert combo.findData("v_003") > 0
+
+
+def test_control_mode_language_and_theme_keep_the_shown_version(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc import control_layout, i18n
+
+    window = _project_with_versions(tmp_path, monkeypatch)
+    monkeypatch.setattr(control_layout, "place_terminal_left", lambda *a, **k: None)
+    monkeypatch.setattr(control_layout.MonitorFeed, "refresh", lambda self: None)
+    _pick(window, "v_001")
+
+    layout = window._control_layout
+    layout.enter()
+    try:
+        tab = layout.tabs.widget(layout._index["physical_outputs"])
+        assert "-4.5" not in _table_text(tab), "the tabs draw the shown version, too"
+        assert not window._shown_mark.isHidden(), "the mark stays in control mode"
+    finally:
+        layout.leave()
+    before = i18n.current_language()
+    i18n.set_language("en" if before == "uk" else "uk")
+    window._retranslate()
+    window._apply_theme("light")
+    i18n.set_language(before)
+    window._retranslate()
+    assert not window._shown_mark.isHidden(), "language and theme changes keep the shown version"
+    assert "-4.5" not in _shown_text(window)
