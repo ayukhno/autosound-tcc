@@ -1894,9 +1894,15 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
     both were seen on the user's machine (2026-09-06). This file is TCC's own advertisement — a
     flag on it is not a decision anybody made about their configuration — so clearing it is
     honest, and it is logged.
+
+    Not written at all where git could not be told to keep it out, or would take it: the entry
+    carries a key that lasts (#247). Raises `mcp_key.NotKeptOutOfGit`, and `start()` keeps it as
+    `config_error`, as for any other refusal.
     """
     path = config.mcp_config_path(project_dir)
-    mcp_key.teach_git_to_ignore(Path(project_dir))
+    problem = mcp_key.keep_out_of_git(Path(project_dir))
+    if problem:
+        raise mcp_key.NotKeptOutOfGit(problem)
     data = _read_config(project_dir)
     servers = data.get("mcpServers")
     if servers is None:  # absent or null; any other shape that is not an object was set aside

@@ -6,9 +6,10 @@ A new `X-TCC-Token` on every start left a Claude Code session in the terminal ho
 
 It is a secret on disk, and that sets the order of everything here:
 
-* **git first.** Nothing is written until the project's `.gitignore` names `.tcc/` — a `git add -A`
-  (the method's `project_repo.py init`, TCC's Git backup) must find it already ignored. A `.gitignore`
-  TCC cannot read or add to means no file at all.
+* **git first.** Nothing is written until the project's `.gitignore` names `.tcc/` and, where there
+  is a repository, git itself says the key would not be taken — a `git add -A` (the method's
+  `project_repo.py init`, TCC's Git backup) must find it already ignored. A `.gitignore` TCC cannot
+  read or add to, or a git that answers no, means no file at all.
 * **Whole or not at all, owner only.** `own_store.write_secret`: temp file, fsync, rename, 0600.
 * **Every failure still gives a key.** The server never runs without a guard and TCC never fails to
   start over this: a key that cannot be read or kept is replaced by a fresh one for this run, and
@@ -25,11 +26,13 @@ import os
 import re
 import secrets
 import stat
+import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from autosound_tcc.core import app_log, config, own_store
+from autosound_tcc.core import app_log, child, config, own_store
 
 #: What `Key.note` says, for whoever tells the person.
 KEPT = ""  # the saved key, unchanged: nothing to say
@@ -55,6 +58,15 @@ _MOST_READ = 4096
 #: packages sent to the reviewer. `.mcp-*.tmp` is `.mcp.json` on its way through a temp file in the
 #: project's root: a kill between the write and the rename leaves the key in it.
 _IGNORE_LINES = (".mcp.json", ".tcc/", ".mcp-*.tmp")
+
+
+#: How long git gets to answer, all its questions together. `load` and `reset` run on the GUI
+#: thread, which waits for them: a hung git costs this much, once, and counts as a refusal.
+_GIT_WAIT_S = 2.0
+
+
+class NotKeptOutOfGit(OSError):
+    """Git could not be told, or says no: the key is not to be written where it would be taken."""
 
 
 @dataclass(frozen=True)
@@ -102,6 +114,44 @@ def teach_git_to_ignore(project_dir: Path) -> bool:
     return True
 
 
+def keep_out_of_git(project_dir: Path) -> str:
+    """Teach `.gitignore`, then ask git: "" when a key may be written here, else why it may not."""
+    project_dir = Path(project_dir)
+    if not teach_git_to_ignore(project_dir):
+        return f"{project_dir / '.gitignore'} does not keep .tcc/ out of git"
+    return _git_would_take_it(project_dir)
+
+
+def _git_would_take_it(project_dir: Path) -> str:
+    """Whether git, asked, would carry the key: "" when it would not, or when there is no repository
+    or no git to ask. The text of `.gitignore` cannot tell: a ` .tcc/` with a leading space or a
+    later `!.tcc/` names the line and ignores nothing, and a tracked `.mcp.json` stays tracked
+    whatever is ignored. `check-ignore` one path at a time: given several, it says yes for any."""
+    if not any(os.path.lexists(there / ".git")
+               for there in (project_dir.absolute(), *project_dir.absolute().parents)):
+        return ""
+    give_up = time.monotonic() + _GIT_WAIT_S
+    try:
+        if _ask_git(project_dir, give_up, "ls-files", "--error-unmatch", ".mcp.json") == 0:
+            return f".mcp.json is tracked by git in {project_dir}"
+        for name in (f".tcc/{FILE_NAME}", ".mcp.json"):
+            if _ask_git(project_dir, give_up, "check-ignore", "-q", name) != 0:
+                return f"git in {project_dir} does not ignore {name}"
+    except FileNotFoundError:
+        return ""  # no git on this machine, so no `git add -A` either
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"git in {project_dir} could not be asked: {_why(exc)}"
+    return ""
+
+
+def _ask_git(project_dir: Path, give_up: float, *question: str) -> int:
+    """Git's exit code for `question`. `child.run_bounded`: `subprocess.run` can outwait its own
+    timeout on Windows, and this holds the GUI thread."""
+    return child.run_bounded(["git", "-C", str(project_dir), *question],
+                             timeout=max(0.0, give_up - time.monotonic()),
+                             **child.quiet()).returncode
+
+
 def load(project_dir: Optional[Path]) -> Key:
     """This project's key: the saved one, or a new one and what became of it. Never raises.
 
@@ -121,6 +171,9 @@ def load(project_dir: Optional[Path]) -> Key:
     if not token:
         # Not a key at all, so nothing is lost; left as it is, every start would make another.
         return _made(project_dir, REPLACED)
+    problem = keep_out_of_git(Path(project_dir))
+    if problem:  # the file stays: it may be good again once git is told, and it is the person's
+        return _run_only(problem)
     return Key(token)
 
 
@@ -200,8 +253,9 @@ def _keep(project_dir: Path, token: str, first: bool = False) -> str:
     no key is there: `FileExistsError` when one is (`_made_first`)."""
     try:
         project_dir.mkdir(parents=True, exist_ok=True)  # a project not made yet has no `.gitignore`
-        if not teach_git_to_ignore(project_dir):
-            return f"{project_dir / '.gitignore'} does not keep .tcc/ out of git"
+        problem = keep_out_of_git(project_dir)
+        if problem:
+            return problem
         own_store.write_secret(_path(project_dir), token + "\n", only_if_absent=first)
     except (OSError, ValueError) as exc:
         if first and isinstance(exc, FileExistsError):

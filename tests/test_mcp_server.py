@@ -1001,18 +1001,21 @@ def test_the_ignore_lines_are_not_added_twice(tmp_path, monkeypatch):
     assert said.count(".tcc/") == 1
 
 
-def test_a_gitignore_that_cannot_be_written_is_logged_not_raised(
+def test_a_gitignore_that_cannot_be_written_is_logged_and_no_key_goes_in_mcp_json(
     tmp_path, monkeypatch, app_log_warnings
 ):
-    """A project whose `.gitignore` cannot be written still deserves a running server. The refusal
-    went to `app_log.warn`, which does not exist, so the OSError came out as an AttributeError and
-    took `write_mcp_config` down with it."""
+    """The refusal went to `app_log.warn`, which does not exist, so the OSError came out as an
+    AttributeError. The answer is used now (#247): what git cannot be told to ignore gets no key
+    written into it, and `start()` keeps that as `config_error` with the server up."""
+    from autosound_tcc.core import config, mcp_key
+
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     (tmp_path / ".gitignore").mkdir()  # a folder by that name: reading and writing both refuse
 
-    path = write_mcp_config(tmp_path, 8765, "tok")
+    with pytest.raises(mcp_key.NotKeptOutOfGit):
+        write_mcp_config(tmp_path, 8765, "tok")
 
-    assert path.exists()
+    assert not config.mcp_config_path(tmp_path).exists()
     assert any(".gitignore" in r.getMessage() for r in app_log_warnings)
 
 
@@ -1117,14 +1120,17 @@ def test_an_advertisement_whose_mode_cannot_be_set_is_logged_not_raised(
 def test_a_gitignore_that_is_not_utf8_is_left_alone(tmp_path, monkeypatch, app_log_warnings):
     """A UTF-16 `.gitignore` (what `"x" > .gitignore` writes in Windows PowerShell 5.1) raised
     UnicodeDecodeError out of `start()` while uvicorn was already serving (the G1 review)."""
+    from autosound_tcc.core import mcp_key
+
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     ignore = tmp_path / ".gitignore"
     ignore.write_bytes("node_modules/\n".encode("utf-16"))
     before = ignore.read_bytes()
 
-    path = write_mcp_config(tmp_path, 8765, "tok")
+    with pytest.raises(mcp_key.NotKeptOutOfGit):
+        write_mcp_config(tmp_path, 8765, "tok")
 
-    assert "tcc" in json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
+    assert not (tmp_path / ".mcp.json").exists(), "no key where git could not be told (#247)"
     assert ignore.read_bytes() == before, "a file that could not be read is not rewritten"
     assert any(".gitignore" in r.getMessage() for r in app_log_warnings)
 
