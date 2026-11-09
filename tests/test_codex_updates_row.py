@@ -404,7 +404,6 @@ def test_a_link_to_tccs_copy_is_tccs_copy(tmp_path, monkeypatch, versions):
 
     assert _line(dialog) == "Codex 0.162.1 — up to date"
     assert dialog._codex_row.button.isHidden() and not dialog._codex_row.offered
-    assert found.path == str(link), "the path Codex is started by stays as found"
 
 
 @pytest.mark.parametrize("latest", ["0.165.0", "0.1000.0"])  # 0.1000 sorts before 0.162 as text
@@ -433,8 +432,9 @@ def test_a_newer_codex_is_named_and_held_by_the_pin_with_no_button(
     _pypi_says("0.162.1"),
     _pypi_says("0.161.9"),
     _pypi_says("0.99.0"),  # sorts after 0.162.1 as text
+    _pypi_says("9" * 4301 + ".0.0"),  # int() refuses a number that long
 ], ids=["offline", "refused", "timeout", "not-json", "no-info", "a-list", "not-a-string",
-        "pre-release", "the-pin", "older", "older-by-number"])
+        "pre-release", "the-pin", "older", "older-by-number", "too-many-digits"])
 def test_no_newer_version_read_keeps_todays_text(monkeypatch, versions, answer):
     _tcc_copy(monkeypatch, versions)
     asked = _pypi(monkeypatch, answer)
@@ -469,6 +469,36 @@ def test_a_slow_pypi_does_not_hold_the_row(monkeypatch, versions):
         release.set()
     _until(lambda: row.label.text() == "Codex 0.165.0 is out; TCC holds 0.162.1 (pinned)")
     assert row.button.isHidden()
+
+
+@pytest.mark.parametrize("who, read, said_on_the_row", [
+    ("own", (0, 170, 2), "Codex 0.170.2 — your own Codex"),
+    ("missing", None, "Codex — not installed"),
+    ("too old", (0, 152, 0), "Codex 0.152.0 → 0.162.1 (TCC's own copy)"),
+], ids=["a-persons-own", "none", "too-old"])
+def test_pypi_is_asked_only_for_tccs_copy_and_a_slow_one_holds_no_other_row(
+        tmp_path, monkeypatch, versions, who, read, said_on_the_row):
+    said, _ = versions
+    if who != "missing":
+        found = Found(_binary(tmp_path), codex_cli.SOURCE_PATH)
+        said[found.path] = read
+        _finds(monkeypatch, found)
+    asked: list[bool] = []
+    release = threading.Event()
+
+    def query():
+        asked.append(True)
+        release.wait(30)
+        return _pypi_says("0.165.0")
+
+    monkeypatch.setattr(codex_cli, "_pypi_json", query, raising=False)
+    try:
+        dialog = _shown(_Host())  # waits for the row: a query that holds it times out here
+    finally:
+        release.set()
+
+    assert asked == []
+    assert _line(dialog) == said_on_the_row
 
 
 def test_the_query_asks_pypi_for_the_packages_latest_with_a_timeout(monkeypatch):

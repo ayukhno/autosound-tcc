@@ -543,12 +543,12 @@ def newer_than_pin() -> str:
     try:
         latest = json.loads(_pypi_json())["info"]["version"]
         release = _RELEASE_RE.fullmatch(latest)
+        past = release is not None and tuple(map(int, release.groups())) > tuple(
+            map(int, PIN.split(".")))
     except Exception as exc:  # noqa: BLE001 — anything at all here is just «not known»
         app_log.logger().info("codex: PyPI's latest could not be read (%s)", exc)
         return ""
-    if release is None or tuple(map(int, release.groups())) <= tuple(map(int, PIN.split("."))):
-        return ""
-    return latest
+    return latest if past else ""
 
 
 def standing() -> Standing:
