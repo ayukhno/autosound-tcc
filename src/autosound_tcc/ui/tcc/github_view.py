@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -43,6 +44,8 @@ class Read:
     ledger_newer: bool = False
     #: The run itself failed: the method's or TCC's words, with every list None.
     failed: str = ""
+    #: When this read landed, for the header's hover.
+    read_at: str = ""
 
     @property
     def changed(self) -> Optional[int]:
@@ -51,9 +54,13 @@ class Read:
         return len(self.tuning) + len(self.housekeeping)
 
 
+def _now() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
 def unread(said: str) -> Read:
     """A run that gave no answer: everything unknown, and it says why."""
-    return Read(remote=None, tuning=None, housekeeping=None, ahead=None, failed=said or "—")
+    return Read(remote=None, tuning=None, housekeeping=None, ahead=None, failed=said or "—", read_at=_now())
 
 
 def from_status(answer: dict, newest_version: Optional[str] = None) -> Optional[Read]:
@@ -72,7 +79,7 @@ def from_status(answer: dict, newest_version: Optional[str] = None) -> Optional[
     return Read(remote=answer.get("remote"), tuning=tuning, housekeeping=housekeeping, ahead=ahead,
                 remote_head=remote_head, fetched=answer.get("fetched"), fetch_error=answer.get("fetch_error"),
                 changes_error=answer.get("changes_error"), sends=answer.get("sends") or "person",
-                ledger_newer=_ledger_is_newer(newest_version, remote_head))
+                ledger_newer=_ledger_is_newer(newest_version, remote_head), read_at=_now())
 
 
 def _ledger_is_newer(newest: Optional[str], head: Optional[Commit]) -> bool:
@@ -90,8 +97,6 @@ NAMES_IN_TIP = 12
 
 def when(stamp: str) -> str:
     """An ISO time as a person reads it: the hour today, the day and the hour before that."""
-    from datetime import datetime
-
     moment = _parsed(stamp)
     if moment is None:
         return str(stamp)
@@ -137,8 +142,6 @@ def ahead_tip(read: Read) -> str:
 
 
 def _parsed(stamp: str):
-    from datetime import datetime
-
     try:
         value = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
     except ValueError:
@@ -218,6 +221,10 @@ class Row:
     value: str
     #: The hover: the names behind the number, or "".
     tip: str = ""
+    #: `bad` / `wait` colours the row with the dot's colour; None leaves it quiet.
+    level: Optional[str] = None
+    #: A number beside a label that must read whole: the key takes every pixel the number leaves.
+    count: bool = False
 
 
 @dataclass(frozen=True)
@@ -231,7 +238,8 @@ class Panel:
 
 
 def panel(git: GitStatus, read: Optional[Read], name: str) -> Panel:
-    """The panel for `git`, the first paint, and `read`, the method's answer once it has landed."""
+    """The panel for `git`, the first paint, and `read`, the method's answer once it has landed. A
+    remote that is not `origin` is one the method does not count: the first paint stands for it."""
     if not git.works:
         return Panel(i18n.t("gitSubBroken"), git.level, i18n.t("gitTipBroken"),
                      (Row(i18n.t("gitRow"), i18n.t("gitSubBroken")),), None)
@@ -239,24 +247,84 @@ def panel(git: GitStatus, read: Optional[Read], name: str) -> Panel:
         sub = i18n.t("gitSubNoRepo")
         tip = i18n.t("gitTipNoRepo").format(button=backup_label(0))
         return Panel(sub, git.level, tip, (Row(i18n.t("gitRow"), sub),), 0)
-    changed, unpushed, counted = git.changed, git.unpushed, git.counted
-    if read is not None:
-        changed, unpushed = read.changed, None if read.ahead is None else len(read.ahead)
-        counted = read.ahead is not None
+    if read is None or (git.remote and not read.remote and not read.failed):
+        return _first_paint(git, name)
+    return _from_read(git, read, name)
+
+
+def _first_paint(git: GitStatus, name: str) -> Panel:
     if not git.remote:
         sub, tip = i18n.t("gitSubNoRemote"), i18n.t("gitTipNoRemote").format(name=name)
-    elif unpushed or not counted:  # not counted is «?», never «backed up» (#172)
-        n, said = unpushed or "?", i18n.t("gitTipBehind" if counted else "gitTipUncounted")
+    elif git.unpushed or not git.counted:  # not counted is «?», never «backed up» (#172)
+        n, said = git.unpushed or "?", i18n.t("gitTipBehind" if git.counted else "gitTipUncounted")
         sub, tip = i18n.t("gitSubBehind").format(n=n), said.format(n=n, remote=git.remote)
     else:
         sub, tip = i18n.t("gitSubOk"), i18n.t("gitTipOk").format(remote=git.remote)
     rows = [Row(i18n.t("gitRow"), git.branch or "—")]
-    if changed is not None:
-        rows.append(Row(i18n.t("gitChanges"), str(changed) if changed else i18n.t("gitClean"),
-                        changes_tip(read) if read is not None else ""))
+    if git.changed is not None:
+        rows.append(Row(i18n.t("gitChanges"), str(git.changed) if git.changed else i18n.t("gitClean"), count=True))
+    rows.append(Row(i18n.t("gitBackup"), git.remote or i18n.t("gitNone")))
+    if git.unpushed or not git.counted:
+        rows.append(Row(i18n.t("gitUnpushed"), str(git.unpushed or "?"), count=True))
+    return Panel(sub, git.level, tip, tuple(rows), None if git.remote else 1)
+
+
+def _verdict(git: GitStatus, read: Read, name: str) -> tuple[str, str, str]:
+    """(level, sub, tip) of a read: red for work that is not safe, amber for what waits, and never
+    green for what could not be read."""
+    ahead = read.ahead or ()
+    remote = git.remote
+    if read.tuning:
+        n = len(read.tuning)
+        return "bad", i18n.t("gitSubUnsaved").format(n=n), i18n.t("gitTipUnsaved").format(n=n)
+    if ahead and read.ledger_newer:
+        return "bad", i18n.t("gitSubBehind").format(n=len(ahead)), i18n.t("gitTipBehind").format(n=len(ahead), remote=remote)
+    if git.detached:
+        return "wait", i18n.t("gitSubDetached"), i18n.t("gitTipDetached")
+    if read.tuning is None or read.ahead is None or read.failed or read.changes_error:
+        return "wait", i18n.t("gitSubUnread"), i18n.t("gitTipUnread")
+    if not remote:
+        return "wait", i18n.t("gitSubNoRemote"), i18n.t("gitTipNoRemote").format(name=name)
+    if ahead:
+        return "wait", i18n.t("gitSubBehind").format(n=len(ahead)), i18n.t("gitTipBehind").format(n=len(ahead), remote=remote)
+    if read.fetch_error:
+        return "wait", i18n.t("gitSubOffline"), i18n.t("gitTipOffline")
+    if read.housekeeping:
+        n = len(read.housekeeping)
+        return "wait", i18n.t("gitSubHousekeeping").format(n=n), i18n.t("gitTipHousekeepingOnly").format(n=n)
+    return "done", i18n.t("gitSubOk"), i18n.t("gitTipOk").format(remote=remote)
+
+
+def _facts(read: Read) -> list[str]:
+    """The lines under a read's verdict: what the remote holds, how fresh, what could not be read."""
+    if read.failed:
+        return [read.failed]
+    lines = [on_github(read)]
+    if read.changes_error:
+        lines.append(read.changes_error)
+    if read.fetch_error:
+        lines.append(i18n.t("gitTipFetchError").format(error=read.fetch_error))
+    if read.fetched:
+        lines.append(i18n.t("gitTipFetched").format(time=when(read.fetched)))
+    if read.read_at:
+        lines.append(i18n.t("gitTipReadAt").format(time=when(read.read_at)))
+    return lines
+
+
+def _from_read(git: GitStatus, read: Read, name: str) -> Panel:
+    level, sub, said = _verdict(git, read, name)
+    tip = "\n".join([said, "", *_facts(read)])
+    rows = [Row(i18n.t("gitRow"), git.branch or "—")]
+    if read.changed is None:
+        rows.append(Row(i18n.t("gitChanges"), "?", read.changes_error or i18n.t("gitTipUnread"), "wait", count=True))
+    else:
+        rows.append(Row(i18n.t("gitChanges"), str(read.changed) if read.changed else i18n.t("gitClean"),
+                        changes_tip(read), "bad" if read.tuning else ("wait" if read.housekeeping else None), count=True))
     rows.append(Row(i18n.t("gitBackup"), git.remote or i18n.t("gitNone"),
-                    on_github(read) if read is not None and git.remote else ""))
-    if unpushed or not counted:
-        rows.append(Row(i18n.t("gitUnpushed"), str(unpushed or "?"), ahead_tip(read) if read is not None else ""))
-    level = git.level if read is None else ("wait" if not git.remote or unpushed or not counted else "done")
+                    on_github(read) if git.remote else ""))
+    if read.ahead is None:
+        rows.append(Row(i18n.t("gitUnpushed"), "?", i18n.t("gitTipUnread"), "wait", count=True))
+    elif read.ahead:
+        rows.append(Row(i18n.t("gitUnpushed"), str(len(read.ahead)), ahead_tip(read),
+                        "bad" if read.ledger_newer else "wait", count=True))
     return Panel(sub, level, tip, tuple(rows), None if git.remote else 1)

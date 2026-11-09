@@ -401,6 +401,14 @@ def build_qss(theme: Theme, scale: float = 1.0, font: str = font_looks.DEFAULT) 
         color: {t.faint};
         font-size: 11px;
     }}
+    /* The project's git by severity (tcc#235): the header's words and the rows' labels take the
+    same colour as the dot. `sev` is set on the label, so the classes stay as they are. */
+    QLabel[class~="phead-sub"][sev="bad"], QLabel[class~="pk"][sev="bad"], QLabel[class~="pv"][sev="bad"] {{
+        color: {t.warn};
+    }}
+    QLabel[class~="phead-sub"][sev="wait"], QLabel[class~="pk"][sev="wait"], QLabel[class~="pv"][sev="wait"] {{
+        color: {t.yellow};
+    }}
 
     /* .curve-status-bad — the curve window's status line when a read FAILED. Four refusals in
     faint 11px over an empty plot read as a whisper (the Arbiter, 2026-09-20: «хоч би червоним

@@ -122,6 +122,12 @@ class SidebarSection(QWidget):
     def set_sub(self, text: str) -> None:
         self._sub_label.setText(text)
 
+    def set_sub_level(self, level: Optional[str]) -> None:
+        """Colour the sub by its severity (`sev` in the sheet); None for its quiet default."""
+        self._sub_label.setProperty("sev", level)
+        self._sub_label.style().unpolish(self._sub_label)
+        self._sub_label.style().polish(self._sub_label)
+
     def set_dot(self, status: Optional[str]) -> None:
         """A `tl-<status>` dot before the sub, or none."""
         self._dot.setVisible(status is not None)

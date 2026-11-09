@@ -433,6 +433,188 @@ def test_a_time_reads_today_or_with_its_day():
     assert github_view.when("not a time") == "not a time"
 
 
+# ── (c) The dot and the labels by severity, and the words not cut ────────────────────────────────
+
+def _state(widget, panel) -> tuple:
+    section = widget._project_section
+    return section.dot_status(), section.sub_text()
+
+
+def _sev(widget, key_text):
+    key, value = _labels(widget, key_text)
+    return key.property("sev"), value.property("sev")
+
+
+def _status_stub(monkeypatch, **fields) -> None:
+    answer = {"repo": True, "remote": "git@github.com:o/car.git", "gh": "absent", "init": None, "offer": None,
+              "changes": {"tuning": [], "housekeeping": []}, "ahead": [],
+              "remote_head": {"hash": "a" * 40, "time": "2026-11-01T10:00:00+00:00"}, "fetched": None,
+              "fetch_error": None, "changes_error": None, "sends": "person"}
+    answer.update(fields)
+    monkeypatch.setattr(project_repo, "read", lambda _p: dict(answer))
+
+
+def _painted(repo, host):
+    widget, panel = host()
+    panel.show()
+    assert _until(lambda: _settled(panel))
+    return widget, panel
+
+
+def test_all_clear_is_green_only_when_the_real_read_says_so(repo, host):
+    widget, panel = _painted(repo, host)
+    assert _state(widget, panel) == ("done", i18n.t("gitSubOk"))
+    assert widget._project_section._sub_label.property("sev") in (None, "")
+
+
+def test_a_tuning_file_uncommitted_is_red_and_its_row_is_too(repo, host):
+    project, _bare = repo
+    _write(project, "state/v_010.json")
+    widget, panel = _painted(repo, host)
+
+    assert _state(widget, panel) == ("bad", i18n.t("gitSubUnsaved").format(n=1))
+    assert _sev(widget, i18n.t("gitChanges")) == ("bad", "bad")
+    assert widget._project_section._sub_label.property("sev") == "bad"
+
+
+def test_only_housekeeping_uncommitted_is_amber(repo, host):
+    project, _bare = repo
+    _write(project, ".sessions.log")
+    widget, panel = _painted(repo, host)
+
+    assert _state(widget, panel) == ("wait", i18n.t("gitSubHousekeeping").format(n=1))
+    assert _sev(widget, i18n.t("gitChanges")) == ("wait", "wait")
+
+
+def test_commits_not_on_github_are_amber(repo, host):
+    project, _bare = repo
+    _commit(project, "docs/x.md")
+    widget, panel = _painted(repo, host)
+
+    assert _state(widget, panel) == ("wait", i18n.t("gitSubBehind").format(n=1))
+    assert _sev(widget, i18n.t("gitUnpushed")) == ("wait", "wait")
+
+
+def test_a_banked_version_newer_than_the_last_push_is_red(repo, host):
+    project, _bare = repo
+    _write(project, "state/SQ/v_001.json",
+           '{"created": "' + (datetime.datetime.now() + datetime.timedelta(hours=1)).isoformat(timespec="seconds") + '"}\n')
+    _git(project, "add", "-A")
+    _git(project, "commit", "-q", "-m", "a banked version, not pushed")
+    widget, panel = _painted(repo, host)
+
+    assert _state(widget, panel) == ("bad", i18n.t("gitSubBehind").format(n=1))
+    assert _sev(widget, i18n.t("gitUnpushed")) == ("bad", "bad")
+
+
+def test_a_null_is_could_not_read_never_zero_and_never_green(repo, host, monkeypatch):
+    _status_stub(monkeypatch, changes=None, ahead=None, changes_error="git could not read this project's changes")
+    widget, panel = _painted(repo, host)
+
+    assert _state(widget, panel) == ("wait", i18n.t("gitSubUnread"))
+    assert _rows(widget)[i18n.t("gitChanges")] == "?"
+    assert _rows(widget)[i18n.t("gitUnpushed")] == "?"
+    assert "git could not read this project's changes" in widget._project_section._sub_label.toolTip()
+
+
+def test_a_read_that_never_answered_says_so_with_the_reason(repo, host, monkeypatch):
+    monkeypatch.setattr(project_repo, "read", lambda _p: project_repo.RepoResult(False, "the method timed out"))
+    widget, panel = _painted(repo, host)
+
+    assert _state(widget, panel) == ("wait", i18n.t("gitSubUnread"))
+    assert "the method timed out" in widget._project_section._sub_label.toolTip()
+
+
+def test_offline_is_not_all_clear_and_says_why(repo, host):
+    """The real method, a remote that cannot be reached: `fetch_error`, and the dot amber."""
+    project, _bare = repo
+    _git(project, "remote", "set-url", "origin", str(project.parent / "no-such-remote.git"))
+    widget, panel = _painted(repo, host)
+
+    dot, sub = _state(widget, panel)
+    assert dot == "wait" and sub == i18n.t("gitSubOffline")
+    assert panel._read.fetch_error
+    assert panel._read.fetch_error[:30] in widget._project_section._sub_label.toolTip()
+
+
+def test_a_tuning_change_stays_red_even_offline(repo, host):
+    project, _bare = repo
+    _git(project, "remote", "set-url", "origin", str(project.parent / "no-such-remote.git"))
+    _write(project, "state/v_011.json")
+    widget, panel = _painted(repo, host)
+
+    assert _state(widget, panel)[0] == "bad"
+    assert panel._read.fetch_error
+
+
+def test_a_detached_head_is_never_green(repo, host):
+    project, _bare = repo
+    _git(project, "checkout", "-q", "--detach")
+    widget, panel = _painted(repo, host)
+
+    dot, sub = _state(widget, panel)
+    assert dot == "wait" and sub == i18n.t("gitSubDetached")
+
+
+def test_a_project_from_before_the_methods_status_keeps_its_first_read(repo, host, monkeypatch):
+    """An older copy of the method answers with the five keys: the panel stays as it was, no
+    Send and no «could not read»."""
+    monkeypatch.setattr(project_repo, "read", lambda _p: {"repo": True, "remote": "x", "gh": "absent",
+                                                          "init": None, "offer": None})
+    widget, panel = host()
+    panel.show()
+
+    assert _until(panel.idle)
+    assert panel._read is None
+    assert _state(widget, panel) == ("done", i18n.t("gitSubOk"))
+
+
+def test_the_status_is_whole_at_the_narrowest_column_in_every_language(repo, monkeypatch):
+    """The header read «не ві…» at the 30.10 session. It takes the sub off the title's line and
+    gives it the column, at the 200 px floor, the typewriter look and every language."""
+    from autosound_tcc.ui.tcc import font_looks, labels
+    from tests.test_project_repo import _window
+
+    project, _bare = repo
+    window = _window(project, monkeypatch)
+    window.show()
+    panel = window._github
+    window._settings.setValue(font_looks.KEY, font_looks.TYPEWRITER)
+    window._restyle()
+    section = window._project_section
+    subs = ("gitSubUnsaved", "gitSubBehind", "gitSubOffline", "gitSubUnread", "gitSubHousekeeping", "gitSubDetached",
+            "gitSubOk", "gitSubNoRemote")
+    keys = ("gitChanges", "gitUnpushed", "gitBackup")
+    try:
+        for lang in ("en", "uk", "pl", "de"):
+            monkeypatch.setattr(i18n, "_lang", lang)
+            window._left.setFixedWidth(max(200, font_looks.left_floor(window)))
+            QApplication.processEvents()
+            for key in subs:
+                text = i18n.t(key).format(n=12)
+                section.set_sub(text)
+                QApplication.processEvents()
+                assert section._sub_label.text() == text, (lang, key, section._sub_label.width())
+            _status_stub(monkeypatch, changes={"tuning": ["a"] * 12, "housekeeping": []}, ahead=[
+                {"hash": "b" * 40, "time": "2026-11-01T10:00:00+00:00", "subject": "x"}] * 12)
+            panel._read = github_view.from_status(project_repo.read(project))
+            panel._read_of = project
+            panel._paint(project)
+            QApplication.processEvents()
+            for key in keys[:2]:
+                label, value = _labels(window, i18n.t(key))
+                row = label.parentWidget()
+                room = row.width() - row.layout().contentsMargins().left() - row.layout().contentsMargins().right() \
+                    - row.layout().spacing() - value.width()
+                whole = label.text() == i18n.t(key)
+                assert whole or label.width() >= room - 1, (lang, key, label.text())
+                assert isinstance(label, labels.ElidedLabel)
+    finally:
+        window._github.stop()
+        for worker in list(qt_shutdown.live()) + list(qt_shutdown.detached()):
+            worker.wait(20000)
+
+
 def test_the_window_shows_the_read_and_a_read_starts_no_reload(repo, monkeypatch):
     """The whole wiring on the real window: a commit moves the rows, no project reload is started
     (a reload wipes the capture grid, #225), and looking at an old version (#249) changes nothing,

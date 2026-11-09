@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from autosound_tcc.core import app_log, config, project_repo
 from autosound_tcc.state import project_view
@@ -105,6 +105,7 @@ class ProjectGithub(QObject):
         view = github_view.panel(self._git, self._read, chosen.name)
         section.set_sub(view.sub)
         section.set_dot(view.level)
+        section.set_sub_level(None if view.level == "done" else view.level)
         section.set_sub_tip(view.tip)
         self._window._backup_step = view.step
         layout = self._box.layout()
@@ -119,9 +120,18 @@ class ProjectGithub(QObject):
     @staticmethod
     def _row(row: github_view.Row) -> QWidget:
         widget = labels.kv_row(row.key, row.value)
-        if row.tip:
-            for label in widget.findChildren(labels.ElidedLabel):
+        key, value = widget.findChildren(labels.ElidedLabel)
+        for label in (key, value):
+            if row.tip:
                 label.set_tip(row.tip)  # kept through the resizes that re-cut the label
+            if row.level:
+                label.setProperty("sev", row.level)
+        if row.count:  # the number is short and asks for its width; the key takes the rest
+            layout = widget.layout()
+            layout.setStretch(0, 1)
+            layout.setStretch(1, 0)
+            value.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+            value.set_min_width(min(value.sizeHint().width(), 56))
         return widget
 
     def _button(self, text: str, tip_key: str, slot) -> QWidget:
