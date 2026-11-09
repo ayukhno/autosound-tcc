@@ -413,8 +413,11 @@ class GitStatus:
 
 
 def _remote_label(url: str) -> str:
-    """`git@github.com:owner/name.git` / `https://github.com/owner/name` → `github.com/owner/name`."""
+    """`git@github.com:owner/name.git` / `https://github.com/owner/name` → `github.com/owner/name`;
+    a folder (`C:\\backups\\name.git`) stays a folder: a drive's colon is no `host:path` separator."""
     text = url.strip()
+    if re.match(r"^[A-Za-z]:[\\/]", text):
+        return text[:-4] if text.endswith(".git") else text
     text = re.sub(r"^[a-z+]+://", "", text)
     text = re.sub(r"^[^@/]+@", "", text)
     text = text.replace(":", "/", 1) if "/" not in text.split(":", 1)[0] and ":" in text else text

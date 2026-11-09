@@ -346,6 +346,16 @@ def test_a_remote_is_named_the_way_a_person_reads_it():
     assert project_view._remote_label("https://github.com/ayukhno/EPY") == "github.com/ayukhno/EPY"
 
 
+def test_a_remote_that_is_a_folder_is_named_as_that_folder():
+    """A Windows drive's colon is not `host:path`: `C:\\Users\\me\\backup.git` read as host `C`
+    was said as `C/\\Users\\me\\backup` in the question before sending (CI, run 42677312857)."""
+    from autosound_tcc.state import project_view
+
+    assert project_view._remote_label(r"C:\Users\me\backup.git") == r"C:\Users\me\backup"
+    assert project_view._remote_label("D:/backups/project.git") == "D:/backups/project"
+    assert project_view._remote_label("server.lan:tunes/epy.git") == "server.lan/tunes/epy"
+
+
 def _git(*args: str) -> str:
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout.strip()
 
