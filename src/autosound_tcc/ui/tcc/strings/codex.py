@@ -235,19 +235,16 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     'updCodexHeldByPin': {
         'en': 'Codex {latest} is out; TCC holds {here} (pinned)',
-        'uk': 'Codex {latest} is out; TCC holds {here} (pinned)',
-        'pl': 'Codex {latest} is out; TCC holds {here} (pinned)',
-        'de': 'Codex {latest} is out; TCC holds {here} (pinned)',
+        'uk': "Вийшов Codex {latest}; у TCC зафіксовано {here} (закріплено)",
+        'pl': "Wydano Codex {latest}; TCC utrzymuje {here} (przypięty)",
+        'de': "Codex {latest} ist verfügbar; TCC verwendet {here} (gepinnt)",
     },
     'updCodexCurrentPath': {
         'en': "This is TCC's own copy. To use it in a terminal, add this folder to PATH yourself "
               '(TCC does not change PATH):',
-        'uk': "This is TCC's own copy. To use it in a terminal, add this folder to PATH yourself "
-              '(TCC does not change PATH):',
-        'pl': "This is TCC's own copy. To use it in a terminal, add this folder to PATH yourself "
-              '(TCC does not change PATH):',
-        'de': "This is TCC's own copy. To use it in a terminal, add this folder to PATH yourself "
-              '(TCC does not change PATH):',
+        'uk': "Це власна копія TCC. Щоб використовувати її в терміналі, додайте цю теку до PATH самостійно (TCC не змінює PATH):",
+        'pl': "To jest własna kopia TCC. Aby używać jej w terminalu, dodaj ten folder do PATH samodzielnie (TCC nie modyfikuje PATH):",
+        'de': "Dies ist TCCs eigene Kopie. Um sie in einem Terminal zu verwenden, fügen Sie diesen Ordner selbst zu PATH hinzu (TCC ändert PATH nicht):",
     },
     'updCodexOwn': {
         'en': 'Codex {here} — your own Codex',

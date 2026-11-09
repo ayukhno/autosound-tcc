@@ -36,11 +36,9 @@ STRINGS: dict[str, dict[str, str]] = {
         'uk': 'Бібліотеку профілів DSP методу не вдалося прочитати, тож тут жодного не '
               'запропоновано: назвіть DSP нижче. Чому — сказано в журналі.',
         # #170: the English until the Advisor.
-        'pl': "The method's library of DSP profiles could not be read, so none is offered here: "
-              "name the DSP below. The log says why.",
+        'pl': "Nie udało się odczytać biblioteki profili DSP metody, więc żaden nie jest tutaj oferowany: wpisz nazwę DSP poniżej. Log zawiera wyjaśnienie.",
         # #170: the English until the Advisor.
-        'de': "The method's library of DSP profiles could not be read, so none is offered here: "
-              "name the DSP below. The log says why.",
+        'de': "Die DSP-Profilbibliothek der Methode konnte nicht gelesen werden, daher wird hier keines angeboten: Benennen Sie den DSP unten. Das Protokoll gibt Aufschluss über den Grund.",
     },
     'npVendor': {
         'en': 'DSP vendor',
@@ -278,8 +276,8 @@ STRINGS: dict[str, dict[str, str]] = {
     'npSeedEmpty': {
         'en': 'Choose the project to copy from first.',
         'uk': 'Спершу виберіть проєкт, з якого копіювати.',
-        'pl': 'Choose the project to copy from first.',
-        'de': 'Choose the project to copy from first.',
+        'pl': "Najpierw wybierz projekt źródłowy do skopiowania.",
+        'de': "Wählen Sie zuerst das Projekt aus, von dem kopiert werden soll.",
     },
     'npSeedFailed': {
         'en': 'Nothing was copied: {problem}',
