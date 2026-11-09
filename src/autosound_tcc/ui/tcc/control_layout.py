@@ -563,6 +563,8 @@ class ControlLayout:
         self._saved_geometry = None
         self._confirm_home: Optional[tuple] = None
         self._hidden: list = []
+        #: The bar's in-app session half, parked in one hidden box while the mode is on (#236).
+        self._bar_left: Optional[QWidget] = None
         #: Which tab holds what: a group id, "eq", a parameter field, or "monitor".
         self._index: dict[str, int] = {}
         self._corner: Optional[QWidget] = None
@@ -646,6 +648,7 @@ class ControlLayout:
         w._main_splitter.setVisible(False)
 
         self._compact(True)
+        self._park_session_bar()
         self._hold_table()
         self._place_on_screen()
         self.active = True
@@ -678,6 +681,7 @@ class ControlLayout:
         self._compare_tip = self._header_watch = None
         self._table_whole = None
         self._index = {}
+        self._restore_session_bar()
         self._compact(False)
         if self._saved_geometry is not None:
             geometry, state = self._saved_geometry
@@ -690,6 +694,42 @@ class ControlLayout:
             if state & (Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen):
                 w.setWindowState(state)
         self.active = False
+
+    def _park_session_bar(self) -> None:
+        """Hide the bottom bar's in-app session half: pickers, status, buttons (#236).
+
+        The session runs in a terminal here, so the bar keeps only the coffee and feedback buttons
+        at its right end. The left half moves into one box that is hidden, not widget by widget:
+        each child keeps its own shown/hidden state (the «!» marks, the spinner, a session button
+        that waits for a session), whatever happens to it while the mode is on, and leaving puts
+        the box's children back as they are. `_terminal_btn` goes with them: it is never shown.
+        """
+        footer = self.window._coffee_btn.parentWidget()
+        layout = footer.layout()
+        stretch = next(i for i in range(layout.count()) if layout.itemAt(i).spacerItem() is not None)
+        box = QWidget(footer)
+        box_layout = QHBoxLayout(box)
+        box_layout.setContentsMargins(0, 0, 0, 0)
+        box_layout.setSpacing(layout.spacing())
+        for _ in range(stretch):
+            box_layout.addWidget(layout.takeAt(0).widget())
+        layout.insertWidget(0, box)
+        box.setVisible(False)
+        self._bar_left = box
+
+    def _restore_session_bar(self) -> None:
+        box = self._bar_left
+        if box is None:
+            return
+        self._bar_left = None
+        footer = self.window._coffee_btn.parentWidget()
+        layout = footer.layout()
+        box_layout = box.layout()
+        for index in range(box_layout.count()):
+            layout.insertWidget(index, box_layout.takeAt(0).widget())
+        layout.removeWidget(box)
+        box.setParent(None)
+        box.deleteLater()
 
     def toggle(self) -> None:
         self.leave() if self.active else self.enter()
@@ -1038,8 +1078,10 @@ class ControlLayout:
         ~800, against half of a 1512 px MacBook screen. In this mode the language, zoom and theme
         controls leave the header (the menu has all three), the field captions go, the preset and
         target shrink, and the menu button is its glyph; the Generator's effort leaves the footer
-        (it steers the in-app session, which this mode does not run). The model picker STAYS: it
-        decides which CLI and model the terminal opens with.
+        (it steers the in-app session, which this mode does not run). The rest of the bar's session
+        half leaves too, after this (`_park_session_bar`, #236): the Arbiter chose a bar with only
+        the coffee and feedback buttons, 2026-11-09. This runs first so that the effort's own state
+        is read while it is still shown.
         """
         w = self.window
         hidden = [w._preset_field_lbl, w._target_field_lbl, w._lang_combo,

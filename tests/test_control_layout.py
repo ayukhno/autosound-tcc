@@ -1632,3 +1632,40 @@ def test_the_monitor_feed_reads_its_window_s_journal_not_the_setting(monkeypatch
     text = feed._feed.toPlainText()
 
     assert "from-A" in text and "from-B" not in text
+
+
+def test_control_mode_bar_keeps_only_coffee_and_feedback_and_leaving_restores(tmp_path, monkeypatch):
+    """#236: the session runs in a terminal, so the in-app session's pickers and status are not
+    shown; coffee and feedback stay. Leaving brings back what was shown, not what was hidden."""
+    window = _window(tmp_path, monkeypatch)
+    window.show()
+    for _ in range(3):
+        QApplication.processEvents()
+    pickers = [window._models_btn, window._ai_main_combo, window._ai_critic_combo,
+               window._ai_main_lbl, window._ai_critic_lbl, window._critic_status]
+    assert all(w.isVisible() for w in pickers)
+    window._session_btn.setVisible(True)  # shown while a session runs: one of the bar's own states
+    pickers.append(window._session_btn)
+    # Hidden in the full window, and changed again while in Control mode: not shown on leaving.
+    window._critic_warn.setVisible(False)
+    window._main_warn.setVisible(False)
+    assert window._terminal_btn.isHidden()
+
+    window._control_layout.enter()
+    window._critic_status.setText("Critic: not called")  # a refresh while in the mode
+    window._ext_session_lbl.setVisible(True)
+    for _ in range(3):
+        QApplication.processEvents()
+    assert not any(w.isVisible() for w in pickers)
+    assert not window._ext_session_lbl.isVisible()
+    assert window._coffee_btn.isVisible() and window._feedback_btn.isVisible()
+
+    window._control_layout.leave()
+    for _ in range(3):
+        QApplication.processEvents()
+    assert all(w.isVisible() for w in pickers)
+    assert window._ext_session_lbl.isVisible()  # shown in the mode's absence of it, as it asked
+    assert not window._critic_warn.isVisible() and not window._main_warn.isVisible()
+    assert window._terminal_btn.isHidden()
+    assert window._coffee_btn.isVisible() and window._feedback_btn.isVisible()
+    window.close()
