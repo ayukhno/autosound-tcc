@@ -4,16 +4,19 @@ While `state/` is missing the whole project folder is watched, and Qt reports on
 path, not what changed in it. TCC's own `.tcc/` (a reviewer pick, a setting) lands there too, and
 cost two reloads. The folder's entry list, minus `.tcc`, tells the two apart.
 
-Ignored: a change that leaves every entry but `.tcc` as it was, and the root files named in
-`READ_FILES` as they were (mtime, size). Not ignored: a new or removed entry, an edited `READ_FILES`
-file. `project.json` and `dsp_profile.json` are watched as files and need no entry here.
+Ignored: a change that leaves every entry but `.tcc` and `process` as it was, and the root files
+named in `READ_FILES` as they were (mtime, size). Not ignored: a new or removed entry, an edited
+`READ_FILES` file. `project.json` and `dsp_profile.json` are watched as files and need no entry here.
+`process/` has a watcher and a redraw of its own (`process_watch`, #246): its first appearance is
+the plan's news, and a reload for it would wipe the capture grid.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-OWN_DIR = ".tcc"
+#: Entries whose coming and going is no reason to reload the project.
+NOT_THE_PROJECT = (".tcc", "process")
 #: Root files the intake gate reads (the vendored `contract.py`: `project.json`, `dsp_profile.json`,
 #: `glossary.json`) that Qt does not watch as files. Rewriting one leaves the entry list as it was,
 #: so the listing alone would call it "nothing happened" and the gate would not re-run.
@@ -22,7 +25,7 @@ READ_FILES = ("glossary.json",)
 
 def _entries(folder: Path) -> tuple:
     try:
-        names = frozenset(p.name for p in folder.iterdir() if p.name != OWN_DIR)
+        names = frozenset(p.name for p in folder.iterdir() if p.name not in NOT_THE_PROJECT)
     except OSError:
         return (frozenset(), ())
     stats = []

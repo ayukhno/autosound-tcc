@@ -105,7 +105,7 @@ from autosound_tcc.ui.tcc.generator_check_view import GeneratorCheckView
 from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line, terminal_menu
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
-from autosound_tcc.ui.tcc import project_watch, qt_shutdown, rew_status, window_folder
+from autosound_tcc.ui.tcc import process_watch, project_watch, qt_shutdown, rew_status, window_folder
 from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order, is_other_preset
 from autosound_tcc.ui.tcc.row_rule import table_fields
 from autosound_tcc.ui.tcc.setting_status import group_status
@@ -1693,6 +1693,7 @@ class MainWindow(QMainWindow):
         that rewrote the ledger usually rewrote the process state and project facts too.
         """
         self._safe_load_project()
+        self._refresh_process()  # what a reopen re-reads too (#246): nothing else asks on a press
         self._start_contract_check()
         # And REW, the other half of "what changed since I looked": a separate application whose
         # answer used to survive only a restart of this one.
@@ -3460,8 +3461,7 @@ class MainWindow(QMainWindow):
         self._process_reload.setSingleShot(True)
         self._process_reload.setInterval(_RELOAD_COALESCE_MS)
         self._process_reload.timeout.connect(self._refresh_process)
-        self._process_watcher.fileChanged.connect(
-            lambda *_args: self._process_reload.start())
+        self._process_watch = process_watch.StateWatch(self._process_watcher, self._process_reload.start)
         self._refresh_process()
 
         # The plan was the only thing watched, so the left column kept saying "no data yet" beside
@@ -3569,11 +3569,9 @@ class MainWindow(QMainWindow):
         # keeps this from firing exactly once. Left after the guard, a file that did not read as a
         # state left the path dropped and the plan frozen through every write after it. A window
         # still being built (`_show_left_status`) has no watcher yet: the refresh is worth doing
-        # then, the re-arming is not. A file not there yet is not watched.
-        watcher = getattr(self, "_process_watcher", None)
-        path = str(process_view.state_file())
-        if watcher is not None and path not in watcher.files() and Path(path).is_file():
-            watcher.addPath(path)
+        # then, the re-arming is not. A file not there yet is its folder's to catch (#246).
+        if (watch := getattr(self, "_process_watch", None)) is not None:
+            watch.arm()
         if not window_folder.ours(self, "the plan's reload"):  # a cancelled switch (#206, I1)
             return
         # The round is in the process state, so «Готово» follows every write to it (finding 31).

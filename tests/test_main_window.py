@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 
 from types import SimpleNamespace
@@ -5111,20 +5112,10 @@ def test_the_first_ledger_snapshot_is_watched_for_before_state_exists(tmp_path, 
     returned `[]` when it was missing. That is the NORMAL first run, not an edge case: the ledger
     is always the last artefact to appear, always into a folder nobody was watching.
     """
-    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
-    monkeypatch.delenv("AUTOSOUND_STATE_ROOT", raising=False)
-    monkeypatch.delenv("AUTOSOUND_TCC_PRESET", raising=False)
-    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
-    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
-    _intake.seed(tmp_path)
+    window = _project_without_a_plan(tmp_path, monkeypatch, ledger=False)  # not tuned yet
     ledger = tmp_path / "state"
-    ledger.rename(tmp_path / "state.later")  # a project that has not been tuned yet
 
-    _app()
-    window = MainWindow()
-    _KEEP_WINDOWS.append(window)
-
-    assert not (tmp_path / "state").is_dir(), "the situation this is about"
+    assert not ledger.is_dir(), "the situation this is about"
     assert str(tmp_path) in window._watched_project_dirs(), (
         "the folder the ledger will appear in is what has to be watched")
 
@@ -5141,6 +5132,117 @@ def test_the_first_ledger_snapshot_is_watched_for_before_state_exists(tmp_path, 
     grows = ledger / "versions" if ledger_line.is_project_line(ledger) else ledger / "FULL"
     assert str(ledger) in watched and str(grows) in watched
     assert window._preset_combo.currentData() == "FULL"
+
+
+def _project_without_a_plan(tmp_path, monkeypatch, ledger: bool = True):
+    """An open project whose `process-state.json` is not there yet (#246). `ledger=False`: no
+    `state/` either, the one case where the project's own watcher holds the project folder."""
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("AUTOSOUND_STATE_ROOT", raising=False)
+    monkeypatch.delenv("AUTOSOUND_TCC_PRESET", raising=False)
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    _intake.seed(tmp_path)
+    if not ledger:
+        (tmp_path / "state").rename(tmp_path / "state.later")
+    _app()
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    assert not window._plan_panel.plan and not window._meas_panel._rows, "nothing to show yet"
+    return window
+
+
+def _write_plan(project) -> None:
+    (project / "process").mkdir(exist_ok=True)
+    (project / "process" / "process-state.json").write_text(
+        json.dumps({
+            "schema_version": 3,
+            "active_phase": "0",  # a phase that takes captures, so the grid has rows to show
+            "phases": {"0": {"status": "cur", "title": "Baseline"}},
+            "plan": [{"id": "xo", "name": "Baseline solo: tw-L_1 (sw)", "status": "cur", "phase": "0"}],
+        }),
+        encoding="utf-8",
+    )
+
+
+def _plan_and_captures_show(window) -> bool:
+    return bool(window._plan_panel.plan) and bool(window._meas_panel._rows)
+
+
+@pytest.mark.parametrize("folder_first", [True, False], ids=["process-there", "process-later"])
+def test_the_plan_appears_when_the_state_file_does(tmp_path, monkeypatch, folder_first):
+    """#246: only a file that existed was watched, so a plan that appeared after the project was
+    opened stayed off Plan and Captures until a reopen. Both ways it can appear, on the real
+    watcher: `process/` already there, and `process/` itself made later."""
+    process = tmp_path / "process"
+    if folder_first:
+        process.mkdir()
+    window = _project_without_a_plan(tmp_path, monkeypatch)
+
+    if not folder_first:
+        process.mkdir()
+        # The folder alone is no plan, and the second event must still be heard.
+        assert _pump_until(lambda: str(process) in window._process_watcher.directories(), seconds=5)
+    _write_plan(tmp_path)
+
+    assert _pump_until(lambda: _plan_and_captures_show(window), seconds=5)
+
+
+def test_reload_re_reads_the_process_state(tmp_path, monkeypatch):
+    """#246: the button re-read the project and not the plan beside it. The watcher is silenced, so
+    the press is the only way the file can reach the panels."""
+    window = _project_without_a_plan(tmp_path, monkeypatch)
+    window._process_watcher.blockSignals(True)
+    for noise in ("_start_contract_check", "_ping_rew", "_refresh_cli_catalogue"):
+        monkeypatch.setattr(MainWindow, noise, lambda self, **_kw: None)
+    _write_plan(tmp_path)
+    try:
+        window._reload_from_disk()
+        assert _plan_and_captures_show(window)
+    finally:
+        window._process_watcher.blockSignals(False)
+
+
+def test_a_write_under_process_costs_the_capture_grid_nothing(tmp_path, monkeypatch):
+    """#225 was a folder watch that wiped the grid. `process/` appearing is no project reload, even
+    while `state/` is missing and the project's own watcher holds the folder; and a file written
+    beside the state (the journal, on every step) is no redraw of the plan either."""
+    window = _project_without_a_plan(tmp_path, monkeypatch, ledger=False)
+
+    (tmp_path / "process").mkdir()
+    window._project_watcher.directoryChanged.emit(str(tmp_path))
+    assert not window._project_reload.isActive(), "process/ is the plan's news, not the project's"
+
+    _write_plan(tmp_path)
+    assert _pump_until(lambda: _plan_and_captures_show(window), seconds=5)
+    assert not window._project_reload.isActive()
+
+    (tmp_path / "process" / "journal.jsonl").write_text("{}\n", encoding="utf-8")
+    window._process_watcher.directoryChanged.emit(str(tmp_path / "process"))
+    assert not window._process_reload.isActive(), "the state did not come or go"
+
+
+def test_the_plans_watcher_holds_only_what_is_there(tmp_path, monkeypatch):
+    """#246: re-arming on every reload must not pile paths up, and a watched `process/` that goes
+    away falls back to the project folder, so the next one is heard."""
+    process = tmp_path / "process"
+    process.mkdir()
+    window = _project_without_a_plan(tmp_path, monkeypatch)
+    _write_plan(tmp_path)
+    assert _pump_until(lambda: _plan_and_captures_show(window), seconds=5)
+    for _ in range(3):
+        window._refresh_process()
+    assert window._process_watcher.directories() == [str(process)]
+    assert window._process_watcher.files() == [str(process / "process-state.json")]
+
+    shutil.rmtree(process)
+    assert _pump_until(lambda: not window._plan_panel.plan, seconds=5)
+    assert window._process_watcher.directories() == [str(tmp_path)]
+    assert window._process_watcher.files() == []
+
+    _write_plan(tmp_path)
+    assert _pump_until(lambda: bool(window._plan_panel.plan), seconds=5)
+    assert window._process_watcher.directories() == [str(process)]
 
 
 def test_the_ear_button_follows_the_active_phase(tmp_path, monkeypatch):
