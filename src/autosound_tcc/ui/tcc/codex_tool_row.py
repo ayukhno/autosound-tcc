@@ -121,7 +121,10 @@ class CodexToolRow(QWidget):
         own = self.standing is not None and self.standing.state == codex_cli.STANDING_OWN
         self.label.setToolTip(i18n.t("updCodexOwnTip") if own else "")
         current = self.standing is not None and self.standing.state == codex_cli.STANDING_TCC
-        self.button.setHidden(own or current)
+        # No answer yet is nothing to press (`offered` needs one): an up-to-date row flashed a
+        # greyed button for as long as `codex --version` took (#252). An install never gets here
+        # with none: it starts from an answer, and `check` waits for it to end.
+        self.button.setHidden(self.standing is None or own or current)
         self.button.setEnabled(self.offered)
 
     def retranslate(self) -> None:

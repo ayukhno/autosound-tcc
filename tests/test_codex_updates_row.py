@@ -312,3 +312,36 @@ def test_update_all_is_live_for_the_codex_install_alone(versions, monkeypatch):
     gh = updates.Tool("gh", "2.1", "2.1", True)
     dialog = _tools_dialog(monkeypatch, _Host(), gh)
     assert dialog._tools_all_btn.isEnabled()
+
+
+def test_a_row_being_checked_shows_no_greyed_install(monkeypatch):
+    """#252: an up-to-date row flashed a greyed «Install Codex» for as long as `codex --version`
+    took to answer (up to 10 s). Nothing can be done with the button until the answer is in
+    (`offered` needs one), so it is not there; it comes with an answer that offers the install."""
+    from autosound_tcc.ui.tcc import codex_tool_row
+
+    class Held:
+        running, result, error = True, None, ""
+
+    held = Held()
+    monkeypatch.setattr(codex_tool_row, "_Check", lambda: held)
+    host = _Host()
+    row = codex_tool_row.CodexToolRow(lambda: host, lambda: None)
+
+    row.check()
+    assert row.checking and row.button.isHidden(), "asked, not answered: no button"
+    held.running, held.result = False, codex_cli.Standing(codex_cli.STANDING_TCC, "0.162.1")
+    row._poll()
+    assert row.button.isHidden(), "up to date: still none"
+
+    held.running = True
+    row.check()
+    assert row.button.isHidden()
+    held.running, held.result = False, codex_cli.Standing(codex_cli.STANDING_MISSING)
+    row._poll()
+    assert not row.button.isHidden() and row.offered, "none found: the install is offered"
+
+    held.running, held.result, held.error = False, None, "OSError: boom"
+    row.check()
+    row._poll()
+    assert row.button.isHidden(), "no answer to act on, nothing to press"
