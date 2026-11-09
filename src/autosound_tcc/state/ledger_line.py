@@ -272,6 +272,76 @@ def created_days(root, preset: str, versions: list[str]) -> dict[str, str]:
     return days
 
 
+class Loaded(NamedTuple):
+    """`slots[slot].loaded` (#251, hub #325): the method's dated claim of what a DSP preset holds.
+    `since` is «DD.MM.YYYY HH:MM», as `_stamp` says it; a field that cannot be believed is no claim."""
+
+    slot: str
+    version: str
+    since: str
+    source: str
+
+
+def _loaded_of(slot: str, entry) -> Optional[Loaded]:
+    """One slot's `loaded`, or None where it is absent or malformed: no claim is unknown, not HEAD."""
+    record = entry.get("loaded") if isinstance(entry, dict) else None
+    if not isinstance(record, dict):
+        return None
+    version, since, source = record.get("version"), _stamp(record.get("since")), record.get("source")
+    if (not isinstance(version, str) or not _VER.match(version) or since is None
+            or not isinstance(source, str) or not source.strip()):
+        return None
+    return Loaded(slot, version, since, source.strip())
+
+
+#: `_loaded_claims`' answer per `slots.json`: `{path: ((path, mtime, size, inode), {slot: Loaded})}`.
+_CLAIMS: dict = {}
+
+
+def _loaded_claims(root) -> dict[str, Loaded]:
+    """`{slot: claim}` from `slots.json`, read only when the file changes (asked on the GUI thread at
+    every reload, like `_entry`). The method replaces the file, so the inode says a change the clock
+    could miss. A file being rewritten reads as no claims and is not remembered."""
+    path = Path(root) / SLOTS_FILE
+    try:
+        stat = path.stat()
+    except OSError:
+        return {}
+    key = (str(path), stat.st_mtime_ns, stat.st_size, stat.st_ino)
+    held = _CLAIMS.get(key[0])
+    if held is None or held[0] != key:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        entries = data.get("slots") if isinstance(data, dict) else None
+        found = {slot: claim for slot, entry in (entries.items() if isinstance(entries, dict) else ())
+                 if (claim := _loaded_of(slot, entry)) is not None}
+        held = _CLAIMS[key[0]] = (key, found)
+    return held[1]
+
+
+def _on_the_line(root, claim: Loaded) -> bool:
+    """A claim naming a version the line does not have is no claim. Checked at each ask, not in the
+    memo: a version file may come or go while `slots.json` stays as it was."""
+    return version_path(root, "", claim.version).is_file()
+
+
+def loaded_in_dsp(root, slot: Optional[str]) -> Optional[Loaded]:
+    """What the method says is in the DSP's preset for `slot`; None when it says nothing believable."""
+    claim = _loaded_claims(root).get(slot) if isinstance(slot, str) else None
+    return claim if claim is not None and _on_the_line(root, claim) else None
+
+
+def loaded_by_version(root) -> dict[str, tuple[Loaded, ...]]:
+    """`{version: every slot's claim that it is in the DSP}`: one version may stand in two presets."""
+    found: dict[str, tuple[Loaded, ...]] = {}
+    for claim in _loaded_claims(root).values():
+        if _on_the_line(root, claim):
+            found[claim.version] = (*found.get(claim.version, ()), claim)
+    return found
+
+
 def same_content(one: Optional[str], other: Optional[str]) -> bool:
     """Two md5s of the same content: equal, or one the short form of the other (a ledger's text
     keeps eight characters of it)."""

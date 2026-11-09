@@ -571,11 +571,81 @@ def test_any_version_can_be_shown_read_only_with_a_mark_and_one_way_back(tmp_pat
     assert "0" in _shown_text(window) and "-4.5" not in _shown_text(window), "the tree shows v_001"
     assert not window._shown_mark.isHidden() and "v_001" in window._shown_mark.text()
     assert "not the current" in window._shown_mark.text()
-    # The header's dot and version say what is in the processor, HEAD, and name what is looked at.
+    # The header's dot and version are HEAD's, and name what is looked at.
     assert window._dsp_section.sub_text().startswith("v_003") and "v_001" in window._dsp_section.sub_text()
 
     window._shown_back.click()
     assert window._shown_mark.isHidden() and "-4.5" in _shown_text(window), "one way back to HEAD"
+
+
+def _record_loaded(project, slot, version, source):
+    """`state.py loaded`, the method's own writer, on the slot of a window's fixture."""
+    history = vendor_loader.load_dsp_state().PresetHistory(str(project / "state"), slot, project_dir=str(project))
+    return history.record_loaded(version, source)
+
+
+def _dated(claim) -> str:
+    from datetime import datetime
+
+    return datetime.fromisoformat(claim["since"]).strftime("%d.%m.%Y %H:%M")
+
+
+def _compare_row(window, version) -> str:
+    combo = window._detail._compare_combo
+    return next(combo.itemText(i) for i in range(combo.count()) if combo.itemText(i).startswith(version))
+
+
+def test_a_loaded_version_behind_head_is_said_dated_and_head_is_not_claimed(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
+    i18n.set_language("en")
+    window = _project_with_versions(tmp_path, monkeypatch)
+    claim = _record_loaded(tmp_path, "FULL", "v_002", "SQ-2.pct6 loaded, read back on the screen")
+    window._safe_load_project()
+
+    assert window._dsp_section.sub_text() == "v_003 · in the DSP: v_002"
+    hover = window._dsp_section._dot.toolTip()
+    assert "v_002" in hover and _dated(claim) in hover and "SQ-2.pct6 loaded, read back on the screen" in hover
+    assert "in the processor" not in hover.lower(), "the slot's version is not what the DSP holds"
+    assert "in the DSP" in _compare_row(window, "v_002") and "in the DSP" not in _compare_row(window, "v_003")
+
+
+def test_with_no_loaded_the_header_says_it_is_not_known_and_no_row_claims_it(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
+    i18n.set_language("en")
+    window = _project_with_versions(tmp_path, monkeypatch)
+    assert window._dsp_section.sub_text() == "v_003", "no claim, and HEAD is not one"
+    hover = window._dsp_section._dot.toolTip()
+    assert i18n.t("dspLoadedUnknown") in hover and "in the processor" not in hover.lower()
+    assert all("in the DSP" not in _compare_row(window, v) for v in ("v_001", "v_002", "v_003"))
+
+
+def test_loaded_on_head_is_said_in_the_header(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
+    i18n.set_language("en")
+    window = _project_with_versions(tmp_path, monkeypatch)
+    _record_loaded(tmp_path, "FULL", "v_003", "attest")
+    window._safe_load_project()
+    assert window._dsp_section.sub_text() == "v_003 · in the DSP"
+    assert "attest" in window._dsp_section._dot.toolTip()
+
+
+def test_a_version_looked_at_does_not_move_what_the_dsp_is_said_to_hold(tmp_path, monkeypatch):
+    from autosound_tcc.ui.tcc import i18n
+
+    i18n.set_language("en")
+    window = _project_with_versions(tmp_path, monkeypatch)
+    _record_loaded(tmp_path, "FULL", "v_002", "read back")
+    window._safe_load_project()
+
+    _pick(window, "v_001")
+
+    assert window._view.version == "v_003", "the actors' view stays HEAD"
+    assert window._dsp_section.sub_text().startswith("v_003 · in the DSP: v_002")
+    assert "v_001" in window._dsp_section.sub_text(), "and what is looked at is named"
+    assert "in the DSP" in _compare_row(window, "v_002") and "in the DSP" not in _compare_row(window, "v_001")
 
 
 def test_nothing_acts_on_a_looked_at_version_as_head(tmp_path, monkeypatch):

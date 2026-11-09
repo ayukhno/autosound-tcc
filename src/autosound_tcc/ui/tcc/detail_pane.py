@@ -923,8 +923,9 @@ def fill_compare_combo(combo: QComboBox, versions: list, labels: Optional[dict] 
     `looked_at`: `current` is a version somebody is only looking at (#249), so its row reads
     «shown», not «now», which says the current configuration.
 
-    `checks` is `dsp_check.marks`' answer: a version in it gets the green mark and the hover that
-    names its files (#251), wherever its row stands, the greyed `current` row included."""
+    `checks` is `dsp_check.marks`' answer: a version in it gets the green mark with the hover that
+    names its files, the words «in the DSP» with the method's claim, or both (#251), wherever its
+    row stands, the greyed `current` row included."""
     combo.clear()
     combo.addItem("—", None)
     if preset is not None:

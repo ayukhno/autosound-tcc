@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from autosound_tcc.core import config  # noqa: E402
 from autosound_tcc.state import ledger_line  # noqa: E402
-from autosound_tcc.ui.tcc import control_layout, i18n, main_window  # noqa: E402
+from autosound_tcc.ui.tcc import control_layout, dsp_check, i18n, main_window  # noqa: E402
 
 
 def _app():
@@ -390,7 +390,7 @@ def test_one_compare_drives_every_tab_and_the_dots(tmp_path, monkeypatch):
     assert all(p._compare_view is not None for p in panes)
     # #251: the control layout's list carries the same mark as the pane's.
     window._compare_args = window._compare_args + (None, None, False, {
-        "v_006": (ledger_line.SavedFile("a.pct6", "ee627ad6", None, None),)})
+        "v_006": dsp_check.RowMark((ledger_line.SavedFile("a.pct6", "ee627ad6", None, None),))})
     layout._fill_compare()
     row = layout.compare_combo.findData("v_006")
     assert not layout.compare_combo.itemIcon(row).isNull()

@@ -2307,10 +2307,9 @@ class MainWindow(QMainWindow):
         self._save_label.setVisible(bool(save))
 
     def _show_version(self, view, profile: dict) -> None:
-        """The configuration in the processor NOW, in the DSP section's header: `v_008` with its
-        dot — yellow while any channel is only proposed, green once all of it is entered
-        (`attest`) — and the processor's name with the counts on hover (F-070; placed there by the
-        Arbiter, 2026-09-23: «в шапці розділу ДСП в лівій панелі як поточний в процесорі»)."""
+        """HEAD in the DSP section's header: `v_008` with its dot — yellow while any channel is only
+        proposed, green once all of it is entered (`attest`) — the processor's name with the counts
+        on hover (F-070), and what the DSP holds now, which is the method's claim (#251)."""
         self._version_shown = (view, profile)  # a language switch re-says the tooltip
         shown_version.sync(self)
         prof = profile.get("dsp_profile", profile)
@@ -2326,9 +2325,10 @@ class MainWindow(QMainWindow):
         root = config.state_root()
         standing = ledger_line.config_of(root, view.version)
         said = f"{standing[0]} · {view.version}" if standing else view.version
+        said, now = dsp_check.now_in_dsp(root, view, self._loaded_preset, said)
         self._dsp_section.set_sub(shown_version.sub(self, said))
         counts = dict(view.status_counts)
-        tip = i18n.t("dspNowTip").format(
+        tip = i18n.t("dspHeadTip").format(
             dsp=processor, version=view.version, preset=view.preset,
             applied=counts.get("applied", 0), proposed=counts.get("proposed", 0),
             measured=counts.get("measured", 0))
@@ -2339,7 +2339,7 @@ class MainWindow(QMainWindow):
                 code=code, slot=rec.get("slot") or "?",
                 preset=i18n.t("dspConfigPreset").format(n=number) if number else "",
                 purpose=f" — {rec['purpose']}" if rec.get("purpose") else "")
-        dot, tip = dsp_check.header(root, view, profile, tip, self._loaded_preset)
+        dot, tip = dsp_check.header(root, view, profile, tip, self._loaded_preset, now)
         self._dsp_section.set_dot(dot)
         self._dsp_section.set_sub_tip(tip)
         if getattr(view, "version_mismatch", False):

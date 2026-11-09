@@ -14,8 +14,12 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import pytest  # noqa: E402
 
+from autosound_tcc.core import vendor_loader  # noqa: E402
+from autosound_tcc.state import ledger_line  # noqa: E402
 from autosound_tcc.ui.tcc import dsp_check, i18n, shown_version  # noqa: E402
 from autosound_tcc.ui.tcc.detail_pane import DetailPane  # noqa: E402
+
+from tests import _intake, _reads  # noqa: E402
 
 HELIX = {"dsp_profile": {"vendor": "Audiotec-Fischer", "name": "Helix DSP Ultra S", "groups": []}}
 OTHER = {"dsp_profile": {"vendor": "Musway", "name": "M6V4", "groups": []}}
@@ -312,3 +316,94 @@ def test_the_header_dot_stays_as_it_was_without_the_mark(tmp_path):
     assert dsp_check.header(tmp_path, _head_view(state=None), HELIX, "t") == (None, "t")
     _bank(tmp_path, "v_001", **_with_file())
     assert dsp_check.header(tmp_path, _head_view(), OTHER, "tip") == ("done", "tip")
+
+
+# ---- «In the DSP now»: the method's `slots[slot].loaded`, a separate fact ----------------------
+
+
+def _method_line(project, files=(None, None)):
+    """FULL at v_003 with v_001 and v_002 behind it, one line per project, through the method's writers."""
+    _intake.seed(project)
+    root = project / "state"
+    history = vendor_loader.load_dsp_state().PresetHistory(str(root), "FULL", project_dir=str(project))
+    for file in files:
+        history.snapshot({"preset": "FULL", "sample_rate": 96000, "note": "fixture",
+                          "provenance": {"file": file} if file else {"decision": "by ear"},
+                          "channels": {"w-L": {"hp": None, "lp": None, "gain_db": -1.5, "ta_ms": 1.5,
+                                               "polarity": "NORM", "status": "applied"}}})
+    return root, history
+
+
+def _line_combo(root, current="v_003", profile=HELIX):
+    _app()
+    i18n.set_language("en")
+    pane = DetailPane()
+    window = SimpleNamespace(_loaded_preset="FULL", _detail=pane, _sync_status_dots=lambda: None,
+                             _shown_key=None)
+    shown_version.offer_compare(window, lambda *_a, **_k: None, root, "FULL", profile, current)
+    return pane._compare_combo
+
+
+def _text_of(combo, version):
+    return next(combo.itemText(i) for i in range(combo.count()) if combo.itemText(i).startswith(version))
+
+
+def test_the_green_mark_and_in_the_dsp_are_told_apart_on_a_row(tmp_path):
+    """Either, or both: the tick is «checked», the words are «in the DSP», the hover says each."""
+    root, history = _method_line(tmp_path, ("presets/a.pct6 (md5 ee627ad6…)", None))
+    # v_002 is checked, v_003 is not; the DSP holds v_002.
+    history.record_loaded("v_002", "a.pct6 read back")
+    combo = _line_combo(root)
+    assert _row(combo, "v_002")[0], "the tick stands: it is the version's own fact"
+    assert "in the DSP" in _text_of(combo, "v_002"), "the words are the other fact"
+    hover = _row(combo, "v_002")[1]
+    assert "md5 ee627ad6…" in hover and "a.pct6 read back" in hover
+
+    history.record_loaded("v_003", "loaded in the PC tool")
+    combo = _line_combo(root)
+    assert "in the DSP" in _text_of(combo, "v_003") and not _row(combo, "v_003")[0], "the words alone"
+    assert _row(combo, "v_002")[0] and "in the DSP" not in _text_of(combo, "v_002"), "the tick alone"
+    assert "md5" not in _row(combo, "v_003")[1], "a claim names no file it was not checked against"
+
+
+def test_a_row_of_another_dsp_says_in_the_dsp_too(tmp_path):
+    """`loaded` is the method's on any DSP; the green mark is the Helix's only."""
+    root, history = _method_line(tmp_path)
+    history.record_loaded("v_002", "loaded in the PC tool")
+    combo = _line_combo(root, profile=OTHER)
+    assert "in the DSP" in _text_of(combo, "v_002") and not _row(combo, "v_002")[0]
+
+
+@pytest.mark.parametrize("loaded", [
+    "v_002", None, 7, [], {},
+    {"version": "v_099", "since": "2026-11-09T10:00:00", "source": "x"},  # no such version
+    {"version": "nonsense", "since": "2026-11-09T10:00:00", "source": "x"},
+    {"version": 2, "since": "2026-11-09T10:00:00", "source": "x"},
+    {"version": "v_002", "source": "x"},
+    {"version": "v_002", "since": "yesterday", "source": "x"},
+    {"version": "v_002", "since": "2026-11-09T10:00:00"},
+    {"version": "v_002", "since": "2026-11-09T10:00:00", "source": "  "},
+    {"version": "v_002", "since": "2026-11-09T10:00:00", "source": 5},
+])
+def test_a_loaded_field_that_cannot_be_believed_is_no_claim_and_no_crash(tmp_path, loaded):
+    root, _history = _method_line(tmp_path)
+    data = json.loads((root / "slots.json").read_text(encoding="utf-8"))
+    data["slots"]["FULL"]["loaded"] = loaded
+    (root / "slots.json").write_text(json.dumps(data), encoding="utf-8")
+    combo = _line_combo(root)
+    assert all("in the DSP" not in combo.itemText(i) for i in range(combo.count())), loaded
+    assert ledger_line.loaded_in_dsp(root, "FULL") is None
+
+
+def test_the_slots_file_is_read_once_and_a_change_is_seen(tmp_path, monkeypatch):
+    """Asked on the GUI thread at every reload, like a version file (#172)."""
+    root, history = _method_line(tmp_path)
+    history.record_loaded("v_002", "first")
+    opened = _reads.opened_under(monkeypatch, tmp_path)
+    assert ledger_line.loaded_in_dsp(root, "FULL").version == "v_002"
+    assert ledger_line.loaded_in_dsp(root, "FULL").source == "first"
+    assert [o for o in opened if o.endswith("slots.json")] == [str(root / "slots.json")], "read once"
+
+    history.record_loaded("v_001", "read back from the device")
+    claim = ledger_line.loaded_in_dsp(root, "FULL")
+    assert (claim.version, claim.source) == ("v_001", "read back from the device")
