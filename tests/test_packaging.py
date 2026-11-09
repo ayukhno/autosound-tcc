@@ -722,6 +722,9 @@ def text_io_without_encoding(source: str, label: str) -> list[str]:
         if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) \
                 and inner.func.id == "distribution":
             continue
+        # `os.open` gives a descriptor: no text layer, and it takes no `encoding` at all.
+        if node.func.attr == "open" and isinstance(inner, ast.Name) and inner.id == "os":
+            continue
         if node.func.attr == "open":
             if id(node) in awaited:
                 continue  # `await x.open()`: a process starting, not a file (AppServer)

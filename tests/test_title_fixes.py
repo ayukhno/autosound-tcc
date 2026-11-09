@@ -200,13 +200,15 @@ def test_the_window_offers_the_fix_once_for_the_same_list(tmp_path, monkeypatch)
     monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
     window = MainWindow()
     monkeypatch.setattr(window._meas_panel, "rew_titles", lambda: ["sw_01 (sw)"])
+    opened = []
+    monkeypatch.setattr(window._meas_panel, "open_import", lambda: opened.append(True))
     said = []
     monkeypatch.setattr(window._status_strip, "notify", lambda text, **k: said.append((text, k)))
     window._offer_title_fixes({"expected": ["sw_1 (sw)"]})
     window._offer_title_fixes({"expected": ["sw_1 (sw)"]})
     assert len(said) == 1 and "sw_01 (sw) → sw_1 (sw)" in said[0][0]
-    assert said[0][1]["action"][1] == window._meas_panel.open_import, \
-        "the fix is made in the import form"
+    said[0][1]["action"][1]()
+    assert opened == [True], "the fix is made in the import form"
 
 
 def test_a_curve_that_is_not_there_is_waiting_not_bad():
