@@ -262,6 +262,7 @@ at the session's pace, plus the PR's CI (~35–40 min per run) and the skill's v
 ## Ledger
 
 Step 3's group: seats and one fix round done (`385b30bb`, `247d9193`, `41578365`). For step 9, the window's left over: `stripCopyAll` is gone (reused `copyMessage`).
+#247: done, `cb404d28` and two fix rounds, up to `ce9f363b` (opus · high; task seat, group seats, narrow re-review; the left-overs in `docs/W-12-LEDGER.md`).
 #246: `d6c6899a` (opus · medium, red shown; `process_watch.py`). The fold's fix round had left one test's double short of `_right_fold` (a file outside its run); the next task's run caught it, fixed the same step.
 
 | issue | state | implementer | commits | review | note |
