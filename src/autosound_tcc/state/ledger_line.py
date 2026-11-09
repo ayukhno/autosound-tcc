@@ -202,7 +202,6 @@ class SourceFile(NamedTuple):
     `SavedFile`. A field the record does not hold is None."""
 
     name: str
-    path: Optional[str]
     md5: Optional[str]
     saved: Optional[str]
     read_at: Optional[str]
@@ -244,7 +243,7 @@ def source_file(record) -> Optional[SourceFile]:
     malformed = ((record.get("name") is not None and not isinstance(record.get("name"), str))
                  or (record.get("md5") is not None and _file_md5(record) is None)
                  or (compared is not None and not isinstance(compared, (str, list, tuple))))
-    return SourceFile(_file_name(record), text("path"), _file_md5(record), _when(record, "saved"),
+    return SourceFile(_file_name(record), _file_md5(record), _when(record, "saved"),
                       _when(record, "read_at"), text("pctool"), text("device"),
                       compared not in (None, "", [], ()), differences, malformed)
 
@@ -275,7 +274,10 @@ def _saved_files(data: dict) -> tuple[SavedFile, ...]:
     if (_not_verified(provenance.get("verified_by_file"))
             or (isinstance(source, dict) and _differs(source.get("compared")))):
         return ()
-    found = (_saved_file(provenance.get("file"), created), _saved_file(source, created))
+    # Only an object counts as `source_file`, as the tab reads it (`source_file`): the sentence
+    # form is `provenance.file`'s.
+    found = (_saved_file(provenance.get("file"), created),
+             _saved_file(source, created) if isinstance(source, dict) else None)
     return tuple(f for f in found if f is not None)
 
 

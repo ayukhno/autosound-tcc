@@ -12,8 +12,8 @@ import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtGui import QColor, QPalette  # noqa: E402
-from PySide6.QtWidgets import QApplication, QTableWidget  # noqa: E402
+from PySide6.QtGui import QColor, QPalette, QTextDocumentFragment  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QTableWidget  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -294,7 +294,6 @@ def test_the_source_file_shape_is_one_reader_for_the_mark_and_the_tab():
     read = ledger_line.source_file(SOURCE)
     saved = ledger_line._saved_file(SOURCE, None)
     assert (read.name, read.md5) == (saved.name, saved.md5) == ("5S.pct6", SOURCE["md5"])
-    assert read.path == "/presets/5S.pct6"
     assert read.saved == "29.10.2026 12:32" and read.read_at == "29.10.2026 14:03"
     assert read.pctool == "5.4.1" and read.device == "Helix DSP Ultra S"
     assert read.compared and read.differences == ()
@@ -311,7 +310,7 @@ def test_the_tab_says_the_source_file_with_its_md5(ledger, apply_module):
     apply_module.attest(ledger, source_file=SOURCE)
     cells = _cells(_pane(_read(ledger)))
     item = cells[_label("presetFile")]
-    assert item.text() == "5S.pct6" and "/presets/5S.pct6" in item.toolTip()
+    assert item.text() == "5S.pct6" and item.toolTip() == "5S.pct6"
     assert cells[_label("presetMd5")].text() == "46f99511"
     assert cells[_label("presetSaved")].text() == "29.10.2026 12:32"
     assert cells[_label("presetReadAt")].text() == "29.10.2026 14:03"
@@ -335,7 +334,7 @@ def test_a_version_not_read_from_a_file_says_so(ledger):
 
 
 def test_a_file_name_cannot_inject_markup_into_a_hover(ledger):
-    hostile = dict(SOURCE, path="/x/<b>y</b>.pct6", name="<b>y</b>.pct6")
+    hostile = dict(SOURCE, name="<b>y.pct6")
     pane = _pane(_read(ledger, _bank(ledger, {"input_gain_db": -1.0, "status": "applied", "source_file": hostile})))
     tip = _cells(pane)[_label("presetFile")].toolTip()
     assert "<b>y" not in tip and "&lt;b&gt;" in tip, tip
@@ -510,6 +509,22 @@ def _tree(view, compared=None, said="v_001"):
     tree.set_status({}, said)
     tree.set_compared(None if compared is None else list(compared.groups), compared)
     return tree
+
+
+def _drawn(section, label: str) -> tuple:
+    """`(the text, blue and bold, grey)`, read off the row's label as it is painted: wide enough to
+    hold the line, so nothing is cut."""
+    value = section._row_named(label)._value
+    value.resize(2000, 30)
+    value._elide()
+    rich = value.text()
+    t = theme.current_theme()
+    return (QTextDocumentFragment.fromHtml(rich).toPlainText(),
+            f"color:{t.info};font-weight:700" in rich, f"color:{t.faint}" in rich)
+
+
+def _hover(section, label: str) -> str:
+    return section._row_named(label).hover_tip.text()
 
 
 def test_the_tree_has_a_preset_section_with_the_settings_and_the_dot(ledger):
@@ -688,3 +703,105 @@ def test_the_pane_keeps_the_tab_through_a_language_switch(window):
         assert _cells(window._detail)[i18n.t("presetInputGain")].text() == "-0.3 dB"
     finally:
         i18n.set_language("en")
+
+
+# ---- what the review found (the fix round) -----------------------------------------------------
+
+
+APPLIED = {"input_gain_db": -0.3, "status": "applied"}
+
+
+def _raw(settings):
+    """A version the method would refuse to write, so read straight from the dict."""
+    return ProjectView.from_dict({"version": "v_001", "preset": "FULL", "channels": {"w-L": dict(ROW)},
+                                  "preset_settings": settings}, HELIX)
+
+
+def _said(pane) -> str:
+    return " ".join(lbl.text() for lbl in pane._scroll.widget().findChildren(QLabel))
+
+
+@pytest.mark.parametrize(("key", "now", "was", "said", "tip"), [
+    ("presetInputGain", {"bt": {"auto_switch": False}}, {"input_gain_db": -1.0}, "-1 dB", "presetDefaultTip"),
+    ("presetSubxpander", {"bt": {"auto_switch": False}}, {"fx": {"subxpander": True}}, "was: on", "presetUnknownTip"),
+    ("presetBtSource", {"bt": {"auto_switch": False}}, {"bt": {"source": "AUX"}}, "AUX", "presetDashTip"),
+])
+def test_a_value_not_stated_that_differs_is_blue_and_its_hover_says_both(ledger, key, now, was, said, tip):
+    """Blue and bold, as every table's change; the hover keeps that this side is no reading."""
+    pane, view, old = _compared(ledger, dict(now, status="applied"), dict(was, status="applied"))
+    cell = _cells(pane)[_label(key)]
+    assert _is_changed(cell), "changed is blue, greyed reading or not"
+    assert said in cell.toolTip() and i18n.t(tip) in cell.toolTip(), cell.toolTip()
+    tree = _tree(view, compared=old)
+    assert _drawn(tree._preset, _label(key))[1], "blue in the tree too"
+    assert said in _hover(tree._preset, _label(key)) and i18n.t(tip) in _hover(tree._preset, _label(key))
+
+
+def test_a_was_with_markup_keeps_its_two_lines_on_the_hover():
+    """`<qt>` is rich text, where a bare line break is a space."""
+    now, was = _raw({"status": "applied"}), _raw({"bt": {"source": "<AUX>"}, "status": "applied"})
+    tip = _cells(_pane(now, compared=was))[_label("presetBtSource")].toolTip()
+    assert "&lt;AUX&gt;<br>" in tip and tip.startswith("<qt>"), tip
+
+
+def test_an_unreadable_switch_keeps_its_hover_against_off():
+    now, was = _raw({"fx": {"realcenter": "yes"}}), _raw({"fx": {"realcenter": False}})
+    cell = _cells(_pane(now, compared=was))[_label("presetRealcenter")]
+    assert cell.text() == "?" and "yes" in cell.toolTip(), cell.toolTip()
+
+
+def test_off_against_an_unreadable_switch_is_not_said_to_be_unknown():
+    now, was = _raw({"fx": {"realcenter": False}}), _raw({"fx": {"realcenter": "yes"}})
+    tip = _cells(_pane(now, compared=was))[_label("presetRealcenter")].toolTip()
+    assert i18n.t("presetUnknownSideTip") not in tip, tip
+
+
+def test_a_version_whose_only_setting_is_unreadable_is_not_said_to_have_nothing():
+    view = _raw({"input_gain_db": "loud", "status": "applied"})
+    assert setting_status.preset_status(view, None, False) == "set"
+
+
+def test_a_stated_value_against_an_unread_one_says_what_the_other_side_holds():
+    now, was = _raw({"input_gain_db": -0.3}), _raw({"input_gain_db": "loud"})
+    cell = _cells(_pane(now, compared=was))[_label("presetInputGain")]
+    assert not _is_changed(cell), "nothing can be said to have moved"
+    assert i18n.t("presetComparedUnreadTip").format(value=repr("loud")) in cell.toolTip()
+    assert setting_status.preset_status(now, was, True) == "set"
+
+
+def test_a_default_against_an_unread_one_keeps_its_own_hover_too():
+    now, was = _raw({"status": "applied"}), _raw({"input_gain_db": "loud"})
+    tip = _cells(_pane(now, compared=was))[_label("presetInputGain")].toolTip()
+    assert i18n.t("presetDefaultTip") in tip and repr("loud") in tip, tip
+
+
+def test_no_hover_shows_a_full_path(ledger):
+    home = dict(SOURCE, path="/Users/someone/presets/5S.pct6")
+    view = _read(ledger, _bank(ledger, dict(APPLIED, source_file=home)))
+    tip = _cells(_pane(view))[_label("presetFile")].toolTip()
+    tree = _tree(view)
+    in_tree = _hover(tree._preset, _label("presetFile"))
+    for said in (tip, in_tree):
+        assert "/Users" not in said and "someone" not in said and "5S.pct6" in said, said
+
+
+def test_a_string_source_file_gives_no_tick_as_the_tab_gives_no_file(ledger, tmp_path):
+    version = _bank(ledger, dict(APPLIED))
+    path = ledger_line.version_path(tmp_path / "state", "FULL", version)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    # By hand: the method's writer refuses it, and a ledger is a file somebody can edit.
+    data["preset_settings"]["source_file"] = "presets/a.pct6 (md5 ee627ad6…)"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    view = _read(ledger, version)
+    assert view.preset_settings.source_unread, "the control: the tab refuses it"
+    assert not ledger_line.checked_files(tmp_path / "state", "FULL", version), "and the tick refuses it too"
+
+
+@pytest.mark.parametrize("settings", [
+    {"input_gain_db": 10 ** 400},
+    {"rtc": {"curve": {"gstart0": 10 ** 400}}},
+])
+def test_a_number_too_big_for_a_float_is_unreadable_and_the_version_still_loads(settings):
+    view = _raw(dict(settings, status="applied"))
+    assert any(s.reading == "unread" for s in view.preset_settings.settings)
+    _cells(_pane(view))  # drawn

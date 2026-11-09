@@ -74,9 +74,12 @@ def value_said(setting) -> str:
 
 
 def _safe(text: str) -> str:
-    """A hover that may hold the ledger's words: Qt reads a tooltip with tags as rich text."""
+    """A hover that may hold the ledger's words: Qt reads a tooltip with tags as rich text, and the
+    tree's rounded tip is always rich, where a line break is a space."""
     escaped = html.escape(text, quote=False)
-    return f"<qt>{escaped}</qt>" if escaped != text else text
+    if escaped == text and "\n" not in text:
+        return text
+    return "<qt>" + escaped.replace("\n", "<br>") + "</qt>"
 
 
 def _setting_line(setting, was, compared: bool) -> PresetLine:
@@ -92,9 +95,13 @@ def _setting_line(setting, was, compared: bool) -> PresetLine:
         tip = i18n.t("presetDashTip")
     changed = compared and was is not None and setting.changes_from(was)
     if changed:
-        tip = i18n.t("cmpWas").format(value=value_said(was))
+        # Blue is the table's rule for a change; the hover still says this side is no reading.
+        tip = "\n".join(filter(None, (i18n.t("cmpWas").format(value=value_said(was)), tip)))
     elif compared and was is not None and setting.unknown_against_off(was):
         tip = i18n.t("presetUnknownSideTip")
+    elif compared and was is not None and was.reading == UNREAD and setting.reading != UNREAD:
+        said = i18n.t("presetComparedUnreadTip").format(value=was.held)
+        tip = "\n".join(filter(None, (tip, said)))
     copy = f"{setting.value:g}" if setting.kind == "db" and setting.value is not None else ""
     return PresetLine(setting.path, label, text, setting.reading, bool(changed), _safe(tip), copy)
 
@@ -124,7 +131,8 @@ def file_lines(view) -> list[PresetLine]:
         if settings.source_unread:
             return [PresetLine("file", i18n.t("presetFile"), UNREAD_LEG, UNREAD, tip=i18n.t("presetFileUnreadTip"))]
         return [PresetLine("file", i18n.t("presetFile"), i18n.t("presetNotFromFile"), DASH)]
-    out = [PresetLine("file", i18n.t("presetFile"), source.name or UNREAD_LEG, STATED, tip=_safe(source.path or ""))]
+    # The name, never the path: a hover shows no path (`ledger_line._leaf`).
+    out = [PresetLine("file", i18n.t("presetFile"), source.name or UNREAD_LEG, STATED, tip=_safe(source.name))]
     for key, value in (("presetMd5", source.md5[:8] if source.md5 else None), ("presetSaved", source.saved),
                        ("presetReadAt", source.read_at), ("presetPctool", source.pctool),
                        ("presetDevice", source.device)):

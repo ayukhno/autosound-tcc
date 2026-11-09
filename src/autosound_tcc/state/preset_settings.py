@@ -55,7 +55,12 @@ def is_audiotec(vendor, name) -> bool:
 
 
 def _number(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an int too big for a float: JSON has no bound on one
+        return False
 
 
 def _valid(kind: str, value) -> bool:
@@ -89,8 +94,10 @@ class Setting:
         return _changed(self, was)
 
     def unknown_against_off(self, was: "Setting") -> bool:
-        """One side unknown, the other off: said on hover, marked as nothing."""
-        return self.kind == "switch" and {self.value, was.value} == {None, False}
+        """One side unknown, the other off: said on hover, marked as nothing. A value that could
+        not be read is neither: its None is no reading of the switch."""
+        return (self.kind == "switch" and UNREAD not in (self.reading, was.reading)
+                and {self.value, was.value} == {None, False})
 
 
 def _unread(path: str, kind: str, held) -> Setting:
@@ -142,8 +149,9 @@ class PresetSettings:
 
     @property
     def any_stated(self) -> bool:
-        """Something really set: a field at its default, or not stated, is no setting."""
-        return any(s.reading == STATED and not s.at_default for s in self.settings)
+        """Something really set: a field at its default, or not stated, is no setting. A value the
+        ledger holds and TCC cannot read is one: «nothing is set here» would be a claim about it."""
+        return any(s.reading == UNREAD or (s.reading == STATED and not s.at_default) for s in self.settings)
 
     @property
     def waiting(self) -> bool:
