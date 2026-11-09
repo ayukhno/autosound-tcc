@@ -45,6 +45,9 @@ def _say_key(server, strip, after_reset: bool = False) -> None:
         strip.notify(i18n.t("mcpKeyReplaced"), level="warn")
     elif note == mcp_key.RESET:
         strip.notify(i18n.t("mcpKeyReset"), level="warn")
+    elif note == mcp_key.OLD_ON_DISK:
+        strip.notify(i18n.t("mcpKeyOldOnDisk").format(why=server.key_problem), level="warn",
+                     sticky=True)
     elif note == mcp_key.RUN_ONLY:
         # Standing: it comes true again on every start until the cause is fixed, and the window's
         # own opening lines would otherwise replace it before anyone read it.

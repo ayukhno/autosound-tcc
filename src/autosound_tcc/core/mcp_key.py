@@ -37,6 +37,7 @@ MADE = "made"  # none was saved: a new one, kept from now on
 REPLACED = "replaced"  # the saved one was damaged: a new one, kept from now on
 RESET = "reset"  # a new one on request, kept from now on
 RUN_ONLY = "run_only"  # could not be read or kept: a fresh one for this run alone (`problem`: why)
+OLD_ON_DISK = "old_on_disk"  # a reset could neither save the new key nor remove the old one
 NO_FOLDER = "no_folder"  # no project was chosen: nowhere that is this project's to keep one
 
 FILE_NAME = "mcp-token"
@@ -124,10 +125,20 @@ def load(project_dir: Optional[Path]) -> Key:
 
 
 def reset(project_dir: Optional[Path]) -> Key:
-    """A new key on request, saved over the old one. Never raises."""
+    """A new key on request, saved over the old one. Never raises.
+
+    A person resets because a key leaked. If the new one cannot be saved, the old one must not be
+    what the next start reads back, so its file goes; `OLD_ON_DISK` when that is refused too."""
     if project_dir is None:
         return Key(_fresh(), NO_FOLDER)
-    return _made(project_dir, RESET)
+    key = _made(project_dir, RESET)
+    if key.note != RUN_ONLY:
+        return key
+    refused = _discard(_path(project_dir))
+    if not refused:
+        return key
+    app_log.logger().warning("the revoked MCP key is still on disk: %s", refused)
+    return Key(key.token, OLD_ON_DISK, f"{key.problem}; {refused}")
 
 
 def _path(project_dir: Path) -> Path:
@@ -196,6 +207,22 @@ def _keep(project_dir: Path, token: str, first: bool = False) -> str:
         if first and isinstance(exc, FileExistsError):
             raise
         return f"{_path(project_dir)}: {_why(exc)}"
+    return ""
+
+
+def _discard(path: Path) -> str:
+    """Take the key's file away: "" when no key is left there, else why it is. A link goes, and
+    nothing behind it; a folder or a device holds no key this file ever read."""
+    try:
+        if path.parent.is_symlink():
+            return ""  # nothing of TCC's was ever kept through a link
+        if not stat.S_ISREG(os.lstat(path).st_mode) and not path.is_symlink():
+            return ""
+        os.unlink(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return ""
+    except OSError as exc:
+        return f"{path}: {_why(exc)}"
     return ""
 
 

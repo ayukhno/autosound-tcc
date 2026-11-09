@@ -452,21 +452,62 @@ def test_an_enormous_file_is_not_read_whole(folder):
 
 
 @pytest.mark.parametrize("dies_in", ["fsync", "replace"])
-def test_a_write_that_dies_halfway_leaves_the_old_key_whole(folder, monkeypatch, dies_in):
+def test_a_secret_write_that_dies_halfway_leaves_the_old_one_whole(tmp_path, monkeypatch, dies_in):
+    (tmp_path / "store").mkdir()
+    secret = tmp_path / "store" / "a-secret"
+    secret.write_text("the old one\n", encoding="utf-8")
+
+    def dead(*_args, **_kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(own_store.os, dies_in, dead)
+    with pytest.raises(OSError):
+        own_store.write_secret(secret, "the new one\n")
+    monkeypatch.undo()
+
+    assert secret.read_text(encoding="utf-8") == "the old one\n"
+    assert [p.name for p in secret.parent.iterdir()] == ["a-secret"], "no half-written temp stays"
+
+
+@pytest.mark.parametrize("dies_in", ["fsync", "replace", "gitignore"])
+def test_a_reset_whose_write_fails_does_not_leave_the_revoked_key_for_the_next_start(
+        folder, monkeypatch, dies_in):
+    """A person resets because the key leaked: left in the file, it was back at the next start."""
     server = TccMcpServer(project_dir=folder)
     key = server.token
 
     def dead(*_args, **_kwargs):
         raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr(own_store.os, dies_in, dead)
+    if dies_in == "gitignore":
+        (folder / ".gitignore").unlink()
+        (folder / ".gitignore").mkdir()
+    else:
+        monkeypatch.setattr(own_store.os, dies_in, dead)
     server.reset_token()
     monkeypatch.undo()
 
-    assert _key_file(folder).read_text(encoding="utf-8").strip() == key
-    assert [p.name for p in _key_file(folder).parent.iterdir() if p.name != "mcp-token"
-            and p.name.endswith(".tmp")] == [], "no half-written temp stays behind"
     assert server.token != key and server.key_note == "run_only"
+    assert not _key_file(folder).exists()
+    assert [p.name for p in _key_file(folder).parent.iterdir() if p.name.endswith(".tmp")] == []
+    assert TccMcpServer(project_dir=folder).token != key, "the revoked key came back"
+
+
+@_NOT_ROOT
+def test_a_reset_that_can_neither_save_nor_remove_says_the_old_key_is_still_on_disk(folder):
+    server = TccMcpServer(project_dir=folder)
+    key = server.token
+    strip = _Strip()
+    os.chmod(_key_file(folder).parent, 0o500)
+    try:
+        mcp_view.reset_key(_host(server, strip))
+        assert _key_file(folder).read_text(encoding="utf-8").strip() == key
+    finally:
+        os.chmod(_key_file(folder).parent, 0o700)
+
+    assert server.token != key and server.key_note == "old_on_disk" and server.key_problem
+    assert strip.lines == [(i18n.t("mcpKeyOldOnDisk").format(why=server.key_problem), "warn", True)]
+    assert "still on disk" in strip.lines[0][0]
 
 
 def test_a_project_with_no_chosen_folder_gets_a_key_and_no_file(tmp_path, monkeypatch):
