@@ -3396,21 +3396,15 @@ _NINE_POINTS = [f"m-L p{n}_1 (sw)" for n in range(1, 10)]
 def _session_of_a_round(tmp_path, monkeypatch, titles):
     """What the panel gets for an open round whose columns the method's own writer placed."""
     from autosound_tcc.core import vendor_loader
-    from autosound_tcc.state import measurement_view, process_view
+    from autosound_tcc.state import measurement_view
     from tests import _rounds
 
     if not vendor_loader.is_available():
         pytest.skip("rew_tool submodule not checked out")
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
-    _rounds.write_round(tmp_path, expected=titles, pad=False)
     (tmp_path / "glossary.json").write_text(json.dumps(
         {"schema_version": 1, "channels": [{"code": "m-L", "active": True}]}), encoding="utf-8")
-    naming = vendor_loader.load_naming()
-    state_path = process_view.process_dir(tmp_path) / "process-state.json"
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    state["capture"]["groups"] = naming.place_in_groups(
-        [], titles, naming.Glossary.for_project(str(tmp_path)))
-    state_path.write_text(json.dumps(state), encoding="utf-8")
+    _rounds.write_round(tmp_path, expected=titles, pad=False)
     return measurement_view.build_session("0", 1, [], tmp_path)
 
 
@@ -3499,3 +3493,94 @@ def test_the_drawing_shows_each_mark_on_a_clean_ground_in_either_theme(monkeypat
     for name, place in figure.marks().items():
         assert drawn_around(place.x(), place.y()) > 20, name
     assert all(image.pixelColor(x, y) == ground for x in range(8) for y in range(8))
+
+
+def test_a_round_the_method_opened_carries_the_points_column_s_kind(tmp_path, monkeypatch):
+    """Through the method's real `start_capture`, no column placed by hand: the panel's way in reads
+    the word `kind` the round's own list wrote."""
+    from autosound_tcc.state.models import KIND_POINTS
+
+    session = _session_of_a_round(tmp_path, monkeypatch, ["m-L_1 (sw)", *_NINE_POINTS])
+
+    kinds = {group.type: group.kind for group in session.groups}
+    assert kinds["Points (sw)"] == KIND_POINTS, kinds
+    assert [k for k in kinds.values() if k != KIND_POINTS], "and only that column"
+
+
+class _PainterSpy:
+    """What `NinePointsFigure.paintEvent` drew, in drawing order, through a recording `QPainter`."""
+
+    def __init__(self, monkeypatch):
+        from PySide6.QtGui import QPainter
+
+        from autosound_tcc.ui.tcc import nine_points
+
+        self.heads, self.legs, self.texts = [], [], []
+        spy = self
+
+        class Recording(QPainter):
+            def drawPolygon(self, polygon):  # noqa: N802 (Qt)
+                spy.heads.append(polygon[0])
+                return super().drawPolygon(polygon)
+
+            def drawLine(self, first, last):  # noqa: N802 (Qt)
+                spy.legs.append((first, last))
+                return super().drawLine(first, last)
+
+            def drawPath(self, path):  # noqa: N802 (Qt)
+                spy.legs.append((path.elementAt(0), path.currentPosition()))
+                return super().drawPath(path)
+
+            def drawText(self, rect, flags, text):  # noqa: N802 (Qt)
+                spy.texts.append((rect, flags, text))
+                return super().drawText(rect, flags, text)
+
+        monkeypatch.setattr(nine_points, "QPainter", Recording)
+
+
+def test_the_drawing_goes_p1_to_p9_with_each_number_on_its_dot_and_left_on_the_left(monkeypatch):
+    """Painted, so what is painted is read: the path's eight legs in the method's order with their
+    arrowheads at the far end, each number beside its own dot, the words on their own sides."""
+    from PySide6.QtCore import Qt
+
+    from autosound_tcc.ui.tcc.nine_points import NinePointsFigure
+
+    _app()
+    i18n.set_language("en")
+    spy = _PainterSpy(monkeypatch)
+    figure = NinePointsFigure()
+    figure.ensurePolished()
+    figure.resize(figure.sizeHint())
+    figure.grab()
+    marks = figure.marks()
+    names = [f"p{n}" for n in range(1, 10)]
+
+    def far(one, other) -> float:
+        return abs(_x(one) - _x(other)) + abs(_y(one) - _y(other))
+
+    assert len(spy.legs) == 8 and len(spy.heads) == 8, "the whole path is drawn, leg by leg"
+    for start, end, leg, tip in zip(names, names[1:], spy.legs, spy.heads):
+        first, last = leg
+        assert far(first, marks[start]) < far(first, marks[end]), (start, end, "drawn from its start")
+        assert far(last, marks[end]) < far(last, marks[start]), (start, end, "drawn to its end")
+        assert far(tip, marks[end]) < far(tip, marks[start]), (start, end, "the arrow points onward")
+
+    numbered = {text: rect.center() for rect, _flags, text in spy.texts if text in marks}
+    assert set(numbered) == {"p2", "p3", "p4", "p6", "p7", "p8"}, sorted(numbered)
+    for name, where in numbered.items():
+        nearest = min((n for n in names if n not in ("p1", "p5", "p9")), key=lambda n: far(where, marks[n]))
+        assert nearest == name, (name, nearest)
+
+    sides = {text: flags for _rect, flags, text in spy.texts}
+    assert sides[i18n.t("measPointsLeft")] & Qt.AlignmentFlag.AlignLeft
+    assert sides[i18n.t("measPointsRight")] & Qt.AlignmentFlag.AlignRight
+    assert marks["p2"].x() < marks["p1"].x() < marks["p6"].x(), "and p2 stands on the left word's side"
+
+
+def _x(point) -> float:
+    """A `QPointF`, or a `QPainterPath.Element` whose x and y are fields."""
+    return point.x() if callable(point.x) else point.x
+
+
+def _y(point) -> float:
+    return point.y() if callable(point.y) else point.y
