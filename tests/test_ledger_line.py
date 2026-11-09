@@ -1054,3 +1054,15 @@ def test_control_mode_language_and_theme_keep_the_shown_version(tmp_path, monkey
     window._retranslate()
     assert not window._shown_mark.isHidden(), "language and theme changes keep the shown version"
     assert "-4.5" not in _shown_text(window)
+
+
+def test_a_looked_at_version_is_named_from_the_windows_own_ledger(tmp_path, monkeypatch):
+    """After a cancelled project switch `config` names another folder, and this window is not it."""
+    from types import SimpleNamespace
+
+    from autosound_tcc.ui.tcc import shown_version
+
+    monkeypatch.setattr(shown_version.window_folder, "state_root", lambda _window: tmp_path, raising=False)
+    monkeypatch.setattr(shown_version.ledger_line, "label", lambda root, _version: str(root))
+
+    assert shown_version._said(SimpleNamespace(_loaded_preset="FULL"), "v_001") == str(tmp_path)

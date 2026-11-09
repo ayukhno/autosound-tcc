@@ -490,6 +490,18 @@ def test_only_housekeeping_uncommitted_is_amber(repo, host):
     assert _sev(widget, i18n.t("gitChanges")) == ("wait", "wait")
 
 
+def test_a_gitignore_alone_is_no_unsaved_work(repo, host):
+    """TCC itself teaches `.gitignore` on a project's first start, and the method counts it as a
+    tuning file: every project went red for an edit of TCC's own. It goes with the next save."""
+    project, _bare = repo
+    (project / ".gitignore").write_text(".tcc/\n.mcp.json\n", encoding="utf-8")
+    widget, panel = _painted(repo, host)
+
+    assert _state(widget, panel)[0] != "bad"
+    assert _sev(widget, i18n.t("gitChanges"))[0] != "bad"
+    assert _send_button(widget) is None
+
+
 def test_commits_not_on_github_are_amber(repo, host):
     project, _bare = repo
     _commit(project, "docs/x.md")

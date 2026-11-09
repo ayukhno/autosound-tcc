@@ -21,9 +21,9 @@ from typing import Callable, Optional
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QPushButton, QWidget
 
-from autosound_tcc.core import app_log, config
+from autosound_tcc.core import app_log
 from autosound_tcc.state import ledger_line
-from autosound_tcc.ui.tcc import dsp_check, i18n
+from autosound_tcc.ui.tcc import dsp_check, i18n, window_folder
 from autosound_tcc.ui.tcc.detail_pane import is_other_preset
 
 
@@ -44,7 +44,7 @@ def _split(window, key: str) -> tuple[Optional[str], str]:
 
 def _said(window, key: str) -> str:
     of, version = _split(window, key)
-    text = ledger_line.label(config.state_root(), version)
+    text = ledger_line.label(window_folder.state_root(window), version)
     return f"{text} · {of}" if is_other_preset(key) else text
 
 
@@ -157,7 +157,7 @@ def clear(window) -> None:
 
 def show(window, key: str) -> None:
     window._shown_key = key
-    window._shown_line = ledger_line.line_mark(config.state_root(), window._loaded_preset)
+    window._shown_line = ledger_line.line_mark(window_folder.state_root(window), window._loaded_preset)
     window._safe_load_project()
 
 
@@ -204,7 +204,7 @@ def reload_at_head(window, load: Callable[[], None]) -> None:
         return
     held = getattr(window, "_shown_line", None)
     if held is not None and not ledger_line.moved(
-            held, ledger_line.line_mark(config.state_root(), window._loaded_preset)):
+            held, ledger_line.line_mark(window_folder.state_root(window), window._loaded_preset)):
         load()
         return
     window._shown_key = None
@@ -216,7 +216,7 @@ def reload_at_head(window, load: Callable[[], None]) -> None:
 def picker_menu(window) -> QMenu:
     """«Показати версію…», from `compare_offer`: every version of every slot; the current one and
     the one already shown are greyed (the way back is the strip's button)."""
-    root = config.state_root()
+    root = window_folder.state_root(window)
     preset = window._loaded_preset
     head = getattr(window._view, "file_version", None) or window._view.version
     offer = ledger_line.compare_offer(root, preset, head)

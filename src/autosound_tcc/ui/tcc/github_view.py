@@ -273,13 +273,20 @@ def _first_paint(git: GitStatus, name: str) -> Panel:
     return Panel(sub, git.level, tip, tuple(rows), None if git.remote else 1)
 
 
+def _work(read: Read) -> tuple[str, ...]:
+    """What is really unsaved. `.gitignore` is what TCC itself teaches on a project's first start,
+    and the method counts it as a tuning file: alone it is no work at risk, and goes with the next
+    save, where the question names it."""
+    return tuple(path for path in read.tuning or () if path != ".gitignore")
+
+
 def _verdict(git: GitStatus, read: Read, name: str) -> tuple[str, str, str]:
     """(level, sub, tip) of a read: red for work that is not safe, amber for what waits, and never
     green for what could not be read."""
     ahead = read.ahead or ()
     remote = git.remote
-    if read.tuning:
-        n = len(read.tuning)
+    if _work(read):
+        n = len(_work(read))
         return "bad", i18n.t("gitSubUnsaved").format(n=n), i18n.t("gitTipUnsaved").format(n=n)
     if ahead and read.ledger_newer:
         return "bad", i18n.t("gitSubBehind").format(n=len(ahead)), i18n.t("gitTipBehind").format(n=len(ahead), remote=remote)
@@ -308,7 +315,7 @@ def _send_offer(git: GitStatus, read: Read) -> tuple[Optional[str], bool]:
     Arbiter 2026-11-08); the panel says who sends in its own row, and the spare's tip says so."""
     if not read.remote or read.failed or git.detached:
         return None, False
-    if read.tuning is None or read.ahead is None or not (read.tuning or read.ahead):
+    if read.tuning is None or read.ahead is None or not (_work(read) or read.ahead):
         return None, False
     if git.behind:
         return i18n.t("gitSendTipPull").format(n=git.behind), True
@@ -377,7 +384,7 @@ def _from_read(git: GitStatus, read: Read, name: str) -> Panel:
         rows.append(Row(i18n.t("gitChanges"), "?", read.changes_error or i18n.t("gitTipUnread"), "wait", count=True))
     else:
         rows.append(Row(i18n.t("gitChanges"), str(read.changed) if read.changed else i18n.t("gitClean"),
-                        changes_tip(read), "bad" if read.tuning else ("wait" if read.housekeeping else None), count=True))
+                        changes_tip(read), "bad" if _work(read) else ("wait" if read.housekeeping else None), count=True))
     rows.append(Row(i18n.t("gitBackup"), git.remote or i18n.t("gitNone"),
                     on_github(read) if git.remote else ""))
     if read.remote:
