@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import atexit
 import functools
-import json
 import os
 import signal
 import threading
@@ -123,6 +122,7 @@ from autosound_tcc.ui.tcc.new_project_dialog import NewProjectDialog
 from autosound_tcc.ui.tcc.resonalyze_import_dialog import ResonalyzeImportDialog
 from autosound_tcc.ui.tcc.app_settings import get_settings
 from autosound_tcc.ui.tcc.labels import ElidedButton, ElidedLabel
+from autosound_tcc.ui.tcc.panel_fold import PanelFold
 from autosound_tcc.ui.tcc.plan_panel import PlanPanel
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip, tip_html
 from autosound_tcc.ui.tcc.sidebar_section import (
@@ -183,7 +183,6 @@ _FLOOR_CELLS = {"hp": {"f": 3500, "type": "LR", "slope": 24},
                 "lp": {"f": 3500, "type": "LR", "slope": 24},
                 "gain_db": -12.5, "ta_ms": 15.75, "polarity": "NORM"}
 #: The border between the plan and the capture card in the right column, where it was left.
-_RIGHT_SPLIT_KEY = "ui/right_split"
 #: How often the REW-online dot re-asks, while this window has the focus. Thirty seconds because
 #: the probe pulls REW's whole measurement list — cheap for a local HTTP call, not free — and
 #: because what it is watching for (REW being started or closed beside TCC) happens on the scale
@@ -3251,31 +3250,6 @@ class MainWindow(QMainWindow):
         splitter.setSizes([420, 600])
         return splitter
 
-    def _read_right_split(self) -> list[int]:
-        """Where the Arbiter left the border between the plan and the capture card, or nothing."""
-        raw = self._settings.value(_RIGHT_SPLIT_KEY, None)
-        try:
-            sizes = [int(v) for v in json.loads(raw)] if raw else []
-        except (TypeError, ValueError):
-            sizes = []
-        return sizes if len(sizes) == 2 and all(v > 0 for v in sizes) else []
-
-    def _apply_right_split(self) -> None:
-        """Where the border was left — or, the first time, the larger share to the capture card:
-        it is the one with the list in it."""
-        try:
-            total = sum(self._right_split.sizes())
-        except RuntimeError:
-            return
-        saved = self._read_right_split()
-        if saved:
-            self._right_split.setSizes(saved)
-        elif total > 0:
-            self._right_split.setSizes([total * 3 // 8, total - total * 3 // 8])
-
-    def _remember_right_split(self, *_args) -> None:
-        self._settings.setValue(_RIGHT_SPLIT_KEY, json.dumps(self._right_split.sizes()))
-
     def _on_dialog_editing_changed(self, editing: bool) -> None:
         self._dialog_frame.setProperty("class", "panel dialog-editing" if editing else "panel")
         self._dialog_frame.style().unpolish(self._dialog_frame)
@@ -3351,10 +3325,13 @@ class MainWindow(QMainWindow):
         split.addWidget(meas_panel)
         split.setStretchFactor(0, 1)
         split.setStretchFactor(1, 2)
-        # Sized once the column has a height: sizes set before that are clamped to the cards'
-        # minimums and the plan ended up with most of the column.
-        QTimer.singleShot(0, self._apply_right_split)
-        split.splitterMoved.connect(self._remember_right_split)
+        self._right_fold = PanelFold(split, self._settings)  # the fold and the border's memory
+        self._right_fold.add("plan", plan_panel, plan_head, self._plan_panel, self._plan_sub)
+        self._right_fold.add("focus", meas_panel, meas_head, self._meas_panel, self._meas_sub)
+        QTimer.singleShot(0, self._right_fold.apply)
+        split.splitterMoved.connect(self._right_fold.remember)
+        # A hidden panel asks for no layout, so its floor is read again when it is back.
+        self._right_fold.unfolded.connect(self._fit_right_floor)
 
         # A step's measurement icon opens that capture series in the panel below (user request
         # 2026-07-28).
@@ -5997,6 +5974,7 @@ class MainWindow(QMainWindow):
         self._plan_title.setText(i18n.t("planTitle"))
         self._plan_sub.setText(i18n.t("planSub"))
         self._meas_title.setText(i18n.t("focus"))
+        self._right_fold.retranslate()
         self._capture_ready_btn.setText(i18n.t("captureReady"))
         self._capture_ready_tip.set_text(i18n.t("captureReadyTip"))
         self._meas_sub.setText(i18n.t("measSub"))

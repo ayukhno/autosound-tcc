@@ -5097,8 +5097,8 @@ def test_the_border_between_plan_and_captures_is_remembered(tmp_path, monkeypatc
     window._right_split.setSizes([500, 300])
     QApplication.processEvents()
     held = window._right_split.sizes()
-    window._remember_right_split()
-    assert window._read_right_split() == held
+    window._right_fold.remember()
+    assert window._right_fold.read() == held
     window.hide()
 
 

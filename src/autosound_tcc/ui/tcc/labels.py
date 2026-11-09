@@ -61,6 +61,13 @@ class ElidedLabel(QLabel):
         # only gives ground -- down to `min_width` -- when it would otherwise widen the panel.
         self.setSizePolicy(policy, QSizePolicy.Policy.Preferred)
 
+    def set_min_width(self, width: int) -> None:
+        """A new floor for a label already built: a neighbour in its row has taken the room."""
+        self._min_width = width
+        self.setMinimumWidth(width)
+        self.updateGeometry()
+        self._elide()
+
     def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
         self._full = text
         # A tip of the owner's own said more about the text it was set with, and goes with it: the

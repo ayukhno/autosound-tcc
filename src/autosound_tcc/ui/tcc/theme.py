@@ -454,6 +454,20 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
     QToolButton[class~="status-strip-close"]:hover {{
         color: {t.text};
     }}
+    /* .panel-fold — the ▾/▸ in the right column's card headers (tcc#243). */
+    QToolButton[class~="panel-fold"] {{
+        background: transparent;
+        border: none;
+        color: {t.muted};
+        font-size: 11px;
+        padding: 0px 2px;
+    }}
+    QToolButton[class~="panel-fold"]:hover {{
+        color: {t.text};
+    }}
+    QToolButton[class~="panel-fold"]:disabled {{
+        color: {t.faint};
+    }}
 
     /* .sidebar-head — the left panel's top-level accordion header bar (System params / Project
     params / Car audio analysis / DSP) -- the only rows in the app deliberately shaded darker than

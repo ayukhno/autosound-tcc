@@ -41,8 +41,9 @@ BUILD = "Main" + "Window("
 #: sign-in stopped through `menu_registry.stop_workers` in one line, #181 task 9; 6073 after the
 #: delayed re-reads' guard moved into `window_folder` and the restart wrapper went, #206;
 #: W-11: 6048 after the pickers' tint moved into `availability_view.mark_missing` and the main AI's
-#: check came in as `generator_check_view`, #222).
-MAIN_WINDOW_MAX_LINES = 6048
+#: check came in as `generator_check_view`, #222; W-12: 6026 after the right column's border moved
+#: into `panel_fold` beside the fold, #243).
+MAIN_WINDOW_MAX_LINES = 6026
 #: Full-window builds in the tests, outside comments (W-8: 223 on 2026-10-06, 218 after the menu
 #: tests became renderer tests, #161; W-9: 212 after the «settled» tests became plain tests over a
 #: recorded round, #175; 208 after the capture series' tests did, #175; 207 after the compare

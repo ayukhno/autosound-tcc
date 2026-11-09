@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 import shiboken6  # noqa: E402
-from PySide6.QtCore import QRect  # noqa: E402
+from PySide6.QtCore import QRect, QSize  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QLayout,
@@ -1695,4 +1695,60 @@ def test_control_mode_bar_keeps_the_session_name_coffee_and_feedback_and_leaving
     assert window._terminal_btn.isHidden()
     assert window._coffee_btn.isVisible() and window._feedback_btn.isVisible()
     assert _bar(footer) == before, "the bar's own order comes back"
+    window.close()
+
+
+def test_a_folded_panel_holds_through_the_mode_a_language_and_a_theme(tmp_path, monkeypatch):
+    """Tcc#243: the fold lives on the cards, and `w._right` moves as a whole."""
+    window = _window(tmp_path, monkeypatch, store={})
+    window.resize(1400, 900)
+    window.show()
+    for _ in range(3):
+        QApplication.processEvents()
+    fold, card, head_widgets = window._right_fold, window._meas_card, (
+        window._capture_ready_btn, window._meas_rew_dot)
+    fold.arrow("focus").click()
+    QApplication.processEvents()
+
+    def _still_folded(when: str) -> None:
+        QApplication.processEvents()
+        assert not window._meas_panel.isVisible(), when
+        assert card.maximumHeight() == card.sizeHint().height(), when
+        assert all(w.isVisible() for w in head_widgets), when
+
+    _still_folded("folded")
+    window._control_layout.enter()
+    _still_folded("in the mode")
+    i18n.set_language("uk")
+    try:
+        window._retranslate()
+        _still_folded("after a language")
+    finally:
+        i18n.set_language("en")
+        window._retranslate()
+    window._control_layout.leave()
+    _still_folded("back in the full window")
+    theme = window._mode
+    window._apply_theme("dark" if theme == "light" else "light")
+    _still_folded("after a theme")
+    window._apply_theme(theme)
+    window.close()
+
+
+def test_the_column_floor_is_read_again_when_the_focus_unfolds(tmp_path, monkeypatch):
+    """Tcc#243: a hidden panel asks for no layout, so a floor that moved while it was folded
+    (a language, a new round) would stay unseen."""
+    window = _window(tmp_path, monkeypatch, store={})
+    window.resize(1400, 900)
+    window.show()
+    for _ in range(3):
+        QApplication.processEvents()
+    arrow = window._right_fold.arrow("focus")
+    arrow.click()
+    wider = window._meas_panel.minimumSizeHint().width() + 200
+    monkeypatch.setattr(window._meas_panel, "minimumSizeHint", lambda: QSize(wider, 10))
+    arrow.click()
+    for _ in range(3):
+        QApplication.processEvents()
+    assert window._right.minimumWidth() >= wider, "the column follows the panel's new floor"
     window.close()
