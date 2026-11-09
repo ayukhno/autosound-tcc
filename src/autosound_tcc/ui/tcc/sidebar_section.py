@@ -60,7 +60,7 @@ class SidebarSection(QWidget):
         # The title asks for its natural width and keeps it whenever the panel allows -- two
         # sections both reading "ПАРАМ…" is worse than no sub at all. The sub gives ground first.
         self._title_label = ElidedLabel(title, min_width=70, policy=QSizePolicy.Policy.Maximum)
-        self._title_label.setProperty("class", "sidebar-title")
+        self._title_label.setProperty("class", "sidebar-title sec-title")
         apply_caps(self._title_label, spacing_px=1.4)
         head_layout.addWidget(self._title_label)
         # A state dot before the sub, for a section whose sub is a thing with a state — the DSP's
@@ -94,6 +94,14 @@ class SidebarSection(QWidget):
 
     def body_layout(self) -> QVBoxLayout:
         return self._body_layout
+
+    def head_need(self) -> int:
+        """The header's width with its title whole and its sub at the floor, the dot counted
+        whether it shows yet or not (a project's load shows it after the sheet is measured)."""
+        head, margins = self._head_layout, self._head_layout.contentsMargins()
+        return (margins.left() + margins.right() + self._twist.minimumSizeHint().width()
+                + self._title_label.sizeHint().width() + self._dot.width()
+                + self._sub_label.minimumWidth() + 3 * head.spacing())
 
     def set_title(self, text: str) -> None:
         self._title_label.setText(text)
@@ -181,6 +189,7 @@ class CollapsibleGroup(QWidget):
         self._twist.setProperty("class", "tw")
         head_layout.addWidget(self._twist)
         title_label = QLabel(title.upper())
+        title_label.setProperty("class", "sec-title")
         apply_caps(title_label, spacing_px=1.0)
         head_layout.addWidget(title_label)
         if count:

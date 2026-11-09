@@ -99,7 +99,7 @@ from autosound_tcc.state import (
 )
 from autosound_tcc.core import signal_bus
 from autosound_tcc.state.dsp_state import ProjectView, VersionRefused, load_project_view, rig_view
-from autosound_tcc.ui.tcc import availability_view, copy_menu, i18n, mcp_view, sizing
+from autosound_tcc.ui.tcc import availability_view, copy_menu, font_looks, i18n, mcp_view, sizing
 from autosound_tcc.ui.tcc.availability_view import mark_missing as _mark_missing
 from autosound_tcc.ui.tcc.generator_check_view import GeneratorCheckView
 from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line, terminal_menu
@@ -467,7 +467,7 @@ def _phead(title_key: str, sub_key: str | None = None) -> tuple[QWidget, QLabel,
     layout.setSpacing(8)
 
     title = QLabel(i18n.t(title_key))
-    title.setProperty("class", "phead-title")
+    title.setProperty("class", "phead-title sec-title")
     apply_caps(title, spacing_px=1.4)
     layout.addWidget(title)
 
@@ -941,7 +941,7 @@ class MainWindow(QMainWindow):
         self._refresh_project_button()
 
         self._preset_field_lbl = QLabel(i18n.t("preset"))
-        self._preset_field_lbl.setProperty("class", "kv-lbl")
+        self._preset_field_lbl.setProperty("class", "kv-lbl sec-title")
         apply_caps(self._preset_field_lbl, spacing_px=1.2)
         layout.addWidget(self._preset_field_lbl)
 
@@ -960,7 +960,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._save_label)
 
         self._target_field_lbl = QLabel(i18n.t("target"))
-        self._target_field_lbl.setProperty("class", "kv-lbl")
+        self._target_field_lbl.setProperty("class", "kv-lbl sec-title")
         apply_caps(self._target_field_lbl, spacing_px=1.2)
         layout.addWidget(self._target_field_lbl)
         self._target_label = QLabel("")
@@ -3072,7 +3072,7 @@ class MainWindow(QMainWindow):
             return
         card = self._meas_card
         frame = card.width() - card.contentsRect().width()
-        floor = max(_SIDE_MIN_PX, panel.minimumSizeHint().width() + frame)
+        floor = max(_SIDE_MIN_PX, panel.minimumSizeHint().width() + frame, font_looks.head_floor(self))
         if floor != right.minimumWidth():
             right.setMinimumWidth(floor)
             # The centre's floor is capped against the sides' (two thirds of the screen, #106).
@@ -3344,11 +3344,18 @@ class MainWindow(QMainWindow):
 
     # ---- theme -------------------------------------------------------------
 
-    def _apply_theme(self, mode: str) -> None:
-        app = QApplication.instance()
-        apply_theme(app, mode, scale=self._zoom)
+    def _restyle(self) -> None:
+        """The whole sheet again at this zoom and font look, and what its sizes decide."""
+        apply_theme(QApplication.instance(), self._mode, scale=self._zoom,
+                    font=font_looks.saved(self._settings))
+        self._repolish_all()
+        self._left.setMinimumWidth(max(_SIDE_MIN_PX, font_looks.left_floor(self)))
+        self._fit_right_floor()
+        self._fit_centre_floor()
         # After the sheet, never before: the size being copied is the styled one.
         QTimer.singleShot(0, self._match_icon_buttons)
+
+    def _apply_theme(self, mode: str) -> None:
         self._mode = mode
         self._settings.setValue(_THEME_KEY, mode)
         # The Project params row that names the theme (VM-8): written when the section was built
@@ -3357,8 +3364,7 @@ class MainWindow(QMainWindow):
         value = self.__dict__.get("_theme_value")
         if value is not None and shiboken6.isValid(value):
             value.setText(self._theme_word())
-        self._repolish_all()
-        self._fit_centre_floor()
+        self._restyle()
         # The curve window is not in this window's widget tree and would not repaint from the
         # stylesheet even if it were: pyqtgraph draws with explicit pens.
         curves = getattr(self, "_curve_dialog", None)
@@ -3423,11 +3429,7 @@ class MainWindow(QMainWindow):
     def _set_zoom(self, zoom: float) -> None:
         self._zoom = round(min(_ZOOM_MAX, max(_ZOOM_MIN, zoom)), 2)
         self._settings.setValue(_ZOOM_KEY, self._zoom)
-        apply_theme(QApplication.instance(), self._mode, scale=self._zoom)
-        self._repolish_all()
-        self._fit_centre_floor()
-        # Zoom scales every font in the sheet, so the box being copied has just changed size.
-        QTimer.singleShot(0, self._match_icon_buttons)
+        self._restyle()
         self._zoom_label.setText(f"{round(self._zoom * 100)}%")
 
     def _zoom_out(self) -> None:
@@ -3435,8 +3437,6 @@ class MainWindow(QMainWindow):
 
     def _zoom_in(self) -> None:
         self._set_zoom(self._zoom + _ZOOM_STEP)
-
-    # ---- language -----------------------------------------------------------
 
     # ---- process state (SCR-004) --------------------------------------------
 

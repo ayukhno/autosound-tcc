@@ -74,7 +74,7 @@ SECTIONS: tuple[tuple[str, str], ...] = (("project", "menuProject"), ("session",
 #: Modules whose `menu_entries()` adds lines; read when `collect()` runs. A provider whose lines
 #: start work of their own may also have `stop_workers(host)`: the window calls it on its way out
 #: (`stop_workers` below).
-PROVIDERS: tuple[str, ...] = ("autosound_tcc.ui.tcc.codex_menu",)
+PROVIDERS: tuple[str, ...] = ("autosound_tcc.ui.tcc.codex_menu", "autosound_tcc.ui.tcc.font_looks")
 
 #: The window attributes tests drive lines by — closed at these five (G13, #161).
 WINDOW_ALIASES = frozenset({"_intake_action", "_reload_action", "_import_action",

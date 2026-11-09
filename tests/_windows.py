@@ -91,7 +91,7 @@ class _StandIn:
         self._widget.setStyleSheet(sheet)
 
 
-def theme_on(monkeypatch, widget, mode, scale=1.0):
+def theme_on(monkeypatch, widget, mode, scale=1.0, font="normal"):
     """`theme.apply_theme(app, mode, scale)`, with `widget` standing in for the application: the
     palette and the sheet go on that widget alone, and the current theme is set as the real call
     sets it -- and put back at teardown (F-065).
@@ -104,7 +104,7 @@ def theme_on(monkeypatch, widget, mode, scale=1.0):
     from autosound_tcc.ui.tcc import theme
 
     monkeypatch.setattr(theme, "_CURRENT", theme._CURRENT)
-    return theme.apply_theme(_StandIn(widget), mode, scale)
+    return theme.apply_theme(_StandIn(widget), mode, scale, font=font)
 
 
 def theme_on_the_window(monkeypatch, window) -> None:
@@ -114,7 +114,8 @@ def theme_on_the_window(monkeypatch, window) -> None:
     from autosound_tcc.ui.tcc import main_window
 
     monkeypatch.setattr(main_window, "apply_theme",
-                        lambda _app, mode, scale=1.0: theme_on(monkeypatch, window, mode, scale))
+                        lambda _app, mode, scale=1.0, font="normal":
+                            theme_on(monkeypatch, window, mode, scale, font))
 
 
 def language_listeners() -> list:

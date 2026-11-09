@@ -130,13 +130,13 @@ def test_the_theme_switch_wears_the_wait_cursor_and_takes_no_second_click(monkey
     _windows.theme_on_the_window(monkeypatch, window)
     applying, seen = main_window.apply_theme, []
 
-    def slow(app, mode, scale=1.0):
+    def slow(app, mode, scale=1.0, font="normal"):
         cursor = QApplication.overrideCursor()
         seen.append((mode, cursor.shape() if cursor else None, window._theme_btn.isEnabled()))
         if len(seen) == 1:
             window._toggle_theme()
             _click_queued(window._theme_btn)
-        return applying(app, mode, scale)
+        return applying(app, mode, scale, font=font)
 
     monkeypatch.setattr(main_window, "apply_theme", slow)
     start = window._mode

@@ -21,6 +21,8 @@ from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QFont, QFontMetrics, QFontMetricsF, QPalette
 from PySide6.QtWidgets import QComboBox, QStyle, QStyleOptionComboBox, QStylePainter, QWidget
 
+from autosound_tcc.ui.tcc import font_looks
+
 Mode = Literal["dark", "light"]
 
 #: The tick a done plan step draws in its box (`.plan-step-check`). The app's icons ship as SVG
@@ -352,7 +354,7 @@ def _scale_font_sizes(qss: str, scale: float) -> str:
     return _FONT_SIZE_RE.sub(lambda m: f"font-size: {float(m.group(1)) * scale:.1f}px", qss)
 
 
-def build_qss(theme: Theme, scale: float = 1.0) -> str:
+def build_qss(theme: Theme, scale: float = 1.0, font: str = font_looks.DEFAULT) -> str:
     """The application-wide stylesheet. Widgets opt into a "class" via the Qt dynamic-property
     trick (`widget.setProperty("class", "panel")`) since QSS object names must be unique but
     many widgets share the same look — mirrors the prototype's CSS classes.
@@ -2161,7 +2163,7 @@ def build_qss(theme: Theme, scale: float = 1.0) -> str:
         spacing: 7px;
     }}
     """
-    return _scale_font_sizes(qss, scale)
+    return _scale_font_sizes(font_looks.dress(qss, font), scale)
 
 
 _CURRENT: "Theme | None" = None
@@ -2173,10 +2175,11 @@ def current_theme() -> "Theme":
     return _CURRENT if _CURRENT is not None else get_theme("dark")
 
 
-def apply_theme(app, mode: Mode, scale: float = 1.0) -> Theme:
+def apply_theme(app, mode: Mode, scale: float = 1.0, font: str = font_looks.DEFAULT) -> Theme:
     """Swap the whole application's stylesheet — the Qt equivalent of the prototype's
     `document.documentElement.dataset.theme = mode`. `scale` reapplies the current zoom level
-    (build_qss default is 1.0, i.e. no-op) so a theme toggle doesn't reset zoom."""
+    (build_qss default is 1.0, i.e. no-op) so a theme toggle doesn't reset zoom; `font` is the
+    look picked in the menu (`font_looks`), for the same reason."""
     global _CURRENT
     theme = get_theme(mode)
     _CURRENT = theme
@@ -2203,7 +2206,7 @@ def apply_theme(app, mode: Mode, scale: float = 1.0) -> Theme:
     # with the sheet the application HAS, not a record of what this function last set: a sheet
     # taken off behind its back left the record saying «on», and the next window skipped it
     # (tcc#123; the W-4 order fixes, where a test had cleared it).
-    qss = build_qss(theme, scale=scale)
+    qss = build_qss(theme, scale=scale, font=font)
     if app.styleSheet() != qss:
         app.setStyleSheet(qss)
     return theme

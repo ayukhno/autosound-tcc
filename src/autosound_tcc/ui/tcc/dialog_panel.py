@@ -340,7 +340,7 @@ class DialogPanel(QWidget):
         head_layout.setContentsMargins(12, 8, 12, 8)
         head_layout.setSpacing(8)
         self._title_label = QLabel(i18n.t("dialog"))
-        self._title_label.setProperty("class", "phead-title")
+        self._title_label.setProperty("class", "phead-title sec-title")
         apply_caps(self._title_label, spacing_px=1.4)
         head_layout.addWidget(self._title_label)
         self._sub_label = QLabel(i18n.t("dialogSub"))

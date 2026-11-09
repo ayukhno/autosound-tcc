@@ -614,6 +614,7 @@ class TreeGroupSection(QWidget):
         self._twist.setProperty("class", "tw")
         head_layout.addWidget(self._twist)
         title = QLabel(_group_label(group).upper())
+        title.setProperty("class", "sec-title")
         apply_caps(title, spacing_px=1.0)
         head_layout.addWidget(title)
         # The working tree shows what is being worked on: unused slots stay out of it (user,
