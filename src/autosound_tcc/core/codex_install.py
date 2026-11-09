@@ -544,7 +544,7 @@ def refresh_current(binary: Optional[Path] = None, *, repoint: bool = False) -> 
             _warn_once(link, ("not ours",), "codex: %s is not TCC's and is left alone; TCC's Codex "
                        "works, but a terminal gets no fixed path to it", link)
             return ""
-        dangling = kind is not None and not os.path.exists(link)
+        dangling = kind is not None and not (codex_cli.current_bin(binary) / binary.name).is_file()
         if kind is None or dangling or (repoint and not _leads_to(link, folder)):
             _point_current(folder, link, kind)
     except Exception as exc:  # noqa: BLE001 — whatever it is, the Codex itself is fine

@@ -22,6 +22,7 @@ site. Sent to the hub by ticket at the wave's end.
 | 2026-11-09 | Opus seat (`feature-dev:code-reviewer`, opus · high), 6 min, 132K | #253's task review | 2 | 2 | 0 | 0 | 1 | 0 / 1 / 1 |
 | 2026-11-09 | silent-failure seat (opus · high), 5 min, 138K | the Codex group (#254, #253) | 10 | checked in the fix round | | | 9 | 0 / 1 / 9 |
 | 2026-11-09 | test seat (opus · high) | the Codex group | 11 | each gap proved by a mutation run | | | 11 | 0 / 3 / 8 |
+| 2026-11-09 | narrow re-review (opus · high), 4 min, 108K | the Codex group's fix round | 3 | 3 | 0 | 0 | 3 | 0 / 2 / 1 |
 
 The first two seats found the same Important on their own (a pin bump leaves a person on the old Codex, told «up to date»).
 

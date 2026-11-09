@@ -198,6 +198,34 @@ def test_a_codex_found_through_current_on_an_older_folder_is_behind_the_pin(tmp_
 
 
 @POSIX_ONLY
+@pytest.mark.parametrize("folder", ["0.999.0", "not-a-version"])
+def test_a_copy_in_a_folder_not_older_than_the_pin_is_not_behind_it(tmp_path, folder):
+    """An older TCC reinstalled, or a folder no version can be read from: called behind, «Update
+    all» moved `current` down to the lower version."""
+    own = codex_cli.tcc_copy_path()
+    _file(own.parents[3] / folder / "codex_cli_bin" / "bin" / own.name)
+    (own.parents[3] / codex_cli.CURRENT).symlink_to(folder, target_is_directory=True)
+    through = codex_cli.current_bin(own) / own.name
+
+    assert not codex_cli.behind_pin(_find(tmp_path, path=str(through.parent)))
+
+
+@POSIX_ONLY
+def test_a_link_on_path_into_an_older_folder_gives_way_to_the_pins_copy(tmp_path):
+    """The install moves only `current`: a person's own link into an old version folder stayed
+    what `find` answered, so the offer never ended and TCC kept running the old copy."""
+    default = codex_cli.tcc_copy_path()
+    older = _file(default.parents[3] / "0.162.0" / "codex_cli_bin" / "bin" / default.name)
+    links = tmp_path / "links"
+    links.mkdir()
+    (links / default.name).symlink_to(older)
+    own = _file(codex_cli.tcc_copy_path(home=tmp_path / "home", environ={"PATH": str(links)},
+                                        windows=False))
+
+    assert _find(tmp_path, path=str(links)) == Found(str(own), codex_cli.SOURCE_TCC)
+
+
+@POSIX_ONLY
 def test_a_real_folder_named_current_is_not_tccs(tmp_path, monkeypatch):
     """A codex the person keeps in a folder of their own, even one named `current` beside TCC's
     versions: only what leads to a version folder is TCC's."""

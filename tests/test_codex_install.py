@@ -854,6 +854,18 @@ def test_a_current_left_dangling_by_tcc_is_moved_to_the_copy(target):
 
 
 @POSIX_ONLY
+def test_a_current_whose_folder_stands_but_has_no_codex_is_moved_to_the_copy(target):
+    _whole_copy(target)
+    link = _current(target)
+    (link.parent / "0.150.0").mkdir()
+    link.symlink_to("0.150.0", target_is_directory=True)
+
+    assert codex_install.refresh_current(target) == str(codex_cli.current_bin(target))
+
+    assert os.path.realpath(link) == os.path.realpath(_version_folder(target))
+
+
+@POSIX_ONLY
 def test_two_tccs_with_different_pins_do_not_move_current_by_reading(target):
     """Each read of the Updates tab moved it to that TCC's own pin, back and forth. A read makes a
     missing link or repairs a dangling one; only an install moves a live one."""

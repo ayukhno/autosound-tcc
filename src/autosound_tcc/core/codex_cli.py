@@ -257,7 +257,7 @@ def find(*, environ: Optional[Mapping[str, str]] = None, home: Optional[Path] = 
             if hit is None:
                 continue
             candidate = Found(str(hit[0]), source, hit[1])
-            if not too_old(candidate):
+            if not too_old(candidate) and not behind_pin(candidate):
                 found = candidate
                 break
             stale = stale or candidate
@@ -523,11 +523,19 @@ def _is_tccs_copy(found: Found) -> bool:
 
 
 def behind_pin(found: Optional[Found]) -> bool:
-    """`found` is a copy of TCC's in a version folder other than `PIN`'s: what `current` on the
-    person's PATH leads to after a TCC update moved the pin, until the install moves it (#253).
-    Stat calls only, for a menu line's state too."""
+    """`found` is a copy of TCC's in a version folder below `PIN`'s: what `current` on the person's
+    PATH leads to after a TCC update moved the pin, until the install moves it (#253). A folder
+    above the pin (an older TCC reinstalled) or with no version in its name is not behind: an
+    install would only move it down. Stat calls only, for a menu line's state too."""
     folder = _tccs_folder(found) if found is not None else ""
-    return bool(folder) and folder != PIN
+    try:
+        return bool(folder) and _numbers(folder) < _numbers(PIN)
+    except ValueError:  # a folder whose name is no version
+        return False
+
+
+def _numbers(version: str) -> tuple:
+    return tuple(int(part) for part in version.split("."))
 
 
 def _pypi_json() -> bytes:
