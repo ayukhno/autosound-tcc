@@ -33,9 +33,11 @@ def omp_without_config(server) -> str:
     return say(session_routes.omp_without_config(server))
 
 
-def _say_key(server, strip) -> None:
+def _say_key(server, strip, after_reset: bool = False) -> None:
     """The line for what became of the key — when a session must reconnect, and only then. A key
-    that did not change is not news: that is the whole of #247. Holds the reason, never the key."""
+    that did not change is not news: that is the whole of #247. Holds the reason, never the key.
+    `after_reset`: the person asked for a new key, so the line also has to say what it did not
+    reach — a second TCC on the folder read the key once, at its start."""
     note = getattr(server, "key_note", mcp_key.KEPT)
     if note == mcp_key.MADE:
         strip.notify(i18n.t("mcpKeyMade"))
@@ -46,16 +48,16 @@ def _say_key(server, strip) -> None:
     elif note == mcp_key.RUN_ONLY:
         # Standing: it comes true again on every start until the cause is fixed, and the window's
         # own opening lines would otherwise replace it before anyone read it.
-        strip.notify(i18n.t("mcpKeyRunOnly").format(why=server.key_problem), level="warn",
-                     sticky=True)
+        line = "mcpKeyResetRunOnly" if after_reset else "mcpKeyRunOnly"
+        strip.notify(i18n.t(line).format(why=server.key_problem), level="warn", sticky=True)
 
 
-def say_started(server, strip) -> None:
+def say_started(server, strip, after_reset: bool = False) -> None:
     """What the strip says once the server is up, or its key was reset: the key's line, then the
     advertisement's — the server is up and `.mcp.json` may still not be, which is real and
     invisible otherwise (a terminal session will not find TCC) but is NOT "the server did not
     start", which is what it used to say about a server that was serving (user's log, 2026-09-06)."""
-    _say_key(server, strip)
+    _say_key(server, strip, after_reset)
     if getattr(server, "config_error", ""):
         strip.notify(i18n.t("mcpNoConfig").format(error=server.config_error), level="warn")
 
@@ -63,7 +65,7 @@ def say_started(server, strip) -> None:
 def reset_key(host) -> None:
     """The menu's «reset key»: a new key, and the strip says who has to reconnect."""
     host._mcp_server.reset_token()
-    say_started(host._mcp_server, host._status_strip)
+    say_started(host._mcp_server, host._status_strip, after_reset=True)
 
 
 def menu_entries() -> list:

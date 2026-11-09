@@ -112,7 +112,7 @@ def load(project_dir: Optional[Path]) -> Key:
     try:
         token = _read_saved(path)
     except FileNotFoundError:
-        return _made(project_dir, MADE)
+        return _made_first(Path(project_dir))
     except (OSError, ValueError) as exc:
         # There and refused: the bytes may be perfectly good, so nothing is written over them
         # (`own_store`'s rule). A reset is the person asking, and it may.
@@ -157,14 +157,44 @@ def _made(project_dir: Path, note: str) -> Key:
     return Key(token, note)
 
 
-def _keep(project_dir: Path, token: str) -> str:
-    """Save `token`, git told first: "" when it landed, else why it did not."""
+def _made_first(project_dir: Path) -> Key:
+    """This project's first key. Two TCCs starting on one folder both find no file and both get
+    here; the rename let the last one win, and left the other serving a key the file did not hold.
+    So the first to land is the project's key, and the other takes that one."""
+    token = _fresh()
+    try:
+        problem = _keep(project_dir, token, first=True)
+    except FileExistsError:
+        return _theirs(project_dir)
+    if problem:
+        return _run_only(problem)
+    return Key(token, MADE)
+
+
+def _theirs(project_dir: Path) -> Key:
+    """The key another TCC has just landed. Told as made: to this TCC's sessions it is new too.
+    Empty only for the moment a folder with no hard links is mid-write: this run then uses its own."""
+    path = _path(project_dir)
+    try:
+        token = _read_saved(path)
+    except (OSError, ValueError) as exc:
+        return _run_only(f"{path}: {_why(exc)}")
+    if not token:
+        return _run_only(f"{path}: another TCC was still writing it")
+    return Key(token, MADE)
+
+
+def _keep(project_dir: Path, token: str, first: bool = False) -> str:
+    """Save `token`, git told first: "" when it landed, else why it did not. With `first`, only if
+    no key is there: `FileExistsError` when one is (`_made_first`)."""
     try:
         project_dir.mkdir(parents=True, exist_ok=True)  # a project not made yet has no `.gitignore`
         if not teach_git_to_ignore(project_dir):
             return f"{project_dir / '.gitignore'} does not keep .tcc/ out of git"
-        own_store.write_secret(_path(project_dir), token + "\n")
+        own_store.write_secret(_path(project_dir), token + "\n", only_if_absent=first)
     except (OSError, ValueError) as exc:
+        if first and isinstance(exc, FileExistsError):
+            raise
         return f"{_path(project_dir)}: {_why(exc)}"
     return ""
 

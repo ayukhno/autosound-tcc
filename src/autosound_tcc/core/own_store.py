@@ -154,9 +154,12 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     _forget_aside(path)  # a fresh file is there now
 
 
-def write_secret(path: Path, text: str) -> None:
+def write_secret(path: Path, text: str, *, only_if_absent: bool = False) -> None:
     """A secret, the way `write_json` writes a store — temp file, fsync, rename — and the owner's
     alone: so no reader ever finds half of it, and a write that dies leaves the old one whole.
+
+    `only_if_absent` lets the first of two writers win: `FileExistsError` for the second, whose
+    bytes do not land (a rename would have put the last writer's there, whoever read first).
 
     0600 said rather than inherited: `mkstemp` happens to create at that, which is not a decision
     anybody took and not one that survives a refactor. Set before the rename, so the name never
@@ -175,9 +178,40 @@ def write_secret(path: Path, text: str) -> None:
             os.fsync(fh.fileno())
         if os.name != "nt":
             os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
+        if only_if_absent:
+            _place_once(Path(tmp), path, text)
+            with contextlib.suppress(OSError):  # it landed: a temp left in place changes nothing
+                os.unlink(tmp)
+        else:
+            os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _place_once(tmp: Path, path: Path, text: str) -> None:
+    """Put `tmp`'s bytes at `path` unless something is there: `FileExistsError` if it is.
+
+    A hard link, because it is whole the moment it exists, and `os.link` fails over an existing
+    name on Windows as on POSIX. A folder that has no hard links (FAT, exFAT, some network shares)
+    claims the name with `O_EXCL` instead and writes after: a reader may find it empty for that
+    moment, which only that kind of folder pays for."""
+    try:
+        os.link(tmp, path)
+        return
+    except FileExistsError:
+        raise
+    except OSError:
+        pass  # no hard links here
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+                     | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)
         raise
 
 

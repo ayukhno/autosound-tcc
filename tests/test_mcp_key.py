@@ -10,6 +10,7 @@ No `QWidget` here: the strip and the window's host are stand-ins, so nothing can
 
 from __future__ import annotations
 
+import errno
 import http.client
 import importlib
 import json
@@ -202,14 +203,16 @@ def test_the_key_is_ignored_by_git_before_it_is_written(folder, monkeypatch):
     assert _git(folder, "init", "-q").returncode == 0
     (folder / ".gitignore").write_text("*.log\n", encoding="utf-8")
     landed: list[bool] = []
-    real = os.replace
 
-    def watching(src, dst, **kwargs):
-        if Path(dst) == _key_file(folder):
-            landed.append(_git(folder, "check-ignore", "-q", ".tcc/mcp-token").returncode == 0)
-        real(src, dst, **kwargs)
+    def watching(real):
+        def call(src, dst, **kwargs):
+            if Path(dst) == _key_file(folder):
+                landed.append(_git(folder, "check-ignore", "-q", ".tcc/mcp-token").returncode == 0)
+            real(src, dst, **kwargs)
+        return call
 
-    monkeypatch.setattr(os, "replace", watching)
+    monkeypatch.setattr(os, "link", watching(os.link))  # a first key lands by a link
+    monkeypatch.setattr(os, "replace", watching(os.replace))  # a later one by a rename
 
     TccMcpServer(project_dir=folder)
 
@@ -560,6 +563,47 @@ def test_a_stopping_server_withdraws_while_the_port_is_still_its_own(folder, mon
     assert held == [True]
 
 
+def _beaten_to_it(folder: Path, monkeypatch) -> list:
+    """Another TCC finishes its first start at the worst moment: after this one found no file,
+    before this one writes. Forced rather than raced: a race a test has to win is no test."""
+    real = own_store.write_secret
+    theirs: list = []
+
+    def they_get_there_first(path, text, **kwargs):
+        monkeypatch.setattr(own_store, "write_secret", real)
+        theirs.append(mcp_key.load(folder))
+        return real(path, text, **kwargs)
+
+    monkeypatch.setattr(own_store, "write_secret", they_get_there_first)
+    return theirs
+
+
+def test_the_first_start_of_two_tccs_ends_on_the_one_key_the_file_holds(folder, monkeypatch):
+    theirs = _beaten_to_it(folder, monkeypatch)
+
+    mine = mcp_key.load(folder)
+
+    assert theirs[0].note == "made" and mine.note == "made"
+    assert _key_file(folder).read_text(encoding="utf-8").strip() == theirs[0].token == mine.token
+    assert [p.name for p in _key_file(folder).parent.iterdir()] == ["mcp-token"]
+
+
+def test_the_first_writer_still_wins_on_a_folder_with_no_hard_links(folder, monkeypatch):
+    """FAT, exFAT and some network shares refuse `os.link`; the name is then claimed by O_EXCL."""
+    def refused(*_args, **_kwargs):
+        raise OSError(errno.ENOTSUP, "Operation not supported")
+
+    monkeypatch.setattr(own_store.os, "link", refused)
+    theirs = _beaten_to_it(folder, monkeypatch)
+
+    mine = mcp_key.load(folder)
+
+    assert _key_file(folder).read_text(encoding="utf-8").strip() == theirs[0].token == mine.token
+    assert [p.name for p in _key_file(folder).parent.iterdir()] == ["mcp-token"]
+    if os.name != "nt":
+        assert stat.S_IMODE(_key_file(folder).stat().st_mode) == 0o600
+
+
 # ---- what is said, and what never is ----
 
 
@@ -626,6 +670,28 @@ def test_the_reset_line_resets_and_the_strip_says_every_session_must_reconnect()
     assert calls == ["reset"]
     assert host._status_strip.lines == [(i18n.t("mcpKeyReset"), "warn", False)]
     assert "/mcp" in host._status_strip.lines[0][0]
+
+
+def test_a_reset_says_a_second_open_tcc_needs_a_restart():
+    """It reads the key once, at its start, so it keeps taking the old one until it restarts."""
+    strip = _Strip()
+    server = SimpleNamespace(key_note="reset", key_problem="", config_error="",
+                             reset_token=lambda: None)
+
+    mcp_view.reset_key(_host(server, strip))
+
+    assert "second TCC" in strip.lines[0][0] and "restart" in strip.lines[0][0]
+
+
+def test_a_reset_that_could_not_be_saved_says_so_and_about_the_second_tcc_too():
+    strip = _Strip()
+    server = SimpleNamespace(key_note="run_only", key_problem="some reason", config_error="",
+                             reset_token=lambda: None)
+
+    mcp_view.reset_key(_host(server, strip))
+
+    assert strip.lines == [(i18n.t("mcpKeyResetRunOnly").format(why="some reason"), "warn", True)]
+    assert "some reason" in strip.lines[0][0] and "second TCC" in strip.lines[0][0]
 
 
 def test_the_reset_line_is_off_while_there_is_no_server():
