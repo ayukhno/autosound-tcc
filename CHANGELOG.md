@@ -15,6 +15,56 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [Unreleased]
+
+Paired with method `fe34a96065125753abfa06d75b27d5eff77492ac` — the method's signed candidate `beta-v3.3.0-rc1`: the
+train tags that commit **`v3.3.0`**.
+
+The wave W-12, the joint minor with the method (TCC v1.3.0 with the method's v3.3.0).
+
+### Added
+
+- **Any version of any slot, read-only** (tcc#249): «Show version…» above the DSP tree, a «not the current one» mark
+  and one way back. Sessions, saving and what a session is told stay on the current version.
+- **«Checked in the DSP» and «in the DSP now»** (tcc#251): a green mark on a version every channel of which was entered and
+  whose save file is on record (a Helix only, for now), with the file, md5 and time on hover; and the method's dated
+  record of what is in the processor, per slot. With no record TCC claims nothing.
+- **A «Preset» tab and a tree section** (tcc#256): input levels, RealCenter, Dynamic Bass, SubXpander, RTC, BT, the
+  Conductor and the file a version was read from. What is not recorded is grey, and says so. A proposal that only
+  changes the trim no longer reads as entered.
+- **Saving to GitHub, in the open** (tcc#235): the panel follows git live, names the files and commits behind its
+  numbers, colours by severity, and has a «Send» that says what will go and asks before each send.
+- **A plan step's note** (tcc#248): what to do, what to expect, what to change if heard otherwise, and the Arbiter's
+  answer beside what was expected.
+- **The nine hand-held points' order as a picture** (tcc#259), beside the round's points column.
+- **The plan and focus panels fold to their headers** (tcc#243), and it is remembered.
+- **Four font looks** beside the theme switch (tcc#237): Regular, Light, Rounded, Typewriter.
+- **The refusal banner can be selected and copied** (tcc#245), the whole text on demand.
+- **Codex's row says when a newer version is out** and that TCC holds its own pinned copy (tcc#254), and names a fixed
+  folder a terminal can use, `codex/current` (tcc#253). TCC does not touch PATH. A new version comes with a TCC release.
+
+### Changed
+
+- **The MCP key is kept per project** (tcc#247), in the git-ignored `.tcc/`, so a TCC restart no longer costs a terminal
+  session a 401. «Reset the MCP key» is in Settings. Where git would carry the file, the key lasts one run and the status
+  line says so.
+- **Control mode's bottom bar** keeps only the terminal session's name, «Buy me a coffee» and «Message the developer»
+  (tcc#236).
+- **A changed INV** stays blue and bold like any change, and carries an orange frame so the inversion still catches the eye
+  (tcc#250).
+
+### Fixed
+
+- **The method link leaves git** (tcc#255): a link tracked by a project's git broke a clone on a second Mac. TCC takes it
+  out in one commit of its own, holding only that link and `.gitignore`, with no push and nothing during a merge, rebase,
+  cherry-pick, revert or bisect.
+- **Plan and Captures pick up a process state that appears after the project opened** (tcc#246), and «Refresh» re-reads it.
+- **Three flaw kinds no longer show a raw key** (tcc#244).
+- **After TCC installs Codex** the row no longer offers to install it again (tcc#252).
+- **A stranger's text is data** (tcc#260): one rule for sessions working in this repository.
+- **The flaky project-header test** is fixed, not quarantined (tcc#233), and the installers test on Linux rides the pin
+  (tcc#257).
+
 ## [v1.2.1] — 2026-10-25 · README says the app is released
 
 Paired with method `a9952206468573743d2083b73c4b7e7f9d10dc6d` — the tag on that commit is **`v3.2.0`**.
