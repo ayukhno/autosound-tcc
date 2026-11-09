@@ -1001,21 +1001,18 @@ def test_the_ignore_lines_are_not_added_twice(tmp_path, monkeypatch):
     assert said.count(".tcc/") == 1
 
 
-def test_a_gitignore_that_cannot_be_written_is_logged_and_no_key_goes_in_mcp_json(
+def test_a_gitignore_that_cannot_be_written_is_logged_not_raised(
     tmp_path, monkeypatch, app_log_warnings
 ):
-    """The refusal went to `app_log.warn`, which does not exist, so the OSError came out as an
-    AttributeError. The answer is used now (#247): what git cannot be told to ignore gets no key
-    written into it, and `start()` keeps that as `config_error` with the server up."""
-    from autosound_tcc.core import config, mcp_key
-
+    """A project whose `.gitignore` cannot be written still deserves a running server. The refusal
+    went to `app_log.warn`, which does not exist, so the OSError came out as an AttributeError and
+    took `write_mcp_config` down with it."""
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     (tmp_path / ".gitignore").mkdir()  # a folder by that name: reading and writing both refuse
 
-    with pytest.raises(mcp_key.NotKeptOutOfGit):
-        write_mcp_config(tmp_path, 8765, "tok")
+    path = write_mcp_config(tmp_path, 8765, "tok")
 
-    assert not config.mcp_config_path(tmp_path).exists()
+    assert path.exists()
     assert any(".gitignore" in r.getMessage() for r in app_log_warnings)
 
 
@@ -1120,17 +1117,14 @@ def test_an_advertisement_whose_mode_cannot_be_set_is_logged_not_raised(
 def test_a_gitignore_that_is_not_utf8_is_left_alone(tmp_path, monkeypatch, app_log_warnings):
     """A UTF-16 `.gitignore` (what `"x" > .gitignore` writes in Windows PowerShell 5.1) raised
     UnicodeDecodeError out of `start()` while uvicorn was already serving (the G1 review)."""
-    from autosound_tcc.core import mcp_key
-
     monkeypatch.setenv("AUTOSOUND_PROJECT_DIR", str(tmp_path))
     ignore = tmp_path / ".gitignore"
     ignore.write_bytes("node_modules/\n".encode("utf-16"))
     before = ignore.read_bytes()
 
-    with pytest.raises(mcp_key.NotKeptOutOfGit):
-        write_mcp_config(tmp_path, 8765, "tok")
+    path = write_mcp_config(tmp_path, 8765, "tok")
 
-    assert not (tmp_path / ".mcp.json").exists(), "no key where git could not be told (#247)"
+    assert "tcc" in json.loads(path.read_text(encoding="utf-8"))["mcpServers"]
     assert ignore.read_bytes() == before, "a file that could not be read is not rewritten"
     assert any(".gitignore" in r.getMessage() for r in app_log_warnings)
 
@@ -1178,7 +1172,7 @@ def test_start_keeps_any_failure_of_the_advertisement_as_config_error(tmp_path, 
     try:
         server.start(write_config=True)
         assert server.serving
-        assert server.config_error.startswith("UnicodeDecodeError")
+        assert "invalid start byte" in server.config_error
     finally:
         server.stop()
 
@@ -2459,7 +2453,7 @@ def test_an_unwritable_advertisement_does_not_take_the_server_down(tmp_path, mon
             port = server.start()
 
         assert port, "the server is up"
-        assert "PermissionError" in server.config_error
+        assert server.config_error == "Permission denied"
         assert server.config_unreadable is None, "a write that failed is not a read refused"
         assert server.config_unmoved is None, "nor a damaged file whose move was refused"
         assert any("mcp config not written" in r.getMessage() for r in caplog.records)
@@ -2478,8 +2472,7 @@ def test_a_start_that_could_not_read_the_advertisement_keeps_which_file(tmp_path
     server = TccMcpServer(project_dir=tmp_path, preferred_port=8970)
     try:
         server.start()
-        assert server.serving and server.config_error.startswith("StoreUnreadable"), (
-            server.config_error)
+        assert server.serving and str(path) in server.config_error, server.config_error
         assert server.config_unreadable == path and server.config_unmoved is None
     finally:
         server.stop()
@@ -2505,8 +2498,7 @@ def test_a_start_that_could_not_move_a_damaged_advertisement_aside_keeps_it_apar
     server = TccMcpServer(project_dir=tmp_path, preferred_port=8990)
     try:
         server.start()
-        assert server.serving and server.config_error.startswith("StoreNotSetAside"), (
-            server.config_error)
+        assert server.serving and str(path) in server.config_error, server.config_error
         assert server.config_unmoved == path and server.config_unreadable is None
     finally:
         server.stop()

@@ -1895,14 +1895,11 @@ def write_mcp_config(project_dir: Path, port: int, token: str) -> Path:
     flag on it is not a decision anybody made about their configuration — so clearing it is
     honest, and it is logged.
 
-    Not written at all where git could not be told to keep it out, or would take it: the entry
-    carries a key that lasts (#247). Raises `mcp_key.NotKeptOutOfGit`, and `start()` keeps it as
-    `config_error`, as for any other refusal.
+    Git is not asked here: `mcp_key` asked once at the start or the reset, on the GUI thread's one
+    bound. Where git refused, `token` is that run's key alone, and it dies with the run (#247).
     """
     path = config.mcp_config_path(project_dir)
-    problem = mcp_key.keep_out_of_git(Path(project_dir))
-    if problem:
-        raise mcp_key.NotKeptOutOfGit(problem)
+    mcp_key.teach_git_to_ignore(Path(project_dir))
     data = _read_config(project_dir)
     servers = data.get("mcpServers")
     if servers is None:  # absent or null; any other shape that is not an object was set aside
@@ -2161,7 +2158,7 @@ class TccMcpServer:
             write_mcp_config(self.project_dir, self.port, self.token)
             self._advertised = True
         except Exception as exc:  # noqa: BLE001 — the server is up; only the advert failed
-            self.config_error = f"{type(exc).__name__}: {exc}"
+            self.config_error = mcp_key.in_words(exc)
             if isinstance(exc, own_store.StoreNotSetAside):
                 self.config_unmoved = config.mcp_config_path(self.project_dir)
             elif isinstance(exc, own_store.StoreUnreadable):

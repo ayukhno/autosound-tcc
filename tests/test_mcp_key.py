@@ -221,25 +221,59 @@ def test_the_key_is_ignored_by_git_before_it_is_written(folder, monkeypatch):
 
 
 @pytest.mark.parametrize("broken", ["a-folder", "not-text"])
-def test_no_key_is_written_where_git_could_not_be_told(folder, broken):
-    """A `.gitignore` TCC cannot read or add to leaves `.tcc/` open to `git add -A`: nothing goes
-    on disk, the server still has a key, and the reason is there to say."""
+def test_a_gitignore_tcc_cannot_read_is_no_refusal_with_no_repository(folder, broken):
+    """No git, so nothing to carry the key: as before #247, the key is kept and `.mcp.json` is
+    written. What TCC cannot read is only what it cannot add its lines to."""
     gitignore = folder / ".gitignore"
     if broken == "a-folder":
         gitignore.mkdir()
     else:
         gitignore.write_bytes(b"\xff\xfe not utf-8\n")
 
-    server = TccMcpServer(project_dir=folder)
+    server = _server(folder)
 
-    assert not _key_file(folder).exists()
-    assert server.token and server.key_note == "run_only" and ".gitignore" in server.key_problem
+    assert _key_file(folder).read_text(encoding="utf-8").strip() == server.token
+    assert server.key_note == "made" and server.key_problem == ""
     server.start()
     try:
-        assert not (folder / ".mcp.json").exists(), "and it does not go there either"
-        assert server.serving and ".gitignore" in server.config_error
+        assert _advertised(folder)["headers"]["X-TCC-Token"] == server.token
+        assert server.config_error == ""
     finally:
         server.stop()
+
+
+def test_in_a_repository_git_judges_a_gitignore_tcc_cannot_read(repo):
+    """Unreadable to TCC is not a refusal, and not a pass: git read the file, and says no."""
+    (repo / ".gitignore").write_bytes("node_modules/\n".encode("utf-16"))
+
+    server = TccMcpServer(project_dir=repo)
+
+    assert server.key_note == "run_only" and ".tcc/mcp-token" in server.key_problem
+    assert not _key_file(repo).exists()
+
+
+def test_in_a_repository_git_can_say_yes_past_a_gitignore_tcc_cannot_read(repo):
+    (repo / ".gitignore").write_bytes("node_modules/\n".encode("utf-16"))
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "exclude").write_text(".tcc/\n.mcp.json\n", encoding="utf-8")
+
+    server = TccMcpServer(project_dir=repo)
+
+    assert server.key_note == "made" and _key_file(repo).is_file()
+
+
+@_NOT_ROOT
+def test_a_read_only_gitignore_missing_only_the_temp_line_is_no_refusal(repo):
+    """Git ignores both names, so the key is safe: the `.mcp-*.tmp` line is a nicety on top."""
+    gitignore = repo / ".gitignore"
+    gitignore.write_text(".tcc/\n.mcp.json\n", encoding="utf-8")
+    os.chmod(gitignore, 0o444)
+    try:
+        server = TccMcpServer(project_dir=repo)
+    finally:
+        os.chmod(gitignore, 0o644)
+
+    assert server.key_note == "made" and _key_file(repo).is_file()
 
 
 _LOOKS_RIGHT = [" .tcc/\n.mcp.json\n.mcp-*.tmp\n", ".tcc/\n.mcp.json\n.mcp-*.tmp\n!.tcc/\n"]
@@ -268,41 +302,146 @@ def test_a_key_already_on_disk_is_not_used_once_git_would_take_it(repo, text):
     assert _key_file(repo).read_text(encoding="utf-8").strip() == key, "not written over"
 
 
-def test_a_tracked_mcp_json_is_not_written_with_the_key(repo):
-    """A long-lived key in a file git already tracks is one commit from leaving the machine."""
-    (repo / ".mcp.json").write_text('{"mcpServers": {}}\n', encoding="utf-8")
+def test_a_definite_no_is_a_key_for_this_run_and_the_entry_still_written(repo):
+    """A refusal is only «no key file». The entry carries this run's key, which dies with the run,
+    as it did before #247; left unwritten, the old entry named a key the server no longer took."""
+    (repo / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"tcc": {"headers": {"X-TCC-Token": "the-last-run-s-key"}}}}),
+        encoding="utf-8")
     assert _git(repo, "add", ".mcp.json").returncode == 0
-    before = (repo / ".mcp.json").read_bytes()
+    strip = _Strip()
 
     server = _server(repo)
     server.start()
     try:
-        assert server.key_note == "run_only" and ".mcp.json" in server.key_problem
-        assert (repo / ".mcp.json").read_bytes() == before
-        assert server.serving and server.config_error, "said, and the server is up"
-        assert _answer(server, server.token) != 401 and _answer(server, None) == 401
+        assert _advertised(repo)["headers"]["X-TCC-Token"] == server.token, "the stale entry stays"
+        assert server.config_error == "" and server.key_note == "run_only"
+        assert _answer(server, None) == 401
+        mcp_view.say_started(server, strip)
     finally:
         server.stop()
     assert not _key_file(repo).exists()
+    assert strip.lines == [(i18n.t("mcpKeyRunOnly").format(why=server.key_problem), "warn", True)]
+    assert ".mcp.json" in strip.lines[0][0] and "/mcp" in strip.lines[0][0]
 
 
-def test_a_repository_git_cannot_read_gets_no_key_on_disk(folder):
-    (folder / ".git").write_text("gitdir: /nowhere/at/all\n", encoding="utf-8")
-
-    server = TccMcpServer(project_dir=folder)
-
-    assert server.key_note == "run_only" and not _key_file(folder).exists()
-
-
-def test_a_git_that_does_not_answer_counts_as_a_refusal(repo, monkeypatch):
-    def hung(args, *, timeout, **_kwargs):
-        raise subprocess.TimeoutExpired(args, timeout)
-
-    monkeypatch.setattr(mcp_key.child, "run_bounded", hung)
+@pytest.mark.parametrize("name", [".tcc/", ".mcp.json"])
+def test_a_negated_line_is_a_definite_no(repo, name):
+    """`!.mcp.json` names the file, and un-ignores it: both names are asked, one at a time."""
+    (repo / ".gitignore").write_text(f".tcc/\n.mcp.json\n.mcp-*.tmp\n!{name}\n", encoding="utf-8")
 
     server = TccMcpServer(project_dir=repo)
 
-    assert server.key_note == "run_only" and not _key_file(repo).exists()
+    assert server.key_note == "run_only" and name.rstrip("/") in server.key_problem
+    assert not _key_file(repo).exists()
+
+
+def test_a_project_inside_a_larger_repository_is_asked_about_by_that_repository(repo):
+    """The `.git` is above the project, and the tracked file is the project's."""
+    project = repo / "cars" / "b8"
+    project.mkdir(parents=True)
+    (project / ".mcp.json").write_text('{"mcpServers": {}}\n', encoding="utf-8")
+    assert _git(repo, "add", "cars/b8/.mcp.json").returncode == 0
+
+    server = _server(project)
+    server.start()
+    try:
+        assert server.key_note == "run_only" and ".mcp.json" in server.key_problem
+        assert _advertised(project)["headers"]["X-TCC-Token"] == server.token
+    finally:
+        server.stop()
+    assert not _key_file(project).exists()
+
+
+def _exits(code: int):
+    return lambda args, **_kwargs: subprocess.CompletedProcess(args, code)
+
+
+def _raises(exc: BaseException):
+    def call(_args, **_kwargs):
+        raise exc
+    return call
+
+
+_NO_ANSWER = {"exit-128": _exits(128), "exit-127": _exits(127), "exit-2": _exits(2),
+              "timeout": _raises(subprocess.TimeoutExpired("git", 2.0)),
+              "refused": _raises(PermissionError(13, "Permission denied")),
+              "no-binary": _raises(FileNotFoundError(2, "No such file or directory"))}
+
+
+def _kept_with_nothing_to_say(project: Path) -> None:
+    """The key landed, the next start reads it back, and the strip has no line about it."""
+    made = TccMcpServer(project_dir=project)
+    assert made.key_note == "made" and made.key_problem == ""
+    assert _key_file(project).read_text(encoding="utf-8").strip() == made.token
+
+    again = _server(project)
+    assert again.token == made.token and again.key_note == "" and again.key_problem == ""
+    strip = _Strip()
+    again.start()
+    try:
+        mcp_view.say_started(again, strip)
+        assert _advertised(project)["headers"]["X-TCC-Token"] == again.token
+    finally:
+        again.stop()
+    assert strip.lines == []
+
+
+@pytest.mark.parametrize("answer", _NO_ANSWER.values(), ids=_NO_ANSWER.keys())
+def test_a_git_that_cannot_answer_is_no_git_at_all(repo, monkeypatch, answer):
+    monkeypatch.setattr(mcp_key.child, "run_bounded", answer)
+
+    _kept_with_nothing_to_say(repo)
+
+
+@pytest.mark.parametrize("broken", ["stale-file", "empty-folder"])
+def test_a_git_folder_git_cannot_read_is_no_git_at_all(folder, tmp_path, monkeypatch, broken):
+    """The real thing, not a stand-in for it: git itself exits 128 here."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "no-global-gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    if broken == "stale-file":
+        (folder / ".git").write_text("gitdir: /nowhere/at/all\n", encoding="utf-8")
+    else:
+        (folder / ".git").mkdir()
+    assert _git(folder, "check-ignore", "-q", ".mcp.json").returncode == 128, "the premise"
+
+    _kept_with_nothing_to_say(folder)
+
+
+def test_a_reset_with_a_git_that_cannot_answer_keeps_the_new_key(repo, monkeypatch):
+    server = TccMcpServer(project_dir=repo)
+    old = server.token
+    monkeypatch.setattr(mcp_key.child, "run_bounded", _exits(128))
+
+    server.reset_token()
+
+    assert server.token != old and server.key_note == "reset" and server.key_problem == ""
+    assert _key_file(repo).read_text(encoding="utf-8").strip() == server.token
+
+
+def test_git_is_asked_once_per_start_and_once_per_reset(repo, monkeypatch):
+    """The GUI thread waits for this, so at most the one bound: `_advertise` does not ask again."""
+    asked: list[str] = []
+    real = mcp_key.child.run_bounded
+
+    def counting(args, **kwargs):
+        if "check-ignore" in args and args[-1] == ".mcp.json":
+            asked.append(args[-1])
+        return real(args, **kwargs)
+
+    monkeypatch.setattr(mcp_key.child, "run_bounded", counting)
+    server = _server(repo)
+    server.start()
+    try:
+        assert asked == [".mcp.json"], "a start"
+        asked.clear()
+
+        server.reset_token()
+
+        assert asked == [".mcp.json"], "a reset"
+    finally:
+        server.stop()
 
 
 def test_with_no_git_on_the_machine_the_text_of_gitignore_is_all_there_is(repo, monkeypatch):
@@ -546,28 +685,27 @@ def test_a_secret_write_that_dies_halfway_leaves_the_old_one_whole(tmp_path, mon
     assert [p.name for p in secret.parent.iterdir()] == ["a-secret"], "no half-written temp stays"
 
 
-@pytest.mark.parametrize("dies_in", ["fsync", "replace", "gitignore"])
+@pytest.mark.parametrize("dies_in", ["fsync", "replace", "git-says-no"])
 def test_a_reset_whose_write_fails_does_not_leave_the_revoked_key_for_the_next_start(
-        folder, monkeypatch, dies_in):
+        repo, monkeypatch, dies_in):
     """A person resets because the key leaked: left in the file, it was back at the next start."""
-    server = TccMcpServer(project_dir=folder)
+    server = TccMcpServer(project_dir=repo)
     key = server.token
 
     def dead(*_args, **_kwargs):
         raise OSError(28, "No space left on device")
 
-    if dies_in == "gitignore":
-        (folder / ".gitignore").unlink()
-        (folder / ".gitignore").mkdir()
+    if dies_in == "git-says-no":
+        (repo / ".gitignore").write_text(_LOOKS_RIGHT[1], encoding="utf-8")
     else:
         monkeypatch.setattr(own_store.os, dies_in, dead)
     server.reset_token()
     monkeypatch.undo()
 
     assert server.token != key and server.key_note == "run_only"
-    assert not _key_file(folder).exists()
-    assert [p.name for p in _key_file(folder).parent.iterdir() if p.name.endswith(".tmp")] == []
-    assert TccMcpServer(project_dir=folder).token != key, "the revoked key came back"
+    assert not _key_file(repo).exists()
+    assert [p.name for p in _key_file(repo).parent.iterdir() if p.name.endswith(".tmp")] == []
+    assert TccMcpServer(project_dir=repo).token != key, "the revoked key came back"
 
 
 @_NOT_ROOT
@@ -856,3 +994,30 @@ def test_the_key_reaches_neither_the_log_nor_the_strip(folder, monkeypatch, app_
     assert strip.lines, "the failure above was said"
     for key in seen:
         assert key not in told
+
+
+@pytest.mark.parametrize("exc, said", [(ValueError("a path that cannot be"), "a path that cannot be"),
+                                       (OSError(), "no reason given")], ids=["value-error", "bare"])
+def test_a_reason_for_the_strip_is_words_not_a_class_name(folder, monkeypatch, exc, said):
+    def dead(*_args, **_kwargs):
+        raise exc
+
+    monkeypatch.setattr(own_store, "write_secret", dead)
+
+    key = mcp_key.load(folder)
+
+    assert key.note == "run_only" and said in key.problem
+    assert type(exc).__name__ not in key.problem
+
+
+def test_the_advert_s_failure_is_in_words_not_a_class_name(folder, monkeypatch):
+    def refused(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied", ".mcp.json")
+
+    monkeypatch.setattr(mcp_server, "write_mcp_config", refused)
+    server = _server(folder)
+    server.start()
+    try:
+        assert server.config_error == "Permission denied"
+    finally:
+        server.stop()

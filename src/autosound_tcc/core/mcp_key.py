@@ -6,10 +6,14 @@ A new `X-TCC-Token` on every start left a Claude Code session in the terminal ho
 
 It is a secret on disk, and that sets the order of everything here:
 
-* **git first.** Nothing is written until the project's `.gitignore` names `.tcc/` and, where there
-  is a repository, git itself says the key would not be taken — a `git add -A` (the method's
-  `project_repo.py init`, TCC's Git backup) must find it already ignored. A `.gitignore` TCC cannot
-  read or add to, or a git that answers no, means no file at all.
+* **git first.** Before anything is written `.gitignore` is taught TCC's lines and, where there is a
+  repository, git is asked whether a `git add -A` (the method's `project_repo.py init`, TCC's Git
+  backup) would take the key. Only its definite no refuses the key on disk: a path it does not
+  ignore, or one it tracks. A git that cannot answer — any other exit, a timeout, no binary, a broken
+  `.git`, dubious ownership — is treated as no git, and the key is kept as for a folder with none.
+* **A refusal is only «no key file».** The run gets a key of its own, and `.mcp.json` is written with
+  it as ever: a key that dies with the run. Asked once per start and once per reset, in `load` and
+  `reset`: the GUI thread pays one bound at most, and `.mcp.json`'s write does not ask again.
 * **Whole or not at all, owner only.** `own_store.write_secret`: temp file, fsync, rename, 0600.
 * **Every failure still gives a key.** The server never runs without a guard and TCC never fails to
   start over this: a key that cannot be read or kept is replaced by a fresh one for this run, and
@@ -61,12 +65,8 @@ _IGNORE_LINES = (".mcp.json", ".tcc/", ".mcp-*.tmp")
 
 
 #: How long git gets to answer, all its questions together. `load` and `reset` run on the GUI
-#: thread, which waits for them: a hung git costs this much, once, and counts as a refusal.
+#: thread, which waits for them: a hung git costs this much, once, and counts as no git.
 _GIT_WAIT_S = 2.0
-
-
-class NotKeptOutOfGit(OSError):
-    """Git could not be told, or says no: the key is not to be written where it would be taken."""
 
 
 @dataclass(frozen=True)
@@ -76,9 +76,8 @@ class Key:
     problem: str = ""
 
 
-def teach_git_to_ignore(project_dir: Path) -> bool:
-    """Add our two lines to the project's `.gitignore`, keeping everything already in it; whether
-    the file names both of them afterwards.
+def teach_git_to_ignore(project_dir: Path) -> None:
+    """Add our lines to the project's `.gitignore`, keeping everything already in it.
 
     The method's README tells the user to back this folder up to a private GitHub, and TCC is what
     puts a token in it — so TCC is what says it must not travel (HUB-026). Measured on the user's
@@ -87,8 +86,8 @@ def teach_git_to_ignore(project_dir: Path) -> bool:
     Merged, never clobbered — the same rule `.mcp.json` itself follows: the file is the user's.
     Idempotent, because a server restarts many times in a session and a file that grows a line
     each time is a file somebody eventually deletes in annoyance. Never raises: a project whose
-    `.gitignore` cannot be written is a project that still deserves a running server. It does not
-    get a key on disk, though: that is what the answer is for.
+    `.gitignore` cannot be read or written still deserves a running server, and whether the key
+    would travel is git's to say (`keep_out_of_git`), not this file's.
     """
     path = Path(project_dir) / ".gitignore"
     try:
@@ -98,11 +97,11 @@ def teach_git_to_ignore(project_dir: Path) -> bool:
     except (OSError, ValueError) as exc:  # unreadable, or not UTF-8: a file never rewritten blind
         app_log.logger().warning("could not read %s (%s: %s); TCC's lines are not added to it",
                                  path, type(exc).__name__, exc)
-        return False
+        return
     present = {line.strip() for line in existing.splitlines()}
     missing = [line for line in _IGNORE_LINES if line not in present]
     if not missing:
-        return True
+        return
     block = "" if not existing or existing.endswith("\n") else "\n"
     block += "\n# TCC: the session's token and TCC's own project state — neither travels.\n"
     block += "".join(f"{line}\n" for line in missing)
@@ -110,37 +109,43 @@ def teach_git_to_ignore(project_dir: Path) -> bool:
         path.write_text(existing + block, encoding="utf-8")
     except OSError as exc:
         app_log.logger().warning("could not add %s to %s: %s", ", ".join(missing), path, exc)
-        return False
-    return True
 
 
 def keep_out_of_git(project_dir: Path) -> str:
     """Teach `.gitignore`, then ask git: "" when a key may be written here, else why it may not."""
     project_dir = Path(project_dir)
-    if not teach_git_to_ignore(project_dir):
-        return f"{project_dir / '.gitignore'} does not keep .tcc/ out of git"
+    teach_git_to_ignore(project_dir)
     return _git_would_take_it(project_dir)
 
 
 def _git_would_take_it(project_dir: Path) -> str:
-    """Whether git, asked, would carry the key: "" when it would not, or when there is no repository
-    or no git to ask. The text of `.gitignore` cannot tell: a ` .tcc/` with a leading space or a
-    later `!.tcc/` names the line and ignores nothing, and a tracked `.mcp.json` stays tracked
-    whatever is ignored. `check-ignore` one path at a time: given several, it says yes for any."""
+    """Why git would carry the key, or "" when it would not or cannot say. The text of `.gitignore`
+    cannot tell: a ` .tcc/` with a leading space or a later `!.tcc/` names the line and ignores
+    nothing, and a tracked `.mcp.json` stays tracked whatever is ignored. `check-ignore` one path at
+    a time: given several, it says yes for any.
+
+    Only exit 1 is a no, from `check-ignore` as from a `ls-files` that found the path tracked (exit
+    0): every other way this ends is git not answering. A broken repository is no reason to take
+    away the terminal routes, and its `.git` carries nothing out of here either."""
     if not any(os.path.lexists(there / ".git")
                for there in (project_dir.absolute(), *project_dir.absolute().parents)):
         return ""
     give_up = time.monotonic() + _GIT_WAIT_S
     try:
-        if _ask_git(project_dir, give_up, "ls-files", "--error-unmatch", ".mcp.json") == 0:
-            return f".mcp.json is tracked by git in {project_dir}"
+        tracked = _ask_git(project_dir, give_up, "ls-files", "--error-unmatch", ".mcp.json")
+        if tracked == 0:
+            return f"git tracks .mcp.json in {project_dir}"
+        if tracked != 1:
+            return ""
         for name in (f".tcc/{FILE_NAME}", ".mcp.json"):
-            if _ask_git(project_dir, give_up, "check-ignore", "-q", name) != 0:
+            ignored = _ask_git(project_dir, give_up, "check-ignore", "-q", name)
+            if ignored == 1:
                 return f"git in {project_dir} does not ignore {name}"
-    except FileNotFoundError:
-        return ""  # no git on this machine, so no `git add -A` either
-    except (OSError, subprocess.SubprocessError) as exc:
-        return f"git in {project_dir} could not be asked: {_why(exc)}"
+            if ignored != 0:
+                return ""
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        app_log.logger().info("git could not be asked about the MCP key in %s: %s", project_dir,
+                              in_words(exc))
     return ""
 
 
@@ -167,7 +172,7 @@ def load(project_dir: Optional[Path]) -> Key:
     except (OSError, ValueError) as exc:
         # There and refused: the bytes may be perfectly good, so nothing is written over them
         # (`own_store`'s rule). A reset is the person asking, and it may.
-        return _run_only(f"{path}: {_why(exc)}")
+        return _run_only(f"{path}: {in_words(exc)}")
     if not token:
         # Not a key at all, so nothing is lost; left as it is, every start would make another.
         return _made(project_dir, REPLACED)
@@ -202,9 +207,10 @@ def _fresh() -> str:
     return secrets.token_urlsafe(24)
 
 
-def _why(exc: BaseException) -> str:
-    """The reason, without an `OSError`'s repeat of the path."""
-    return (exc.strerror if isinstance(exc, OSError) else "") or type(exc).__name__
+def in_words(exc: BaseException) -> str:
+    """The reason as the strip can say it: an `OSError`'s without its repeat of the path, never the
+    name of a class."""
+    return (exc.strerror if isinstance(exc, OSError) else "") or str(exc) or "no reason given"
 
 
 def _run_only(problem: str) -> Key:
@@ -242,7 +248,7 @@ def _theirs(project_dir: Path) -> Key:
     try:
         token = _read_saved(path)
     except (OSError, ValueError) as exc:
-        return _run_only(f"{path}: {_why(exc)}")
+        return _run_only(f"{path}: {in_words(exc)}")
     if not token:
         return _run_only(f"{path}: another TCC was still writing it")
     return Key(token, MADE)
@@ -260,7 +266,7 @@ def _keep(project_dir: Path, token: str, first: bool = False) -> str:
     except (OSError, ValueError) as exc:
         if first and isinstance(exc, FileExistsError):
             raise
-        return f"{_path(project_dir)}: {_why(exc)}"
+        return f"{_path(project_dir)}: {in_words(exc)}"
     return ""
 
 
@@ -276,7 +282,7 @@ def _discard(path: Path) -> str:
     except (FileNotFoundError, NotADirectoryError):
         return ""
     except OSError as exc:
-        return f"{path}: {_why(exc)}"
+        return f"{path}: {in_words(exc)}"
     return ""
 
 
@@ -325,4 +331,4 @@ def _close(handle: int, path: Path) -> None:
         if stat.S_IMODE(os.fstat(handle).st_mode) & 0o077:
             os.fchmod(handle, 0o600)
     except OSError as exc:
-        app_log.logger().warning("could not restrict %s: %s", path, _why(exc))
+        app_log.logger().warning("could not restrict %s: %s", path, in_words(exc))
