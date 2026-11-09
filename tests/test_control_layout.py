@@ -1634,9 +1634,18 @@ def test_the_monitor_feed_reads_its_window_s_journal_not_the_setting(monkeypatch
     assert "from-A" in text and "from-B" not in text
 
 
-def test_control_mode_bar_keeps_only_coffee_and_feedback_and_leaving_restores(tmp_path, monkeypatch):
+def _bar(layout) -> list:
+    """The footer row in layout order: its widgets, "stretch" for the spring."""
+    items = (layout.itemAt(i) for i in range(layout.count()))
+    return [item.widget() if item.spacerItem() is None else "stretch" for item in items]
+
+
+def test_control_mode_bar_keeps_the_session_name_coffee_and_feedback_and_leaving_restores(
+        tmp_path, monkeypatch):
     """#236: the session runs in a terminal, so the in-app session's pickers and status are not
-    shown; coffee and feedback stay. Leaving brings back what was shown, not what was hidden."""
+    shown; coffee and feedback stay, and so does the name of the session that called in over MCP
+    (the Arbiter, 2026-11-09), hidden while none has. Leaving brings back what was shown, not
+    what was hidden, in the order it was."""
     window = _window(tmp_path, monkeypatch)
     window.show()
     for _ in range(3):
@@ -1650,22 +1659,40 @@ def test_control_mode_bar_keeps_only_coffee_and_feedback_and_leaving_restores(tm
     window._critic_warn.setVisible(False)
     window._main_warn.setVisible(False)
     assert window._terminal_btn.isHidden()
+    name = window._ext_session_lbl
+    footer = window._coffee_btn.parentWidget().layout()
+    before = _bar(footer)
+    assert not name.isVisible(), "no session has called in"
 
     window._control_layout.enter()
     window._critic_status.setText("Critic: not called")  # a refresh while in the mode
-    window._ext_session_lbl.setVisible(True)
     for _ in range(3):
         QApplication.processEvents()
     assert not any(w.isVisible() for w in pickers)
-    assert not window._ext_session_lbl.isVisible()
+    assert not name.isVisible(), "no session called in: no name in the mode either"
     assert window._coffee_btn.isVisible() and window._feedback_btn.isVisible()
+
+    window._on_external_session({"client": "antigravity-cli", "version": "1.2",
+                                 "model": "gemini-3.1-pro-high"})
+    for _ in range(3):
+        QApplication.processEvents()
+    assert name.isVisible(), "a session called in: its name stays in the mode"
+    assert not any(w.isVisible() for w in pickers)
+    window.resize(1200, window.height())  # the offscreen screen's half is narrower than the name
+    for _ in range(3):
+        QApplication.processEvents()
+    assert name.width() >= name.sizeHint().width(), (
+        f"{name.width()} px for a name that wants {name.sizeHint().width()}: there is room")
+    shown = [w for w in _bar(footer) if w == "stretch" or w.isVisible()]
+    assert shown == [name, "stretch", window._coffee_btn, window._feedback_btn], shown
 
     window._control_layout.leave()
     for _ in range(3):
         QApplication.processEvents()
     assert all(w.isVisible() for w in pickers)
-    assert window._ext_session_lbl.isVisible()  # shown in the mode's absence of it, as it asked
+    assert name.isVisible(), "it had called in: still named in the full window"
     assert not window._critic_warn.isVisible() and not window._main_warn.isVisible()
     assert window._terminal_btn.isHidden()
     assert window._coffee_btn.isVisible() and window._feedback_btn.isVisible()
+    assert _bar(footer) == before, "the bar's own order comes back"
     window.close()

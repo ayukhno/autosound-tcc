@@ -565,6 +565,9 @@ class ControlLayout:
         self._hidden: list = []
         #: The bar's in-app session half, parked in one hidden box while the mode is on (#236).
         self._bar_left: Optional[QWidget] = None
+        #: Where the session's name stood in that half, and its size policy, for leaving.
+        self._bar_name_index = 0
+        self._bar_name_policy: Optional[QSizePolicy] = None
         #: Which tab holds what: a group id, "eq", a parameter field, or "monitor".
         self._index: dict[str, int] = {}
         self._corner: Optional[QWidget] = None
@@ -698,24 +701,35 @@ class ControlLayout:
     def _park_session_bar(self) -> None:
         """Hide the bottom bar's in-app session half: pickers, status, buttons (#236).
 
-        The session runs in a terminal here, so the bar keeps only the coffee and feedback buttons
-        at its right end. The left half moves into one box that is hidden, not widget by widget:
-        each child keeps its own shown/hidden state (the «!» marks, the spinner, a session button
-        that waits for a session), whatever happens to it while the mode is on, and leaving puts
-        the box's children back as they are. `_terminal_btn` goes with them: it is never shown.
+        The session runs in a terminal here, so the bar keeps the coffee and feedback buttons at
+        its right end and, at its left, the name of the session that called in over MCP (the
+        Arbiter, 2026-11-09; hidden while none has, as it is in the full window). The rest of the
+        left half moves into one box that is hidden, not widget by widget: each child keeps its
+        own shown/hidden state (the «!» marks, the spinner, a session button that waits for a
+        session), whatever happens to it while the mode is on, and leaving puts the box's children
+        back as they are. `_terminal_btn` goes with them: it is never shown.
         """
         footer = self.window._coffee_btn.parentWidget()
         layout = footer.layout()
+        name = self.window._ext_session_lbl
         stretch = next(i for i in range(layout.count()) if layout.itemAt(i).spacerItem() is not None)
+        left = [layout.takeAt(0).widget() for _ in range(stretch)]
         box = QWidget(footer)
         box_layout = QHBoxLayout(box)
         box_layout.setContentsMargins(0, 0, 0, 0)
         box_layout.setSpacing(layout.spacing())
-        for _ in range(stretch):
-            box_layout.addWidget(layout.takeAt(0).widget())
+        for widget in left:
+            if widget is not name:
+                box_layout.addWidget(widget)
         layout.insertWidget(0, box)
+        layout.insertWidget(1, name)
         box.setVisible(False)
+        # `Ignored` in the full window, where the row is short; here the stretch would take all
+        # of it and leave the name its 60-px minimum, cut. Its minimum stays, so the floor does.
+        self._bar_name_policy = name.sizePolicy()
+        name.setSizePolicy(QSizePolicy.Policy.Preferred, self._bar_name_policy.verticalPolicy())
         self._bar_left = box
+        self._bar_name_index = left.index(name)
 
     def _restore_session_bar(self) -> None:
         box = self._bar_left
@@ -724,9 +738,14 @@ class ControlLayout:
         self._bar_left = None
         footer = self.window._coffee_btn.parentWidget()
         layout = footer.layout()
+        name = self.window._ext_session_lbl
+        layout.removeWidget(name)
+        name.setSizePolicy(self._bar_name_policy)
         box_layout = box.layout()
-        for index in range(box_layout.count()):
-            layout.insertWidget(index, box_layout.takeAt(0).widget())
+        left = [box_layout.takeAt(0).widget() for _ in range(box_layout.count())]
+        left.insert(self._bar_name_index, name)
+        for index, widget in enumerate(left):
+            layout.insertWidget(index, widget)
         layout.removeWidget(box)
         box.setParent(None)
         box.deleteLater()
