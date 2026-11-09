@@ -7,7 +7,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import QPoint, Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from autosound_tcc.ui.tcc import status_strip  # noqa: E402
@@ -184,10 +185,25 @@ def test_the_shown_line_is_offered_for_copying_on_right_click():
     said = "Refused.\nRun: project.py <dir> flaw add"
     strip.notify(said, level="warn", action=("Open", lambda: None))
     assert strip._label.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
-    assert strip._label.copy_items() == [(i18n.t("stripCopyAll"), said)]
+    assert strip._label.copy_items() == [(i18n.t("copyMessage"), said)]
 
     strip.notify("a <b>fact</b>")
-    assert strip._label.copy_items() == [(i18n.t("stripCopyAll"), "a fact")]
+    assert strip._label.copy_items() == [(i18n.t("copyMessage"), "a fact")]
+
+
+def test_copy_all_takes_the_lines_waiting_behind_the_one_shown():
+    """#245 asks for «this one and all»: what stands behind «+N more» is copied too, each as the
+    words on the screen."""
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    strip = StatusStrip()
+    strip.notify("the report", level="warn", sticky=True)
+    strip.notify("a <b>second</b> report", level="warn", sticky=True)
+    strip.notify("Phase 2 is done", action=("Start the next", lambda: None))
+    assert dict(strip._label.copy_items())[i18n.t("copyMessage")] == \
+        "the report\na second report\nPhase 2 is done"
+    assert not any("stripCopyAll" in table for table in i18n.T.values())
 
 
 def test_the_line_can_be_selected_and_its_offer_stays_a_link():
@@ -195,13 +211,33 @@ def test_the_line_can_be_selected_and_its_offer_stays_a_link():
 
     _app()
     strip = StatusStrip()
-    strip.notify("Intake ready", action=("Start the session", lambda: None))
-    flags = strip._label.textInteractionFlags()
-    assert flags & Qt.TextInteractionFlag.TextSelectableByMouse
-    assert flags & Qt.TextInteractionFlag.LinksAccessibleByMouse, "the offer is still one click"
-
+    strip.resize(600, 200)
+    fired = []
+    strip.notify("Intake ready", action=("Start the session", lambda: fired.append(True)))
+    strip.show()
+    QApplication.processEvents()
+    label = strip._label
+    assert label.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
     strip._label.setSelection(0, 6)
-    assert strip._label.copy_items()[0] == (i18n.t("copySelection"), "Intake")
+    assert label.copy_items()[0] == (i18n.t("copySelection"), "Intake")
+    label.setSelection(0, 0)
+
+    metrics = label.fontMetrics()
+    x = (label.contentsRect().left() + metrics.horizontalAdvance("Intake ready \u00a0")
+         + metrics.horizontalAdvance("Start the session") // 2)
+    QTest.mouseClick(label, Qt.MouseButton.LeftButton, pos=QPoint(x, label.height() // 2))
+    assert fired == [True], "the offer is still one click"
+
+
+def test_a_selection_over_several_lines_is_copied_with_line_breaks():
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    strip = StatusStrip()
+    strip.notify("first\nsecond", level="warn", action=("Open", lambda: None))
+    strip._label.setSelection(0, len("first\nsecond"))
+    assert strip._label.selectedText() != "first\nsecond", "Qt's own separator, or nothing to clean"
+    assert strip._label.copy_items()[0] == (i18n.t("copySelection"), "first\nsecond")
 
 
 def test_a_line_that_does_not_fit_opens_whole_and_one_that_fits_offers_nothing():
@@ -222,6 +258,51 @@ def test_a_line_that_does_not_fit_opens_whole_and_one_that_fits_offers_nothing()
     strip.notify("16 unusable", level="warn")
     QApplication.processEvents()
     assert strip._whole_button.isHidden(), "a line that fits has nothing more to show"
+
+
+def test_one_long_unbroken_path_is_offered_whole():
+    _app()
+    strip = StatusStrip()
+    strip.resize(300, 200)
+    strip.notify("C:\\" + "x" * 200, level="warn")
+    strip.show()
+    QApplication.processEvents()
+    assert not strip._whole_button.isHidden(), "cut sideways is cut too"
+
+
+def _opened_whole(strip: StatusStrip, said: str, **kwargs) -> None:
+    strip.resize(600, 400)
+    strip.notify(said, level="warn", **kwargs)
+    strip.show()
+    QApplication.processEvents()
+    strip._whole_button.click()
+    assert strip._whole.isVisible()
+
+
+def test_the_whole_text_closes_when_its_line_changes_or_goes():
+    _app()
+    strip = StatusStrip()
+    said = "\n".join(f"line {n}" for n in range(30))
+
+    _opened_whole(strip, said)
+    strip.notify("a new message", level="warn")
+    assert not strip._whole.isVisible(), "the new line stands; the old text does not stay over it"
+
+    _opened_whole(strip, said)
+    strip._close.click()
+    assert not strip._whole.isVisible(), "its line is gone"
+
+
+def test_the_whole_text_offers_its_own_text_for_copying():
+    from autosound_tcc.ui.tcc import i18n
+
+    _app()
+    strip = StatusStrip()
+    said = "\n".join(f"line {n}" for n in range(30))
+    _opened_whole(strip, said, sticky=True)
+    strip.notify("a line waiting behind it", level="warn")
+    assert dict(strip._whole.copy_items())[i18n.t("copyMessage")] == said
+    strip._whole.close()
 
 
 def test_one_line_takes_one_line():

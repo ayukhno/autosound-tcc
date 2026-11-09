@@ -72,7 +72,7 @@ class StatusStrip(QFrame):
                                             | Qt.TextInteractionFlag.LinksAccessibleByMouse)
         copy_menu.enable_copy(self._label, hint="", extra=[
             ("copySelection", lambda: _clean(self._label.selectedText())),
-            ("stripCopyAll", self._plain_text),
+            ("copyMessage", self._all_text),
         ])
         self._scroll = QScrollArea()
         self._scroll.setProperty("class", "status-strip-scroll")
@@ -106,7 +106,7 @@ class StatusStrip(QFrame):
         self._whole.setReadOnly(True)
         copy_menu.enable_copy(self._whole, hint="", extra=[
             ("copySelection", lambda: _clean(self._whole.textCursor().selectedText())),
-            ("stripCopyAll", self._whole.toPlainText),
+            ("copyMessage", self._whole.toPlainText),
         ])
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 6, 0)
@@ -146,13 +146,22 @@ class StatusStrip(QFrame):
         self._whole_button.setVisible(
             needed > most or (width > 0 and self._label.minimumSizeHint().width() > width))
 
-    def _plain_text(self) -> str:
-        """The shown line as a person reads it: no markup, and not the caption of its offer."""
-        line = self._shown
-        if line is None:
-            return ""
+    @staticmethod
+    def _as_read(line: _Line) -> str:
+        """A line as a person reads it: no markup, and not the caption of its offer."""
         return copy_menu.plain(line.text) if line.action is None \
             and QtGuiNamespace.mightBeRichText(line.text) else line.text
+
+    def _plain_text(self) -> str:
+        """The shown line, as it reads."""
+        return self._as_read(self._shown) if self._shown is not None else ""
+
+    def _all_text(self) -> str:
+        """The shown line and what waits behind «+N more», in the order its ✕ brings them (#245:
+        «this one and all»)."""
+        if self._shown is None:
+            return ""
+        return "\n".join(self._as_read(line) for line in (self._shown, *self._behind()))
 
     def _open_whole(self) -> None:
         """The whole line under the strip, as wide as it and at most half the screen tall; moved up
@@ -239,6 +248,7 @@ class StatusStrip(QFrame):
             self._fit_height()
             return
         self._shown = line
+        self._whole.close()  # it held the old line's words
         if line is None:
             self._label.setText("")
             self._close.setVisible(False)
@@ -297,10 +307,12 @@ class StatusStrip(QFrame):
     def waiting(self) -> list[str]:
         """The lines behind the one shown, in the order its ✕ brings them — for the test, and for
         anybody wondering what the count beside it counts."""
+        return [line.text for line in self._behind()]
+
+    def _behind(self) -> list[_Line]:
         if not self._standing:
             return []
-        rest = [line.text for line in self._standing[1:]]
-        return rest + ([self._line.text] if self._line is not None else [])
+        return self._standing[1:] + ([self._line] if self._line is not None else [])
 
     def _expire(self) -> None:
         """The latest line's clock ran out. Nothing else changed, so nothing else is touched."""
