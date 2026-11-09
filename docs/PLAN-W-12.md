@@ -90,9 +90,12 @@ and CI instead of repeating them, changes nothing in the tree and decides nothin
    it** keeps the attention an inversion needs, in the outputs table and on the tree pill. Taken after the group seat showed
    the table never paints a cell's background (`::item` in the sheet) and `QColor("rgb(...)")` is invalid. An unchanged INV
    stays as it is.
-3. **#237 — decided (the Arbiter, 2026-11-09):** three looks: «Звичайний» (today), «Легкий» (the system font, light weight:
-   SF Pro on macOS, Segoe UI Light on Windows), «Округлий» (one more family present on both). A light weight shows only if
-   the family ships one on both systems. Shown on a screenshot first, his pick, then built.
+3. **#237 — decided (the Arbiter, 2026-11-09, on real screenshots):** four looks in the menu beside the theme, remembered, the
+   default unchanged: «Звичайний» (today); «Легкий» (the system font, light weight: Segoe UI Light on Windows); «Округлий»
+   (Trebuchet MS, present on both systems); «Друкарський»: section headings in Courier New, normal weight, about 14 px, with their
+   wide letter-spacing; reading text in the system font a step calmer (600/700 → 500); numbers stay mono as today. Tried and
+   dropped: all Courier (no balance, it cuts text), bold Courier headings (too heavy), Courier in values (thin at small sizes).
+   Special Elite is not taken: it is not on the machines and would have to be bundled.
 4. **#253 — decided (the Arbiter, 2026-11-09):** TCC does not edit a PATH or put files in `~/.local/bin`. It keeps a fixed
    folder `…/autosound-tcc/codex/current` (a link, a junction on Windows) refreshed on install, and the row says that path
    and that the copy is TCC's. He first chose a PATH write, and dropped it once #254 kept no newer-version button.
@@ -267,4 +270,9 @@ at the session's pace, plus the PR's CI (~35–40 min per run) and the skill's v
 | #252 | done | sonnet · medium | `193af6dc` | group | red run shown |
 | #250 | done | sonnet · medium | `5d0009c0` | group | red run shown; on the group seat: INV on «changed» in light ≈3.0 contrast (the token's own), the pill's 1px frame |
 | #244 | done | sonnet · medium | `3142d66a` | group | red run shown; for step 9: `flawKind_ringing`, `flawKind_energy_lag`, `flawKind_decay_asymmetry` stand in English in uk/pl/de (the repo has no mark for it); the map's «IR unreachable» was wrong, it is drawn |
-| #236 | done | sonnet · medium | `ad903a3f` | group | red run shown; the whole left half hides, the terminal session's name (`_ext_session_lbl`) with it |
+| #236 | done | sonnet · medium | `ad903a3f`, `3a74dac7` | group | the left half hides, the terminal session's name stays (his word) |
+| #250 | done, second design | opus · medium | `d889f300` | group | blue and an orange frame on a changed INV, proved by pixels |
+| #252 | fixed after the seat | opus · medium | `a0cef017` | group | no flash while checking |
+| #245 | built | opus · medium | `1b6a59a3` | group | for the group's fix round: «copy all» must cover the lines behind «+N more» too (the issue's «this one and all»); reuse `copyMessage` instead of the new `stripCopyAll`; for step 9: `stripWholeText` |
+| #243 | built | opus · medium | `61ac5c5c` | group | `panel_fold.py`; `main_window.py` −22 lines; for step 9: `panelFold`, `panelUnfold`, `panelFoldRefused`; for the group: the handle's resize cursor while a card is folded |
+| #237 | built | opus · medium | `4cb4e1fd` | group | `font_looks.py`; the typed look widens the columns (right 340→357, left 260→263) so headings are not cut; for step 9: `menuFontLook`, `fontLookNormal`, `fontLookLight`, `fontLookRounded`, `fontLookTypewriter`; on the VM: Segoe UI Light and the typed look |

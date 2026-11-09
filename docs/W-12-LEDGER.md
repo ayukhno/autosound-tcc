@@ -25,6 +25,9 @@ so the test compared two invalid colours and passed.
 | #250 | sonnet · medium | 81 s | 79K | 13 | `5d0009c0` | |
 | #244 | sonnet · medium | 53 s | 77K | 12 | `3142d66a` | |
 | #236 | sonnet · medium | 100 s | 86K | 15 | `ad903a3f` | |
+| #245 (beside the trial) | opus · medium | 217 s | 109K | 18 | `1b6a59a3` | |
+| #243 (beside the trial) | opus · medium | 553 s | 142K | 27 | `61ac5c5c` | |
+| #237 (beside the trial) | opus · medium | 873 s | 230K | 49 | `4cb4e1fd` | |
 | the group's fix round | opus · medium | 457 s | 184K | 29 | `d889f300` `a0cef017` `3a74dac7` | the Sonnet tasks' defects the seat found: #250's background (Important), #252's flash (Minor) |
 
 ## For the PMO cube (the Arbiter's word 2026-11-09)
@@ -62,6 +65,10 @@ in `ayukhno/hub-kit`, each with its evidence. No write to hub-kit before that.
     Qt aborted and macOS put a «Python quit» dialog in front of him (10:23:07, one second after a commit; the `.ips` holds the
     time and the stack, not the command). Every committed test was clean; a draft did it. The brief now says it, drafts
     included. A session asked «is it yours?» answers from the `.ips`, not from memory.
-11. **From the skill's W-12, taken here:** acceptance on the exact head after the last code change; the reviewer's brief
+11. **A question of look is settled on the real window, in rounds of pictures.** #237 went through five rounds of offscreen
+    grabs of the actual window (a throwaway test, no window on the screen), in his language. Each round cost seconds and
+    changed the design: a text list of looks had looked fine to everybody, and his final pick was a crop of one picture beside
+    a crop of another.
+12. **From the skill's W-12, taken here:** acceptance on the exact head after the last code change; the reviewer's brief
    (a quote at `path:line`, every site of a class, «checked → clean», what could not be checked). Their result in this wave
    goes here when the wave has one.
