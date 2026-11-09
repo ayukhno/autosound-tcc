@@ -51,6 +51,17 @@ def _english():
 
 
 @pytest.fixture
+def sheet_for_one_widget(monkeypatch):
+    """`theme.apply_theme` without the application-wide re-polish: the test puts the sheet on its
+    own widget instead. `QApplication.setStyleSheet` re-polishes every widget the process has; with
+    the windows `test_main_window.py` leaves alive, one call cost 40 s on a Mac and six tests here
+    took a shard past its 25-minute limit (run 42677312857). The palette and the current theme are
+    still set for real."""
+    monkeypatch.setattr(_app(), "setStyleSheet", lambda _sheet: None)
+    monkeypatch.setattr(theme, "_CURRENT", theme._CURRENT)
+
+
+@pytest.fixture
 def ledger(tmp_path, monkeypatch):
     """One history through the method's writer, read back the way the window reads it."""
     monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
@@ -465,10 +476,9 @@ def test_the_tab_and_its_rows_follow_the_language(ledger):
         i18n.set_language("en")
 
 
-def test_a_changed_value_follows_a_theme_switch(ledger, monkeypatch):
+def test_a_changed_value_follows_a_theme_switch(ledger, sheet_for_one_widget):
     app = _app()
-    monkeypatch.setattr(theme, "_CURRENT", theme._CURRENT)
-    sheet, palette = app.styleSheet(), QPalette(app.palette())
+    palette = QPalette(app.palette())
     try:
         theme.apply_theme(app, "dark")
         pane, _view, _old = _compared(ledger, {"input_gain_db": -0.3, "status": "applied"},
@@ -476,27 +486,26 @@ def test_a_changed_value_follows_a_theme_switch(ledger, monkeypatch):
         cell = _cells(pane)[_label("presetInputGain")]
         assert _colour(cell) == QColor(theme.get_theme("dark").info).name().lower()
         theme.apply_theme(app, "light")
+        pane.setStyleSheet(theme.build_qss(theme.get_theme("light")))
         QApplication.processEvents()
         assert _colour(cell) == QColor(theme.get_theme("light").info).name().lower()
     finally:
-        app.setStyleSheet(sheet)
         app.setPalette(palette)
 
 
 @pytest.mark.parametrize("look", ["normal", "light", "rounded", "typewriter"])
-def test_the_table_is_drawn_in_every_font_look(ledger, look, monkeypatch):
+def test_the_table_is_drawn_in_every_font_look(ledger, look, sheet_for_one_widget):
     app = _app()
-    monkeypatch.setattr(theme, "_CURRENT", theme._CURRENT)
-    sheet, palette = app.styleSheet(), QPalette(app.palette())
+    palette = QPalette(app.palette())
     try:
         theme.apply_theme(app, "dark", font=look)
         pane, _view, _old = _compared(ledger, {"input_gain_db": -0.3, "status": "applied"},
                                       {"input_gain_db": -1.0, "status": "applied"})
+        pane.setStyleSheet(theme.build_qss(theme.get_theme("dark"), font=look))
         pane.resize(900, 500)
         pane.grab()
         assert _is_changed(_cells(pane)[_label("presetInputGain")])
     finally:
-        app.setStyleSheet(sheet)
         app.setPalette(palette)
 
 
@@ -820,10 +829,9 @@ def test_the_tab_is_marked_against_the_new_compare_after_a_reload(window, tmp_pa
 # ---- what a person sees, that the first pass read off the stored line ------------------------------
 
 
-def test_the_tree_s_grey_follows_a_theme_switch(ledger, monkeypatch):
+def test_the_tree_s_grey_follows_a_theme_switch(ledger, sheet_for_one_widget):
     app = _app()
-    monkeypatch.setattr(theme, "_CURRENT", theme._CURRENT)
-    sheet, palette = app.styleSheet(), QPalette(app.palette())
+    palette = QPalette(app.palette())
     try:
         theme.apply_theme(app, "dark")
         tree = _tree(_read(ledger, _bank(ledger)))
@@ -833,7 +841,6 @@ def test_the_tree_s_grey_follows_a_theme_switch(ledger, monkeypatch):
         QApplication.processEvents()
         assert _drawn(tree._preset, label)[2], "greyed in light, the repainted row's own colour"
     finally:
-        app.setStyleSheet(sheet)
         app.setPalette(palette)
 
 
