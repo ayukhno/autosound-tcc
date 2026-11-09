@@ -10,6 +10,11 @@ site. Sent to the hub by ticket at the wave's end.
 
 | when | seat | what | findings | real | in part | false | only this seat | B / I / M |
 |---|---|---|---|---|---|---|---|---|
+| 2026-11-09 | Opus seat (`feature-dev:code-reviewer`, opus · high), 9 min, 178K | hygiene + small fixes (#233, #252, #250, #244, #236) | 2 | 2 | 0 | 0 | 2 | 0 / 1 / 1 |
+
+The Important was checked by an offscreen `grab()` with the real sheet and a red control cell: no item background paints in a
+`ptable`. The check found one more, which the seat had not: `QColor(t.mix(…))` is invalid, since `mix` returns `rgb(r, g, b)`,
+so the test compared two invalid colours and passed.
 
 ## The Sonnet trial (per task)
 
@@ -19,6 +24,8 @@ site. Sent to the hub by ticket at the wave's end.
 | #252 | sonnet · medium | 22 s | 64K | 6 | `193af6dc` | |
 | #250 | sonnet · medium | 81 s | 79K | 13 | `5d0009c0` | |
 | #244 | sonnet · medium | 53 s | 77K | 12 | `3142d66a` | |
+| #236 | sonnet · medium | 100 s | 86K | 15 | `ad903a3f` | |
+| the group's fix round | opus · medium | 457 s | 184K | 29 | `d889f300` `a0cef017` `3a74dac7` | the Sonnet tasks' defects the seat found: #250's background (Important), #252's flash (Minor) |
 
 ## For the PMO cube (the Arbiter's word 2026-11-09)
 
@@ -45,6 +52,16 @@ in `ayukhno/hub-kit`, each with its evidence. No write to hub-kit before that.
    candidate carried the fix and the PR's CI runs after the pin; dropped.
 7. **Check a subagent's report at the commit.** `git show --stat` and the diff before the ledger says done: the files touched
    are the claim that can be checked in seconds.
-8. **From the skill's W-12, taken here:** acceptance on the exact head after the last code change; the reviewer's brief
+8. **A look is proved by pixels, with a control.** A UI test that reads an item's data says what was asked for, not what is
+   drawn: #250's test passed on a background that never paints and a colour that never parsed. A `grab()` with the real
+   stylesheet and a planted red cell settled it in one run. The first grab misled too (the current cell's tint), which the
+   control exposed.
+9. **Show a design consequence to the person, even mid-review.** The seat named a place the decision did not cover; asked
+   once, he replaced the rule with a better one (blue stays, an orange frame for INV) before a fix round was spent on the old.
+10. **A crash in a test reaches the person's screen.** During the fix round a run built a `QWidget` before the `QApplication`;
+    Qt aborted and macOS put a «Python quit» dialog in front of him (10:23:07, one second after a commit; the `.ips` holds the
+    time and the stack, not the command). Every committed test was clean; a draft did it. The brief now says it, drafts
+    included. A session asked «is it yours?» answers from the `.ips`, not from memory.
+11. **From the skill's W-12, taken here:** acceptance on the exact head after the last code change; the reviewer's brief
    (a quote at `path:line`, every site of a class, «checked → clean», what could not be checked). Their result in this wave
    goes here when the wave has one.

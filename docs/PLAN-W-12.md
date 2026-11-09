@@ -82,10 +82,14 @@ and CI instead of repeating them, changes nothing in the tree and decides nothin
 
 ## Decisions — all eight taken with the Arbiter, one by one, 2026-11-09
 
-1. **#236 — decided (the Arbiter, 2026-11-09):** in Control mode the bar's in-app session pickers and status hide; «Купити каву»
-   and «Відгук» stay, where they are (the bar's right end).
-2. **#250 — decided (the Arbiter, 2026-11-09):** «changed» is background + bold in the outputs table, the font colour stays
-   the value's (orange INV); on the tree pill a frame + background.
+1. **#236 — decided (the Arbiter, 2026-11-09):** in Control mode the bar's in-app session pickers and status hide; «Пригостити
+   кавою» and «Написати розробнику» stay, where they are (the bar's right end), and so does the terminal session's name
+   (`_ext_session_lbl`) when one has called in: «так, залиш, і місце ж є». In the group's fix round.
+2. **#250 — decided (the Arbiter, 2026-11-09, second word, replacing «background + bold, the value's colour»):** «changed» stays
+   blue and bold everywhere, as it was, the tree's second line too. A changed INV is blue as well, and an **orange frame around
+   it** keeps the attention an inversion needs, in the outputs table and on the tree pill. Taken after the group seat showed
+   the table never paints a cell's background (`::item` in the sheet) and `QColor("rgb(...)")` is invalid. An unchanged INV
+   stays as it is.
 3. **#237 — decided (the Arbiter, 2026-11-09):** three looks: «Звичайний» (today), «Легкий» (the system font, light weight:
    SF Pro on macOS, Segoe UI Light on Windows), «Округлий» (one more family present on both). A light weight shows only if
    the family ships one on both systems. Shown on a screenshot first, his pick, then built.
@@ -244,6 +248,8 @@ at the session's pace, plus the PR's CI (~35–40 min per run) and the skill's v
   `make check`, no whole suite: it runs on the PR's CI. `uvx ruff@0.12.0 check` on the changed files.
 - `main_window.py` may not grow (`tests/test_structure_ratchet.py`): a change that adds lines there moves a decision
   out in the same task.
+- A `QWidget` before the `QApplication` aborts the process and opens a crash dialog on the Arbiter's screen, and so does a
+  throwaway draft or a one-off script: create the application first, every time (W-12, 2026-11-09).
 - New strings: English in all four tables, marked for the Advisor; the session translates them at step 9.
 - Commit only your own files, by path (never `git add -A` / `commit -a`); the subject in English,
   `<group>: <what> (#N)`, with the session's attribution lines. No push.
