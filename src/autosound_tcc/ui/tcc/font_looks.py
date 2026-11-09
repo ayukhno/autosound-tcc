@@ -14,16 +14,20 @@ The looks, as the Arbiter chose them on real screenshots (2026-11-09):
 
 The mono classes (`"SF Mono", Menlo, monospace`: values, numbers, the tree's second line) stay as
 they are in every look. A family this machine does not have is simply not named: the widget keeps
-the system font, where Qt left to fall back alone may land on anything, a serif included.
+the system font, where Qt left to fall back alone may land on anything, a serif included. The log
+says so once per look; nothing is shown to the person.
 
 This module imports no Qt at its top: `menu_registry.collect()` reads it, and the registry is Qt-free.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 from typing import Any
+
+_log = logging.getLogger("autosound_tcc")
 
 #: The look's word in QSettings; the window's other `ui/…` keys sit beside it.
 KEY = "ui/font"
@@ -48,11 +52,13 @@ _MONO = '"SF Mono"'
 _RULE = re.compile(r"([^{}]+)\{([^{}]*)\}")
 _HEAVY = re.compile(r"font-weight:\s*(?:600|700)\b")
 _CLASS = re.compile(r'class~="([^"]+)"')
+#: (look, family) already said in the log: `dress` runs on every theme switch and zoom.
+_told: set[tuple[str, str]] = set()
 
 
 def sane(value: Any) -> str:
     """The look a stored value names; anything else — old, foreign, missing — is the default."""
-    return value if value in {look for look, _key in LOOKS} else DEFAULT
+    return value if isinstance(value, str) and value in {look for look, _key in LOOKS} else DEFAULT
 
 
 def saved(settings) -> str:
@@ -66,6 +72,19 @@ def _has_family(name: str) -> bool:
     from PySide6.QtGui import QFontDatabase, QGuiApplication
 
     return QGuiApplication.instance() is not None and QFontDatabase.hasFamily(name)
+
+
+def _named(look: str, family: str) -> str:
+    """`family` when this machine has it; else "" and, once, a line in the log. Before an application
+    the font database cannot be asked, so nothing is known and nothing is said."""
+    if _has_family(family):
+        return family
+    from PySide6.QtGui import QGuiApplication
+
+    if QGuiApplication.instance() is not None and (look, family) not in _told:
+        _told.add((look, family))
+        _log.info("Font look %s: %s is not on this machine, the system font stands in", look, family)
+    return ""
 
 
 def _segoe_has_light() -> bool:
@@ -84,7 +103,7 @@ def _light_family() -> str:
         return ""
     if _segoe_has_light():
         return "Segoe UI"
-    return "Segoe UI Light" if _has_family("Segoe UI Light") else ""
+    return _named(LIGHT, "Segoe UI Light")
 
 
 def _general(family: str, weight: int = 0) -> str:
@@ -98,7 +117,7 @@ def _headings() -> str:
     """The section titles (`sec-title`) of the typewriter look. Last in the sheet; the second
     selector matches the weight of the theme's `.ghead QLabel`. The letter-spacing is the labels'
     own `QFont` (`theme.apply_caps`) and stays."""
-    family = f'font-family: "{_HEADING_FAMILY}"; ' if _has_family(_HEADING_FAMILY) else ""
+    family = f'font-family: "{_HEADING_FAMILY}"; ' if _named(TYPEWRITER, _HEADING_FAMILY) else ""
     return (f'\n    QLabel[class~="sec-title"], QWidget[class~="ghead"] QLabel[class~="sec-title"] '
             f"{{ {family}font-size: 14px; font-weight: 400; }}\n")
 
@@ -123,7 +142,7 @@ def dress(qss: str, look: Any) -> str:
     if look == LIGHT:
         return _general(_light_family(), 300) + qss
     if look == ROUNDED:
-        return _general(_ROUNDED_FAMILY if _has_family(_ROUNDED_FAMILY) else "") + qss
+        return _general(_named(ROUNDED, _ROUNDED_FAMILY)) + qss
     if look == TYPEWRITER:
         return _calmer(qss) + _headings()
     return qss

@@ -3102,6 +3102,7 @@ class MainWindow(QMainWindow):
         centre is hidden in control mode, so this floor is the full window's alone, and it is
         back the moment the full window is. Asked again when the window changes screens.
         """
+        self._left.setMinimumWidth(max(_SIDE_MIN_PX, font_looks.left_floor(self)))  # for `around`, in this language too
         need = self._centre_need()
         margins = self.centralWidget().layout().contentsMargins()
         around = (self._left.minimumWidth() + self._right.minimumWidth()
@@ -3349,7 +3350,6 @@ class MainWindow(QMainWindow):
         apply_theme(QApplication.instance(), self._mode, scale=self._zoom,
                     font=font_looks.saved(self._settings))
         self._repolish_all()
-        self._left.setMinimumWidth(max(_SIDE_MIN_PX, font_looks.left_floor(self)))
         self._fit_right_floor()
         self._fit_centre_floor()
         # After the sheet, never before: the size being copied is the styled one.

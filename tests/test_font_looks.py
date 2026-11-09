@@ -6,7 +6,9 @@ window was given, as `QFont`, the way the person sees them.
 
 from __future__ import annotations
 
+import logging
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -89,11 +91,10 @@ def test_the_default_look_s_sheet_is_the_sheet_without_a_look():
     for mode in ("dark", "light"):
         palette = theme.get_theme(mode)
         plain = theme.build_qss(palette)
-        assert theme.build_qss(palette, font="normal") == plain
         assert "Courier New" not in plain and "Trebuchet" not in plain
         assert "sec-title" not in plain
-        # A zoomed sheet too: the look does not touch what the zoom does.
-        assert theme.build_qss(palette, scale=1.2, font="normal") == theme.build_qss(palette, scale=1.2)
+    sheet = 'QLabel[class~="kv-val"] { font-weight: 600; font-size: 12px; }\n'
+    assert _looks().dress(sheet, "normal") == sheet
 
 
 def test_a_look_survives_a_theme_switch_and_a_zoom(tmp_path, monkeypatch):
@@ -113,7 +114,7 @@ def test_a_look_survives_a_theme_switch_and_a_zoom(tmp_path, monkeypatch):
 
 def test_an_unknown_or_old_saved_value_is_the_default_look(tmp_path, monkeypatch):
     looks = _looks()
-    for value in ("bogus", "", None, 3):
+    for value in ("bogus", "", None, 3, ["a", "b"]):
         assert looks.sane(value) == looks.DEFAULT
     palette = theme.get_theme("dark")
     assert theme.build_qss(palette, font="bogus") == theme.build_qss(palette)
@@ -176,7 +177,8 @@ def test_a_family_the_machine_lacks_leaves_the_system_font(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("look", ALL_LOOKS)
 def test_no_heading_is_cut_at_the_normal_size_in_ukrainian(tmp_path, monkeypatch, look):
-    """The longest words the window's headings have, in the widest language it ships."""
+    """The window's headings in Ukrainian, the language it is mostly used in. Polish's longest
+    title is wider: the test after this one."""
     window = _themed_window(tmp_path, monkeypatch)
     window._on_language_selected("uk")
     window.resize(1500, 900)
@@ -191,6 +193,70 @@ def test_no_heading_is_cut_at_the_normal_size_in_ukrainian(tmp_path, monkeypatch
     for section in (window._project_section, window._system_section, window._audio_section):
         assert section._title_label.text() == section._title_label._full
     window.hide()
+
+
+def test_the_left_column_follows_a_new_language_in_the_typewriter_look(tmp_path, monkeypatch):
+    """Polish's section title needs more than the Ukrainian one the floor was read for, and the
+    floor was re-read only by a restyle: «Parametry projek…»."""
+    window = _themed_window(tmp_path, monkeypatch)
+    window._on_language_selected("uk")
+    window.resize(1500, 900)
+    window.show()
+    QApplication.processEvents()
+    _pick(window, "typewriter")
+    try:
+        window._on_language_selected("pl")
+        assert window._left.minimumWidth() >= _looks().left_floor(window) > 0
+        for _ in range(4):
+            QApplication.processEvents()
+        title = window._project_section._title_label
+        assert title.text() == title._full, title.text()
+    finally:
+        window._on_language_selected("en")
+        window.hide()
+
+
+def _on_windows(monkeypatch, *, style: bool, family: bool) -> None:
+    looks = _looks()
+    monkeypatch.setattr(looks, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(looks, "_segoe_has_light", lambda: style)
+    monkeypatch.setattr(looks, "_has_family", lambda name: family and name == "Segoe UI Light")
+
+
+@pytest.mark.parametrize("style, family, expected", [
+    (True, True, "Segoe UI"),  # the style is the better of the two
+    (False, True, "Segoe UI Light"),
+    (False, False, ""),
+])
+def test_the_light_family_on_windows(monkeypatch, style, family, expected):
+    QApplication.instance() or QApplication([])
+    _on_windows(monkeypatch, style=style, family=family)
+    assert _looks()._light_family() == expected
+
+
+def test_the_light_family_elsewhere_is_the_system_font(monkeypatch):
+    looks = _looks()
+    monkeypatch.setattr(looks, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(looks, "_segoe_has_light", lambda: True)
+    assert looks._light_family() == ""
+
+
+def test_a_look_whose_font_is_absent_leaves_one_log_line_each(app_log_heard, monkeypatch):
+    QApplication.instance() or QApplication([])
+    looks = _looks()
+    heard = app_log_heard(logging.INFO)
+    monkeypatch.setattr(looks, "_told", set(), raising=False)
+    _on_windows(monkeypatch, style=False, family=False)
+
+    for look in ("rounded", "rounded", "typewriter", "light", "typewriter"):
+        looks.dress("", look)
+
+    lines = sorted(record.getMessage() for record in heard)
+    assert len(lines) == 3, lines
+    for line, look, family in zip(lines, ("light", "rounded", "typewriter"),
+                                  ("Segoe UI Light", "Trebuchet MS", "Courier New")):
+        assert look in line and family in line, line
+    assert {record.levelno for record in heard} == {logging.INFO}, "not a warning: nothing to show"
 
 
 def test_a_remembered_look_is_on_at_the_next_start(tmp_path, monkeypatch):
