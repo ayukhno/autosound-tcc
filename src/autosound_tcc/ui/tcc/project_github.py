@@ -255,6 +255,7 @@ class ProjectGithub(QObject):
         self._send = "asked"
         yes = box.exec() == QMessageBox.StandardButton.Yes
         if self._stopped or getattr(self._window, "_closing", False):
+            self._send = None  # a close that is then cancelled leaves the button working
             return  # the window went while it was being asked: nothing goes
         if not yes:
             self._send = None
@@ -349,7 +350,8 @@ class ProjectGithub(QObject):
         """Whether the window may go. A send still under way is asked about, the default keeping
         it (`_ask_abandon_save`'s rule); `_closing` is already up, so what Cancel's branch of the
         window's close puts back goes back here too."""
-        if self._send not in ("queued", "sending") or self._stopped:
+        if self._send not in ("queued", "sending") or self._stopped \
+                or getattr(self._window, "_quitting", False):  # the window's own close: answered
             return True
         box = QMessageBox(self._window)
         box.setIcon(QMessageBox.Icon.Warning)

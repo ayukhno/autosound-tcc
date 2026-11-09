@@ -1313,6 +1313,35 @@ def test_closing_the_real_window_during_a_send_asks_first(repo, monkeypatch):
             worker.wait(20000)
 
 
+def test_the_windows_own_close_after_saving_does_not_ask_again(repo, host, monkeypatch):
+    """A session's save turn ends in the window's own `close()`: the answer was already given."""
+    widget, panel = host()
+    asked = _answer(monkeypatch, NO)
+    panel._send = "sending"
+    widget._quitting = True
+    try:
+        assert panel.may_close() is True and asked == []
+    finally:
+        panel._send = None
+        panel.stop()
+
+
+def test_reading_the_status_takes_no_lock_of_gits(repo, monkeypatch):
+    """The read runs about when a session's `save` commits: an index lock of ours would fail it."""
+    from autosound_tcc.state import project_view
+
+    project, _bare = repo
+    seen, run = [], subprocess.run
+
+    def spy(argv, *args, **kwargs):
+        seen.append(list(argv))
+        return run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(project_view.subprocess, "run", spy)
+    project_view.git_status(project)
+    assert [a for a in seen if "status" in a and "--no-optional-locks" in a], seen
+
+
 def test_a_close_answered_yes_lets_the_window_go(repo, host, monkeypatch):
     widget, panel = _ready(repo, host)
     release, entered = _held_save(monkeypatch)

@@ -548,7 +548,7 @@ def test_a_child_cut_short_by_its_bound_is_never_read_as_backed_up(tmp_path, mon
 
     def past_the_bound(argv, *args, **kwargs):
         _bounded(argv, kwargs)
-        if argv[3] in cut:  # git -C <folder> <verb>
+        if set(argv[3:5]) & set(cut):  # git -C <folder> [--no-optional-locks] <verb>
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         return run(argv, *args, **kwargs)
 

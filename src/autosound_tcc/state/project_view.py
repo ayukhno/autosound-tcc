@@ -485,7 +485,7 @@ def _read_git(project: Path) -> GitStatus:
     # The branch, the changes and the commits the backup lacks in one call; where the backup goes
     # in another. `rev-parse --git-dir` said alone what these two say when neither answers: a
     # `.git` that git cannot read (a stray file, a folder another user owns).
-    status = _git(project, "status", "--porcelain=v2", "--branch")
+    status = _git(project, "--no-optional-locks", "status", "--porcelain=v2", "--branch")
     remotes = _git(project, "remote", "-v")
     if status is None and remotes is None:
         return GitStatus(works=True, repo=False)
