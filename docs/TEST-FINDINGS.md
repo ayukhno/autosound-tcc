@@ -4145,3 +4145,12 @@ method's self-tests and the installers check run in every shard.
 **Whose.** TCC's CI and suite; the process part with the hub. **At the W-13 milestone: one group «CI», one decision**
 with hub #339 (HUB-098: docs pushes run no checks, the nightly by hand, `CLAUDE.md:13`; its ask 2 rewritten by the hub
 after this analysis, comment of 2026-11-10) and the analysis's options A1, H, D, I, K. The Arbiter's word 2026-11-10.
+
+### 196. `ci.yml:36`'s comment says the release gate reads `main`'s serial push run; stale since 2026-10-14
+**What.** The comment above the push trigger calls `main`'s whole, serial run «the run the release gate reads». Since
+2026-10-14 the gate takes the PR's green run on the same commit (`gate_state` with `pr_counts`, `RELEASE-CHANNEL.md`
+§9.9.1): v1.3.1 was cut with `main`'s push run 42817251494 cancelled, and `ci-green` said «not a finding». Found on
+hub #341, the hub's word 2026-11-10: write it down, do not edit it now.
+**Weight.** Low: a comment, no behaviour; it misled this session once about what a push to `main` costs.
+**Whose.** TCC's CI. **At the W-13 milestone, beside hub #339 ask 2** (the fate of `main`'s push run): the comment
+follows whatever that decision is.

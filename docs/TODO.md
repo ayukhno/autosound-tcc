@@ -2082,14 +2082,16 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 
 ### F-109 — v1.3.1: the method's v3.3.1, the Resonalyze import reads format 13 (hub #341)
 
-**Статус**: open · 2026-11-10, the Arbiter's «терміново» (HUB-100), during W-13's collection · branch `fix-341`:
-the pin at v3.3.1 (`8ae9095`) and the patch's bookkeeping (`d069800a`), the guide's method links at v3.3.1
-(`baaeb4c0`) · checked by hand on the Mac, offscreen, through the import window: the skill's v13 fixture reads (6 legs,
-26 checks ok, not blocked); the -fir fixture is refused by pair and side (FIR is a later wave, his word); v3.3.0's
-reader refuses the same file; no file of his own (his word) · `make check` locally: 2 of 7432 red, both fixed — the
-guide's links at v3.3.0, and version_bench's selftest on two leftover TMPDIR folders from a run cut off 2026-11-09
-04:28 (removed) · next: his OK to push (one full PR run), then `--ff-only` to `main`, `make ship VERSION=v1.3.1`,
-`REAL=1`, Latest, the comment on hub #341 · resume: `hub/bin/role tcc --resume c3d1aa4e-538b-420e-ad4e-181a836c4e2d`
+**Статус**: done v1.3.1 · 2026-11-10, the Arbiter's «терміново» (HUB-100), during W-13's collection · signed tag
+v1.3.1 on `2c8e53b4` (PR #270 from `fix-341`, `--ff-only` to `main`), the GitHub release Latest · the pin at v3.3.1
+(`8ae9095`), the patch's bookkeeping, the guide's method links at v3.3.1 · CI: one full PR run (42814807997, green on
+macOS, Windows and Linux); `main`'s push run 42817251494 cancelled on the hub's word, its fate is W-13's milestone with
+hub #339 ask 2; `ci-green` read it as «not a finding»; pool 196 (`ci.yml:36`'s stale comment) · checked by hand on the
+Mac, offscreen, through the import window: the skill's v13 fixture reads (6 legs, 26 checks ok, not blocked); the -fir
+fixture is refused by pair and side (FIR is a later wave, his word); v3.3.0's reader refuses the same file; no file of
+his own (his word) · locally `make check` was 2 of 7432 red, both fixed: the guide's links at v3.3.0, and
+version_bench's selftest on two leftover TMPDIR folders from a run cut off 2026-11-09 04:28 (removed) · resume:
+`hub/bin/role tcc --resume c3d1aa4e-538b-420e-ad4e-181a836c4e2d`
 
 ### F-108 — W-13: the collection, what is waiting
 
