@@ -4123,3 +4123,13 @@ The Arbiter's `ok` on two more, each an issue with its assessment:
 
 Left in the pool, his word the same day: tcc#258 (subscription or API per AI, beside the Claude API key group). Not taken:
 the first step naming the two desk paths; the skill's intake form already offers them.
+
+## W-13 — collection (from 2026-11-10)
+
+### 194. The Send question's close test is flaky in the serial run (tcc#268)
+**What.** `test_closing_during_the_question_sends_nothing` went red on the push to `main` at `c5b56ae4` on Linux and
+Windows (`tests/test_project_github.py:924`, run 42724107999); the PR run on the same commit passed. It waits for
+`qt_shutdown.live()` to empty, the process's registry, which `1dda4063` took out of three sibling tests. Found by the
+release session. Quarantined: `xfail(strict=False, reason="flaky: #268")`.
+**Weight.** Low: no product code; `main`'s CI is red until the mark lands, and the test checks nothing while it stands.
+**Whose.** TCC only. The fix waits for the milestone.

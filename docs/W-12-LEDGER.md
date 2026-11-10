@@ -88,6 +88,9 @@ so the test compared two invalid colours and passed.
 The practices of effective work and of steering a session, collected as they happen. At the wave's end they become issues
 in `ayukhno/hub-kit`, each with its evidence. No write to hub-kit before that.
 
+Recorded 2026-11-10: hub-kit #87 (items 1–4, 9, 11), #88 (5–7, 13), #89 (8, 10, 12, 15); item 14 is hub-kit #81's. The review
+numbers above went to the hub as hub #336 (TCC-070).
+
 1. **Check the limits from the data, before each group.** context-bar-mod writes the 5-hour and 7-day figures to
    `~/dev/_pmo/usage/limits/claude/<UTC day>.jsonl` at most every 5 minutes, so a session can read them and name them before
    a group starts. Evidence: the session first said it could not see them and asked for `/usage`; the Arbiter pointed at the
