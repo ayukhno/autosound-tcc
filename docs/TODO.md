@@ -2080,6 +2080,17 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   skill: TCC-054 (hub #269, the round's raw-title matching vs `name_key`). Resume:
   `hub/bin/role tcc --resume 530f0561-3f1c-4b26-a240-c7149565668c`.
 
+### F-109 — v1.3.1: the method's v3.3.1, the Resonalyze import reads format 13 (hub #341)
+
+**Статус**: open · 2026-11-10, the Arbiter's «терміново» (HUB-100), during W-13's collection · branch `fix-341`:
+the pin at v3.3.1 (`8ae9095`) and the patch's bookkeeping (`d069800a`), the guide's method links at v3.3.1
+(`baaeb4c0`) · checked by hand on the Mac, offscreen, through the import window: the skill's v13 fixture reads (6 legs,
+26 checks ok, not blocked); the -fir fixture is refused by pair and side (FIR is a later wave, his word); v3.3.0's
+reader refuses the same file; no file of his own (his word) · `make check` locally: 2 of 7432 red, both fixed — the
+guide's links at v3.3.0, and version_bench's selftest on two leftover TMPDIR folders from a run cut off 2026-11-09
+04:28 (removed) · next: his OK to push (one full PR run), then `--ff-only` to `main`, `make ship VERSION=v1.3.1`,
+`REAL=1`, Latest, the comment on hub #341 · resume: `hub/bin/role tcc --resume c3d1aa4e-538b-420e-ad4e-181a836c4e2d`
+
 ### F-108 — W-13: the collection, what is waiting
 
 **Статус**: open · 2026-11-10, W-13 is in collection (`WAVES.md` §1 step 1): the Arbiter tests, the session records · in the pool: 194 (tcc#268, a flaky close test, quarantined); 195 (CI's root causes, `docs/CI-ROOT-CAUSE-2026-11-10.md`; at the milestone one group «CI» with hub #339 and the options A1, H, D, I, K, one decision, the Arbiter's word 2026-11-10) · hub #339 ask 1 (`paths-ignore`, the Arbiter's «терміново») done 2026-11-10 at `e8e3a7cd`, PR #269 merged with `[skip ci]`, zero CI runs; asks 2–4 wait for the milestone · the Arbiter's rule 2026-11-10: nothing that starts CI without his OK · on the bus `to:tcc`: none of W-12's left · resume: `hub/bin/role tcc --resume aaedea49-f944-4591-a9f9-3f6b45d1ee6a`
