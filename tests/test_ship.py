@@ -952,13 +952,53 @@ def test_every_uv_run_in_a_workflow_runs_what_the_lock_records():
     assert unlocked == [], unlocked
 
 
-def test_ci_runs_on_every_push_so_the_release_gate_has_a_run_to_read():
-    """HUB-057 made green CI on HEAD a condition of every tag, and the commit a release starts from
-    is a CHANGELOG commit by construction — a path filter would leave it with no run (hub #136)."""
+def _push_paths_ignore(triggers):
+    """The `paths-ignore` list under `push:`, as written."""
+    push = ("\n" + triggers).split("\n  push:\n", 1)[1]
+    push = re.split(r"\n  [a-z_]+:", push, maxsplit=1)[0]
+    block = push.split("\n    paths-ignore:\n", 1)[1]
+    return [m.group(1) for m in re.finditer(r"^      - (\S+)$", block, re.M)]
+
+
+def _gh_glob(pattern):
+    """GitHub's filter glob, the way the hub's gate reads it (`release-preflight.py`, `gh_glob`)."""
+    out = ""
+    for part in re.split(r"(\*\*|\*)", pattern):
+        out += {"**": ".*", "*": "[^/]*"}.get(part, re.escape(part))
+    return re.compile(out + r"\Z")
+
+
+def test_a_prose_only_push_runs_nothing_and_no_file_a_test_reads_is_called_prose():
+    """HUB-098 (hub #339): 52 of the 60 latest pushes to `main` changed prose only and ran the whole
+    suite. The gate now rests such a commit on its nearest green ancestor, reading this filter, so
+    the release commit (a CHANGELOG commit by construction, hub #136) no longer needs its own run.
+
+    The danger runs one way: a file on the list that a test reads is code, and a push changing it
+    would skip the run that catches it. So every tracked file the list matches is checked against
+    what the tests and the shipped package read."""
     text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     triggers = text.split("\non:\n", 1)[1].split("\njobs:\n", 1)[0]
+    patterns = _push_paths_ignore(triggers)
 
-    assert "paths-ignore" not in triggers and "paths:" not in triggers
+    assert patterns, f"push to main has no paths-ignore:\n{triggers}"
+    assert "paths:" not in triggers, "a positive filter the gate does not read"
+    unreadable = [p for p in patterns if p.startswith("!") or any(c in p for c in "[{?+")]
+    assert unreadable == [], f"the hub's gate reads `*` and `**` only and refuses on {unreadable}"
+    pr = triggers.split("\n  pull_request:", 1)[1]
+    assert "paths" not in re.split(r"\n  [a-z_]+:", pr, maxsplit=1)[0], \
+        "the pull request runs whole, whatever it touches"
+
+    tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True,
+                             check=True).stdout.splitlines()
+    globs = [_gh_glob(p) for p in patterns]
+    ignored = {path for path in tracked if any(g.match(path) for g in globs)}
+    assert ignored, "the list matches no tracked file — a typo, not a filter"
+
+    read_by_tests = {"README.md", "docs/TESTING.md"} | {
+        p for p in tracked if re.fullmatch(r"docs/guide/[^/]+\.md", p)}
+    code = {p for p in ignored if p in read_by_tests or not p.endswith(
+        (".md", ".webp", ".png", ".jpg", ".svg", ".gif"))}
+    assert code == set(), f"called prose, but a test reads it or it is not prose: {sorted(code)}"
     assert "NOT a release gate" not in text, "the header still says CI holds no tag back"
 
 

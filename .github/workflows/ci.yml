@@ -8,8 +8,18 @@
 #
 # A release gate since HUB-057. The hub's `release-preflight.py`, which `scripts/ship.py` calls,
 # refuses a tag unless CI on HEAD is green: red, still running, or no run on the sha all refuse.
-# So every push to `main` runs, prose included -- the commit a release starts from is a CHANGELOG
-# commit by construction, and a path filter would leave it with no run to read (HUB-058, hub #136).
+# A push to `main` that changes only prose runs nothing (`paths-ignore` below, HUB-098, hub #339):
+# the gate rests such a commit on its nearest green ancestor, and it reads this very filter to know
+# which paths are prose. That is what answers HUB-058 (hub #136) now -- a release commit is a
+# CHANGELOG commit by construction, and it no longer needs a run of its own.
+#
+# The list names only what no test reads: README.md, docs/TESTING.md and docs/guide/*.md are read
+# by tests and stay code. `scripts/ship.py` reads CHANGELOG.md and docs/TODO.md on this machine at
+# tag time; CI never runs it, so a run on those files checks nothing. Plain `*` and `**` only: the
+# hub's gate reads no other glob and refuses a prose tip when it meets one. A path left off the
+# list only costs a run; a path wrongly on it skips one, so add one only after a grep of tests/.
+# The pull request is not filtered: it runs whole once, whatever it touches.
+#
 # A branch runs through its pull request only: a push trigger on every branch ran each PR commit
 # twice, `push` and `pull_request`, with nothing new in the second run.
 #
@@ -36,6 +46,16 @@ name: checks
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - CHANGELOG.md
+      - CLAUDE.md
+      - NOTICE.md
+      - docs/TODO.md
+      - docs/*-*.md
+      - docs/audit/**
+      - docs/superpowers/**
+      - docs/guide/img/**
+      - spike/**.md
   pull_request:
   # The Linux abort (HUB-049) shows in about half of runs, and a push gives exactly one. A series
   # on demand is what turns "no repro" into evidence: run this with `linux_runs: 20` and read the
