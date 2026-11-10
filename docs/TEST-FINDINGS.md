@@ -4133,3 +4133,15 @@ Windows (`tests/test_project_github.py:924`, run 42724107999); the PR run on the
 release session. Quarantined: `xfail(strict=False, reason="flaky: #268")`.
 **Weight.** Low: no product code; `main`'s CI is red until the mark lands, and the test checks nothing while it stands.
 **Whose.** TCC only. The fix waits for the milestone.
+
+### 195. CI: the root causes of the flaky tests and the slow runs, found once (`docs/CI-ROOT-CAUSE-2026-11-10.md`)
+**What.** Asked by the Arbiter after `main` went red twice in a row on test code alone (194; then two more tests on Linux
+and Windows cancelled at the 60-minute limit, run 42766261211). Facts gathered by three Sonnet passes, the analysis by
+Fable. Five root causes: windows are never destroyed, so app-wide restyles cost more as a process runs; tests drive a
+live `MainWindow` and wait a fixed time; process-wide state is not reset between tests; the PR (12 shards) and `main`
+(one serial process) are different environments, and Linux's `continue-on-error` reports a red suite as green; the
+method's self-tests and the installers check run in every shard.
+**Weight.** High for the process: each W-12 round cost ~20 min, five rounds, one product defect among 19 reds.
+**Whose.** TCC's CI and suite; the process part with the hub. **At the W-13 milestone: one group «CI», one decision**
+with hub #339 (HUB-098: docs pushes run no checks, the nightly by hand, `CLAUDE.md:13`; its ask 2 rewritten by the hub
+after this analysis, comment of 2026-11-10) and the analysis's options A1, H, D, I, K. The Arbiter's word 2026-11-10.
