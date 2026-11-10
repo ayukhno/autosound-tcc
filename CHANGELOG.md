@@ -15,6 +15,16 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [v1.3.1] — 2026-11-10 · the Resonalyze import reads the current Resonalyze's projects (format 13)
+
+Paired with method `8ae9095e41e1342b97c8926513387ced3b8c56f9` — the tag on that commit is **`v3.3.1`**.
+
+### Fixed
+
+- **The Resonalyze import takes a project saved by the current Resonalyze** (hub #341): the import window reads `.vc`
+  files through the method's reader, and the method's v3.3.1 teaches it the formats 11–13. Before, such a project was
+  refused by its version number. A channel that carries a FIR stage is refused by name, not read wrong.
+
 ## [v1.3.0] — 2026-11-09 · any version of any slot read-only, the preset's settings, «in the DSP now», saving to GitHub in the open, the MCP key kept per project, the method at v3.3.0
 
 Paired with method `c92978a60c3583e3540eb8e1e4537d7a4b2f0d9b` — the method's signed candidate `beta-v3.3.0-rc2`: the
