@@ -4124,7 +4124,7 @@ The Arbiter's `ok` on two more, each an issue with its assessment:
 Left in the pool, his word the same day: tcc#258 (subscription or API per AI, beside the Claude API key group). Not taken:
 the first step naming the two desk paths; the skill's intake form already offers them.
 
-## W-13 — collection (from 2026-11-10)
+## W-13 — collection (from 2026-11-10; the milestone is W-14, read from both repos)
 
 ### 194. The Send question's close test is flaky in the serial run (tcc#268)
 **What.** `test_closing_during_the_question_sends_nothing` went red on the push to `main` at `c5b56ae4` on Linux and
@@ -4188,3 +4188,22 @@ no way to start it. A likely partner of 198: «the file differs — take the fil
 be enough: check on test with a Mosconi project before building anything.
 **Weight.** Unknown until tested.
 **Whose.** TCC, on 197.
+
+## W-14 — the milestone (2026-11-22)
+
+The Arbiter's «збір закінчено» (2026-11-22). The skill has no open wave and its last is W-13, so TCC's is W-14: `W-14 · v1.4.0`
+(milestone 13). Review mode: an issue is built only with `ok`.
+
+| pool | issue | group |
+|---|---|---|
+| 197 | #271 pin the method's v3.3.2 (carries hub #343) | Mosconi and Helix |
+| 198 | #272 «Перевірити налаштування» (hub #347; Mosconi `.PR15` too: the Arbiter's call) | Mosconi and Helix |
+| 199 | #273 a new version from the file, `propose --from-file` | Mosconi and Helix |
+| 200 | #274 Mosconi's two DSP-program settings: check first | Mosconi and Helix |
+| 195 | #275 CI: A1, H, D, G | CI |
+| 194 | #268, and #262, #263, #264 | CI |
+| — | #265 the Send button, #266 W-12's minor findings | Project on GitHub, Hygiene |
+| 196 | done with hub #339 | — |
+
+Not on it: the Claude API key group (#238–#242, #258) and hub #264 (PAS-014, deferred), until the Arbiter says.
+
