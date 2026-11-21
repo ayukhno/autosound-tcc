@@ -2080,6 +2080,14 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   skill: TCC-054 (hub #269, the round's raw-title matching vs `name_key`). Resume:
   `hub/bin/role tcc --resume 530f0561-3f1c-4b26-a240-c7149565668c`.
 
+### F-111 — W-14 · v1.3.2: the milestone, the plan
+
+**Статус**: open · 2026-11-22, the Arbiter's «збір закінчено»: milestone 13 `W-14 · v1.3.2` (opened as v1.4.0, renamed: «це
+патч»), 8 issues with `ok`: #271–#274 (Mosconi and Helix, his priority), #275 and #268 (CI), #265, #266. Off it: the key group,
+Windows CI (#262–#264), hub #264. Bus: hub #347 and #343 taken; hub #348 (TCC-071) sent to skill, `attest --from-file .PR15`
+for Mosconi's mark. The plan `docs/PLAN-W-14.md` is written; four decisions wait for him, then his «го». Nothing built.
+CI: none. resume: `hub/bin/role tcc --resume f27c65a7-6902-463c-b044-2597f3ad82b1`
+
 ### F-110 — hub #339 asks 2–4: one shape of CI run, the nightly by hand, the candidate is cut here
 
 **Статус**: done · 2026-11-21, `d6bab6b4` on `main` (`--ff-only`, `[skip ci]`, zero `ci.yml` runs), hub #339 closed · not yet
