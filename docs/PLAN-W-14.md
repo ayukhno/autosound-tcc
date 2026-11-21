@@ -36,6 +36,8 @@ Implementers run **one at a time** in the tree.
 2. **#273, where it lives:** in the comparison's result. When rows differ, a button «Зберегти як нову версію» runs
    `propose --from-file` and shows the fields it kept. **Advice: there**, `.pct6` only (item 14 refuses `.PR`). Without
    the comparison it would be a write nobody saw coming.
+   **Taken (the Arbiter, 2026-11-22): there.** Mosconi joins by hub #349 (TCC-072, `propose --from-file .PR15`), a new
+   ticket on his word.
 3. **#272, how TCC knows what the method reads:** one table in TCC, `reads_save_file`. It maps the Audiotec-Fischer
    family to `.pct6` and the Mosconi PICO 6/8-2 to `.PR15`, with contract item 13 named as its source. The method has
    no verb that answers "which files do you read". **Advice: the table now**, and a test that reads item 13 in
