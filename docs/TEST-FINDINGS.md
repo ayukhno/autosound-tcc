@@ -4191,19 +4191,20 @@ be enough: check on test with a Mosconi project before building anything.
 
 ## W-14 — the milestone (2026-11-22)
 
-The Arbiter's «збір закінчено» (2026-11-22). The skill has no open wave and its last is W-13, so TCC's is W-14: `W-14 · v1.4.0`
-(milestone 13). Review mode: an issue is built only with `ok`.
+The Arbiter's «збір закінчено» (2026-11-22). The skill has no open wave and its last is W-13, so TCC's is W-14: `W-14 · v1.3.2`
+(milestone 13; opened as v1.4.0, renamed the same day: «це патч», the Arbiter). Review mode: an issue is built only with `ok`.
 
 | pool | issue | group |
 |---|---|---|
 | 197 | #271 pin the method's v3.3.2 (carries hub #343) | Mosconi and Helix |
-| 198 | #272 «Перевірити налаштування» (hub #347; Mosconi `.PR15` too: the Arbiter's call) | Mosconi and Helix |
+| 198 | #272 «Перевірити налаштування» (hub #347); Mosconi `.PR15` in (his OK); the mark by capability, not Helix-only (his word); Mosconi's mark waits for hub #348 TCC-071 | Mosconi and Helix |
 | 199 | #273 a new version from the file, `propose --from-file` | Mosconi and Helix |
 | 200 | #274 Mosconi's two DSP-program settings: check first | Mosconi and Helix |
 | 195 | #275 CI: A1, H, D, G | CI |
-| 194 | #268, and #262, #263, #264 | CI |
-| — | #265 the Send button, #266 W-12's minor findings | Project on GitHub, Hygiene |
+| 194 | #268 | CI |
+| — | #265 the Send button (`ok`), #266 W-12's minor findings | Project on GitHub, Hygiene |
 | 196 | done with hub #339 | — |
 
-Not on it: the Claude API key group (#238–#242, #258) and hub #264 (PAS-014, deferred), until the Arbiter says.
+Not on it, the Arbiter 2026-11-22: the Claude API key group (#238–#242, #258, «ключі ні»); Windows CI work (#262, #263, #264,
+«все що по windows не беремо»); hub #264 (PAS-014) stays deferred.
 
