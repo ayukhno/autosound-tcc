@@ -2082,7 +2082,8 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 
 ### F-110 — hub #339 asks 2–4: one shape of CI run, the nightly by hand, the candidate is cut here
 
-**Статус**: open · 2026-11-21, the Arbiter's «терміново», during W-14's collection · built on branch `hub-339-ci-shapes`:
+**Статус**: done · 2026-11-21, `d6bab6b4` on `main` (`--ff-only`, `[skip ci]`, zero `ci.yml` runs), hub #339 closed · not yet
+seen live: the gate's skip on the first `--ff-only` merge after it · was: the Arbiter's «терміново», during W-14's collection · built on branch `hub-339-ci-shapes`:
 `ci.yml` gets a `gate` job (the skill's `checks.yml` form): a push to `main` runs the PR's shards only when no green
 pull-request run of `ci.yml` exists on the commit, so after `--ff-only` it runs only ruff; `linux` and `windows` (the whole
 suite in one process) only on `workflow_dispatch`; `cancel-in-progress` is off on `main`; the header points to hub
@@ -2091,7 +2092,7 @@ only · `CLAUDE.md`: the product session cuts the candidate, `release` tags and 
 passed, the three new tests red on `main`'s workflows; `docs/TESTING.md`'s CI section rewritten to the new shape (the review's
 finding: it said the tag waits ~20 min for `main`'s whole run); one review seat (Opus): no bug, one stale document, two minors, all fixed;
 YAML and actionlint clean; the hub's `push_ignore` reads the filter
-unchanged · CI: none; the push waits for the Arbiter's OK (`[skip ci]`, `--ff-only`) · resume:
+unchanged · CI: none · resume:
 `hub/bin/role tcc --resume f27c65a7-6902-463c-b044-2597f3ad82b1`
 
 ### F-109 — v1.3.1: the method's v3.3.1, the Resonalyze import reads format 13 (hub #341)
