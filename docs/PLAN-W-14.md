@@ -27,24 +27,23 @@ included, waits for the Arbiter's OK.
 
 Implementers run **one at a time** in the tree.
 
-## Decisions for the Arbiter
+## Decisions — all four taken with the Arbiter, 2026-11-22
 
-1. **#275, option G:** move the method's self-tests, the installers check, the writer-race test and real-`uv` packaging out
-   of every shard into one job that runs only when `vendor/` or `scripts/` change. `TESTING.md` says they ride in the
-   suite. **Advice: yes**, but with no nightly; schedules were declined. It takes them out of 12 shards, and they still run
-   on every pin and every change to `scripts/`.
-2. **#273, where it lives:** in the comparison's result. When rows differ, a button «Зберегти як нову версію» runs
-   `propose --from-file` and shows the fields it kept. **Advice: there**, `.pct6` only (item 14 refuses `.PR`). Without
-   the comparison it would be a write nobody saw coming.
-   **Taken (the Arbiter, 2026-11-22): there.** Mosconi joins by hub #349 (TCC-072, `propose --from-file .PR15`), a new
-   ticket on his word.
-3. **#272, how TCC knows what the method reads:** one table in TCC, `reads_save_file`. It maps the Audiotec-Fischer
-   family to `.pct6` and the Mosconi PICO 6/8-2 to `.PR15`, with contract item 13 named as its source. The method has
-   no verb that answers "which files do you read". **Advice: the table now**, and a test that reads item 13 in
-   the vendored `CONTRACT.md` and fails when an extension there is missing from the table. No ticket for a verb.
-4. **Mosconi's mark** waits for hub #348 (TCC-071, `attest --from-file .PR15`). **Advice:** build the mark by the rule
-   now. Mosconi then shows the table and an off mark with its reason, and the mark turns on when the skill ships it,
-   by a re-pin in a later wave.
+1. **#275, option G: yes.** The method's self-tests, the installers check, the writer-race test and real-`uv` packaging
+   move out of every shard into one job. It runs when `vendor/` or `scripts/` change, with no schedule.
+2. **#273: in the comparison's result, Mosconi too.** «Зберегти як нову версію» shows when rows differ, runs
+   `propose --from-file` and shows the fields it kept. Mosconi's half is asked of the skill as hub #349 (TCC-072).
+3. **What the method reads comes from the method.** hub #350 (TCC-073) asks the skill to declare each saved-file reader:
+   its family, file pattern, verbs and checked models. TCC reads that declaration when the pin carries it. On v3.3.2 it
+   falls back to its own two-row table, and a test checks the table against contract item 13. **The declaration is
+   advice, not a gate** (his word): on another model of the same vendor the button stays on and shows the risk warning,
+   and a refusal from the method is shown as the method gives it.
+4. **Mosconi's mark is built now** («роби зразу, скіл вже робить»), against hub #348 (TCC-071). The tests fake the
+   method's answer until the pin carries it.
+
+**The pin moves** (from 3 and 4). Steps 1–8 run on v3.3.2. Before step 9, the pin moves to the skill release that
+carries hub #348, #349 and #350, and the tests that faked those answers are run once against the real method. If that
+release is late, the PR waits for it; that is the milestone's Blocker line.
 
 ## The code map (2026-11-22, `main` at `395ce72b`; a Sonnet reader, line numbers drift)
 
@@ -115,4 +114,4 @@ DSP file is never written.
 
 | issue | state | implementer | commits | review | note |
 |---|---|---|---|---|---|
-| the plan | written 2026-11-22 | — | this | — | the four decisions wait for the Arbiter, then his «го» |
+| the plan | written 2026-11-22; the four decisions taken the same day | — | this | — | hub #348, #349, #350 to skill |
