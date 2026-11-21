@@ -4154,3 +4154,37 @@ hub #341, the hub's word 2026-11-10: write it down, do not edit it now.
 **Weight.** Low: a comment, no behaviour; it misled this session once about what a push to `main` costs.
 **Whose.** TCC's CI. **At the W-13 milestone, beside hub #339 ask 2** (the fate of `main`'s push run): the comment
 follows whatever that decision is.
+**Done 2026-11-21** with hub #339 (`d6bab6b4`): the header now points to the hub's rules and says what `main` runs.
+
+### 197. Pin the method's v3.3.2: the Mosconi PICO 6/8-2 profile and the Helix `.pct6` reader (the Arbiter, 2026-11-21)
+**What.** The skill's v3.3.2 (`aaa3cec`, signed, 2026-11-21) adds a Mosconi PICO 6/8-2 profile with its filter model in
+`predict` and a read-only `.PR15` reader, plus the Helix `.pct6` reader with `compare-file` (contract item 13) and
+`attest` / `propose --from-file` (item 14). TCC pins v3.3.1. The new-project picker lists the method's bundled profiles
+(`_bundled_profiles`), so Mosconi should appear once the pin moves: check that on test. The v3.3.3 patch now being cut
+changes nothing for TCC (the Arbiter's word): v3.3.2 is the base. The pin also carries hub #343 (RES-024): v3.3.2 has no
+link to the deleted `ayukhno/autosound-measurements` (`git grep` at v3.3.2: 0 files); TCC's own files have none.
+**Weight.** High, the Arbiter's priority.
+**Whose.** TCC; the method is released.
+
+### 198. «Перевірити налаштування» in the DSP row: a `.pct6` against the journal's version (hub #347 SKL-093)
+**What.** A button after the version mark: pick a `.pct6`, run `state/apply.py <project> compare-file <version> FILE --json`,
+show parameter · journal · file · result, sound rows first, an `unknown` never shown as a match, the `checked_model: false`
+warning shown above the table. Exit codes 0–3 per item 13; TCC writes nothing beside the file. The «checked in the DSP» mark
+(#251, `dsp_check.py`) then reads the record that `attest --from-file` writes (item 14): one source for the mark and the
+table. Active for every Audiotec-Fischer profile, off with its reason for others. Item 13 also reads a Mosconi `.PR15`
+(one sample checked), so the button could serve Mosconi too: a question for the milestone.
+**Weight.** High, the Arbiter's priority.
+**Whose.** TCC, on 197.
+
+### 199. A new version from the DSP's file: `propose --from-file FILE.pct6` (contract item 14) — no ticket yet
+**What.** The method can bank a new journal version from the values in a saved `.pct6` and name every field it kept. TCC has
+no way to start it. A likely partner of 198: «the file differs — take the file's values as a new version».
+**Weight.** Medium: a session can run it in chat today.
+**Whose.** TCC, on 197; shape at the milestone.
+
+### 200. Mosconi: `predict` asks two DSP-program settings the first time (peak mode, corner set)
+**What.** For a Mosconi project the method asks which peak mode the DSP program is set to and its corner set
+(`project.py <dir> set-dsp-setting`). TCC has no screen for this (no `set-dsp-setting` in `src/`). The session's chat may
+be enough: check on test with a Mosconi project before building anything.
+**Weight.** Unknown until tested.
+**Whose.** TCC, on 197.
