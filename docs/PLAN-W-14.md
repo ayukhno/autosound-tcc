@@ -27,6 +27,9 @@ included, waits for the Arbiter's OK.
 
 Implementers run **one at a time** in the tree.
 
+**No `/test-audit` this wave** (the Arbiter, 2026-11-22): the suite was analysed on 2026-11-10
+(`docs/CI-ROOT-CAUSE-2026-11-10.md`), and since then only three commits touched `tests/` (`c94a0467`, `e8e3a7cd`, `d6bab6b4`).
+
 ## Decisions — all four taken with the Arbiter, 2026-11-22
 
 1. **#275, option G: yes.** The method's self-tests, the installers check, the writer-race test and real-`uv` packaging
