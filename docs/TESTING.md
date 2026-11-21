@@ -99,28 +99,27 @@ would have moved 21.2 minutes to 16.4. And the volume grows on its own — this 
 1722 tests / 498 s on 2026-09-09, so in nine days the count was up 24% and the serial time 31%.
 Fixing a few slow tests was ruled out by that measurement rather than by opinion.
 
-> **The pull request runs four shards per platform. The push to `main` runs the suite whole.**
+> **The pull request runs four shards per platform. A push to `main` runs the same shards only when no green pull-request run exists on the commit; the whole suite in one process runs by hand.**
 
 Each shard is a separate runner with a quarter of the files, run SERIALLY — the same condition a
 release has, with fewer tests per process. That is not the `-n auto` rejected above: no workers
 share a machine, so nothing reproduces the Qt crash that made parallel opt-in. About six minutes
 instead of twenty-one.
 
-The whole serial run does not disappear, it moves to where nobody is waiting: the push to `main`
-that lands the wave. Fewer tests per process is exactly what can HIDE the faults those long jobs
-exist to catch — the Linux abort (HUB-049) and the `#19` class of native Windows crash — and the
-release gate reads the `main` run anyway.
+After `--ff-only` the PR's run is on the very commit, so `main`'s push runs `gate` and ruff and
+skips the rest (`ci.yml`, `gate`), and the tag needs no wait for a second run: which run the gate
+reads is the hub's rule, `RELEASE-CHANNEL.md` §9.9.1. A commit that reached `main` without a PR runs
+the shards there.
 
-**Locally nothing changes.** `make test` is the whole suite, serial, and `scripts/ship.py` still
-runs it whole with `-n 0` before it will cut a tag.
+The whole serial run (`linux`, `windows`) was `main`'s from 2026-09-20 to 2026-11-21, to catch
+what fewer tests per process can hide — the Linux abort (HUB-049) and the `#19` class of native
+Windows crash. Both were closed by mid-September; since 10-02 that run found no product defect and
+made seven test-only reds (`docs/CI-ROOT-CAUSE-2026-11-10.md` RC4). It stays as a manual series
+(`workflow_dispatch`, `linux_runs` / `windows_runs`), the way a long-process fault is chased
+(HUB-098, hub #339).
 
-**What DOES change for the person cutting the release:** the tag now waits for the `main` run.
-The gate is unmoved — `hub/scripts/release-preflight.py` asks for a successful workflow run on
-HEAD and always did — but that run used to be the one whose heavy jobs were skipped because the
-pull request had already been green on the same sha. Now it is the whole suite, so after the
-fast-forward push there is about twenty minutes before `make ship REAL=1` will pass. The wave does
-not get longer; the waiting moves off the pull request, where a person is watching, onto the merge,
-where nobody is.
+**Locally nothing changes.** `make test` is the whole suite, serial, and `scripts/ship.py` falls
+back to running it whole with `-n 0` when CI cannot be read.
 
 ### The split itself
 
@@ -138,6 +137,8 @@ of them load-bearing, and `tests/test_ci_shard.py` holds each:
   quarter of the suite unrun.
 
 ### The four checks the sharding was not allowed to skip, run 2026-09-20
+
+*A record of 2026-09-20, when `main` ran the suite whole. Since 2026-11-21 it runs the shape above (hub #339).*
 
 `TCC-020` (hub #181) asked for four things to be checked **with commands, not by reading the YAML**.
 Three can be answered now; the fourth waits for the tag, because it is about a tag.

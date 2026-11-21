@@ -2,14 +2,15 @@
 #
 # The update press can install a method newer than the pin on a user's machine —
 # `updates.newest_tag()` is the tag the app offers — so a method release that breaks TCC breaks it
-# in the field before any TCC release says so. This runs the suite against exactly that tag every
-# night, so such a release shows within a day.
+# in the field before any TCC release says so. This runs the suite against exactly that tag, by
+# hand: before a wave, and when the method changes. It ran every night until 2026-11-10, when the
+# owner turned the schedule off («вимкнути, запуск руками»): 27 runs, 1 072 minutes at macOS's ×10
+# in 45 days (HUB-098, hub #339).
 #
-# NOT a release gate, and the triggers are what keep it that way (ruling 2): the hub's release
-# preflight reads every run on `push` for the release sha (`ci_state` in its
-# `scripts/release-preflight.py`), so a push trigger here would make the method's newest tag a
-# condition of TCC's own release. A schedule and a button, nothing else; `tests/test_ship.py`
-# fails on any other trigger.
+# NOT a release gate, and the trigger is what keeps it that way (ruling 2): the hub's release
+# preflight reads the `push` runs on the release sha (hub `governance/RELEASE-CHANNEL.md` §9.9), so a
+# push trigger here would make the method's newest tag a condition of TCC's own release. A button,
+# nothing else; `tests/test_ship.py` fails on any other trigger.
 #
 # A red run can be the METHOD's: the suite runs the skill's own selftests too. So the run says
 # which tag it ran — in the suite job's name and in the run summary. Not in the run title: GitHub
@@ -17,9 +18,6 @@
 name: method-newest
 
 on:
-  schedule:
-    # Off the hour: GitHub delays, and under load drops, the runs scheduled as an hour turns.
-    - cron: "17 2 * * *"
   workflow_dispatch:
 
 permissions:
@@ -68,7 +66,7 @@ jobs:
     name: suite against method ${{ needs.pick.outputs.tag }}
     needs: pick
     # macOS, the suite whole in one job. Linux aborts a whole-suite run about half the time
-    # (HUB-049, `ci.yml`), and a nightly red for that would be read as the method's.
+    # (HUB-049, `ci.yml`), and a red for that would be read as the method's.
     runs-on: macos-latest
     # The Linux whole-suite job's bound in `ci.yml`. No whole-suite macOS run has been timed on CI
     # yet; the first run says how much of this it uses.

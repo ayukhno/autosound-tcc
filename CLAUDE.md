@@ -10,8 +10,13 @@ owner, and this repo has paid for that shape often enough (HUB-048).
 make check                                    # the linter AND the whole suite, ~8 min, ONE verdict
 make ship                                     # dry run: works out the next patch, writes nothing
 make ship CANDIDATE=vX.Y.Z                    # dry run of a beta candidate; REAL=1 tags HEAD, writes nothing else
-make ship VERSION=vX.Y.Z                      # dry run of a named release (a minor is the release role's)
+make ship VERSION=vX.Y.Z                      # dry run of a named release
 ```
+
+**The candidate is cut here, in this session.** The product session cuts the candidate that carries
+its release: the version, the lock, the CHANGELOG heading, the Paired line, the pool closed. `release`
+only tags and publishes. A minor too: W-12 read «a minor is the release role's» as «the release role
+does the minor», and no candidate was cut (hub #337 §2B, #339).
 
 **Use `make check`, not `make test`.** They are not the same claim: `make test` does not run the
 linter, CI does, and two commands mean two outputs — the second of which gets scrolled past. That
@@ -63,7 +68,7 @@ it parses the command line, and `make ship` contains no git verb at all.
 **Releases come in waves** (hub `governance/WAVES.md`, HUB-065): test → review → work → release,
 and again. One branch and one PR per product per wave; the version bump and the CHANGELOG entry are
 committed on that branch before the PR; the full CI runs on the pull request, and the tag goes on the
-merged commit straight away. A finding waits for its wave — only the user's «терміново» ships one
+merged commit straight away. Which run the gate reads is the hub's: `RELEASE-CHANNEL.md` §9.9.1. A finding waits for its wave — only the user's «терміново» ships one
 earlier, and during a wave the hub changes nothing in the process.
 
 **The wave's number is READ, never agreed on.** Before opening one, look for an open `W-…` milestone in

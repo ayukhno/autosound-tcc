@@ -1,46 +1,41 @@
 # What this buys, and what it deliberately does not.
 #
-# The suite already runs on every release: `scripts/ship.py` runs `pytest tests/ -q` whole before
-# it will cut a tag. So CI is not here to run the tests -- it is here to run them where this
-# machine cannot look: Windows, whose installer half is checked by hand on the author's VM, and
-# Linux offscreen, where the suite aborts with exit 134 in roughly one run out of two and which
-# macOS does not reproduce at all (checked three times, 2026-09-06).
+# CI runs the suite where this machine cannot look: Windows, whose installer half is checked by hand
+# on the author's VM, and Linux offscreen, where the suite aborts with exit 134 in roughly one run
+# out of two and which macOS does not reproduce at all (checked three times, 2026-09-06).
 #
-# A release gate since HUB-057. The hub's `release-preflight.py`, which `scripts/ship.py` calls,
-# refuses a tag unless CI on HEAD is green: red, still running, or no run on the sha all refuse.
-# A push to `main` that changes only prose runs nothing (`paths-ignore` below, HUB-098, hub #339):
-# the gate rests such a commit on its nearest green ancestor, and it reads this very filter to know
-# which paths are prose. That is what answers HUB-058 (hub #136) now -- a release commit is a
-# CHANGELOG commit by construction, and it no longer needs a run of its own.
+# What the release gate reads, which run counts and when a commit may rest on its parent's run are
+# the hub's rules, not this file's: hub `governance/RELEASE-CHANNEL.md` §9.9-§9.9.2 and
+# `governance/WAVES.md` §2, carried by `hub/scripts/release-preflight.py`. Only this workflow's
+# own choices are written here: its triggers, its filter list and why each path is on it.
 #
-# The list names only what no test reads: README.md, docs/TESTING.md and docs/guide/*.md are read
-# by tests and stay code. `scripts/ship.py` reads CHANGELOG.md and docs/TODO.md on this machine at
-# tag time; CI never runs it, so a run on those files checks nothing. Plain `*` and `**` only: the
-# hub's gate reads no other glob and refuses a prose tip when it meets one. A path left off the
-# list only costs a run; a path wrongly on it skips one, so add one only after a grep of tests/.
-# The pull request is not filtered: it runs whole once, whatever it touches.
+# THE FILTER. A push to `main` that changes only prose runs nothing (`paths-ignore` below, HUB-098,
+# hub #339). The list names only what no test reads: README.md, docs/TESTING.md and docs/guide/*.md
+# are read by tests and stay code. `scripts/ship.py` reads CHANGELOG.md and docs/TODO.md on this
+# machine at tag time; CI never runs it, so a run on those files checks nothing. Plain `*` and `**`
+# only: the hub's gate reads this list and refuses a prose tip when it meets another glob. A path
+# left off the list only costs a run; a path wrongly on it skips one, so add one only after a grep
+# of tests/. The pull request is not filtered: it runs whole once, whatever it touches.
+#
+# ONE SHAPE (hub #339 ask 2). The pull request is sharded: `tests/` split four ways per platform by
+# `scripts/ci_shard.py`, each shard a separate machine running its quarter SERIALLY (TCC-020, hub
+# #181; measured 2026-09-18: about 6 minutes a quarter where the whole Windows suite took 21). This
+# is not the `-n auto` rejected on 2026-09-09: each job has a whole runner and the conditions a
+# release has, with fewer tests per process.
+#
+# The push to `main` runs the same shards, and only when no green pull-request run of this workflow
+# exists on that commit (`gate` below, as the skill's `checks.yml` does it). After `--ff-only` the
+# PR's run is on the very commit, so `main` runs the linter and nothing else; a commit that reached
+# `main` without a PR is tested there in full.
+#
+# The whole suite in one process per platform (`linux`, `windows`) runs on demand only, as a series
+# (`workflow_dispatch`). It was `main`'s run until 2026-11-21: its reasons were closed (`#19` fixed
+# 09-12, HUB-049 closed 09-14), and since 10-02 it found no product defect and made seven test-only
+# reds, one process of 150 files accumulating widgets and state (`docs/CI-ROOT-CAUSE-2026-11-10.md`
+# RC4). A series is still how a long-process fault is chased.
 #
 # A branch runs through its pull request only: a push trigger on every branch ran each PR commit
 # twice, `push` and `pull_request`, with nothing new in the second run.
-#
-# Two shapes of run, and which one a person waits for decides everything (TCC-020, hub #181).
-#
-# THE PULL REQUEST is sharded: `tests/` split four ways per platform by `scripts/ci_shard.py`, each
-# shard a separate machine running its quarter SERIALLY. Measured 2026-09-18: the wait was the
-# suite and the suite is uniform volume — Windows ran 2104 tests in 1273 s and its forty slowest
-# were 290 s of that, so deleting every one of them would have moved 21.2 minutes to 16.4. A
-# quarter each is about 6. This is not the `-n auto` that was rejected on 2026-09-09: that put
-# eight workers on one machine and killed Qt in 29% of runs; here each job has a whole runner and
-# the same serial conditions a release has, with fewer tests per process.
-#
-# THE PUSH TO `main` runs the suite WHOLE and serial, on the commit the wave was merged onto. It is
-# the run the release gate reads, and it is the one that can still catch what fewer tests per
-# process can hide — the Linux abort (HUB-049) and the `#19` class of native Windows crash, both of
-# which need a long run in one process to show. Nobody waits for it interactively.
-#
-# So each commit still runs once in each shape, and neither is a substitute for the other. The
-# earlier arrangement — a full run on the pull request, skipped on `main` when a green PR run
-# existed on the same sha — is gone with the `pr-green` job that asked the question.
 name: checks
 
 on:
@@ -101,14 +96,49 @@ concurrency:
   # A manual series gets its own group: it is the answer to a question somebody asked, and a push
   # landing mid-series must neither kill it nor be killed by it.
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'auto' }}
-  cancel-in-progress: true
+  # A newer push replaces a branch's run; on `main` a run always finishes, and GitHub keeps at most
+  # one pending behind it. A second push used to kill `main`'s verdict: 77 of 120 (hub #339).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# `contents: read` for the checkouts, and nothing else: no job here asks GitHub about GitHub any
-# more (the run-listing that needed `actions: read` went with `pr-green`).
+# `contents: read` for the checkouts; `actions: read` for `gate`, which lists this workflow's own
+# runs. Nothing here writes.
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  # Whether the suite runs at all. A pull request: yes. A push to `main`: only when no green
+  # pull-request run of this workflow exists on the same commit. Anything it cannot establish -- no
+  # answer from the API, an unexpected shape -- counts as "not found", so the suite runs: a skip
+  # needs a green run to point at. A manual series: no, the whole-suite jobs below are its answer.
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.pr.outputs.run }}
+    steps:
+      - id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          case "$EVENT" in
+            pull_request) echo "run=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            push) ;;
+            *) echo "run=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          found="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=pull_request&status=success" --jq '.total_count' 2>/dev/null || echo 0)"
+          if [ "${found:-0}" -gt 0 ] 2>/dev/null; then
+            echo "a green pull-request run of checks exists on $SHA -- the suite is not run twice"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "no green pull-request run on $SHA -- running the shards on main"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   ruff:
     name: ruff
     runs-on: ubuntu-latest
@@ -134,9 +164,9 @@ jobs:
   # fine. Red here is not a blinking check — it is a count of work left, and it points at a file.
   suspects:
     name: suspects (${{ matrix.os }})
-    # The pull request's, like the shards: on `main` the whole suite runs anyway, and this list is
-    # a minute of it.
-    if: github.event_name == 'pull_request'
+    # With the shards, wherever they run: this list is a minute of them.
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -165,10 +195,10 @@ jobs:
           printf 'running %s entries\n' "${#ids[@]}"
           uv run --locked --extra dev --python 3.12 python -m pytest "${ids[@]}" -q
 
-  # The pull request's whole answer, four ways per platform. macOS is in here rather than on its
-  # own any more: as the control it earns nothing on a push (it is the machine the author already
-  # runs), and on a pull request it says whether a failure elsewhere is platform-specific or simply
-  # a broken commit — which a quarter of it says just as well, four times sooner.
+  # The pull request's whole answer, four ways per platform, and `main`'s when no green PR run
+  # exists on the commit. macOS is in here rather than on its own: it says whether a failure
+  # elsewhere is platform-specific or simply a broken commit — which a quarter of it says just as
+  # well, four times sooner.
   #
   # The split is `scripts/ci_shard.py`: by FILE, because a session-scoped QApplication and
   # module-level state make a file the safe unit (`docs/TESTING.md`, under `--dist loadfile`), and
@@ -177,7 +207,8 @@ jobs:
   # every file is claimed exactly once is `tests/test_ci_shard.py`, not this file.
   shard:
     name: shard ${{ matrix.group }}/4 (${{ matrix.os }})
-    if: github.event_name == 'pull_request'
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     # The Linux abort (HUB-049) is not this commit's fault, and a check that blinks is ignored
@@ -213,13 +244,13 @@ jobs:
           echo "shard **$GROUP/4** on \`${{ matrix.os }}\`: $count test files" >> "$GITHUB_STEP_SUMMARY"
           uv run --locked --extra dev --python 3.12 python -m pytest $files -q
 
-  # How many Linux runs this workflow was asked for, as a matrix. One on a push; whatever the
-  # dispatch input says when a person is chasing the abort.
+  # How many Linux runs this workflow was asked for, as a matrix: whatever the dispatch input says
+  # when a person is chasing the abort.
   linux-plan:
     name: linux plan
-    # The whole-suite half: a push to `main`, or a series somebody asked for by hand. The pull
-    # request has the shards instead.
-    if: github.event_name != 'pull_request'
+    # The whole-suite half: a series somebody asked for by hand, nothing else. A pull request and a
+    # push to `main` have the shards.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -277,12 +308,12 @@ jobs:
         env:
           PYTHONFAULTHANDLER: "1"
 
-  # How many Windows runs were asked for. One on a push; a series when somebody is chasing a crash.
+  # How many Windows runs were asked for: a series when somebody is chasing a crash.
   windows-plan:
     name: windows plan
-    # The whole-suite half: a push to `main`, or a series somebody asked for by hand. The pull
-    # request has the shards instead.
-    if: github.event_name != 'pull_request'
+    # The whole-suite half: a series somebody asked for by hand, nothing else. A pull request and a
+    # push to `main` have the shards.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

@@ -2080,6 +2080,20 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   skill: TCC-054 (hub #269, the round's raw-title matching vs `name_key`). Resume:
   `hub/bin/role tcc --resume 530f0561-3f1c-4b26-a240-c7149565668c`.
 
+### F-110 — hub #339 asks 2–4: one shape of CI run, the nightly by hand, the candidate is cut here
+
+**Статус**: open · 2026-11-21, the Arbiter's «терміново», during W-14's collection · built on branch `hub-339-ci-shapes`:
+`ci.yml` gets a `gate` job (the skill's `checks.yml` form): a push to `main` runs the PR's shards only when no green
+pull-request run of `ci.yml` exists on the commit, so after `--ff-only` it runs only ruff; `linux` and `windows` (the whole
+suite in one process) only on `workflow_dispatch`; `cancel-in-progress` is off on `main`; the header points to hub
+`RELEASE-CHANNEL.md` §9.9–§9.9.2 and `WAVES.md` §2 instead of restating them · `method-newest.yml`: no schedule, a button
+only · `CLAUDE.md`: the product session cuts the candidate, `release` tags and publishes · `tests/test_ship.py`: 134
+passed, the three new tests red on `main`'s workflows; `docs/TESTING.md`'s CI section rewritten to the new shape (the review's
+finding: it said the tag waits ~20 min for `main`'s whole run); one review seat (Opus): no bug, one stale document, two minors, all fixed;
+YAML and actionlint clean; the hub's `push_ignore` reads the filter
+unchanged · CI: none; the push waits for the Arbiter's OK (`[skip ci]`, `--ff-only`) · resume:
+`hub/bin/role tcc --resume f27c65a7-6902-463c-b044-2597f3ad82b1`
+
 ### F-109 — v1.3.1: the method's v3.3.1, the Resonalyze import reads format 13 (hub #341)
 
 **Статус**: done v1.3.1 · 2026-11-10, the Arbiter's «терміново» (HUB-100), during W-13's collection · signed tag

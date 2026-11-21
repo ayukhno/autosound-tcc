@@ -1015,32 +1015,55 @@ def test_each_commit_runs_ci_once_main_by_push_a_branch_by_its_pull_request():
     assert re.search(r"^  pull_request:", triggers, re.M), "a branch would then run no CI at all"
 
 
-def test_the_pull_request_is_sharded_and_the_push_to_main_runs_the_suite_WHOLE():
-    """TCC-020 (hub #181). Which run a person waits for is the whole design: the pull request gets
-    four shards per platform, about six minutes instead of twenty-one, and `main` gets the whole
-    suite in one process — the shape that can still catch what fewer tests per process hide (the
-    Linux abort HUB-049, the `#19` class of native Windows crash). The release gate reads the
-    `main` run, and nobody waits for it.
+def test_main_runs_the_pull_requests_shape_and_the_whole_suite_runs_by_hand_only():
+    """HUB-098 ask 2 (hub #339), over TCC-020 (hub #181). One shape of run: the pull request gets
+    four shards per platform, and a push to `main` gets the same shards only when no green
+    pull-request run of this workflow exists on the commit (`gate`). The whole suite in one process
+    (`linux`, `windows`) is a manual series: on `main` it found no product defect since 10-02 and
+    made seven test-only reds (`docs/CI-ROOT-CAUSE-2026-11-10.md` RC4).
 
-    Asserted on the file rather than trusted to a reading of it, because the failure mode is
-    silent both ways round: shards that also ran on `main` would double every wave's CI, and a
-    `main` that only ran shards would retire the long-run jobs without anybody deciding to."""
+    Asserted on the file, because the failure is silent both ways: a whole-suite job back on `main`
+    doubles every merge, and shards that never run on `main` leave a commit pushed without a PR
+    untested."""
     text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     jobs = text.split("\njobs:\n", 1)[1]
     blocks = dict(re.findall(r"^  ([a-z][a-z0-9-]*):\n((?:(?:    .*|\s*)\n)*)", jobs + "\n", re.M))
 
-    shard = blocks.get("shard", "")
-    assert "github.event_name == 'pull_request'" in shard, "the shards would run on main too"
+    gate = blocks.get("gate", "")
+    assert "actions/workflows/ci.yml/runs?head_sha=$SHA&event=pull_request&status=success" in gate, \
+        "the gate asks for a green pull-request run of THIS workflow on THIS commit"
+    assert re.search(r"pull_request\) echo \"run=true\"", gate), "a pull request always runs"
+    assert re.search(r"\*\) echo \"run=false\"", gate), "a manual series runs the whole suite instead"
+    assert re.search(r"^  actions: read$", text, re.M), "the gate cannot list runs without it"
+    push_half = gate.split("esac", 1)[1]
+    assert re.search(r'if \[ "\$\{found:-0\}" -gt 0 \][^\n]*\n[^\n]*\n *echo "run=false"', push_half), \
+        "on a push the suite is skipped only when a green run was found, never by default"
+    assert push_half.count('"run=false"') == 1, "a second skip path on a push"
+    assert "needs:" not in blocks.get("ruff", "x"), \
+        "ruff is what `main` runs after a green PR: behind the gate it could skip with the rest"
+
+    for job in ("shard", "suspects"):
+        block = blocks.get(job, "")
+        assert re.search(r"^    needs: gate$", block, re.M), f"{job} does not wait for the gate"
+        assert "if: needs.gate.outputs.run == 'true'" in block, f"{job} ignores the gate"
+    shard = blocks["shard"]
     assert "ci_shard.py --splits 4 --group" in shard, "the split is the script's, not the YAML's"
     assert re.search(r"^        group: \[1, 2, 3, 4\]", shard, re.M), \
         "four groups asked for, four groups run — a mismatch silently drops a quarter of the suite"
 
     for job in ("linux-plan", "windows-plan"):
-        assert "github.event_name != 'pull_request'" in blocks.get(job, ""), \
-            f"{job} runs on the pull request as well, so the wave pays for the suite twice"
+        assert "if: github.event_name == 'workflow_dispatch'" in blocks.get(job, ""), \
+            f"{job} runs outside a manual series, so a merge pays for the suite twice"
 
-    assert "pr-green" not in blocks and "needs: pr-green" not in text, \
-        "the skip-on-main question is gone: main is now the run that must not be skipped"
+
+def test_a_second_push_never_cancels_mains_run():
+    """Hub #339 (Fable's review of the PMO cube §3): `cancel-in-progress: true` on every ref let a
+    second push to `main` kill the running verdict, 77 of 120 `main` runs. A branch's run is still
+    replaced by its newer push."""
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    concurrency = text.split("\nconcurrency:\n", 1)[1].split("\n\n", 1)[0]
+    assert re.search(r"^  cancel-in-progress: \$\{\{ github\.ref != 'refs/heads/main' \}\}$",
+                     concurrency, re.M), concurrency
 
 
 def test_every_platform_that_runs_the_suite_on_a_pull_request_is_sharded():
@@ -1062,7 +1085,7 @@ def test_every_platform_that_runs_the_suite_on_a_pull_request_is_sharded():
 #
 # The update press can install a method newer than the pin (`updates.newest_tag()`), so a method
 # release that breaks TCC breaks it on a user's machine before any TCC release says so. This
-# workflow runs the suite against that tag every night. Read as text, like `ci.yml` above.
+# workflow runs the suite against that tag, by hand. Read as text, like `ci.yml` above.
 
 METHOD_NEWEST = ROOT / ".github" / "workflows" / "method-newest.yml"
 
@@ -1078,10 +1101,12 @@ def _workflow_jobs(text: str) -> dict[str, str]:
     return dict(re.findall(r"^  ([a-z][a-z0-9-]*):\n((?:(?:    .*|\s*)\n)*)", jobs + "\n", re.M))
 
 
-def test_method_newest_runs_nightly_and_by_hand_and_never_on_a_push():
+def test_method_newest_runs_by_hand_only():
     """Ruling 2. The hub's release preflight counts every workflow run on `push` for the release
     sha, so a `push` trigger here would make the method's NEWEST tag a condition of TCC's own
     release, and a `pull_request` one would put a method TCC does not pin in front of every wave.
+    No schedule either: the owner turned the nightly off, «вимкнути, запуск руками» (HUB-098,
+    hub #339) — 1 072 macOS minutes at ×10 in 45 days.
 
     The `on:` block is read as text: PyYAML would hand its key back as the boolean True."""
     text = METHOD_NEWEST.read_text(encoding="utf-8")
@@ -1089,8 +1114,7 @@ def test_method_newest_runs_nightly_and_by_hand_and_never_on_a_push():
     assert on, "no block-form `on:` — a one-line trigger list would slip past this read"
 
     triggers = re.findall(r"^  ([a-z_]+):", on.group(1), re.M)
-    assert sorted(triggers) == ["schedule", "workflow_dispatch"], triggers
-    assert re.search(r"^    - cron: ", on.group(1), re.M), "a schedule with no cron never runs"
+    assert triggers == ["workflow_dispatch"], triggers
 
 
 def test_method_newest_tests_the_tag_the_app_offers_and_names_it():
@@ -1133,7 +1157,7 @@ def test_method_newest_moves_the_submodule_before_the_suite_runs():
 
 
 def test_method_newest_goes_red_for_real_on_the_locked_environment():
-    """No `continue-on-error`: a nightly that cannot go red is one nobody reads, and the point is
+    """No `continue-on-error`: a run that cannot go red is one nobody reads, and the point is
     to see a breaking method release within a day. Every `uv run` is `--locked`: the suite runs
     what `uv.lock` records, not whatever resolves that night. One macOS job, the suite whole: the
     Linux whole-suite run aborts about half the time (HUB-049, `ci.yml`). The skill folder is
