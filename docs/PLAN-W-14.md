@@ -117,4 +117,4 @@ DSP file is never written.
 
 | issue | state | implementer | commits | review | note |
 |---|---|---|---|---|---|
-| the plan | written 2026-11-22; the four decisions taken the same day | — | this | — | hub #348, #349, #350 to skill |
+| the plan | written 2026-11-22; the four decisions taken the same day; his «го» the same day | — | this | — | hub #348, #349, #350 to skill |

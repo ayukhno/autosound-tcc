@@ -2086,7 +2086,8 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 патч»), 8 issues with `ok`: #271–#274 (Mosconi and Helix, his priority), #275 and #268 (CI), #265, #266. Off it: the key group,
 Windows CI (#262–#264), hub #264. Bus: hub #347 and #343 taken; hub #348 (TCC-071) sent to skill, `attest --from-file .PR15`
 for Mosconi's mark. The plan `docs/PLAN-W-14.md`: the four decisions taken 2026-11-22; hub #349 (TCC-072) and #350 (TCC-073) sent and
-accepted by skill; no test audit this wave (his word). **Next: branch `wave-14`, step 1 (the pin to v3.3.2), on his «го».** Nothing built.
+accepted by skill; no test audit this wave (his word). **His «го» given 2026-11-22 («робимо очистку і йдемо в розробку»): next, branch `wave-14`, step 1 (the pin to
+v3.3.2), in a fresh context after `/clear`.** Nothing built.
 CI: none. resume: `hub/bin/role tcc --resume f27c65a7-6902-463c-b044-2597f3ad82b1`
 
 ### F-110 — hub #339 asks 2–4: one shape of CI run, the nightly by hand, the candidate is cut here
