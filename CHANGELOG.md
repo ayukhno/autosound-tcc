@@ -15,6 +15,49 @@ line. The heading is written by hand; `make ship` only checks it. A `### Breakin
 change the user must act on, and such a change is not a patch. A candidate, `beta-vX.Y.Z-rcN`, is
 tagged from the Unreleased notes with `make ship CANDIDATE=vX.Y.Z` and reaches only a beta channel.
 
+## [v1.3.2] — 2026-11-22 · «Check settings» against the DSP's saved file, a new version from it, the Mosconi PICO 6/8-2, the method at v3.3.3
+
+Paired with method `a7966a0bc468abdfcf7a5ef907633571d35bda8d` — the tag on that commit is **`v3.3.3`**.
+
+The wave W-14.
+
+### Added
+
+- **«Перевірити налаштування» (Check settings) in the DSP section** (tcc#272): sets the version on screen against a
+  preset file the DSP program saved — a Helix `.pct6` or a Mosconi PICO 6/8-2 `.PR15` — row by row: parameter,
+  journal, file, result, sound first, an unknown never shown as a match. The method reads the file (`compare-file`);
+  TCC writes nothing to it or beside it. The method's warning comes with every answer, in Ukrainian where the window
+  speaks it, and a model the method was not checked on says so above the table. Which DSPs have the button is the
+  method's own list of the files it reads (`readers.json`), so a reader the method adds later shows with no new TCC;
+  a copy of the method older than v3.3.3 lists none, and the button stays off there with the reason.
+- **«Зберегти як нову версію» (Save as a new version)** (tcc#273): where the comparison found differences, one click
+  banks the file's values as a new version through the method's `propose --from-file`, under its writer lock, and
+  lists what it kept, did not take and took short. TCC does not start the save when the journal's HEAD or the file
+  changed since the comparison.
+- **The Mosconi PICO 6/8-2** in the new project's DSP list (tcc#271), with its «checked in the DSP» mark once a
+  `.PR15` is on record (the method's `attest --from-file`).
+
+### Changed
+
+- **The Send button stands off with its reason** (tcc#265) when there is nothing to send or the project has no remote,
+  instead of not being there.
+- **The method is v3.3.3** (from v3.3.1): the Mosconi profile and the two file readers the buttons above use; the
+  guide's method links point at that tag.
+
+### Fixed
+
+- **Four findings of W-12's acceptance** (tcc#266): a saved file is listed once in the mark's hover; looking at
+  another slot, the strip's mark no longer wraps and cuts the «Show version…» button; a session started from the
+  command line says the method-link message in words, with its hash, not as a raw key; after a cancelled project
+  switch the header reads the project the window shows.
+
+### Tests and CI
+
+- **One process per test file in CI, and a time limit per test** (tcc#275): a test that hangs fails by name instead
+  of stopping its shard; Linux no longer passes when it fails. The method's own self-tests and installers check run
+  in one `method` job, only when `vendor/`, `scripts/` or a dependency file changed.
+- **A test no longer inherits an earlier test's running workers** (tcc#268).
+
 ## [v1.3.1] — 2026-11-10 · the Resonalyze import reads the current Resonalyze's projects (format 13)
 
 Paired with method `8ae9095e41e1342b97c8926513387ced3b8c56f9` — the tag on that commit is **`v3.3.1`**.
