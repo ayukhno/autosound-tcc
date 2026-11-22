@@ -43,6 +43,16 @@ from autosound_tcc.ui.tcc import i18n, qt_shutdown, shown_version, window_folder
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 
 
+def _gone(exc: RuntimeError, where: str) -> None:
+    """A `RuntimeError` met while putting an answer on screen, in the log: a widget whose C++ half
+    went with its window (`Internal C++ object … already deleted`) at debug — the window closed,
+    nothing to show it on — and anything else at warning, with its traceback."""
+    if "already deleted" in str(exc):
+        app_log.logger().debug("dsp file: %s: %s", where, exc)
+    else:
+        app_log.logger().warning("dsp file: %s: %s", where, exc, exc_info=True)
+
+
 class _CompareWorker(QThread):
     """One `compare-file`, off the GUI thread: a child process and a file read."""
 
@@ -118,6 +128,12 @@ def category_word(category: str) -> str:
 
 def refusal_sentence(answer: dsp_file.Answer) -> str:
     message = answer.message
+    if answer.kind == "not_run":
+        return i18n.t("dspFileCheckNotRun").format(message=message)
+    if answer.kind == "timed_out":
+        return i18n.t("dspFileCheckTimedOut").format(message=message)
+    if answer.kind == "busy":
+        return i18n.t("dspFileCheckBusyWriter").format(message=message)
     if answer.kind == "failed":
         return i18n.t("dspFileCheckFailed").format(message=message)
     if answer.code == dsp_file.EXIT_CHANGED:
@@ -138,6 +154,8 @@ def saved_sentence(saved: dsp_file.Saved) -> str:
         return i18n.t("dspFileSaveTimedOut").format(message=message)
     if saved.kind == "stale":
         return i18n.t("dspFileSaveStale")
+    if saved.kind == "head_unread":
+        return i18n.t("dspFileSaveHeadUnread")
     if saved.kind == "not_run":
         return i18n.t("dspFileSaveNotRun").format(message=message)
     if saved.kind == "refused" and saved.code == dsp_file.EXIT_JOURNAL:
@@ -210,9 +228,10 @@ class CompareDialog(QDialog):
         layout.addLayout(buttons)
 
     def offers_save(self) -> bool:
-        """Whether this read may still be banked: offered, and no answer yet but a busy journal's,
-        which wrote nothing. One read is one bank: a second click banks nothing more."""
-        return self.save_button is not None and (self.saved is None or self.saved.kind == "busy")
+        """Whether this read may still be banked: offered, and no answer yet but one that ran
+        nothing — a busy journal's, or a HEAD that could not be read at the click. One read is one
+        bank: a second click banks nothing more."""
+        return self.save_button is not None and (self.saved is None or self.saved.kind in ("busy", "head_unread"))
 
     def saving(self) -> None:
         if self.save_button is not None:
@@ -382,7 +401,8 @@ class FileCheck(QObject):
     def retranslate(self) -> None:
         try:
             self.button.setText(i18n.t("dspFileCheckBusy" if self._busy else "dspFileCheck"))
-        except RuntimeError:  # its C++ half went with the window
+        except RuntimeError as exc:  # its C++ half went with the window
+            _gone(exc, "the button could not be re-said")
             return
         try:
             self.tip.set_text(self.tip_text())
@@ -423,8 +443,11 @@ class FileCheck(QObject):
     @Slot(object)
     def _on_answer(self, answer) -> None:
         self._busy = False
-        if self._stopped or getattr(self._window, "_closing", False):
-            return  # an answer queued before `stop` cut the signal: nothing opens on a closing window
+        if self._stopped:
+            # An answer queued before `stop` cut the signal: nothing opens on a window on its way
+            # out. Not `_closing`: the window sets it BEFORE its close questions and resets it on
+            # Cancel, and a window that stays must show what came meanwhile (group review S1).
+            return
         try:
             self.button.setEnabled(self.reader is not None)
             self.retranslate()
@@ -438,7 +461,8 @@ class FileCheck(QObject):
                                         offer_save=reader is not None and reader.reads(dsp_file.PROPOSE))
             self.dialog.save_requested.connect(self.save)
             self.dialog.show()
-        except RuntimeError:  # the window closed while the file was read
+        except RuntimeError as exc:  # the window closed while the file was read
+            _gone(exc, "the comparison's answer could not be shown")
             return
 
     # ---- the save (#273) -----------------------------------------------------------------------
@@ -458,9 +482,13 @@ class FileCheck(QObject):
         now = dsp_file.md5_of(self._asked_path)
         moved = bool(dialog.answer.md5) and now is not None and now != dialog.answer.md5
         head = dsp_file.journal_head(self._asked_project, self._asked_preset)
-        if (moved or head != self._asked or self._version() != self._asked
-                or shown_version.key_of(self._window) is not None):
+        if moved or (head is not None and head != self._asked) or self._version() != self._asked \
+                or shown_version.key_of(self._window) is not None:
             dialog.show_saved(dsp_file.Saved("stale", None))
+            return
+        if head is None:
+            # Not «changed»: whether it moved is not known — a `slots.json` mid-rewrite, no preset.
+            dialog.show_saved(dsp_file.Saved("head_unread", None))
             return
         worker = _ProposeWorker(self._asked_project, self._asked_path, self._asked_preset)
         worker.result.connect(self._on_saved)
@@ -472,8 +500,8 @@ class FileCheck(QObject):
     @Slot(object)
     def _on_saved(self, saved) -> None:
         self._saving = False
-        if self._stopped or getattr(self._window, "_closing", False):
-            return  # a window on its way out: nothing shown, nothing re-read
+        if self._stopped:
+            return  # a window on its way out: nothing shown, nothing re-read (not `_closing`: S1)
         dialog, self._saving_dialog = self._saving_dialog, None
         try:
             self.button.setEnabled(self.reader is not None)
@@ -482,8 +510,8 @@ class FileCheck(QObject):
                 dialog.show_saved(saved)
                 if dialog.isHidden():
                     dialog.show()  # the answer to a write the person asked for is seen
-        except RuntimeError:  # the dialog or the window went while the method wrote
-            pass
+        except RuntimeError as exc:  # the dialog or the window went while the method wrote
+            _gone(exc, "the save's answer could not be shown")
         if saved.may_have_written:
             # As after the window's own write of the method's (`_open_save_config`): the ledger
             # is watched, but the new version should not wait for the watcher's debounce.

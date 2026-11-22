@@ -113,6 +113,22 @@ def _reader(item) -> Optional[Reader]:
 
 #: path -> (mtime_ns, size, readers or None): read again when the file changes.
 _CACHE: dict[str, tuple[int, int, Optional[tuple[Reader, ...]]]] = {}
+#: The stat errors said once each: a declaration that cannot be looked at is asked on every render.
+_SAID: set[str] = set()
+#: The verbs `readers.v1` names that TCC acts on; another is kept, and said in the log.
+KNOWN_VERBS = (COMPARE, ATTEST, PROPOSE)
+
+
+def _say_edges(path: Path, found: tuple[Reader, ...]) -> None:
+    """What a readable declaration holds that TCC does nothing with, in the log once per read of it:
+    no reader at all, or a verb TCC does not know. The answer is as read."""
+    if not found:
+        app_log.logger().warning("dsp file: %s declares no reader: no DSP's saved file is read", path)
+    for reader in found:
+        unknown = [verb for verb in reader.verbs if verb not in KNOWN_VERBS]
+        if unknown:
+            app_log.logger().warning("dsp file: %s lists for %s verbs TCC does not know: %s",
+                                     path, reader.family, ", ".join(unknown))
 
 
 def declared(skill_dir: Union[str, os.PathLike, None]) -> Optional[tuple[Reader, ...]]:
@@ -124,7 +140,14 @@ def declared(skill_dir: Union[str, os.PathLike, None]) -> Optional[tuple[Reader,
     path = Path(skill_dir) / DECLARATION
     try:
         info = path.stat()
-    except OSError:
+    except FileNotFoundError:
+        return None  # a pin before v3.3.3: no declaration, nothing to say
+    except OSError as exc:
+        said = f"{path}: {exc}"
+        if said not in _SAID:
+            _SAID.add(said)
+            app_log.logger().warning("dsp file: %s cannot be looked at (%s); TCC's own table answers",
+                                     path, exc)
         return None
     key = str(path)
     cached = _CACHE.get(key)
@@ -138,6 +161,7 @@ def declared(skill_dir: Union[str, os.PathLike, None]) -> Optional[tuple[Reader,
         parsed = [_reader(item) for item in listed] if isinstance(listed, list) else [None]
         if all(reader is not None for reader in parsed):
             found = tuple(parsed)
+            _say_edges(path, found)
         else:
             app_log.logger().warning("dsp file: %s is not %s as TCC reads it; TCC's own table answers",
                                      path, CONTRACT)
@@ -214,8 +238,10 @@ class Answer(NamedTuple):
     """What one `compare-file` said, as TCC shows it.
 
     `kind` is `compared` (exit 0, the rows), `refused` (exits 1-3: the method's refusal, the file's
-    or the journal's) or `failed` (no answer to read: a refused binding, a timeout, an exit the
-    contract does not name, an answer that is not the shape). Only `compared` carries rows."""
+    or the journal's), `failed` (no answer to read: an exit the contract does not name, an answer
+    that is not the shape), or what the launcher answered before any answer: `not_run` (a copy TCC
+    will not run, a script not there — no child), `timed_out` (cut at its bound) or `busy` (an exit
+    75). Only `compared` carries rows."""
 
     kind: str
     code: Optional[int]
@@ -268,11 +294,17 @@ def _read(data: dict, code: int, err: str = "") -> Answer:
                                               f"rows: {method_cli.tail(json.dumps(listed), 1)[:200]}")
     rows = tuple(_row(item) for item in listed)
     checked = data.get("checked_model")
-    counts = (data.get("counts") or {}).get("result") if isinstance(data.get("counts"), dict) else None
+    counted = {key: sum(1 for row in rows if row.result == key) for key in RESULTS}
+    stated = (data.get("counts") or {}).get("result") if isinstance(data.get("counts"), dict) else None
+    if (isinstance(stated, dict) and all(type(stated.get(key)) is int for key in RESULTS)
+            and {key: stated[key] for key in RESULTS} != counted):
+        # Counts beside the rows that the rows do not add up to: one of the two is not the answer.
+        return Answer("failed", code, message=f"compare-file's counts {dict((k, stated[k]) for k in RESULTS)} "
+                                              f"are not its rows' {counted}")
+    # Counts missing, or not the contract's: the rows' own, never a «0 · 0 · 0» above rows that differ.
     return Answer("compared", checked_model=checked if isinstance(checked, bool) else None,
                   device=_text(device.get("name")) or _text(device.get("dev")),
-                  counts={k: v for k, v in (counts or {}).items() if k in RESULTS and isinstance(v, int)},
-                  rows=ordered(rows), **common)
+                  counts=counted, rows=ordered(rows), **common)
 
 
 def interpret(code: int, out: str, err: str) -> Answer:
@@ -307,8 +339,12 @@ def compare(project_dir: Union[str, os.PathLike], version: str, file_path: Union
         args += ["--preset", preset]
     try:
         code, out, err = method_cli.spawn(project_dir, SCRIPT, args, timeout_s=TIMEOUT_S, lock=False, holds=0)
+    except method_cli.Busy as exc:
+        return Answer("busy", method_cli.EXIT_BUSY, message=str(exc))
+    except method_cli.TimedOut as exc:
+        return Answer("timed_out", None, message=str(exc))
     except method_cli.ProcessWriterError as exc:
-        return Answer("failed", None, message=str(exc))
+        return Answer("not_run", None, message=str(exc))
     app_log.logger().info("compare-file %s against %s -> exit %s", version, Path(file_path).name, code)
     return interpret(code, out, err)
 
@@ -334,7 +370,9 @@ class Saved(NamedTuple):
     own lock past its wait: nothing written, the same call may go through later), `failed` (no
     answer TCC can read: an exit the contract does not name), `timed_out` (the child was cut at its
     bound: a write cut halfway may have landed) or `not_run` (no child: a copy TCC will not run, a
-    script not there). TCC's own `stale` is a save it did not start: the read moved. `text` is the method's stdout
+    script not there). TCC's own two are saves it did not start: `stale`, the read moved since the
+    comparison; `head_unread`, the journal's HEAD could not be read at the click, so whether it
+    moved is not known — offered again, since nothing was run. `text` is the method's stdout
     as it printed it — the warning, the model line, the version, what it kept, did not take and
     took short — and `message` its stderr, or TCC's sentence where the method said nothing."""
 
@@ -350,7 +388,7 @@ class Saved(NamedTuple):
         lock (75, item 8), a save TCC stopped before it started (`stale`) or could not start
         (`not_run`). An exit the contract
         does not name, or a child cut at its bound, may have banked: the window re-reads."""
-        return self.kind not in ("refused", "busy", "stale", "not_run")
+        return self.kind not in ("refused", "busy", "stale", "head_unread", "not_run")
 
 
 def differs(answer: Answer) -> bool:
@@ -377,8 +415,8 @@ def journal_head(project_dir: Union[str, os.PathLike], preset: Optional[str]) ->
         return None
     try:
         return ledger_line.line_mark(Path(project_dir) / "state", preset)[0]
-    except Exception:  # noqa: BLE001 - a journal that cannot be read now confirms nothing
-        app_log.logger().exception("dsp file: the journal's HEAD could not be read")
+    except Exception as exc:  # noqa: BLE001 - a journal that cannot be read now confirms nothing
+        app_log.logger().warning("dsp file: the journal's HEAD could not be read (%s)", exc, exc_info=True)
         return None
 
 

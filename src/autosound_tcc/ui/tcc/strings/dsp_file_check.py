@@ -280,4 +280,28 @@ STRINGS: dict[str, dict[str, str]] = {
         'pl': 'Nothing was saved: the method was not run. {message}',
         'de': 'Nothing was saved: the method was not run. {message}',
     },
+    'dspFileSaveHeadUnread': {
+        'en': "Nothing was saved: the journal's HEAD could not be read just now, so it is not known whether it moved since the comparison. Try again.",
+        'uk': "Nothing was saved: the journal's HEAD could not be read just now, so it is not known whether it moved since the comparison. Try again.",
+        'pl': "Nothing was saved: the journal's HEAD could not be read just now, so it is not known whether it moved since the comparison. Try again.",
+        'de': "Nothing was saved: the journal's HEAD could not be read just now, so it is not known whether it moved since the comparison. Try again.",
+    },
+    'dspFileCheckNotRun': {
+        'en': 'The method was not run: {message}',
+        'uk': 'The method was not run: {message}',
+        'pl': 'The method was not run: {message}',
+        'de': 'The method was not run: {message}',
+    },
+    'dspFileCheckTimedOut': {
+        'en': 'No answer in time: {message}',
+        'uk': 'No answer in time: {message}',
+        'pl': 'No answer in time: {message}',
+        'de': 'No answer in time: {message}',
+    },
+    'dspFileCheckBusyWriter': {
+        'en': 'Not read: another writer holds the project. Nothing was written; try again once it is done. {message}',
+        'uk': 'Not read: another writer holds the project. Nothing was written; try again once it is done. {message}',
+        'pl': 'Not read: another writer holds the project. Nothing was written; try again once it is done. {message}',
+        'de': 'Not read: another writer holds the project. Nothing was written; try again once it is done. {message}',
+    },
 }

@@ -62,13 +62,15 @@ class RowMark(NamedTuple):
     loaded: tuple[Loaded, ...] = ()
 
 
-def marks(root, preset: str, own: list, others: list, profile: dict) -> dict[str, RowMark]:
+def marks(root, preset: str, own: list, others: list, profile: dict,
+          project_dir=None) -> dict[str, RowMark]:
     """`{compare key: its mark}` for the rows that carry one, as plain data: the text is made when
     a row is filled, so a list filled in one language stays in it until the next load refills it.
     The tick needs a DSP whose file the method reads and records; the claim is the method's on any DSP. A row says «in
     the DSP» only for a version its own slot holds: the words are about that slot's preset, and a
-    version another slot holds is not in this one."""
-    every = ledger_line.all_saved_files(root, preset) if reads_save_file(profile) else None
+    version another slot holds is not in this one. `project_dir` is the window's shown project, the
+    one the button asks too (`FileCheck._project`): its bound copy says what the method reads."""
+    every = ledger_line.all_saved_files(root, preset) if reads_save_file(profile, project_dir) else None
     claims = ledger_line.loaded_by_version(root)
     found = {}
     for of, version, key in _keys(preset, own, others):
@@ -147,13 +149,14 @@ def now_in_dsp(root, view, slot: Optional[str], head: str) -> tuple[str, str]:
 
 
 def header(root, view, profile: dict, base_tip: str,
-           loaded: Optional[str] = None, now: str = "") -> tuple[Optional[str], str]:
+           loaded: Optional[str] = None, now: str = "", project_dir=None) -> tuple[Optional[str], str]:
     """The dot before HEAD's name and its hover: `checked` where the mark stands, otherwise what
     the dot always said — yellow while anything is proposed, green once all of it is entered.
 
     Asked of `view`, HEAD: the version only looked at has its own row in the list. `view.preset` may
     be null on an old layout: `loaded` is the slot the window loaded it as, and with neither there
-    is no mark, never a raise. `now` is `now_in_dsp`'s sentence, plain text, added to the hover."""
+    is no mark, never a raise. `now` is `now_in_dsp`'s sentence, plain text, added to the hover.
+    `project_dir` is the window's shown project, as for `marks`."""
     state = view.state
     dot = None if state is None else ("wait" if state == "proposed" else "done")
     said = f"{html.escape(base_tip)}<br><br>{html.escape(now)}" if now else base_tip
@@ -162,7 +165,7 @@ def header(root, view, profile: dict, base_tip: str,
         # The rows' count in the hover reads 0 proposed on a trim-only proposal (#256).
         said = f"{said if now else html.escape(base_tip)}<br><br>{html.escape(i18n.t('presetWaitingTip'))}"
     preset = view.preset if isinstance(view.preset, str) else loaded
-    if dot != "done" or not reads_save_file(profile) or not isinstance(preset, str):
+    if dot != "done" or not reads_save_file(profile, project_dir) or not isinstance(preset, str):
         return dot, said
     version = getattr(view, "file_version", None) or view.version
     files = ledger_line.checked_files(root, preset, version)

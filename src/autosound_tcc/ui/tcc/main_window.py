@@ -2291,7 +2291,7 @@ class MainWindow(QMainWindow):
                 code=code, slot=rec.get("slot") or "?",
                 preset=i18n.t("dspConfigPreset").format(n=number) if number else "",
                 purpose=f" — {rec['purpose']}" if rec.get("purpose") else "")
-        dot, tip = dsp_check.header(root, view, profile, tip, self._loaded_preset, now)
+        dot, tip = dsp_check.header(root, view, profile, tip, self._loaded_preset, now, window_folder.shown(self))
         self._dsp_section.set_dot(dot)
         self._dsp_section.set_sub_tip(tip)
         if getattr(view, "version_mismatch", False):

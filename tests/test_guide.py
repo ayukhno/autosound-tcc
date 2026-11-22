@@ -126,3 +126,36 @@ def test_every_method_link_in_the_guide_is_at_the_tag_this_tcc_ships_with(monkey
     assert [link for link in links if link[1] != tag] == [], f"not at {tag}"
     assert [link for link in links if not (_VENDORED / link[2]).exists()] == [], \
         "not in the method at that tag"
+
+
+#: A LINK to the measurements repository: its URL, or a markdown link whose target names it. A name
+#: alone is allowed — the skill's own rule (S-134): the repository is private, and a link to it from a
+#: public tree is a link that opens nothing for anyone else (hub #343).
+_MEASUREMENTS_LINK = re.compile(r"github\.com/ayukhno/autosound-measurements|\]\([^)\s]*autosound-measurements[^)]*\)",
+                                re.IGNORECASE)
+_TEXT = {".md", ".py", ".json", ".txt", ".yml", ".yaml", ".toml", ".html"}
+
+
+def _measurement_links(root: Path) -> list[str]:
+    found = []
+    for path in sorted(root.rglob("*")):
+        if path.suffix.lower() not in _TEXT or not path.is_file() or ".git" in path.parts:
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if _MEASUREMENTS_LINK.search(line):
+                found.append(f"{path.relative_to(root).as_posix()}:{n}")
+    return found
+
+
+def test_the_measurement_link_check_goes_red_on_a_link_and_not_on_a_name(tmp_path):
+    (tmp_path / "a.md").write_text("see [the data](https://github.com/ayukhno/autosound-measurements/x)\n"
+                                   "kept in autosound-measurements, by name\n"
+                                   "[rel](../autosound-measurements/README.md)\n", encoding="utf-8")
+    assert _measurement_links(tmp_path) == ["a.md:1", "a.md:3"]
+
+
+def test_the_vendored_method_links_nowhere_into_the_measurements_repository():
+    root = vendor_loader._SUBMODULE_DIR.parents[1]
+    if not vendor_loader._looks_like_the_skill(vendor_loader._SUBMODULE_DIR):
+        pytest.skip("the vendored method is not checked out")
+    assert _measurement_links(root) == []

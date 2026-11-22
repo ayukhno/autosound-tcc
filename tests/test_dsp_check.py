@@ -541,8 +541,12 @@ def _attested_pr15(root, version="v_001", compared="no difference"):
         "read_at": "2026-11-22T10:00:00", "compared": compared}})
 
 
-def test_a_mosconi_version_gets_no_mark_on_a_pin_whose_attest_does_not_read_its_file(tmp_path):
-    """v3.3.2: compare-file reads a `.PR15`, `attest --from-file` refuses it (item 14)."""
+def test_a_mosconi_version_gets_no_mark_on_a_pin_whose_attest_does_not_read_its_file(tmp_path, monkeypatch):
+    """v3.3.2: compare-file reads a `.PR15`, `attest --from-file` refuses it (item 14). The fallback
+    forced, so the pin's move does not turn this red (group review T1)."""
+    from tests.test_dsp_file_check import on_the_fallback
+
+    on_the_fallback(monkeypatch)
     _attested_pr15(tmp_path)
     assert _row(_combo(tmp_path, profile=MOSCONI), "v_001") == (False, "")
     assert dsp_check.header(tmp_path, _head_view(), MOSCONI, "tip") == ("done", "tip")

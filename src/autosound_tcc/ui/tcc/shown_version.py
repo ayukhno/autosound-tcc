@@ -95,7 +95,7 @@ def offer_compare(window, load: Callable, root, preset: str, profile: dict,
     # `preset`, `current`, `looked_at` and the checked marks ride along after `others` (5 to 8) so
     # `control_layout._fill_compare` can head and grey the own group the same way (tcc#103) --
     # appended, not inserted, so the existing `len(args) > 3`/`> 4` reads stay right.
-    checks = dsp_check.marks(root, preset, own, others, profile)
+    checks = dsp_check.marks(root, preset, own, others, profile, window_folder.shown(window))
     window._compare_args = (own, default, loader, labels, others, preset, current, looked_at, checks)
     window._compare_key = default
     window._detail.set_compare_choices(own, default, loader, labels=labels, others=others,

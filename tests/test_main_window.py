@@ -7218,7 +7218,11 @@ def _seeded_window(tmp_path, monkeypatch):
 
 def test_the_dsp_header_has_check_settings_on_by_the_method_s_readers(tmp_path, monkeypatch):
     """#272: «Перевірити налаштування» beside «Збережено в DSP…», on for a DSP whose saved file
-    the method reads, off with the reason on any other; a language switch re-says it."""
+    the method reads, off with the reason on any other; a language switch re-says it. On the
+    fallback table whatever the pin carries: Mosconi's no-mark hover is v3.3.2's (group review T1)."""
+    from tests.test_dsp_file_check import on_the_fallback
+
+    on_the_fallback(monkeypatch)
     window = _seeded_window(tmp_path, monkeypatch)
     button = window._file_check.button
     header = window._dsp_section._head_layout
