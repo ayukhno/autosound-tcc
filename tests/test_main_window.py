@@ -7198,9 +7198,11 @@ def test_a_state_whose_file_and_version_disagree_is_said_in_the_header_and_the_s
     assert window._status_strip.text() == said
 
 
-def test_the_dsp_header_has_check_settings_on_by_the_method_s_readers(tmp_path, monkeypatch):
-    """#272: «Перевірити налаштування» beside «Збережено в DSP…», on for a DSP whose saved file
-    the method reads, off with the reason on any other; a language switch re-says it."""
+MOSCONI_PROFILE = {"dsp_profile": {"vendor": "Mosconi", "name": "PICO 6/8-2 DSP"}}
+
+
+def _seeded_window(tmp_path, monkeypatch):
+    """A window on a seeded project (#272): the fixture's DSP, one version at HEAD."""
     monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
     monkeypatch.delenv("AUTOSOUND_STATE_ROOT", raising=False)
     monkeypatch.delenv("AUTOSOUND_TCC_PRESET", raising=False)
@@ -7211,6 +7213,13 @@ def test_the_dsp_header_has_check_settings_on_by_the_method_s_readers(tmp_path, 
     i18n.set_language("en")
     window = MainWindow()
     _KEEP_WINDOWS.append(window)
+    return window
+
+
+def test_the_dsp_header_has_check_settings_on_by_the_method_s_readers(tmp_path, monkeypatch):
+    """#272: «Перевірити налаштування» beside «Збережено в DSP…», on for a DSP whose saved file
+    the method reads, off with the reason on any other; a language switch re-says it."""
+    window = _seeded_window(tmp_path, monkeypatch)
     button = window._file_check.button
     header = window._dsp_section._head_layout
     assert header.indexOf(button) == header.indexOf(window._cfg_btn) + 1
@@ -7218,13 +7227,44 @@ def test_the_dsp_header_has_check_settings_on_by_the_method_s_readers(tmp_path, 
     assert not button.isHidden() and not button.isEnabled(), "the fixture's DSP: no reader"
     assert "cannot read this DSP's saved file" in window._file_check.tip.text()
 
-    window._show_version(window._view, {"dsp_profile": {"vendor": "Mosconi", "name": "PICO 6/8-2 DSP"}})
+    window._show_version(window._view, MOSCONI_PROFILE)
     assert button.isEnabled() and i18n.t("dspFileCheckNoMarkTip") in window._file_check.tip.text()
     window._on_language_selected("uk")
     try:
         assert button.text() == i18n.t("dspFileCheck") and button.isEnabled()
     finally:
         window._on_language_selected("en")
+
+
+def test_a_window_on_its_way_out_hands_over_a_running_comparison_and_opens_no_dialog(tmp_path, monkeypatch):
+    """#272 review: `stop_workers` did not reach the comparison's worker, which has no parent, so a
+    quit mid-read left a running QThread for Qt to destroy (`qFatal`), and its late answer opened
+    a dialog on a window that was closing."""
+    import threading
+
+    from autosound_tcc.core import dsp_file
+    from autosound_tcc.ui.tcc import qt_shutdown
+
+    release = threading.Event()
+
+    def slow(*_a, **_k):
+        release.wait(20)
+        return dsp_file.Answer("failed", None, message="late")
+
+    monkeypatch.setattr(dsp_file, "compare", slow)
+    window = _seeded_window(tmp_path, monkeypatch)
+    window._show_version(window._view, MOSCONI_PROFILE)
+    window._file_check.start(str(tmp_path / "a.PR15"))
+    worker = window._file_check.running()
+    try:
+        window.stop_workers()
+        assert worker in qt_shutdown.detached() or not worker.isRunning(), "handed over, not left"
+    finally:
+        release.set()
+        assert worker.wait(10000)
+    for _ in range(5):
+        QApplication.processEvents()
+    assert window._file_check.dialog is None, "no dialog on a window on its way out"
 
 
 def test_a_state_file_the_method_refuses_by_its_version_is_said_in_the_arbiter_s_language(

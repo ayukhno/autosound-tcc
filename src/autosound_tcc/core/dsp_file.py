@@ -91,16 +91,19 @@ def _pattern_re(pattern: str) -> re.Pattern:
 
 
 def _reader(item) -> Optional[Reader]:
+    """One `readers.v1` entry, or None where any field TCC reads is not of its type: the caller
+    takes the whole declaration as unreadable then, never the entries that happen to parse."""
     if not isinstance(item, dict):
         return None
     family, pattern, verbs = item.get("family"), item.get("pattern"), item.get("verbs")
+    models = item.get("models", [])
     if not (isinstance(family, str) and family.strip() and isinstance(pattern, str) and pattern.strip()
-            and isinstance(verbs, list)):
+            and isinstance(verbs, list) and all(isinstance(verb, str) for verb in verbs)
+            and isinstance(models, list)
+            and all(isinstance(model, dict) and isinstance(model.get("name"), str) for model in models)):
         return None
-    models = tuple(model["name"] for model in item.get("models") or ()
-                   if isinstance(model, dict) and isinstance(model.get("name"), str))
-    return Reader(str(item.get("id") or family), family.strip(), pattern.strip(),
-                  tuple(verb for verb in verbs if isinstance(verb, str)), models, "declared")
+    return Reader(str(item.get("id") or family), family.strip(), pattern.strip(), tuple(verbs),
+                  tuple(model["name"] for model in models), "declared")
 
 
 #: path -> (mtime_ns, size, readers or None): read again when the file changes.
@@ -125,11 +128,15 @@ def declared(skill_dir: Union[str, os.PathLike, None]) -> Optional[tuple[Reader,
     found: Optional[tuple[Reader, ...]] = None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and data.get("contract") == CONTRACT and isinstance(data.get("readers"), list):
-            found = tuple(r for r in (_reader(item) for item in data["readers"]) if r is not None)
+        listed = (data.get("readers") if isinstance(data, dict) and data.get("contract") == CONTRACT
+                  else None)
+        parsed = [_reader(item) for item in listed] if isinstance(listed, list) else [None]
+        if all(reader is not None for reader in parsed):
+            found = tuple(parsed)
         else:
-            app_log.logger().warning("dsp file: %s is not %s; TCC's own table answers", path, CONTRACT)
-    except (OSError, ValueError) as exc:
+            app_log.logger().warning("dsp file: %s is not %s as TCC reads it; TCC's own table answers",
+                                     path, CONTRACT)
+    except Exception as exc:  # noqa: BLE001 - an unreadable declaration is the fallback, never a load that fails
         app_log.logger().warning("dsp file: %s cannot be read (%s); TCC's own table answers", path, exc)
     _CACHE[key] = (info.st_mtime_ns, info.st_size, found)
     return found
@@ -240,16 +247,21 @@ def ordered(rows) -> tuple[Row, ...]:
     return tuple(sorted(rows, key=lambda r: rank.get(r.category, len(CATEGORIES))))
 
 
-def _read(data: dict, code: int) -> Answer:
+def _read(data: dict, code: int, err: str = "") -> Answer:
     file = data.get("file") if isinstance(data.get("file"), dict) else {}
     device = data.get("device") if isinstance(data.get("device"), dict) else {}
     common = dict(code=code, warning=_text(data.get("warning")), warning_uk=_text(data.get("warning_uk")),
                   file_name=_text(file.get("name")), md5=_text(file.get("md5")), saved=_text(file.get("saved")))
     if code != EXIT_COMPARED:
         error = data.get("error") if isinstance(data.get("error"), dict) else {}
-        return Answer("refused", error_kind=_text(error.get("kind")), message=_text(error.get("message")),
-                      **common)
-    rows = tuple(r for r in (_row(item) for item in data.get("rows") or ()) if r is not None)
+        return Answer("refused", error_kind=_text(error.get("kind")),
+                      message=_text(error.get("message")) or method_cli.tail(err), **common)
+    listed = data.get("rows")
+    if not isinstance(listed, list) or not all(isinstance(item, dict) for item in listed):
+        # A table with rows dropped would disagree with the counts the method printed beside it.
+        return Answer("failed", code, message=f"compare-file's rows are not the contract's list of "
+                                              f"rows: {method_cli.tail(json.dumps(listed), 1)[:200]}")
+    rows = tuple(_row(item) for item in listed)
     checked = data.get("checked_model")
     counts = (data.get("counts") or {}).get("result") if isinstance(data.get("counts"), dict) else None
     return Answer("compared", checked_model=checked if isinstance(checked, bool) else None,
@@ -276,7 +288,7 @@ def interpret(code: int, out: str, err: str) -> Answer:
         return Answer("failed", code, message=method_cli.tail(err) or method_cli.tail(out))
     if not isinstance(data, dict) or data.get("contract") != COMPARE_SHAPE:
         return Answer("failed", code, message=method_cli.tail(err) or method_cli.tail(out))
-    return _read(data, code)
+    return _read(data, code, err)
 
 
 def compare(project_dir: Union[str, os.PathLike], version: str, file_path: Union[str, os.PathLike],

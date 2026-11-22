@@ -1992,16 +1992,8 @@ class MainWindow(QMainWindow):
         self._dsp_section = SidebarSection(
             "dsp", i18n.t("dspPanel"), self._settings, default_collapsed=False, sub_below=True
         )
-        # «Збережено в DSP…» (hub #198): the name this configuration went into the device under.
-        # Shown on the per-project line, where the method records it, and only with a version.
-        self._cfg_btn = QPushButton(i18n.t("cfgButton"))
-        self._cfg_btn.setProperty("class", "link-btn")
-        self._cfg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._cfg_tip = attach_tip(self._cfg_btn, i18n.t("cfgButtonTip"))
-        self._cfg_btn.clicked.connect(self._open_save_config)
-        self._cfg_btn.setVisible(False)
-        self._dsp_section.add_header_widget(self._cfg_btn)
-        self._file_check = dsp_file_check.FileCheck(self)  # «Перевірити налаштування» (#272)
+        # «Збережено в DSP…» (`_cfg_btn`, hub #198) and «Перевірити налаштування» (#272).
+        self._file_check = dsp_file_check.header_buttons(self)
         # No stretch. It was here so the tree would fill the panel instead of sitting at its
         # content height with a gap under it (user, 2026-07-28) -- and what it actually did was
         # hand the tree the leftover viewport and let it scroll inside the column's own scroll.
@@ -5588,6 +5580,8 @@ class MainWindow(QMainWindow):
         menu_registry.stop_workers(self)  # a feature's own work: Codex's install or sign-in (#181)
         if getattr(self, "_gen_check", None) is not None:
             self._gen_check.stop()  # the main AI's check (tcc#222)
+        if getattr(self, "_file_check", None) is not None:
+            self._file_check.stop()  # a comparison of the DSP's saved file, handed over (#272)
         # Both can outlast any wait worth making at quit: a probe is a real model call, and the
         # catalogue can be mid-read. Asked to stop and handed over if they will not, rather than
         # left for Qt to destroy running (F-027) — with `done` cut first, so a late answer never

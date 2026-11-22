@@ -192,6 +192,26 @@ class CompareDialog(QDialog):
             table.setSpan(at, 0, 1, 4)
 
 
+#: How long a window on its way out waits for a comparison before handing it over: one read of a
+#: few kilobytes, which `method_cli` bounds at `dsp_file.TIMEOUT_S` anyway.
+STOP_WAIT_MS = 2000
+
+
+def header_buttons(window) -> "FileCheck":
+    """The DSP header's two buttons, in order, built for `window`. «Збережено в DSP…» (hub #198):
+    the name this configuration went into the device under, shown on the per-project line, where the
+    method records it, and only with a version — `window._cfg_btn`, its hover `window._cfg_tip`,
+    as they were when the window built them itself. Then «Перевірити налаштування», returned."""
+    window._cfg_btn = QPushButton(i18n.t("cfgButton"))
+    window._cfg_btn.setProperty("class", "link-btn")
+    window._cfg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    window._cfg_tip = attach_tip(window._cfg_btn, i18n.t("cfgButtonTip"))
+    window._cfg_btn.clicked.connect(window._open_save_config)
+    window._cfg_btn.setVisible(False)
+    window._dsp_section.add_header_widget(window._cfg_btn)
+    return FileCheck(window)
+
+
 class FileCheck(QObject):
     """The button in the DSP header and the one comparison it runs at a time."""
 
@@ -215,6 +235,8 @@ class FileCheck(QObject):
         #: and answer — `isRunning()` is still true while `run()` unwinds past the answer.
         self._worker: Optional[_CompareWorker] = None
         self._busy = False
+        #: Set by `stop`: the window is on its way out, and a late answer opens nothing.
+        self._stopped = False
         self.dialog: Optional[CompareDialog] = None
         i18n.on_language_changed(self.retranslate)
 
@@ -257,9 +279,13 @@ class FileCheck(QObject):
     def retranslate(self) -> None:
         try:
             self.button.setText(i18n.t("dspFileCheckBusy" if self._busy else "dspFileCheck"))
-            self.tip.set_text(self.tip_text())
         except RuntimeError:  # its C++ half went with the window
             return
+        try:
+            self.tip.set_text(self.tip_text())
+        except Exception:  # noqa: BLE001 - a hover that cannot be said is no project that fails to load
+            app_log.logger().exception("dsp file: the button's hover could not be said")
+            self.tip.set_text("")
 
     # ---- the comparison -----------------------------------------------------------------------
 
@@ -277,7 +303,8 @@ class FileCheck(QObject):
 
     def start(self, path: str) -> None:
         version = self._version()
-        if not version or self._busy or (self._worker is not None and self._worker.isRunning()):
+        if (not version or self._busy or self._stopped
+                or (self._worker is not None and self._worker.isRunning())):
             return
         self._asked = version
         worker = _CompareWorker(self._project(), version, path, self._preset())
@@ -291,15 +318,29 @@ class FileCheck(QObject):
     @Slot(object)
     def _on_answer(self, answer) -> None:
         self._busy = False
+        if self._stopped or getattr(self._window, "_closing", False):
+            return  # an answer queued before `stop` cut the signal: nothing opens on a closing window
         try:
             self.button.setEnabled(self.reader is not None)
             self.retranslate()
-            if self.dialog is not None:
-                self.dialog.close()
+            old, self.dialog = self.dialog, None
+            if old is not None:
+                # Deleted, not only closed: one dialog a check would otherwise stay for the session.
+                old.close()
+                old.deleteLater()
             self.dialog = CompareDialog(answer, self._asked, self._window)
             self.dialog.show()
         except RuntimeError:  # the window closed while the file was read
             return
+
+    def stop(self) -> None:
+        """The window's `stop_workers`: a comparison still reading is asked to stop and handed over
+        (`qt_shutdown.stop_or_detach`) with its answer cut, never left for Qt to destroy running —
+        the worker has no parent, so no sweep of the window's widgets finds it. Safe to run twice."""
+        self._stopped = True
+        worker = self._worker
+        if worker is not None:
+            qt_shutdown.stop_or_detach(worker, STOP_WAIT_MS, mute=(worker.result,))
 
     def running(self) -> Optional[QThread]:
         """The worker of the comparison asked for last, running or done; None before the first."""

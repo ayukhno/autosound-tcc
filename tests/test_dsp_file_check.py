@@ -489,3 +489,44 @@ def test_the_real_method_through_the_button(tmp_path):
     assert dialog.risk_label.isHidden(), "AYA's HELIX DSP ULTRA S is a checked model"
     marks = {dialog.table.item(r, 0).data(Qt.ItemDataRole.UserRole) for r in range(dialog.table.rowCount())}
     assert marks == {"heading", "unknown"}, "the seed gives its channel no slot: no row is a match"
+
+
+# ---- the review's fix round (#272) --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("broken", [
+    {"models": 1}, {"verbs": "compare-file"}, {"family": 7}, {"pattern": None},
+], ids=["models", "verbs", "family", "pattern"])
+def test_a_declaration_with_a_field_of_the_wrong_type_is_unreadable_and_the_table_answers(
+        monkeypatch, tmp_path, broken):
+    readers = [dict(DECLARATION["readers"][0], **broken), DECLARATION["readers"][1]]
+    declare(monkeypatch, tmp_path, dict(DECLARATION, readers=readers))
+    assert dsp_file.readers() == dsp_file.FALLBACK
+    _host, check = _check(tmp_path, HELIX)
+    assert check.button.isEnabled() and ".pct6" in check.tip.text()
+
+
+@pytest.mark.parametrize("rows", ["many", [1, _r("w-L", "gain_db", "match")], {"a": 1}],
+                         ids=["text", "a-number-row", "an-object"])
+def test_rows_off_the_contract_are_a_failure_never_a_table_that_disagrees_with_its_counts(rows):
+    answer = dsp_file.interpret(0, json.dumps(dict(json.loads(_answer()), rows=rows)), "")
+    assert answer.kind == "failed" and answer.rows == ()
+    assert "rows" in answer.message
+
+
+def test_a_refusal_with_no_message_says_what_stderr_said():
+    answer = dsp_file.interpret(2, _refusal("container", ""), "error: a.pct6: container: no zlib stream")
+    assert answer.kind == "refused" and "no zlib stream" in answer.message
+
+
+def test_the_dialog_a_new_check_replaces_is_deleted_not_kept(tmp_path, monkeypatch):
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    _fake(monkeypatch)
+    _host, check = _check(tmp_path, MOSCONI)
+    first = _run(check)
+    second = _run(check)
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not shiboken6.isValid(first), "one dialog per check stayed alive"
+    assert shiboken6.isValid(second) and check.dialog is second
