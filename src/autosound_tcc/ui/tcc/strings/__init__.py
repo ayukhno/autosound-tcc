@@ -11,7 +11,7 @@ from __future__ import annotations
 import importlib
 
 #: The feature modules, in join order.
-FEATURES: tuple[str, ...] = ("new_project", "codex")
+FEATURES: tuple[str, ...] = ("new_project", "codex", "dsp_file_check")
 
 
 def tables() -> list[tuple[str, dict[str, dict[str, str]]]]:

@@ -1,9 +1,13 @@
 """«Checked in the DSP» and «in the DSP now» (#251), said on the «Порівняти з» rows and the header.
 
-The Arbiter's rule (2026-11-09): where TCC can read a DSP's save file (today only the Helix's), a
-version is checked when every channel row is entered and the file is on record. On any other DSP the
-rule is the person's explicit word, and the ledger holds no such fact per version, so no mark is
-shown there. Reading the version files is `ledger_line`'s; this module says what they mean on screen.
+The Arbiter's rule (2026-11-09), by capability since #272 (2026-11-22): where the method reads a
+DSP's saved file and records its comparison in the journal (`attest --from-file`, its CONTRACT.md
+item 14), a version is checked when every channel row is entered and the file is on record. Which
+DSPs that is comes from the method (`dsp_file.reader_for`: its `readers.json`, or TCC's fallback
+table on a pin without one) — the Helix on every pin, the Mosconi once the method's `attest
+--from-file` reads a `.PR15`. On any other DSP the rule is the person's explicit word, and the ledger
+holds no such fact per version, so no mark is shown there. Reading the version files is
+`ledger_line`'s; this module says what they mean on screen.
 
 The mark is about one version and the file it was checked against, never about what the DSP holds
 now. That is the method's `slots[slot].loaded`, a dated claim told apart at a glance: the tick is the
@@ -19,6 +23,7 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import QComboBox
 
+from autosound_tcc.core import app_log, config, dsp_file
 from autosound_tcc.state import ledger_line, preset_settings
 from autosound_tcc.state.ledger_line import Loaded, SavedFile
 from autosound_tcc.ui.tcc import i18n
@@ -30,10 +35,16 @@ def is_helix(vendor, name) -> bool:
     return preset_settings.is_audiotec(vendor, name)
 
 
-def reads_save_file(profile: dict) -> bool:
-    """Whether TCC can read this DSP's save file: today only the Helix's (the Arbiter, 2026-11-09)."""
-    prof = profile.get("dsp_profile", profile) if isinstance(profile, dict) else {}
-    return isinstance(prof, dict) and is_helix(prof.get("vendor"), prof.get("name"))
+def reads_save_file(profile: dict, project_dir=None) -> bool:
+    """Whether the method reads this DSP's saved file and records the comparison the mark reads
+    (`attest --from-file`, item 14) — asked of the copy the project runs (#272). A vendor is not the
+    rule: on v3.3.2 the Mosconi's file is compared and not recorded, so it gets no mark."""
+    try:
+        reader = dsp_file.reader_for(profile, config.project_dir() if project_dir is None else project_dir)
+    except Exception:  # noqa: BLE001 - a lookup that fails is no mark, never a list that fails to fill
+        app_log.logger().exception("dsp file: the readers could not be looked up")
+        return False
+    return reader is not None and reader.reads(dsp_file.ATTEST)
 
 
 def _keys(preset: str, own: list, others: list) -> list[tuple[str, str, str]]:
@@ -54,7 +65,7 @@ class RowMark(NamedTuple):
 def marks(root, preset: str, own: list, others: list, profile: dict) -> dict[str, RowMark]:
     """`{compare key: its mark}` for the rows that carry one, as plain data: the text is made when
     a row is filled, so a list filled in one language stays in it until the next load refills it.
-    The tick needs a DSP whose file TCC reads; the claim is the method's on any DSP. A row says «in
+    The tick needs a DSP whose file the method reads and records; the claim is the method's on any DSP. A row says «in
     the DSP» only for a version its own slot holds: the words are about that slot's preset, and a
     version another slot holds is not in this one."""
     every = ledger_line.all_saved_files(root, preset) if reads_save_file(profile) else None

@@ -525,3 +525,57 @@ def test_a_torn_slots_file_is_no_claim_and_the_next_whole_one_is_read(tmp_path, 
 
     path.write_text(whole, encoding="utf-8")
     assert ledger_line.loaded_in_dsp(root, "FULL").source == "first", "a torn read is not remembered"
+
+
+# ---- the mark follows the method's reader, not a vendor (#272) ----------------------------------
+
+MOSCONI = {"dsp_profile": {"vendor": "Mosconi", "name": "PICO 6/8-2 DSP", "groups": []}}
+PR15_MD5 = "88a9feb8f37986fe6c3846bcd30b5fa1"
+
+
+def _attested_pr15(root, version="v_001", compared="no difference"):
+    """What `attest --from-file a.PR15` writes from v3.3.3 (CONTRACT.md item 14, hub #348)."""
+    _bank(root, version, preset_settings={"status": "applied", "source_file": {
+        "name": "example_pico682.PR15", "path": "/presets/example_pico682.PR15", "md5": PR15_MD5,
+        "saved": None, "pctool": None, "device": "Mosconi PICO 6/8-2 DSP (Dev 15)",
+        "read_at": "2026-11-22T10:00:00", "compared": compared}})
+
+
+def test_a_mosconi_version_gets_no_mark_on_a_pin_whose_attest_does_not_read_its_file(tmp_path):
+    """v3.3.2: compare-file reads a `.PR15`, `attest --from-file` refuses it (item 14)."""
+    _attested_pr15(tmp_path)
+    assert _row(_combo(tmp_path, profile=MOSCONI), "v_001") == (False, "")
+    assert dsp_check.header(tmp_path, _head_view(), MOSCONI, "tip") == ("done", "tip")
+    assert _row(_combo(tmp_path), "v_001")[0], "the same record on the Helix"
+
+
+def test_a_mosconi_version_is_marked_once_the_method_records_its_comparison(tmp_path, monkeypatch):
+    from tests.test_dsp_file_check import declare
+
+    _attested_pr15(tmp_path)
+    declare(monkeypatch, tmp_path / "method")
+    marked, hover = _row(_combo(tmp_path, profile=MOSCONI), "v_001")
+    assert marked and "example_pico682.PR15" in hover and PR15_MD5 in hover
+    assert dsp_check.header(tmp_path, _head_view(), MOSCONI, "tip")[0] == "checked"
+
+
+def test_a_mosconi_comparison_that_found_differences_or_unknowns_is_no_mark(tmp_path, monkeypatch):
+    from tests.test_dsp_file_check import declare
+
+    _attested_pr15(tmp_path, compared=["compare-file.v1: 0 match, 0 differs, 14 unknown",
+                                       "w-L gain_db unknown: project.json gives this channel no slot"])
+    _attested_pr15(tmp_path, "v_050")
+    declare(monkeypatch, tmp_path / "method")
+    combo = _combo(tmp_path, profile=MOSCONI)
+    assert _row(combo, "v_001") == (False, "") and _row(combo, "v_050")[0]
+
+
+def test_a_dsp_the_method_declares_gets_the_mark_with_no_change_of_tcc(tmp_path, monkeypatch):
+    from tests.test_dsp_file_check import DECLARATION, declare
+
+    _bank(tmp_path, "v_001", preset_settings={"source_file": {"name": "a.mwp", "md5": FULL_MD5,
+                                                              "compared": "no difference"}})
+    assert not _row(_combo(tmp_path, profile=OTHER), "v_001")[0]
+    declare(monkeypatch, tmp_path / "method", dict(DECLARATION, readers=[*DECLARATION["readers"], {
+        "id": "musway", "family": "Musway", "pattern": ".mwp", "verbs": ["compare-file", "attest --from-file"]}]))
+    assert _row(_combo(tmp_path, profile=OTHER), "v_001")[0]

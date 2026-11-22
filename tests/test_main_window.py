@@ -7198,6 +7198,35 @@ def test_a_state_whose_file_and_version_disagree_is_said_in_the_header_and_the_s
     assert window._status_strip.text() == said
 
 
+def test_the_dsp_header_has_check_settings_on_by_the_method_s_readers(tmp_path, monkeypatch):
+    """#272: «Перевірити налаштування» beside «Збережено в DSP…», on for a DSP whose saved file
+    the method reads, off with the reason on any other; a language switch re-says it."""
+    monkeypatch.setenv("AUTOSOUND_TCC_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.delenv("AUTOSOUND_STATE_ROOT", raising=False)
+    monkeypatch.delenv("AUTOSOUND_TCC_PRESET", raising=False)
+    monkeypatch.setattr(config, "project_dir", lambda *_a, **_k: tmp_path)
+    monkeypatch.setattr(config, "chosen_project_dir", lambda *_a, **_k: tmp_path)
+    _intake.seed(tmp_path)
+    _app()
+    i18n.set_language("en")
+    window = MainWindow()
+    _KEEP_WINDOWS.append(window)
+    button = window._file_check.button
+    header = window._dsp_section._head_layout
+    assert header.indexOf(button) == header.indexOf(window._cfg_btn) + 1
+    assert window._view is not None and window._view.version
+    assert not button.isHidden() and not button.isEnabled(), "the fixture's DSP: no reader"
+    assert "cannot read this DSP's saved file" in window._file_check.tip.text()
+
+    window._show_version(window._view, {"dsp_profile": {"vendor": "Mosconi", "name": "PICO 6/8-2 DSP"}})
+    assert button.isEnabled() and i18n.t("dspFileCheckNoMarkTip") in window._file_check.tip.text()
+    window._on_language_selected("uk")
+    try:
+        assert button.text() == i18n.t("dspFileCheck") and button.isEnabled()
+    finally:
+        window._on_language_selected("en")
+
+
 def test_a_state_file_the_method_refuses_by_its_version_is_said_in_the_arbiter_s_language(
         tmp_path, monkeypatch):
     """tcc#50 under method v3.0.64 (skill #89, tcc#95): the method now refuses a file whose

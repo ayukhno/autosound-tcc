@@ -105,7 +105,7 @@ from autosound_tcc.ui.tcc import main_menu, menu_registry, process_state_line, t
 from autosound_tcc.ui.tcc.agent_worker import AgentWorker
 from autosound_tcc.ui.tcc.qt_bridge import QtUiBridge
 from autosound_tcc.ui.tcc import github_view, process_watch, project_github, project_watch, qt_shutdown, rew_status, window_folder
-from autosound_tcc.ui.tcc import dsp_check, shown_version
+from autosound_tcc.ui.tcc import dsp_check, dsp_file_check, shown_version
 from autosound_tcc.ui.tcc.detail_pane import DetailPane, eq_field_order
 from autosound_tcc.ui.tcc.row_rule import table_fields
 from autosound_tcc.ui.tcc.setting_status import group_status
@@ -2001,6 +2001,7 @@ class MainWindow(QMainWindow):
         self._cfg_btn.clicked.connect(self._open_save_config)
         self._cfg_btn.setVisible(False)
         self._dsp_section.add_header_widget(self._cfg_btn)
+        self._file_check = dsp_file_check.FileCheck(self)  # «Перевірити налаштування» (#272)
         # No stretch. It was here so the tree would fill the panel instead of sitting at its
         # content height with a gap under it (user, 2026-07-28) -- and what it actually did was
         # hand the tree the leftover viewport and let it scroll inside the column's own scroll.
@@ -2270,6 +2271,7 @@ class MainWindow(QMainWindow):
         on hover (F-070), and what the DSP holds now, which is the method's claim (#251)."""
         self._version_shown = (view, profile)  # a language switch re-says the tooltip
         shown_version.sync(self)
+        self._file_check.sync(view, profile)
         prof = profile.get("dsp_profile", profile)
         processor = f"{prof.get('vendor', '?')} {prof.get('name', '?')}"
         self._cfg_btn.setVisible(bool(view.version) and shown_version.key_of(self) is None

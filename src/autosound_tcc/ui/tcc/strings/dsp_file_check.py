@@ -1,0 +1,211 @@
+"""«Перевірити налаштування» (#272): the DSP's saved preset file against a version of the journal.
+Four languages side by side per key; the English stands in all four until the Advisor's uk, pl
+and de (W-14 step 8). Plain data that imports nothing.
+"""
+
+STRINGS: dict[str, dict[str, str]] = {
+    'dspFileCheck': {
+        'en': 'Check settings',
+        'uk': 'Check settings',
+        'pl': 'Check settings',
+        'de': 'Check settings',
+    },
+    'dspFileCheckTip': {
+        'en': 'Compares {version} with a preset file the DSP program saved ({pattern}), row by row: parameter, journal, file, result. The method reads the file; nothing is written to it or beside it.',
+        'uk': 'Compares {version} with a preset file the DSP program saved ({pattern}), row by row: parameter, journal, file, result. The method reads the file; nothing is written to it or beside it.',
+        'pl': 'Compares {version} with a preset file the DSP program saved ({pattern}), row by row: parameter, journal, file, result. The method reads the file; nothing is written to it or beside it.',
+        'de': 'Compares {version} with a preset file the DSP program saved ({pattern}), row by row: parameter, journal, file, result. The method reads the file; nothing is written to it or beside it.',
+    },
+    'dspFileCheckNoMarkTip': {
+        'en': 'The «checked in the DSP» mark is not set for this DSP: the method pinned here compares its file but does not record the comparison in the journal (attest --from-file), so the mark has nothing to read.',
+        'uk': 'The «checked in the DSP» mark is not set for this DSP: the method pinned here compares its file but does not record the comparison in the journal (attest --from-file), so the mark has nothing to read.',
+        'pl': 'The «checked in the DSP» mark is not set for this DSP: the method pinned here compares its file but does not record the comparison in the journal (attest --from-file), so the mark has nothing to read.',
+        'de': 'The «checked in the DSP» mark is not set for this DSP: the method pinned here compares its file but does not record the comparison in the journal (attest --from-file), so the mark has nothing to read.',
+    },
+    'dspFileCheckOffTip': {
+        'en': "The method cannot read this DSP's saved file, so there is nothing to compare it with. It reads: {readers}.",
+        'uk': "The method cannot read this DSP's saved file, so there is nothing to compare it with. It reads: {readers}.",
+        'pl': "The method cannot read this DSP's saved file, so there is nothing to compare it with. It reads: {readers}.",
+        'de': "The method cannot read this DSP's saved file, so there is nothing to compare it with. It reads: {readers}.",
+    },
+    'dspFileCheckPick': {
+        'en': 'The preset file the DSP program saved',
+        'uk': 'The preset file the DSP program saved',
+        'pl': 'The preset file the DSP program saved',
+        'de': 'The preset file the DSP program saved',
+    },
+    'dspFileCheckFilter': {
+        'en': '{family} preset ({globs})',
+        'uk': '{family} preset ({globs})',
+        'pl': '{family} preset ({globs})',
+        'de': '{family} preset ({globs})',
+    },
+    'dspFileCheckAllFiles': {
+        'en': 'All files (*)',
+        'uk': 'All files (*)',
+        'pl': 'All files (*)',
+        'de': 'All files (*)',
+    },
+    'dspFileCheckBusy': {
+        'en': 'Checking…',
+        'uk': 'Checking…',
+        'pl': 'Checking…',
+        'de': 'Checking…',
+    },
+    'dspFileCheckTitle': {
+        'en': '{version} against {file}',
+        'uk': '{version} against {file}',
+        'pl': '{version} against {file}',
+        'de': '{version} against {file}',
+    },
+    'dspFileCheckFileLine': {
+        'en': 'md5 {md5}',
+        'uk': 'md5 {md5}',
+        'pl': 'md5 {md5}',
+        'de': 'md5 {md5}',
+    },
+    'dspFileCheckSavedLine': {
+        'en': 'saved {saved}',
+        'uk': 'saved {saved}',
+        'pl': 'saved {saved}',
+        'de': 'saved {saved}',
+    },
+    'dspFileCheckDeviceLine': {
+        'en': 'device: {device}',
+        'uk': 'device: {device}',
+        'pl': 'device: {device}',
+        'de': 'device: {device}',
+    },
+    'dspFileCheckRisk': {
+        'en': "The method has not been checked on this model: the comparison is read at your own risk. Check every value against the DSP program's own screens.",
+        'uk': "The method has not been checked on this model: the comparison is read at your own risk. Check every value against the DSP program's own screens.",
+        'pl': "The method has not been checked on this model: the comparison is read at your own risk. Check every value against the DSP program's own screens.",
+        'de': "The method has not been checked on this model: the comparison is read at your own risk. Check every value against the DSP program's own screens.",
+    },
+    'dspFileCheckCounts': {
+        'en': '{match} match · {differs} differ · {unknown} unknown',
+        'uk': '{match} match · {differs} differ · {unknown} unknown',
+        'pl': '{match} match · {differs} differ · {unknown} unknown',
+        'de': '{match} match · {differs} differ · {unknown} unknown',
+    },
+    'dspFileCheckColParameter': {
+        'en': 'Parameter',
+        'uk': 'Parameter',
+        'pl': 'Parameter',
+        'de': 'Parameter',
+    },
+    'dspFileCheckColJournal': {
+        'en': 'Journal',
+        'uk': 'Journal',
+        'pl': 'Journal',
+        'de': 'Journal',
+    },
+    'dspFileCheckColFile': {
+        'en': 'File',
+        'uk': 'File',
+        'pl': 'File',
+        'de': 'File',
+    },
+    'dspFileCheckColResult': {
+        'en': 'Result',
+        'uk': 'Result',
+        'pl': 'Result',
+        'de': 'Result',
+    },
+    'dspFileCheckMatch': {
+        'en': 'match',
+        'uk': 'match',
+        'pl': 'match',
+        'de': 'match',
+    },
+    'dspFileCheckDiffers': {
+        'en': 'differs',
+        'uk': 'differs',
+        'pl': 'differs',
+        'de': 'differs',
+    },
+    'dspFileCheckUnknown': {
+        'en': 'unknown',
+        'uk': 'unknown',
+        'pl': 'unknown',
+        'de': 'unknown',
+    },
+    'dspFileCheckCategory_audio': {
+        'en': 'Sound',
+        'uk': 'Sound',
+        'pl': 'Sound',
+        'de': 'Sound',
+    },
+    'dspFileCheckCategory_system': {
+        'en': 'System',
+        'uk': 'System',
+        'pl': 'System',
+        'de': 'System',
+    },
+    'dspFileCheckCategory_naming': {
+        'en': 'Names',
+        'uk': 'Names',
+        'pl': 'Names',
+        'de': 'Names',
+    },
+    'dspFileCheckCategory_ui_state': {
+        'en': 'Program view',
+        'uk': 'Program view',
+        'pl': 'Program view',
+        'de': 'Program view',
+    },
+    'dspFileCheckCategory_save_metadata': {
+        'en': 'Save details',
+        'uk': 'Save details',
+        'pl': 'Save details',
+        'de': 'Save details',
+    },
+    'dspFileCheckCategory_structure': {
+        'en': 'Structure',
+        'uk': 'Structure',
+        'pl': 'Structure',
+        'de': 'Structure',
+    },
+    'dspFileCheckCategory_unknown': {
+        'en': 'Other',
+        'uk': 'Other',
+        'pl': 'Other',
+        'de': 'Other',
+    },
+    'dspFileCheckNoRows': {
+        'en': 'The comparison has no rows.',
+        'uk': 'The comparison has no rows.',
+        'pl': 'The comparison has no rows.',
+        'de': 'The comparison has no rows.',
+    },
+    'dspFileCheckRefusedJournal': {
+        'en': 'Not compared: the journal refused. {message}',
+        'uk': 'Not compared: the journal refused. {message}',
+        'pl': 'Not compared: the journal refused. {message}',
+        'de': 'Not compared: the journal refused. {message}',
+    },
+    'dspFileCheckRefusedFile': {
+        'en': 'Not compared: the file could not be read ({kind}). {message}',
+        'uk': 'Not compared: the file could not be read ({kind}). {message}',
+        'pl': 'Not compared: the file could not be read ({kind}). {message}',
+        'de': 'Not compared: the file could not be read ({kind}). {message}',
+    },
+    'dspFileCheckRefusedChanged': {
+        'en': 'Not compared: the file changed while it was read, so this is no result. Read it again once nothing is saving it. {message}',
+        'uk': 'Not compared: the file changed while it was read, so this is no result. Read it again once nothing is saving it. {message}',
+        'pl': 'Not compared: the file changed while it was read, so this is no result. Read it again once nothing is saving it. {message}',
+        'de': 'Not compared: the file changed while it was read, so this is no result. Read it again once nothing is saving it. {message}',
+    },
+    'dspFileCheckFailed': {
+        'en': 'Not compared: the method gave no answer TCC can read. {message}',
+        'uk': 'Not compared: the method gave no answer TCC can read. {message}',
+        'pl': 'Not compared: the method gave no answer TCC can read. {message}',
+        'de': 'Not compared: the method gave no answer TCC can read. {message}',
+    },
+    'dspFileCheckClose': {
+        'en': 'Close',
+        'uk': 'Close',
+        'pl': 'Close',
+        'de': 'Close',
+    },
+}
