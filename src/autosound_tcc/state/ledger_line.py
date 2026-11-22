@@ -105,6 +105,9 @@ class SavedFile(NamedTuple):
     md5: Optional[str]
     saved: Optional[str]
     recorded: Optional[str]
+    #: The rows the method could not compare, in its own words, where the comparison found nothing
+    #: different (the Arbiter, 2026-11-22, W-14 acceptance B1): said on the mark's hover.
+    unknown: tuple[str, ...] = ()
 
 
 class Entry(NamedTuple):
@@ -147,12 +150,16 @@ def _day(created) -> Optional[str]:
 
 
 def _stamp(value) -> Optional[str]:
-    """An ISO timestamp, or the `DDMMYYYYHHMM` the method records for a saved file (rc1:
-    `"291020261232"`), as «DD.MM.YYYY HH:MM», local where it says its zone; None if it is neither."""
+    """An ISO timestamp, the `DDMMYYYYHHMM` the method recorded for a saved file (rc1:
+    `"291020261232"`), or the `dd.MM.yyyy hh:mm` it records now (CONTRACT.md item 14, as the file
+    states it; W-14 acceptance A2), as «DD.MM.YYYY HH:MM», local where it says its zone; None if it is
+    none of them."""
     if not isinstance(value, str):
         return None
     try:
         moment = (datetime.strptime(value, "%d%m%Y%H%M") if re.fullmatch(r"\d{12}", value)
+                  else datetime.strptime(value.strip(), "%d.%m.%Y %H:%M")
+                  if re.fullmatch(r"\s*\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}\s*", value)
                   else datetime.fromisoformat(value))
         if moment.tzinfo is not None:
             moment = moment.astimezone()
@@ -194,7 +201,7 @@ def _saved_file(record, created) -> Optional[SavedFile]:
     if not name or md5 is None:
         return None
     return SavedFile(name, md5, _stamp(record.get("saved")),
-                     _stamp(record.get("read_at")) or _stamp(created))
+                     _stamp(record.get("read_at")) or _stamp(created), _unknowns(record.get("compared")))
 
 
 class SourceFile(NamedTuple):
@@ -248,12 +255,41 @@ def source_file(record) -> Optional[SourceFile]:
                       compared not in (None, "", [], ()), differences, malformed)
 
 
+#: The counts line the method puts first in a list `compared` (CONTRACT.md item 14).
+_TALLY = re.compile(r"compare-file\.v1:\s*(\d+) match,\s*(\d+) differs?,\s*(\d+) unknown", re.IGNORECASE)
+
+
+def tally(compared) -> Optional[tuple[int, int, int]]:
+    """`(match, differs, unknown)` of a list `compared`, read off its first line, or None where it
+    has no such line (rc1's lists held the differences alone)."""
+    if not isinstance(compared, (list, tuple)) or not compared or not isinstance(compared[0], str):
+        return None
+    found = _TALLY.match(compared[0].strip())
+    return tuple(int(n) for n in found.groups()) if found else None
+
+
+def _unknowns(compared) -> tuple[str, ...]:
+    """The method's lines for the rows it could not compare, where nothing was found different."""
+    if _differs(compared) or tally(compared) is None:
+        return ()
+    return tuple(str(line) for line in compared[1:] if " unknown" in str(line))
+
+
 def _differs(compared) -> bool:
-    """A comparison on record that is no statement of no difference: rc1 writes the string
-    `"no difference"`, or a list of the differences. Nothing written is nothing compared."""
-    if compared in (None, "", []):
+    """A comparison on record that is no statement of no difference. The method writes the string
+    `"no difference"` when every row matches, else a list: its counts first, then a line a row that
+    differs and a line a row it could not compare (item 14: «an unknown row is never written as no
+    difference»). Unknown rows are not a difference (the Arbiter, 2026-11-22, W-14 acceptance B1:
+    on a real file there always are some, and the mark never showed); a row that differs is, and so
+    is a list with no counts (rc1's held the differences alone) or one that matched nothing — a
+    comparison that compared nothing checked nothing. Nothing written is nothing compared."""
+    if compared in (None, "", [], ()):
         return False
-    return not (isinstance(compared, str) and compared.strip().lower() == "no difference")
+    if isinstance(compared, str):
+        return compared.strip().lower() != "no difference"
+    counts = tally(compared)
+    return (counts is None or counts[1] > 0 or counts[0] == 0
+            or any(" differs:" in str(line) for line in compared[1:]))
 
 
 def _not_verified(value) -> bool:
@@ -290,7 +326,8 @@ def one_per_file(files) -> tuple[SavedFile, ...]:
         for at, have in enumerate(kept):
             if have.name == file.name and same_content(have.md5, file.md5):
                 kept[at] = SavedFile(have.name, have.md5 if len(have.md5 or "") >= len(file.md5 or "") else file.md5,
-                                     have.saved or file.saved, have.recorded or file.recorded)
+                                     have.saved or file.saved, have.recorded or file.recorded,
+                                     have.unknown or file.unknown)
                 break
         else:
             kept.append(file)

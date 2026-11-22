@@ -236,6 +236,52 @@ def test_no_difference_written_or_nothing_compared_keeps_the_mark(tmp_path, comp
     assert _row(_combo(tmp_path), "v_001")[0], compared
 
 
+#: What the method writes after a real `attest --from-file` (v3.3.3, CONTRACT.md item 14): its counts,
+#: then one line a row it could not compare. On a real file there always are some (W-14 acceptance B1).
+HELIX_UNKNOWNS = ["compare-file.v1: 469 match, 0 differs, 12 unknown",
+                  "w-L hp.type unknown: the file's filter family is not one the journal names",
+                  "w-R hp.type unknown: the file's filter family is not one the journal names",
+                  "tw-L lp.type unknown: the file's filter family is not one the journal names",
+                  "tw-R lp.type unknown: the file's filter family is not one the journal names"]
+
+
+def test_nothing_found_different_is_checked_and_the_hover_names_what_was_not_compared(tmp_path):
+    """The Arbiter, 2026-11-22 (W-14 acceptance B1): the mark read every list as differences, and
+    the method lists its unknown rows too, so after a real attest the mark never showed. Unknowns
+    are no difference; the hover counts them and names the first three."""
+    _bank(tmp_path, "v_001", preset_settings={"source_file": {
+        "name": "a.pct6", "md5": FULL_MD5, "saved": "27.10.2026 11:23", "compared": HELIX_UNKNOWNS}})
+    import html
+
+    marked, hover = _row(_combo(tmp_path), "v_001")
+    assert marked, hover
+    said = i18n.t("dspCheckedUnknown").format(n=4, rows="; ".join(HELIX_UNKNOWNS[1:4]) + "; …")
+    assert html.escape(said) in hover, hover
+    assert "saved 27.10.2026 11:23" in hover, "the time as the method writes it (A2)"
+
+
+@pytest.mark.parametrize("compared", [
+    ["compare-file.v1: 468 match, 1 differs, 12 unknown", "w-L gain_db differs: journal -3.0, file -2.5"],
+    ["compare-file.v1: 0 match, 0 differs, 15 unknown", "w-L gain_db unknown: no slot"],
+    ["compare-file.v1: 469 match, 0 differs, 1 unknown", "w-L gain_db differs: journal -3.0, file -2.5"],
+], ids=["a-row-differs", "nothing-matched", "counts-and-rows-disagree"])
+def test_a_list_with_a_difference_or_nothing_compared_is_no_mark(tmp_path, compared):
+    """A row that differs vetoes as before; a comparison that matched nothing checked nothing."""
+    _bank(tmp_path, "v_001", preset_settings={"source_file": {"name": "a.pct6", "md5": FULL_MD5,
+                                                              "compared": compared}})
+    assert _row(_combo(tmp_path), "v_001") == (False, ""), compared
+
+
+def test_the_saved_time_the_method_writes_now_is_read(tmp_path):
+    """v3.3.x writes `saved` as the file states it, `dd.MM.yyyy hh:mm` (item 14; W-14 acceptance A2):
+    the hover said «recorded» with the version's time instead."""
+    _bank(tmp_path, "v_001", preset_settings={"source_file": {
+        "name": "a.pct6", "md5": FULL_MD5, "saved": "28.10.2026 09:41", "read_at": "2026-11-22T11:23:00",
+        "compared": "no difference"}})
+    _marked, hover = _row(_combo(tmp_path), "v_001")
+    assert "saved 28.10.2026 09:41" in hover, hover
+
+
 def test_the_saved_time_rc1_writes_is_read(tmp_path):
     _bank(tmp_path, "v_001", preset_settings={"source_file": {
         "name": "5S.pct6", "md5": "46f99511aa", "saved": "291020261232",
@@ -533,7 +579,14 @@ MOSCONI = {"dsp_profile": {"vendor": "Mosconi", "name": "PICO 6/8-2 DSP", "group
 PR15_MD5 = "88a9feb8f37986fe6c3846bcd30b5fa1"
 
 
-def _attested_pr15(root, version="v_001", compared="no difference"):
+#: What the real method records for the sample `.PR15` (W-14 acceptance, `logs/55`): the input gain is
+#: always unknown, so a Mosconi comparison is never «no difference».
+PR15_COMPARED = ["compare-file.v1: 267 match, 0 differs, 2 unknown",
+                 "Output 8 channel unknown: the profile names no channel for this output",
+                 "preset input_gain_db unknown: the version records no preset settings"]
+
+
+def _attested_pr15(root, version="v_001", compared=PR15_COMPARED):
     """What `attest --from-file a.PR15` writes from v3.3.3 (CONTRACT.md item 14, hub #348): its keys
     are held to the real method's below."""
     _bank(root, version, preset_settings={"status": "applied", "source_file": {
@@ -566,6 +619,8 @@ def test_the_real_attest_from_file_records_a_mosconi_file_as_the_fake_above_has_
     faked = json.loads((fake / PRESET / "v_001.json").read_text(encoding="utf-8"))
     assert set(source) == set(faked["preset_settings"]["source_file"]), source
     assert source["device"] == "Mosconi PICO 6/8-2 DSP (Dev 15)" and source["saved"] is None, source
+    assert ledger_line.tally(source["compared"]) is not None, "the counts line the mark reads (B1)"
+    assert ledger_line.tally(PR15_COMPARED) is not None
     assert source["md5"] == PR15_MD5 and path.read_bytes() == before
 
 
@@ -590,15 +645,21 @@ def test_a_mosconi_version_is_marked_once_the_method_records_its_comparison(tmp_
     assert dsp_check.header(tmp_path, _head_view(), MOSCONI, "tip")[0] == "checked"
 
 
-def test_a_mosconi_comparison_that_found_differences_or_unknowns_is_no_mark(tmp_path, monkeypatch):
+def test_a_mosconi_comparison_with_a_difference_or_nothing_matched_is_no_mark_and_unknowns_are_named(
+        tmp_path, monkeypatch):
     from tests.test_dsp_file_check import declare
 
     _attested_pr15(tmp_path, compared=["compare-file.v1: 0 match, 0 differs, 14 unknown",
                                        "w-L gain_db unknown: project.json gives this channel no slot"])
     _attested_pr15(tmp_path, "v_050")
+    _attested_pr15(tmp_path, "v_060", compared=["compare-file.v1: 266 match, 1 differs, 2 unknown",
+                                                "1 gain_db differs: journal -3.0, file -2.5"])
     declare(monkeypatch, tmp_path / "method")
     combo = _combo(tmp_path, profile=MOSCONI)
-    assert _row(combo, "v_001") == (False, "") and _row(combo, "v_050")[0]
+    assert _row(combo, "v_001") == (False, ""), "nothing matched: nothing checked"
+    assert _row(combo, "v_060") == (False, ""), "a row differs"
+    marked, hover = _row(combo, "v_050")
+    assert marked and "input_gain_db unknown" in hover, "the real record's unknowns: checked, and named"
 
 
 def test_a_dsp_the_method_declares_gets_the_mark_with_no_change_of_tcc(tmp_path, monkeypatch):

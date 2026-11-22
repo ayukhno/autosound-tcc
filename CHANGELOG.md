@@ -51,6 +51,11 @@ The wave W-14.
   command line says the method-link message in words, with its hash, not as a raw key; after a cancelled project
   switch the header reads the project the window shows.
 
+- **«Checked in the DSP» shows after the method's own record of the file** (tcc#272, found at acceptance): a
+  comparison that found nothing different counts, and the hover says how many values the method could not compare.
+  Before, any value the method could not compare hid the mark, and on a real file there always is one, so the mark
+  never showed for a Mosconi. The file's save time is read in the form the method writes it now.
+
 ### Tests and CI
 
 - **One process per test file in CI, and a time limit per test** (tcc#275): a test that hangs fails by name instead

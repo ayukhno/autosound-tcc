@@ -81,6 +81,10 @@ def marks(root, preset: str, own: list, others: list, profile: dict,
     return found
 
 
+#: How many of the rows the method could not compare the hover names; the count says the rest.
+_UNKNOWN_SHOWN = 3
+
+
 def _file_line(file: SavedFile) -> str:
     parts = [html.escape(file.name)]
     if file.md5:
@@ -98,7 +102,11 @@ def tip(files: tuple[SavedFile, ...]) -> str:
     lines = [html.escape(i18n.t("dspCheckedTip"))]
     if len(files) > 1:
         lines.append(html.escape(i18n.t("dspCheckedSameFiles")))
-    lines.extend(_file_line(file) for file in files)
+    for file in files:
+        lines.append(_file_line(file))
+        if file.unknown:
+            shown = "; ".join(file.unknown[:_UNKNOWN_SHOWN]) + ("; …" if len(file.unknown) > _UNKNOWN_SHOWN else "")
+            lines.append(html.escape(i18n.t("dspCheckedUnknown").format(n=len(file.unknown), rows=shown)))
     return "<br>".join(lines)
 
 

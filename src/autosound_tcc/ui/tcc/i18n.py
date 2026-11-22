@@ -670,6 +670,7 @@ answers the first five questions anybody would ask.",
         "dspCheckedMd5": "md5 {md5}",
         "dspCheckedSaved": "saved {when}",
         "dspCheckedRecorded": "recorded {when}",
+        "dspCheckedUnknown": "The method could not compare {n} value(s) of this version with the file, so they are not part of the check: {rows}",
         "menuCopyCarTip": "Start a project from one that already exists: the car, the equipment and the installation — make, drivers per channel, amps, mic, the DSP and its profile, the naming glossary. What was MEASURED in the other project stays there unless you ask for it. You adjust what differs instead of describing your own car again.",
         "menuReviewerKey": "Reviewer key…",
         "menuReviewerKeyTip": "Where the reviewer's API key is kept, and a safe place to enter one. A reviewer signed in through its CLI needs no key.",
@@ -2250,6 +2251,7 @@ Choose sweeps (sw) above to read this.",
         "dspCheckedMd5": "md5 {md5}",
         "dspCheckedSaved": "збережено {when}",
         "dspCheckedRecorded": "записано {when}",
+        "dspCheckedUnknown": "Метод не зміг порівняти {n} значення(нь) цієї версії з файлом, тому вони не входять до перевірки: {rows}",
         "menuCopyCarTip": "Почати проєкт із наявного: авто, обладнання та установка — марка, драйвери по каналах, підсилювачі, мікрофон, DSP та його профіль, глосарій назв. Те, що ВИМІРЯНО в тому проєкті, лишається там, поки ви не попросите. Ви правите те, що відрізняється, замість описувати свою машину заново.",
         "menuReviewerKey": "Ключ рецензента…",
         "menuReviewerKeyTip": "Де лежить API-ключ рецензента, і безпечне місце, щоб його ввести. Рецензентові, що увійшов через свій CLI, ключ не потрібен.",
@@ -3763,6 +3765,7 @@ Choose sweeps (sw) above to read this.",
         "dspCheckedMd5": "md5 {md5}",
         "dspCheckedSaved": "zapisano {when}",
         "dspCheckedRecorded": "zarejestrowano {when}",
+        "dspCheckedUnknown": "Metoda nie mogła porównać {n} wartości tej wersji z plikiem, więc nie są częścią sprawdzenia: {rows}",
         "menuCopyCarTip": 'Zacznij projekt od już istniejącego: auto, sprzęt i montaż — marka, głośniki po kanałach, '
                           'wzmacniacze, mikrofon, DSP i jego profil, słownik nazw. To, co ZMIERZONO w tamtym projekcie, '
                           'zostaje tam, dopóki nie poprosisz. Poprawiasz to, co się różni, zamiast opisywać własne auto '
@@ -5327,6 +5330,7 @@ Choose sweeps (sw) above to read this.",
         "dspCheckedMd5": "md5 {md5}",
         "dspCheckedSaved": "gespeichert {when}",
         "dspCheckedRecorded": "erfasst {when}",
+        "dspCheckedUnknown": "Die Methode konnte {n} Wert(e) dieser Version nicht mit der Datei vergleichen, deshalb sind sie nicht Teil der Prüfung: {rows}",
         "menuCopyCarTip": 'Ein Projekt aus einem bestehenden beginnen: das Auto, die Anlage und der Einbau — Marke, '
                           'Chassis pro Kanal, Endstufen, Mikrofon, das DSP und sein Profil, das Namensglossar. Was im '
                           'anderen Projekt GEMESSEN wurde, bleibt dort, solange du es nicht anforderst. Du korrigierst, '
