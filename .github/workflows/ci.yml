@@ -172,11 +172,13 @@ jobs:
               || [ -z "$changed" ] || [ "$(printf '%s\n' "$changed" | grep -c .)" -ge 300 ]; then
             echo "the changed files are not known -- the method job runs"
             echo "method=true" >> "$GITHUB_OUTPUT"
-          elif printf '%s\n' "$changed" | grep -qE '^(vendor/|scripts/|uv\.lock$|pyproject\.toml$|constraints\.txt$)'; then
-            echo "vendor/, scripts/ or the dependencies changed -- the method job runs"
+          # The `method` tests' own files, the conftest they run under and this workflow too: the shards
+          # deselect those tests, so a change to them alone would otherwise be run nowhere (W-14 review).
+          elif printf '%s\n' "$changed" | grep -qE '^(vendor/|scripts/|uv\.lock$|pyproject\.toml$|constraints\.txt$|tests/(test_skill_selftests|test_writer_race|test_constraints|test_ci_shard|conftest)\.py$|\.github/workflows/ci\.yml$)'; then
+            echo "vendor/, scripts/, a dependency, a method test or this workflow changed -- the method job runs"
             echo "method=true" >> "$GITHUB_OUTPUT"
           else
-            echo "nothing under vendor/ or scripts/ and no dependency file changed -- no method job"
+            echo "nothing under vendor/ or scripts/, no dependency, method test or workflow changed -- no method job"
             echo "method=false" >> "$GITHUB_OUTPUT"
           fi
 

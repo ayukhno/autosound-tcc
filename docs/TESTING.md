@@ -142,7 +142,9 @@ now describe the condition they pack.
 installers check, the bare-CLI writer race, the real `uv` export — are marked `method`. The shards
 run `-m "not method"`; the `method` job runs `-m method` once per platform, and only when `gate`
 finds `vendor/` (the pin is a gitlink there), `scripts/`, `uv.lock`, `pyproject.toml` or
-`constraints.txt` among the changed files (the last three because the real `uv` export reads them). No schedule.
+`constraints.txt` among the changed files (the last three because the real `uv` export reads them), or one of the
+`method` tests' own files, `tests/conftest.py` or `ci.yml` itself — the shards deselect those tests, so a change to
+them alone would run them nowhere. No schedule.
 They were about a quarter of every shard's time (RC5). The selftests' discovery test is not
 marked: it checks TCC's own list against the skill and costs nothing.
 

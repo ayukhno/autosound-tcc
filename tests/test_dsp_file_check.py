@@ -816,8 +816,10 @@ def test_a_banked_version_is_shown_with_what_the_method_kept_did_not_take_and_to
     (2, "usage: apply.py <project-dir> propose …", "could not be read"),
     (3, "error: AYA.pct6: changed: the file changed while it was read", "changed while it was read"),
 ], ids=["journal", "file", "usage", "changed"])
-def test_a_refusal_is_shown_in_the_method_s_words_and_nothing_is_banked_or_reloaded(
+def test_a_refusal_is_shown_in_the_method_s_words_and_only_the_journal_s_re_reads(
         tmp_path, monkeypatch, code, err, said):
+    """Exit 1 re-reads: the method banks before it builds the sheet, and an error there is exit 1
+    too, so a version may be there. The file's refusals (2, 3) come before any bank."""
     path = _saved_file(tmp_path)
     _method(monkeypatch, _differing(path), saved=(code, "", err))
     host, check = _saving_check(tmp_path)
@@ -825,7 +827,7 @@ def test_a_refusal_is_shown_in_the_method_s_words_and_nothing_is_banked_or_reloa
     dialog = _save(check)
     assert said in dialog.saved_label.text() and err in dialog.saved_label.text()
     assert "Nothing was saved" in dialog.saved_label.text()
-    assert host.reloads == 0, "nothing banked: nothing to re-read"
+    assert host.reloads == (1 if code == 1 else 0), "exit 1 may follow a bank; 2 and 3 never do"
     assert not dialog.save_button.isEnabled(), "the same read is not offered again"
     assert dialog.warning_label.text() == "Read at your own risk." and not dialog.warning_label.isHidden()
 

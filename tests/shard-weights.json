@@ -48,6 +48,7 @@
     "tests/test_discard.py": 0.77,
     "tests/test_doubles.py": 3.23,
     "tests/test_dsp_check.py": 2.5,
+    "tests/test_dsp_file_check.py": 4.64,
     "tests/test_dsp_state.py": 1.03,
     "tests/test_dsp_tree_compare.py": 1.17,
     "tests/test_dsp_tree_tooltip.py": 0.89,

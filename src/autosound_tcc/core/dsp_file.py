@@ -374,11 +374,15 @@ class Saved(NamedTuple):
 
     @property
     def may_have_written(self) -> bool:
-        """All but the answers that guarantee nothing was written: a refusal (1-3, item 14), a held
-        lock (75, item 8), a save TCC stopped before it started (`stale`) or could not start
-        (`not_run`). An exit the contract
-        does not name, or a child cut at its bound, may have banked: the window re-reads."""
-        return self.kind not in ("refused", "busy", "stale", "head_unread", "not_run")
+        """All but the answers that guarantee nothing was written: the file's refusals (2, 3: read
+        before anything is banked), a held lock (75, item 8), a save TCC stopped before it started
+        (`stale`, `head_unread`) or could not start (`not_run`). Exit 1 is not among them: the
+        method banks the version before it builds the sheet, and an error there is exit 1 too
+        (`state/apply.py`, `_main`). An exit the contract does not name, or a child cut at its bound,
+        may have banked as well: the window re-reads, which costs nothing (W-14 final review)."""
+        if self.kind == "refused":
+            return self.code == EXIT_JOURNAL
+        return self.kind not in ("busy", "stale", "head_unread", "not_run")
 
 
 def differs(answer: Answer) -> bool:
