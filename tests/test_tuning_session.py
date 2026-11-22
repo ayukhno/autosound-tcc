@@ -1487,20 +1487,27 @@ def test_a_thinking_block_says_the_model_is_thinking_and_its_text_stays_out(tmp_
     assert session._translate(Delta()) == []
 
 
-def test_a_start_with_no_window_says_the_link_commit_in_words_with_its_hash(monkeypatch, tmp_path):
-    """#266 A3: a command-line start has no window to hand the core its table; the person got the key
-    `methodLinkCommitted` and no hash."""
-    from autosound_tcc.core import app_log, method_link_git, self_check
+def test_a_light_install_start_says_the_link_messages_in_words(tmp_path):
+    """#266 A3: with no PySide6 at all, the CLI's link messages are sentences with their hash, the
+    edits suffix and a blocked key included, never raw keys."""
+    from tests import test_packaging
 
-    told = []
-    monkeypatch.setattr(self_check, "_translate", str)
-    monkeypatch.setattr(app_log, "warn", told.append)
-    monkeypatch.setattr(method_link_git, "_TOLD", set())
-    method_link_git._say(tmp_path, method_link_git.Outcome(
-        method_link_git.COMMITTED, "methodLinkCommitted",
-        {"path": ".claude/skills/x", "edits": False, "commit": "abc1234", "widened": False, "behind": False},
-        commit="abc1234"))
-    assert told and "methodLinkCommitted" not in told[0] and "abc1234" in told[0], told
+    body = f"""
+from pathlib import Path
+from autosound_tcc import tuning_session_cli
+from autosound_tcc.core import app_log, method_link_git as g
+told = []
+app_log.warn = told.append
+args = {{"path": "x", "edits": True, "commit": "abc1234", "widened": False, "behind": False}}
+g._say(Path({str(tmp_path)!r}), g.Outcome(g.COMMITTED, "methodLinkCommitted", args, commit="abc1234"))
+g._say(Path({str(tmp_path)!r}), g.Outcome(g.BLOCKED, "methodLinkDetached", {{"path": "x"}}))
+print("\\n".join(told))
+"""
+    done = test_packaging._run(body)
+    assert done.returncode == 0, done.stderr
+    assert "abc1234" in done.stdout and "uncommitted edits" in done.stdout, done.stdout
+    assert "detached HEAD" in done.stdout, done.stdout
+    assert "methodLink" not in done.stdout, done.stdout
 
 
 def test_the_command_line_start_hands_the_core_the_translations(monkeypatch):

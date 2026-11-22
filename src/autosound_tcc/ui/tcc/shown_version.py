@@ -19,7 +19,7 @@ import functools
 from typing import Callable, Optional
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QVBoxLayout, QWidget
 
 from autosound_tcc.core import app_log
 from autosound_tcc.state import ledger_line
@@ -113,8 +113,10 @@ def sub(window, text: str) -> str:
 def row(window) -> QWidget:
     """The strip over the tree: the picker, and — while looking — the mark and the way back."""
     widget = QWidget()
-    layout = QHBoxLayout(widget)
-    layout.setContentsMargins(12, 2, 8, 2)
+    column = QVBoxLayout(widget)
+    column.setContentsMargins(12, 2, 8, 2)
+    column.setSpacing(2)
+    layout = QHBoxLayout()
     layout.setSpacing(6)
     # One line, cut to the room the buttons leave, the whole text on hover (#266 A2): a wrapping
     # label took six lines at the default width and squeezed the buttons.
@@ -128,9 +130,13 @@ def row(window) -> QWidget:
     window._shown_pick.setProperty("class", "link-btn")
     window._shown_pick.setCursor(Qt.CursorShape.PointingHandCursor)
     window._shown_pick.clicked.connect(lambda _c=False: _open_picker(window))
-    layout.addWidget(window._shown_mark, stretch=1)
+    # The mark on a line of its own, over the buttons: beside them it had no room left to say its
+    # first words, and those are the warning.
+    column.addWidget(window._shown_mark)
     layout.addWidget(window._shown_back)
+    layout.addStretch(1)
     layout.addWidget(window._shown_pick)
+    column.addLayout(layout)
     widget.setVisible(False)
     window._shown_row = widget
     return widget

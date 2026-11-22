@@ -372,12 +372,6 @@ def _said(done: subprocess.CompletedProcess) -> str:
     return " ".join(((done.stderr or "") + " " + (done.stdout or "")).split())[-300:] or "no reason given"
 
 
-#: What is said where nothing hands the core the window's table (a command-line start, a light
-#: install): the commit's own news, with its hash.
-_PLAIN = {"methodLinkCommitted": "TCC took the method link {path} out of git and committed that as {commit}. "
-                                 "Nothing was pushed."}
-
-
 def _say(project: Path, outcome: Outcome) -> None:
     """On the strip, once per run for what stays the same: a commit is its own news (its hash)."""
     if not outcome.key:
@@ -389,10 +383,7 @@ def _say(project: Path, outcome: Outcome) -> None:
         _TOLD.add(mark)
     from autosound_tcc.core import self_check  # its translator is the window's (`use_translator`)
 
-    text = self_check.translated(outcome.key)
-    if text == outcome.key:  # no translator (a Qt-free start): a sentence, not the key (#266 A3)
-        text = _PLAIN.get(outcome.key, text)
-    text = text.format(**outcome.args)
+    text = self_check.translated(outcome.key).format(**outcome.args)
     for said, key in (("edits", "methodLinkCommittedEdits"), ("widened", "methodLinkCommitWidened"),
                       ("behind", "methodLinkCommittedIndexBehind")):
         if outcome.args.get(said):

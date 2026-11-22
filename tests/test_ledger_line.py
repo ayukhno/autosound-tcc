@@ -578,7 +578,7 @@ def test_any_version_can_be_shown_read_only_with_a_mark_and_one_way_back(tmp_pat
 
     assert "0" in _shown_text(window) and "-4.5" not in _shown_text(window), "the tree shows v_001"
     assert not window._shown_mark.isHidden() and "v_001" in window._shown_mark.text()
-    assert "not the current" in window._shown_mark.text()
+    assert "not the current" in window._shown_mark.text().lower()
     # The header's dot and version are HEAD's, and name what is looked at.
     assert window._dsp_section.sub_text().startswith("v_003") and "v_001" in window._dsp_section.sub_text()
 
@@ -753,7 +753,7 @@ def test_nothing_acts_on_a_looked_at_version_as_head(tmp_path, monkeypatch):
     head_dot = _dot_of(window)
     _pick(window, "v_004")  # SQ's: another slot, so a reader of what is drawn would say SQ
 
-    assert window._shown_mark.text().startswith("Showing v_004") and "SQ" in window._shown_mark.text()
+    assert window._shown_mark.text().startswith("Not the current one") and "SQ" in window._shown_mark.text()
     assert window._view.version == "v_003", "the actors' view is HEAD"
     assert _dot_of(window) == head_dot and head_dot == "tl tl-done", "the header's dot is HEAD's"
     window._open_curves(["w-L_01 (sw)"])
@@ -1022,7 +1022,7 @@ def test_a_version_of_another_slot_is_named_and_compared_from_that_slot(tmp_path
     shown_version.show(window, menu_row)
 
     assert "-7.5" in _shown_text(window), "the other slot's values are on screen"
-    assert "SQ" in window._shown_mark.text() and "not the current" in window._shown_mark.text()
+    assert "SQ" in window._shown_mark.text() and "not the current" in window._shown_mark.text().lower()
     assert window._loaded_preset == "FULL" and window._view.version == "v_003", "HEAD did not move"
     args = window._compare_args
     assert args[5] == "SQ" and args[6] == "v_004", "the compare list is the shown slot's"
@@ -1110,5 +1110,6 @@ def test_the_strip_over_the_tree_keeps_its_buttons_whole_at_the_default_width():
             assert button.width() >= button.sizeHint().width(), (button.text(), button.width())
         assert window._shown_mark.height() <= 2 * window._shown_mark.fontMetrics().height()
         assert window._shown_mark.toolTip() == text, "the cut text is whole on hover"
+        assert window._shown_mark.text().startswith("Not the current one"), window._shown_mark.text()
     finally:
         host.close()
