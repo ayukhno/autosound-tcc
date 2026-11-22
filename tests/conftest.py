@@ -594,7 +594,66 @@ def _end_qt_before_python_finalises():
     gc.collect()
     from autosound_tcc.ui.tcc import qt_shutdown
 
+    _earlier_workers_back(qt_shutdown)
     qt_shutdown.destroy_application()
+
+
+#: Workers an earlier test left in `qt_shutdown`'s registry, and which of its two sets each was in.
+#: Held here, strongly, for exactly the reason the registry holds them: dropping the last reference
+#: to a running QThread is `qFatal` (`qt_shutdown.watch`). Each leaves this table when it finishes.
+_EARLIER_WORKERS: dict = {}
+
+
+def _earlier_workers_back(qt_shutdown) -> None:
+    """Every set-aside worker that has not finished goes back to the set it came from, so the exit
+    path (`destroy_application` → `quiesce_detached`) sees exactly what it saw before #268."""
+    for thread, homes in list(_EARLIER_WORKERS.items()):
+        try:
+            finished = thread.isFinished()
+        except RuntimeError:  # its C++ half is already gone
+            finished = True
+        if not finished:
+            for home in homes:
+                getattr(qt_shutdown, home).add(thread)
+    _EARLIER_WORKERS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _a_test_sees_only_its_own_workers():
+    """tcc#268: `qt_shutdown.live()` and `detached()` are the PROCESS's registry, and a worker an
+    earlier file left running kept them non-empty, so a test waiting for «no worker live» waited
+    out its deadline in a long serial run and passed in a shard (`docs/CI-ROOT-CAUSE-2026-11-10.md`
+    RC3).
+
+    Before each test the registry is emptied into `_EARLIER_WORKERS`, and only then: everything the
+    CURRENT test starts or hands over lands in the registry as usual and stays visible to its own
+    asserts and to its own teardown; it is set aside at the start of the next test, never inside
+    this one. Nothing is dropped: the table holds each worker until it finishes, and the session's
+    end puts the unfinished ones back before Qt is destroyed."""
+    from autosound_tcc.ui.tcc import qt_shutdown
+
+    for home in ("_LIVE", "_DETACHED"):
+        registry = getattr(qt_shutdown, home)
+        for thread in list(registry):
+            registry.discard(thread)
+            try:
+                done = thread.isFinished()
+            except RuntimeError:  # its C++ half is already gone
+                done = True
+            if done and thread not in _EARLIER_WORKERS:
+                # Ended, its own queued `finished` not yet delivered: the registry would let go of
+                # it the moment it is, so there is nothing to hold.
+                continue
+            if thread not in _EARLIER_WORKERS:
+                _EARLIER_WORKERS[thread] = set()
+                try:
+                    # Queued to the GUI thread, like the registry's own `finished` connections.
+                    thread.finished.connect(lambda t=thread: _EARLIER_WORKERS.pop(t, None))
+                except RuntimeError:  # its C++ half is already gone: nothing left to hold
+                    _EARLIER_WORKERS.pop(thread, None)
+                    continue
+            _EARLIER_WORKERS[thread].add(home)
+    yield
 
 
 @pytest.fixture
