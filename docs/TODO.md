@@ -2082,7 +2082,7 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 
 ### F-111 — W-14 · v1.3.2: the milestone, the plan
 
-**Статус**: open · 2026-11-22, the Arbiter's «збір закінчено»: milestone 13 `W-14 · v1.3.2` (opened as v1.4.0, renamed: «це
+**Статус**: done v1.3.2 · the patch, tagged on the commit that carries this line: PR #276 merged `--ff-only` 2026-11-22 at `ea5c6962` (its CI green on all three systems), paired with the method's v3.3.3 (`a7966a0`); the milestone closes with the tag · was: open · 2026-11-22, the Arbiter's «збір закінчено»: milestone 13 `W-14 · v1.3.2` (opened as v1.4.0, renamed: «це
 патч»), 8 issues with `ok`: #271–#274 (Mosconi and Helix, his priority), #275 and #268 (CI), #265, #266. Off it: the key group,
 Windows CI (#262–#264), hub #264. Bus: hub #347 and #343 taken; hub #348 (TCC-071) sent to skill, `attest --from-file .PR15`
 for Mosconi's mark. The plan `docs/PLAN-W-14.md`: the four decisions taken 2026-11-22; hub #349 (TCC-072) and #350 (TCC-073) sent and
@@ -2119,7 +2119,7 @@ version_bench's selftest on two leftover TMPDIR folders from a run cut off 2026-
 
 ### F-108 — W-13: the collection, what is waiting
 
-**Статус**: open · 2026-11-10, W-13 is in collection (`WAVES.md` §1 step 1): the Arbiter tests, the session records · in the pool: 194 (tcc#268, a flaky close test, quarantined); 195 (CI's root causes, `docs/CI-ROOT-CAUSE-2026-11-10.md`; at the milestone one group «CI» with hub #339 and the options A1, H, D, I, K, one decision, the Arbiter's word 2026-11-10) · hub #339 ask 1 (`paths-ignore`, the Arbiter's «терміново») done 2026-11-10 at `e8e3a7cd`, PR #269 merged with `[skip ci]`, zero CI runs; asks 2–4 wait for the milestone · the Arbiter's rule 2026-11-10: nothing that starts CI without his OK · on the bus `to:tcc`: none of W-12's left · resume: `hub/bin/role tcc --resume aaedea49-f944-4591-a9f9-3f6b45d1ee6a`
+**Статус**: done v1.3.2 · its pool went to W-14's milestone: tcc#268 and the CI group (#275) shipped in v1.3.2; hub #339 asks 2–4 are F-110 · was: open · 2026-11-10, W-13 is in collection (`WAVES.md` §1 step 1): the Arbiter tests, the session records · in the pool: 194 (tcc#268, a flaky close test, quarantined); 195 (CI's root causes, `docs/CI-ROOT-CAUSE-2026-11-10.md`; at the milestone one group «CI» with hub #339 and the options A1, H, D, I, K, one decision, the Arbiter's word 2026-11-10) · hub #339 ask 1 (`paths-ignore`, the Arbiter's «терміново») done 2026-11-10 at `e8e3a7cd`, PR #269 merged with `[skip ci]`, zero CI runs; asks 2–4 wait for the milestone · the Arbiter's rule 2026-11-10: nothing that starts CI without his OK · on the bus `to:tcc`: none of W-12's left · resume: `hub/bin/role tcc --resume aaedea49-f944-4591-a9f9-3f6b45d1ee6a`
 
 ### F-107 — W-12: the milestone
 
