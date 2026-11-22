@@ -65,6 +65,9 @@ def test_every_pin_is_the_version_the_lock_holds():
         assert name in {pinned for pinned, _ in pins}, f"{name} is installed and not pinned"
 
 
+# The real `uv`: CI's `method` job runs it, not the shards (#275, option G). The pins against the
+# lock, above, stay in every shard, and `make test` runs both.
+@pytest.mark.method
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv, which CI and `make` both run")
 def test_the_file_is_the_lock_s_export():
     """And the whole set: what `make constraints` would write now — a dependency added to the lock

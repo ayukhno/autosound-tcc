@@ -71,13 +71,21 @@ def _params():
     """Every selftest, on every platform: v3.1.4 mended the three that failed on Windows over a
     path said the way Windows writes it (hub #274, TCC-055), and their strict xfail came off with
     the re-pin."""
-    return [pytest.param(module, argv, id=module) for module, argv in _SELFTESTS]
+    return [pytest.param(module, argv, id=module, marks=[
+        # CI's `method` job runs these, not the shards (#275, option G): they test the method,
+        # and they were a quarter of every shard's time.
+        pytest.mark.method,
+        # The subprocess's own bound decides, not pytest-timeout's general 120 s: a slow selftest
+        # is slow by nature (`_TIMEOUT_S`), and its own timeout names it better than a dump.
+        pytest.mark.timeout(_TIMEOUT_S.get(module, _DEFAULT_TIMEOUT_S) + 30),
+    ]) for module, argv in _SELFTESTS]
 
 
 #: A selftest slower than the general bound, in seconds. `joint_search.py`: 41-76 s on the author's
 #: Mac, past 180 s on windows-latest (PR #261's run 42677312857, where this whole file ran at over
 #: four times the Mac's pace). 600 s is over three times the likely slowest seen.
 _TIMEOUT_S = {"joint_search.py": 600}
+_DEFAULT_TIMEOUT_S = 180
 
 
 @pytest.mark.parametrize("module,argv", _params())
@@ -94,7 +102,7 @@ def test_skill_selftest_passes(module, argv):
         encoding="utf-8",
         errors="replace",
         env=vendor_loader.child_env(),
-        timeout=_TIMEOUT_S.get(module, 180),
+        timeout=_TIMEOUT_S.get(module, _DEFAULT_TIMEOUT_S),
     )
     # Both streams: some of them print their summary on stdout and their failures on stderr, and a
     # bare "exit 1" tells whoever reads CI nothing they can act on.
@@ -126,6 +134,8 @@ def test_discovery_sees_subpackages_and_both_command_styles():
     )
 
 
+@pytest.mark.method
+@pytest.mark.timeout(360 + 30)  # the subprocess's own bound below decides
 def test_the_three_installers_still_agree_with_each_other():
     """The one check in the skill's runner that is not a `rew_tool` selftest.
 

@@ -48,11 +48,16 @@ def test_files() -> list[str]:
 
 
 def time_one(name: str) -> tuple[float, int]:
-    """Wall seconds for one file in a fresh process, and pytest's exit code."""
+    """Wall seconds for one file in a fresh process, and pytest's exit code.
+
+    What a shard runs of it, and only that: `-m "not method"`, as `ci.yml`'s shard step hands
+    `scripts/ci_per_file.py`. The `method` tests run in a job of their own (#275, option G), and
+    timed here they would weigh a shard with minutes it no longer spends. Exit 5 is a file whose
+    every test is a `method` one: nothing for a shard to run, not red."""
     started = time.monotonic()
     done = subprocess.run(
         ["uv", "run", "--extra", "dev", "--python", "3.12", "python", "-m", "pytest", name,
-         "-q", "-p", "no:cacheprovider"],
+         "-q", "-p", "no:cacheprovider", "-m", "not method"],
         cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace")
     return round(time.monotonic() - started, 2), done.returncode
 
@@ -72,10 +77,10 @@ def main(argv: list[str] | None = None) -> int:
     for index, name in enumerate(names, 1):
         took, code = time_one(name)
         seconds[name] = took
-        if code != 0:
+        if code not in (0, 5):
             red.append(name)
         print(f"  {index:3d}/{len(names)}  {took:7.2f} s  {name}"
-              f"{'  ← red, and timed anyway' if code else ''}", flush=True)
+              f"{'  ← red, and timed anyway' if code not in (0, 5) else ''}", flush=True)
 
     # A red file still has a cost, and a shard still has to carry it. Say it once at the end rather
     # than refusing to record: the table is about seconds, and the suite is about green.

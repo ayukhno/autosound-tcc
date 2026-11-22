@@ -21,7 +21,14 @@
 # `scripts/ci_shard.py`, each shard a separate machine running its quarter SERIALLY (TCC-020, hub
 # #181; measured 2026-09-18: about 6 minutes a quarter where the whole Windows suite took 21). This
 # is not the `-n auto` rejected on 2026-09-09: each job has a whole runner and the conditions a
-# release has, with fewer tests per process.
+# release has, with fewer tests per process. Inside a shard each FILE is its own pytest process
+# (`scripts/ci_per_file.py`, #275 option A1), so no file pays for the windows and state the files
+# before it left (`docs/CI-ROOT-CAUSE-2026-11-10.md` RC1, RC3).
+#
+# THE METHOD JOB (#275 option G). The tests of other systems -- the method's own self-tests, its
+# installers check, the bare-CLI writer race, the real `uv` export: pytest's `method` marker -- run
+# in one job of their own, and only when the change touches `vendor/` or `scripts/` (`gate` works
+# that out from the compare API). The shards leave them out. No schedule.
 #
 # The push to `main` runs the same shards, and only when no green pull-request run of this workflow
 # exists on that commit (`gate` below, as the skill's `checks.yml` does it). After `--ff-only` the
@@ -117,6 +124,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       run: ${{ steps.pr.outputs.run }}
+      method: ${{ steps.method.outputs.method }}
     steps:
       - id: pr
         env:
@@ -137,6 +145,38 @@ jobs:
           else
             echo "no green pull-request run on $SHA -- running the shards on main"
             echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Whether the `method` job runs: only where the suite runs at all, and only when the change
+      # touches `vendor/` (the pin is a gitlink there) or `scripts/`. A pull request is compared
+      # from its base, a push from the commit before it. Fail open, as above: no base, no answer,
+      # or a list GitHub may have cut short (300 files) runs the job.
+      - id: method
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ steps.pr.outputs.run }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$RUN" != "true" ]; then
+            echo "method=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$BASE" ] || [ -z "${BASE//0/}" ]; then
+            echo "no commit to compare with -- the method job runs"
+            echo "method=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! changed="$(gh api "repos/$REPO/compare/$BASE...$HEAD" --jq '.files[].filename' 2>/dev/null)" \
+              || [ -z "$changed" ] || [ "$(printf '%s\n' "$changed" | grep -c .)" -ge 300 ]; then
+            echo "the changed files are not known -- the method job runs"
+            echo "method=true" >> "$GITHUB_OUTPUT"
+          elif printf '%s\n' "$changed" | grep -qE '^(vendor|scripts)/'; then
+            echo "vendor/ or scripts/ changed -- the method job runs"
+            echo "method=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "nothing under vendor/ or scripts/ changed -- no method job"
+            echo "method=false" >> "$GITHUB_OUTPUT"
           fi
 
   ruff:
@@ -202,19 +242,20 @@ jobs:
   #
   # The split is `scripts/ci_shard.py`: by FILE, because a session-scoped QApplication and
   # module-level state make a file the safe unit (`docs/TESTING.md`, under `--dist loadfile`), and
-  # weighted by a recorded serial run rather than alphabetically, because two files are a fifth of
-  # the suite. Each job works the same split out independently and they never talk: the test that
-  # every file is claimed exactly once is `tests/test_ci_shard.py`, not this file.
+  # weighted by a recorded run of each file in its own process rather than alphabetically, because
+  # two files are a fifth of the suite. Each job works the same split out independently and they
+  # never talk: the test that every file is claimed exactly once is `tests/test_ci_shard.py`, not
+  # this file. Each file then runs in its own process (`scripts/ci_per_file.py`), the condition its
+  # weight was recorded in, and the job is red when any file is; the log's end names each one.
   shard:
     name: shard ${{ matrix.group }}/4 (${{ matrix.os }})
     needs: gate
     if: needs.gate.outputs.run == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
-    # The Linux abort (HUB-049) is not this commit's fault, and a check that blinks is ignored
-    # within a week — the same reason the full `linux` job below carries this flag. Windows and
-    # macOS go red for real.
-    continue-on-error: ${{ matrix.os == 'ubuntu-latest' }}
+    # No `continue-on-error` on any platform (#275, option H). Linux carried one for the abort of
+    # HUB-049, closed 2026-09-14 with no recurrence, and the run read green while the Linux suite
+    # was red for three weeks (`docs/CI-ROOT-CAUSE-2026-11-10.md` RC4).
     strategy:
       fail-fast: false
       matrix:
@@ -242,7 +283,36 @@ jobs:
           count=$(printf '%s\n' $files | grep -c .)
           echo "shard $GROUP of 4 on ${{ matrix.os }}: $count files"
           echo "shard **$GROUP/4** on \`${{ matrix.os }}\`: $count test files" >> "$GITHUB_STEP_SUMMARY"
-          uv run --locked --extra dev --python 3.12 python -m pytest $files -q
+          # One process per file; `-m "not method"` leaves the `method` job's tests to that job.
+          uv run --locked --extra dev --python 3.12 python scripts/ci_per_file.py $files -- -q -m "not method"
+
+  # The tests of other systems, once per platform, only when `vendor/` or `scripts/` changed
+  # (`gate`): the method's self-tests and installers check, the bare-CLI writer race, the real `uv`
+  # export -- pytest's `method` marker (`pyproject.toml`). They were about a quarter of every
+  # shard's time (`docs/CI-ROOT-CAUSE-2026-11-10.md` RC5). One process: they are subprocess-bound
+  # and build no windows, so there is nothing for them to accumulate.
+  method:
+    name: method (${{ matrix.os }})
+    needs: gate
+    if: needs.gate.outputs.method == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon0 libdbus-1-3
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - shell: bash
+        run: uv run --locked --extra dev --python 3.12 python -m pytest tests/ -m method -q
 
   # How many Linux runs this workflow was asked for, as a matrix: whatever the dispatch input says
   # when a person is chasing the abort.
@@ -276,10 +346,8 @@ jobs:
     # 45, not 30: the whole suite in one Linux job took 26m39s at v0.1.44 and was cancelled at 30m at v0.1.45
     # (the wave W-4 added ~70 UI tests) — slow, not hung (2026-09-30, the Arbiter's word).
     timeout-minutes: 45
-    # Red here does not mean the build is broken -- it means the abort happened again. A check
-    # that blinks is ignored within a week, and an ignored CI is worse than none, so this one
-    # reports instead of blocking. The flag comes off when HUB-049 is closed.
-    continue-on-error: true
+    # No `continue-on-error` (#275, option H): HUB-049 is closed, and a series whose red reads green
+    # answers nothing.
     strategy:
       fail-fast: false
       matrix:
@@ -372,7 +440,7 @@ jobs:
           # Retry ONLY on a native crash, never on a test that failed. #19 killed the process with
           # `Windows fatal exception: access violation` in about 4 runs of 10 until it was fixed on
           # 2026-09-12, and a job red 40% of the time for a reason unrelated to the commit is a job
-          # people stop reading — the same argument that put Linux under `continue-on-error`.
+          # people stop reading — the same argument that once put Linux under `continue-on-error`.
           #
           # Deliberately NOT `continue-on-error` here: that would swallow real failures too. This
           # retries one kind of fault and nothing else, and says so in the run summary every time.

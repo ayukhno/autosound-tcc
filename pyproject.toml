@@ -90,8 +90,10 @@ gui = [
 # hole this file exists to close.
 # `scipy` because the vendored skill's dsp_math self-test designs crossovers since v3.0.12 and
 # imports it BY NAME; the suite runs those self-tests, so the dependency is written down here.
-dev = ["pytest>=7,<10", "pytest-xdist>=3.6,<4", "packaging>=24,<27", "scipy>=1.11,<2",
-       "autosound-tcc[gui,claude]"]
+# `pytest-timeout` so that a hung test names itself (`[tool.pytest.ini_options]`, #275): without it
+# a hang ran to the job's limit and read "cancelled", test unknown.
+dev = ["pytest>=7,<10", "pytest-xdist>=3.6,<4", "pytest-timeout>=2.3,<3", "packaging>=24,<27",
+       "scipy>=1.11,<2", "autosound-tcc[gui,claude]"]
 
 [project.scripts]
 autosound-tcc = "autosound_tcc.app:main"
@@ -127,6 +129,20 @@ testpaths = ["tests"]
 #     PYTEST_ADDOPTS='-n auto --dist loadfile' make test
 #
 # `docs/TESTING.md` carries the numbers and what would have to be true to make it the default.
+#
+# A hang names its test (#275, option D): 120 s for the test function alone, its fixtures not
+# counted (`timeout_func_only`), so a slow teardown is not reported as the test's hang. Without it
+# a hung test ran to the CI job's limit and the run said "cancelled", test unknown. A test that is
+# slow by nature says so itself with `@pytest.mark.timeout(N)`.
+timeout = 120
+timeout_func_only = true
+# `method`: a test of another system, not of TCC's code — the vendored method's own self-tests,
+# its installers check, the bare-CLI writer race and the real `uv` export. CI's shards leave these
+# out (`-m "not method"`) and the `method` job runs exactly these, only when `vendor/` or `scripts/`
+# change (#275, option G; `docs/TESTING.md`). `make test` still runs everything.
+markers = [
+    "method: runs in CI's `method` job, not in the shards (vendor/ or scripts/ changed)",
+]
 
 # The linter. `select` is written out even though it is ruff's default: the default is a property
 # of the VERSION, and a ruff upgrade would otherwise add rule classes to CI silently. Wider sets

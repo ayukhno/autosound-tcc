@@ -13,6 +13,7 @@ sharding is worth doing at all.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -181,3 +182,34 @@ def test_the_weights_file_says_how_it_was_made():
     assert table["recorded"], "when"
     assert table["how"], "and the command that would do it again"
     assert all(isinstance(value, (int, float)) and value >= 0 for value in table["seconds"].values())
+
+
+# --- scripts/ci_per_file.py: each file of a shard in its own process (#275, option A1) ---------
+
+
+def test_every_file_runs_in_its_own_process_and_any_red_file_fails_the_shard(tmp_path):
+    """A red file in the middle does not stop the files after it, the exit is red, and the end of
+    the log names that file. A file whose every test the `-m` expression deselected (pytest's 5)
+    is not red. Run where the repository's own conftest cannot reach the planted files."""
+    (tmp_path / "test_green.py").write_text("def test_ok():\n    pass\n", encoding="utf-8")
+    (tmp_path / "test_red.py").write_text("def test_no():\n    assert False\n", encoding="utf-8")
+    (tmp_path / "test_after.py").write_text(
+        "import pathlib\n\ndef test_ran():\n    pathlib.Path('after-ran').touch()\n",
+        encoding="utf-8")
+    (tmp_path / "test_marked.py").write_text(
+        "import pytest\n\n@pytest.mark.method\ndef test_elsewhere():\n    pass\n", encoding="utf-8")
+    (tmp_path / "pytest.ini").write_text("[pytest]\nmarkers =\n    method: elsewhere\n",
+                                         encoding="utf-8")
+    files = ["test_green.py", "test_red.py", "test_after.py", "test_marked.py"]
+
+    done = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "ci_per_file.py"), *files,
+         "--", "-q", "-p", "no:cacheprovider", "-m", "not method"],
+        cwd=str(tmp_path), capture_output=True, text=True, encoding="utf-8",
+        env={k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS"})
+
+    assert done.returncode == 1, done.stdout
+    assert (tmp_path / "after-ran").exists(), "a red file stopped the files after it"
+    tail = done.stdout.rsplit("ci_per_file:", 1)[1]
+    assert "1 of 4 file(s) failed" in tail and "test_red.py (pytest exit 1)" in tail, tail
+    assert "test_marked.py" not in tail and "test_green.py" not in tail, tail

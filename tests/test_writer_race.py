@@ -226,6 +226,10 @@ _T2_TCC = [f"2.{n}" for n in range(11, 16)]
 _T2_BARE = [f"2.{n}" for n in range(21, 26)]
 
 
+# The ten-writer race runs in CI's `method` job, not in the shards (#275, option G): 62-81 s in a
+# shard, and what it races is the method's bare CLI. Its own bound is `_TCC_RETURNS_S` per wait.
+@pytest.mark.method
+@pytest.mark.timeout(int(2 * _TCC_RETURNS_S))
 @pytest.mark.xfail(sys.platform == "win32", strict=False, reason="flaky: #262")
 def test_t2_tcc_and_bare_cli_writes_race_while_a_reader_rereads(project):
     """T2 (PLAN-AUDIT §5.4), reduced to 5 + 5: five `process_writer.add_step` calls on threads and

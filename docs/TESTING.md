@@ -15,7 +15,14 @@ and tenfold out on the time (HUB-048); the hub's `probe-number-drift` complained
 read it. The dated measurements further down DO carry numbers, and should — those are records of
 a moment, not claims about now. `test_packaging.py` fails if a count creeps back up here.
 
-The suite includes the skill's own selftests, run as subprocesses.
+The suite includes the skill's own selftests, run as subprocesses, and `make test` runs them
+with everything else. CI does not run them in every shard: they, the installers check, the
+bare-CLI writer race and the real `uv` export carry pytest's `method` marker and run in CI's
+`method` job, only when a change touches `vendor/` or `scripts/` (#275, the Arbiter's word
+2026-11-22; "CI is sharded", below).
+
+A hang names its test: `pytest-timeout` gives every test function 120 s, its fixtures not
+counted (`pyproject.toml`). A test slow by nature says so with `@pytest.mark.timeout(N)`.
 
 There is deliberately no fast/slow split, and it is worth writing down why, because there nearly
 was one. What there IS, since 2026-09-09, is a parallel run — which is not a split: every test
@@ -118,8 +125,27 @@ made seven test-only reds (`docs/CI-ROOT-CAUSE-2026-11-10.md` RC4). It stays as 
 (`workflow_dispatch`, `linux_runs` / `windows_runs`), the way a long-process fault is chased
 (HUB-098, hub #339).
 
-**Locally nothing changes.** `make test` is the whole suite, serial, and `scripts/ship.py` falls
-back to running it whole with `-n 0` when CI cannot be read.
+**Each file of a shard is its own pytest process** (`scripts/ci_per_file.py`, #275 option A1,
+2026-11-22). One process for a whole shard made every test pay for the windows and the
+process-wide state every file before it left, so which files shared a process decided which test
+went red (`docs/CI-ROOT-CAUSE-2026-11-10.md` RC1, RC3). Every file runs whatever the one before it
+did; the shard is red when any file is, and the end of its log names each red file with pytest's
+exit code. A process per file is also what `scripts/record_shard_weights.py` times, so the weights
+now describe the condition they pack.
+
+**The `method` job** (#275 option G). The tests of other systems — the method's own selftests, its
+installers check, the bare-CLI writer race, the real `uv` export — are marked `method`. The shards
+run `-m "not method"`; the `method` job runs `-m method` once per platform, and only when `gate`
+finds `vendor/` (the pin is a gitlink there) or `scripts/` among the changed files. No schedule.
+They were about a quarter of every shard's time (RC5). The selftests' discovery test is not
+marked: it checks TCC's own list against the skill and costs nothing.
+
+**No `continue-on-error` on Linux any more** (#275 option H). It was there for the abort of
+HUB-049, closed 2026-09-14, and it let the run read green while the Linux suite was red for three
+weeks (RC4). A red Linux shard is a red run.
+
+**Locally nothing changes.** `make test` is the whole suite, serial, the `method` tests included,
+and `scripts/ship.py` falls back to running it whole with `-n 0` when CI cannot be read.
 
 ### The split itself
 
@@ -129,7 +155,7 @@ of them load-bearing, and `tests/test_ci_shard.py` holds each:
 * **By FILE**, for the reason `--dist loadfile` exists two sections up: session-scoped
   `QApplication` and module-level state make a whole file the safe unit.
 * **Weighted by wall seconds per file** (`tests/shard-weights.json`), each measured in its own
-  process, packed longest-first into the lightest shard. An alphabetical quarter balances by name,
+  process with the shard's own `-m "not method"`, packed longest-first into the lightest shard. An alphabetical quarter balances by name,
   and two files are nearly half of this suite. A file the table has not heard of weighs the MEDIAN,
   never nothing, and is named on stderr so a stale table shows in the job log.
 * **Computed independently by every job**, with no state and no talking: four jobs on three
@@ -306,6 +332,13 @@ importing them would exercise something other than what a person runs by hand.
 
 They are the skill's only tests and nothing ran them: `rew_tool.py selftest` had been failing since
 the v3 identity split and went unnoticed for weeks (2026-08-07).
+
+**Where they run** (2026-11-22, #275 option G, the Arbiter's word). From 08-07 they rode in the
+suite everywhere, every shard of every run. Now `make test` still runs them, and CI runs them in
+its `method` job only — on a change to `vendor/` (a re-pin) or `scripts/`. What changes the method
+TCC runs is the pin, and the pin is under `vendor/`. Each carries its own timeout mark, the
+subprocess's bound plus 30 s, so pytest-timeout's general 120 s does not cut `joint_search.py`
+(600 s) or the installers check (360 s) short.
 
 The file also asserts that its own list is complete, by scanning the skill for modules that
 dispatch a `selftest` command. On its first run that found **two nobody had ever named** —

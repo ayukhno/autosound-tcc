@@ -1,5 +1,5 @@
 {
-  "recorded": "2026-11-09",
+  "recorded": "2026-11-22",
   "how": "python scripts/record_shard_weights.py — each test file run alone, wall seconds, because a file's cost inside the whole suite is mostly the windows the suite is keeping alive",
   "seconds": {
     "tests/test_acoustics_view.py": 1.3,
@@ -28,7 +28,7 @@
     "tests/test_config_project_dir.py": 2.3,
     "tests/test_confirm_bar.py": 3.49,
     "tests/test_conftest_guards.py": 1.99,
-    "tests/test_constraints.py": 0.99,
+    "tests/test_constraints.py": 0.9,
     "tests/test_contract_check.py": 2.57,
     "tests/test_contract_one.py": 0.99,
     "tests/test_control_layout.py": 128.46,
@@ -135,7 +135,7 @@
     "tests/test_ship.py": 34.32,
     "tests/test_signal_bus.py": 0.91,
     "tests/test_signed_tags.py": 0.86,
-    "tests/test_skill_selftests.py": 263.39,
+    "tests/test_skill_selftests.py": 1.21,
     "tests/test_slot_errors.py": 1.15,
     "tests/test_splash_timing.py": 0.84,
     "tests/test_startup_console.py": 0.81,
@@ -151,6 +151,6 @@
     "tests/test_vendor_loader.py": 1.57,
     "tests/test_window_folder.py": 0.99,
     "tests/test_windows_identity.py": 1.38,
-    "tests/test_writer_race.py": 7.31
+    "tests/test_writer_race.py": 6.53
   }
 }
