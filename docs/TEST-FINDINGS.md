@@ -4189,6 +4189,34 @@ be enough: check on test with a Mosconi project before building anything.
 **Weight.** Unknown until tested.
 **Whose.** TCC, on 197.
 
+### 201. «Зберегти як нову версію» is offered on a preset that is not the DSP's active slot, and the method always refuses it
+**What.** W-14's acceptance (`docs/W-14-ACCEPTANCE.md` A1): on the `after` copy the window opens on `1.N-NOV26_from0` while
+the registry's active slot is `4.F-NOV26_flat1st`. The comparison runs and the save is offered; the click gets exit 1,
+«SLOT MISMATCH … `registry set-active` … or pass allow_nonactive=True», and one of the two remedies is a Python argument a
+person cannot pass. Nothing is written; the refusal is shown as given.
+**Weight.** Low: no wrong write, a button that cannot work there. **Whose.** TCC (the offer), the method (its remedy's words).
+**The Arbiter's word 2026-11-22:** to the next wave's pool.
+
+### 202. «Збережено в DSP…» in the DSP header is cut by 7–28 px at the left column's default width (from `main`)
+**What.** Measured offscreen during W-14's PR: the header (twist, title, `_cfg_btn`) asks 251–278 px (en/pl/uk/de) of a
+column whose viewport is 237–238 px, so the button's right end, and every row's, is cut by that much. Since W-14 the
+«Перевірити налаштування» line under it shares that width.
+**Weight.** Low; visible. **Whose.** TCC. To the next wave's pool.
+
+### 203. «1 службових файлів»: the housekeeping count has no Ukrainian plural (#266's comment)
+**What.** `gitSubHousekeeping` is `"{n} службових файлів"` for every n (W-14's acceptance, observations).
+**Weight.** Low. **Whose.** TCC's strings. To the next wave's pool.
+
+### 204. The stray «_CurveWorker destroyed on GUI thread while it had NOT finished» line under `-n 4`, no crash
+**What.** Printed once in several local `-n 4` runs during W-14, twice with no `test_qt_shutdown.py` in the run, so the
+group seat's reading (its deliberate `_gone` call) does not hold for those. No crash, no red test.
+**Weight.** Unknown: it names the abort of finding 35. **Whose.** TCC's tests or `curve_view`. To the next wave's pool.
+
+### 205. The method's own texts in a TCC window (for the skill)
+**What.** W-14's acceptance A3: a row's reason is English in a Ukrainian window («невідомо: the version does not record
+it»); after `propose --from-file` on a `.PR15` the method's sheet is headed «APPLY THIS in Helix PC-Tool» for a Mosconi.
+**Whose.** The skill's. To be told to it at the next collection.
+
 ## W-14 — the milestone (2026-11-22)
 
 The Arbiter's «збір закінчено» (2026-11-22). The skill has no open wave and its last is W-13, so TCC's is W-14: `W-14 · v1.3.2`

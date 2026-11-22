@@ -2082,7 +2082,7 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 
 ### F-111 — W-14 · v1.3.2: the milestone, the plan
 
-**Статус**: done v1.3.2 · the patch, tagged on the commit that carries this line: PR #276 merged `--ff-only` 2026-11-22 at `ea5c6962` (its CI green on all three systems), paired with the method's v3.3.3 (`a7966a0`); the milestone closes with the tag · was: open · 2026-11-22, the Arbiter's «збір закінчено»: milestone 13 `W-14 · v1.3.2` (opened as v1.4.0, renamed: «це
+**Статус**: done v1.3.2 · **released 2026-11-22**: signed tag `v1.3.2` on `b6a52b48`, the GitHub release Latest, the milestone closed 8 of 8; the pool: findings 201–205 · the patch, tagged on the commit that carries this line: PR #276 merged `--ff-only` 2026-11-22 at `ea5c6962` (its CI green on all three systems), paired with the method's v3.3.3 (`a7966a0`); the milestone closes with the tag · was: open · 2026-11-22, the Arbiter's «збір закінчено»: milestone 13 `W-14 · v1.3.2` (opened as v1.4.0, renamed: «це
 патч»), 8 issues with `ok`: #271–#274 (Mosconi and Helix, his priority), #275 and #268 (CI), #265, #266. Off it: the key group,
 Windows CI (#262–#264), hub #264. Bus: hub #347 and #343 taken; hub #348 (TCC-071) sent to skill, `attest --from-file .PR15`
 for Mosconi's mark. The plan `docs/PLAN-W-14.md`: the four decisions taken 2026-11-22; hub #349 (TCC-072) and #350 (TCC-073) sent and
