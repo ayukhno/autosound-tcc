@@ -7226,7 +7226,8 @@ def test_the_dsp_header_has_check_settings_on_by_the_method_s_readers(tmp_path, 
     window = _seeded_window(tmp_path, monkeypatch)
     button = window._file_check.button
     header = window._dsp_section._head_layout
-    assert header.indexOf(button) == header.indexOf(window._cfg_btn) + 1
+    assert header.indexOf(window._cfg_btn) >= 0 and header.indexOf(button) < 0, "not in the header (PR #276)"
+    assert window._dsp_section.body_layout().itemAt(0).widget() is window._file_check.row, "its own line, first"
     assert window._view is not None and window._view.version
     assert not button.isHidden() and not button.isEnabled(), "the fixture's DSP: no reader"
     assert "cannot read this DSP's saved file" in window._file_check.tip.text()
@@ -7236,6 +7237,32 @@ def test_the_dsp_header_has_check_settings_on_by_the_method_s_readers(tmp_path, 
     window._on_language_selected("uk")
     try:
         assert button.text() == i18n.t("dspFileCheck") and button.isEnabled()
+    finally:
+        window._on_language_selected("en")
+
+
+def test_check_settings_never_sets_the_left_column_s_width_in_any_language(tmp_path, monkeypatch):
+    """PR #276's Linux shard: in the header beside «Збережено в DSP…» the button made the DSP
+    header ask 375 px in English and 472 in Ukrainian of a column 237 px wide — the button sat
+    past the edge and every row of the column was cut. On its own line it elides first: its line
+    asks no more than the column's floor, and the header asks what it asked without it."""
+    from autosound_tcc.ui.tcc.main_window import _SIDE_MIN_PX
+
+    window = _seeded_window(tmp_path, monkeypatch)
+    window._show_version(window._view, MOSCONI_PROFILE)
+    window.show()
+    check = window._file_check
+    try:
+        for language in ("en", "uk", "de", "pl"):
+            window._on_language_selected(language)
+            QApplication.processEvents()
+            assert not check.button.isHidden() and check.button.text() == i18n.t("dspFileCheck"), language
+            assert check.row.minimumSizeHint().width() <= _SIDE_MIN_PX, (language, check.row.minimumSizeHint())
+            header = window._dsp_section._header.minimumSizeHint().width()
+            check.row.hide()
+            QApplication.processEvents()
+            assert window._dsp_section._header.minimumSizeHint().width() == header, language
+            check.row.show()
     finally:
         window._on_language_selected("en")
 

@@ -1,7 +1,10 @@
 """«Перевірити налаштування» (#272): the DSP row's button that sets the version on screen against the
 preset file the DSP program saved, and the table the method's answer is shown in.
 
-The button sits in the DSP section's header beside «Збережено в DSP…». It is on for a DSP whose
+The button stands on a line of its own at the top of the DSP section, under its header (the
+Arbiter, 2026-11-22): in the header beside «Збережено в DSP…» the row asked 375 px in English and 472
+in Ukrainian of a column 237 px wide, so the button sat past the column's edge and every row of the
+column was cut (PR #276's Linux shard). On its line it elides before it asks for room. It is on for a DSP whose
 saved file the method reads (`dsp_file.reader_for`: the declaration of the copy the project runs);
 for any other DSP, and on a copy that declares no reader, it is off, and its hover says why. A click asks for
 the file and runs `state/apply.py <project> compare-file <version> FILE --json` in a worker
@@ -34,12 +37,13 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
-    QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QPlainTextEdit, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout,
+    QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QPlainTextEdit, QPushButton, QSizePolicy, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from autosound_tcc.core import app_log, config, dsp_file
 from autosound_tcc.ui.tcc import i18n, qt_shutdown, shown_version, window_folder
+from autosound_tcc.ui.tcc.labels import ElidedButton
 from autosound_tcc.ui.tcc.rounded_tooltip import attach as attach_tip
 
 
@@ -309,10 +313,11 @@ STOP_WAIT_MS = 2000
 
 
 def header_buttons(window) -> "FileCheck":
-    """The DSP header's two buttons, in order, built for `window`. «Збережено в DSP…» (hub #198):
-    the name this configuration went into the device under, shown on the per-project line, where the
-    method records it, and only with a version — `window._cfg_btn`, its hover `window._cfg_tip`,
-    as they were when the window built them itself. Then «Перевірити налаштування», returned."""
+    """The DSP section's two buttons, built for `window`. «Збережено в DSP…» (hub #198), in the
+    header: the name this configuration went into the device under, shown on the per-project line,
+    where the method records it, and only with a version — `window._cfg_btn`, its hover
+    `window._cfg_tip`, as they were when the window built them itself. Then «Перевірити
+    налаштування», on its own line at the top of the section's body, returned."""
     window._cfg_btn = QPushButton(i18n.t("cfgButton"))
     window._cfg_btn.setProperty("class", "link-btn")
     window._cfg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -324,18 +329,26 @@ def header_buttons(window) -> "FileCheck":
 
 
 class FileCheck(QObject):
-    """The button in the DSP header and the one comparison it runs at a time."""
+    """The button at the top of the DSP section and the one comparison it runs at a time."""
 
     def __init__(self, window) -> None:
         super().__init__(window)
         self._window = window
-        self.button = QPushButton(i18n.t("dspFileCheck"))
+        # Elided by its font's metrics before it asks the column for room: a plain QPushButton
+        # holds its whole text, and the text is the column's width in Ukrainian (`ElidedButton`).
+        self.button = ElidedButton(i18n.t("dspFileCheck"), gives_way=True)
         self.button.setProperty("class", "link-btn")
         self.button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.tip = attach_tip(self.button, "")
         self.button.clicked.connect(lambda _checked=False: self.pick())
-        self.button.setVisible(False)
-        window._dsp_section.add_header_widget(self.button)
+        #: The button's line, first in the section's body: shown and hidden with the button.
+        self.row = QWidget()
+        line = QHBoxLayout(self.row)
+        line.setContentsMargins(12, 0, 12, 6)
+        line.addWidget(self.button)
+        self._show(False)
+        window._dsp_section.body_layout().insertWidget(0, self.row)
         self.reader: Optional[dsp_file.Reader] = None
         self._view = None
         #: The version the running comparison was asked for: the dialog names it, not a later one.
@@ -384,9 +397,14 @@ class FileCheck(QObject):
         except Exception:  # noqa: BLE001 - a lookup that fails turns the button off, never the window
             app_log.logger().exception("dsp file: the readers could not be looked up")
             self.reader = None
-        self.button.setVisible(bool(getattr(view, "version", None)) and shown_version.key_of(self._window) is None)
+        self._show(bool(getattr(view, "version", None)) and shown_version.key_of(self._window) is None)
         self.button.setEnabled(self.reader is not None and not self._busy and not self._saving)
         self.retranslate()
+
+    def _show(self, shown: bool) -> None:
+        """The button and its line together: a hidden button on a shown line still takes its margins."""
+        self.button.setVisible(shown)
+        self.row.setVisible(shown)
 
     def tip_text(self) -> str:
         reader = self.reader

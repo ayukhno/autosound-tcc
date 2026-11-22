@@ -1992,7 +1992,7 @@ class MainWindow(QMainWindow):
         self._dsp_section = SidebarSection(
             "dsp", i18n.t("dspPanel"), self._settings, default_collapsed=False, sub_below=True
         )
-        # «Збережено в DSP…» (`_cfg_btn`, hub #198) and «Перевірити налаштування» (#272).
+        # «Збережено в DSP…» (`_cfg_btn`, hub #198) in the header; «Перевірити налаштування» (#272) under it.
         self._file_check = dsp_file_check.header_buttons(self)
         # No stretch. It was here so the tree would fill the panel instead of sitting at its
         # content height with a gap under it (user, 2026-07-28) -- and what it actually did was
