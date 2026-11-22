@@ -210,6 +210,25 @@ def test_every_file_runs_in_its_own_process_and_any_red_file_fails_the_shard(tmp
 
     assert done.returncode == 1, done.stdout
     assert (tmp_path / "after-ran").exists(), "a red file stopped the files after it"
-    tail = done.stdout.rsplit("ci_per_file:", 1)[1]
+    tail = done.stdout.split("ci_per_file:", 1)[1]  # the closing lines, all of them
     assert "1 of 4 file(s) failed" in tail and "test_red.py (pytest exit 1)" in tail, tail
-    assert "test_marked.py" not in tail and "test_green.py" not in tail, tail
+    failed_part, _, empty_part = tail.partition("collected nothing")
+    assert "test_marked.py" not in failed_part and "test_green.py" not in tail, tail
+    assert "test_marked.py" in empty_part, "a file with every test deselected is named"
+
+
+def test_a_shard_in_which_no_file_collected_a_test_is_red(tmp_path):
+    """Every file deselected (a wrong `-m`) is a shard that ran nothing, and says so."""
+    for name in ("test_one.py", "test_two.py"):
+        (tmp_path / name).write_text("def test_ok():\n    pass\n", encoding="utf-8")
+    (tmp_path / "pytest.ini").write_text("[pytest]\nmarkers =\n    method: elsewhere\n",
+                                         encoding="utf-8")
+
+    done = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "ci_per_file.py"), "test_one.py", "test_two.py",
+         "--", "-q", "-p", "no:cacheprovider", "-m", "method"],
+        cwd=str(tmp_path), capture_output=True, text=True, encoding="utf-8",
+        env={k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS"})
+
+    assert done.returncode == 1, done.stdout
+    assert "none of the 2 file(s) collected a test" in done.stdout, done.stdout

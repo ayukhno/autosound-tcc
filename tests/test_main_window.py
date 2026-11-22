@@ -8468,6 +8468,9 @@ def test_a_preset_left_by_another_project_is_not_reported(tmp_path, monkeypatch)
     assert window._bridge.snapshot()["preset"] == "FULL"
 
 
+# 84 s alone on the author's Mac (2026-11-22): two real `_apply_theme` passes, each re-polishing
+# every widget alive (`docs/CI-ROOT-CAUSE-2026-11-10.md` RC1). Slow by nature, not hung.
+@pytest.mark.timeout(600)
 def test_edit_mode_reaches_the_agent(tmp_path, monkeypatch):
     _two_presets(tmp_path, monkeypatch)
     _app()

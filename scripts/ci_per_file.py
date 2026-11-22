@@ -24,8 +24,9 @@ unit, and nothing here cuts inside one.
 ## Exit codes
 
 pytest's 5 is "no tests collected": a file whose every test the `-m` expression deselected has
-nothing to run, and that is not a failure. Every other non-zero code is, a crash of the process
-(a negative code, or 134/139) included.
+nothing to run, and that is not a failure; the end of the log names such files. When EVERY file
+gives 5 the shard ran nothing at all -- a wrong `-m` -- and that is a failure. Every other non-zero
+code is one too, a crash of the process (a negative code, or 134/139) included.
 """
 from __future__ import annotations
 
@@ -51,9 +52,12 @@ def _in_actions() -> bool:
     return os.environ.get("GITHUB_ACTIONS") == "true"
 
 
-def run(files: list[str], pytest_args: list[str], python: str = sys.executable) -> list[tuple[str, int]]:
-    """Each file in its own `python -m pytest`, in order. → `[(file, exit code)]` for the failed."""
-    failed = []
+def run(files: list[str], pytest_args: list[str],
+        python: str = sys.executable) -> tuple[list[tuple[str, int]], list[str]]:
+    """Each file in its own `python -m pytest`, in order.
+
+    → `([(file, exit code)] for the failed, [file] for those with nothing collected)`."""
+    failed, empty = [], []
     for index, name in enumerate(files, 1):
         header = f"[{index}/{len(files)}] {name}"
         print(f"::group::{header}" if _in_actions() else f"=== {header}", flush=True)
@@ -62,20 +66,35 @@ def run(files: list[str], pytest_args: list[str], python: str = sys.executable) 
         took = time.monotonic() - started
         if _in_actions():
             print("::endgroup::", flush=True)
-        if code not in (0, NO_TESTS):
+        if code == NO_TESTS:
+            empty.append(name)
+        elif code != 0:
             failed.append((name, code))
             if _in_actions():
                 print(f"::error title=pytest exit {code}::{name}", flush=True)
         print(f"    {name}: exit {code}, {took:.0f} s", flush=True)
-    return failed
+    return failed, empty
 
 
-def report(files: list[str], failed: list[tuple[str, int]]) -> str:
-    """The closing lines: how many files, and each one that failed by name and code."""
-    if not failed:
-        return f"ci_per_file: all {len(files)} file(s) passed"
-    lines = [f"ci_per_file: {len(failed)} of {len(files)} file(s) failed:"]
-    lines += [f"  {name} (pytest exit {code})" for name, code in failed]
+def ran_nothing(files: list[str], empty: list[str]) -> bool:
+    """Every file collected nothing: the selection, not the tests, is what is wrong."""
+    return bool(files) and len(empty) == len(files)
+
+
+def report(files: list[str], failed: list[tuple[str, int]], empty: list[str]) -> str:
+    """The closing lines: each failed file by name and code, then each that collected nothing."""
+    if ran_nothing(files, empty):
+        lines = [f"ci_per_file: none of the {len(files)} file(s) collected a test -- the shard "
+                 "ran nothing, so the selection (`-m`, the file list) is wrong"]
+    elif failed:
+        lines = [f"ci_per_file: {len(failed)} of {len(files)} file(s) failed:"]
+        lines += [f"  {name} (pytest exit {code})" for name, code in failed]
+    else:
+        lines = [f"ci_per_file: all {len(files)} file(s) passed"]
+    if empty and not ran_nothing(files, empty):
+        lines.append(f"ci_per_file: {len(empty)} file(s) collected nothing (pytest exit 5, "
+                     "every test deselected):")
+        lines += [f"  {name}" for name in empty]
     return "\n".join(lines)
 
 
@@ -86,15 +105,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("files", nargs="+", help="test files, one pytest process each")
     args = parser.parse_args(files)
 
-    failed = run(args.files, pytest_args)
-    said = report(args.files, failed)
+    failed, empty = run(args.files, pytest_args)
+    said = report(args.files, failed, empty)
     print(said, flush=True)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary and failed:
+    if summary and ran_nothing(args.files, empty):
+        with open(summary, "a", encoding="utf-8") as out:
+            out.write("- red: no file collected a test -- the selection is wrong\n")
+    elif summary and failed:
         with open(summary, "a", encoding="utf-8") as out:
             out.write("\n".join(f"- red: `{name}` (pytest exit {code})" for name, code in failed)
                       + "\n")
-    return 1 if failed else 0
+    return 1 if failed or ran_nothing(args.files, empty) else 0
 
 
 if __name__ == "__main__":

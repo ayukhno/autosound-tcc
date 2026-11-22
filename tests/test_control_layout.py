@@ -1709,6 +1709,9 @@ def test_control_mode_bar_keeps_the_session_name_coffee_and_feedback_and_leaving
     window.close()
 
 
+# 158 s alone on the author's Mac (2026-11-22): two themes and two zooms, each app-wide
+# (`docs/CI-ROOT-CAUSE-2026-11-10.md` RC1). Slow by nature, not hung.
+@pytest.mark.timeout(600)
 def test_a_folded_panel_holds_through_the_mode_a_language_and_a_theme(tmp_path, monkeypatch):
     """Tcc#243: the fold lives on the cards, and `w._right` moves as a whole."""
     window = _window(tmp_path, monkeypatch, store={})

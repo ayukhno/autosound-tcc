@@ -18,11 +18,16 @@ a moment, not claims about now. `test_packaging.py` fails if a count creeps back
 The suite includes the skill's own selftests, run as subprocesses, and `make test` runs them
 with everything else. CI does not run them in every shard: they, the installers check, the
 bare-CLI writer race and the real `uv` export carry pytest's `method` marker and run in CI's
-`method` job, only when a change touches `vendor/` or `scripts/` (#275, the Arbiter's word
+`method` job, only when a change touches `vendor/`, `scripts/` or a dependency file —
+`uv.lock`, `pyproject.toml`, `constraints.txt`, which the real `uv` export reads (#275, the Arbiter's word
 2026-11-22; "CI is sharded", below).
 
-A hang names its test: `pytest-timeout` gives every test function 120 s, its fixtures not
-counted (`pyproject.toml`). A test slow by nature says so with `@pytest.mark.timeout(N)`.
+A hang names its test in a CI shard: there `pytest-timeout` gives every test function 120 s, its
+fixtures not counted (`--timeout=120 -o timeout_func_only=true` in `ci.yml`'s shard step). Only
+there, because a shard runs each file in its own process. `make test`, `scripts/ship.py`, the
+`method` job and the whole-suite dispatch series run with no general timeout: in one process for
+the whole suite single tests were measured at 214, 117 and 108 s (`docs/CI-ROOT-CAUSE-2026-11-10.md`).
+A test slow by nature carries `@pytest.mark.timeout(N)`, which holds wherever it runs.
 
 There is deliberately no fast/slow split, and it is worth writing down why, because there nearly
 was one. What there IS, since 2026-09-09, is a parallel run — which is not a split: every test
@@ -136,7 +141,8 @@ now describe the condition they pack.
 **The `method` job** (#275 option G). The tests of other systems — the method's own selftests, its
 installers check, the bare-CLI writer race, the real `uv` export — are marked `method`. The shards
 run `-m "not method"`; the `method` job runs `-m method` once per platform, and only when `gate`
-finds `vendor/` (the pin is a gitlink there) or `scripts/` among the changed files. No schedule.
+finds `vendor/` (the pin is a gitlink there), `scripts/`, `uv.lock`, `pyproject.toml` or
+`constraints.txt` among the changed files (the last three because the real `uv` export reads them). No schedule.
 They were about a quarter of every shard's time (RC5). The selftests' discovery test is not
 marked: it checks TCC's own list against the skill and costs nothing.
 
@@ -335,10 +341,10 @@ the v3 identity split and went unnoticed for weeks (2026-08-07).
 
 **Where they run** (2026-11-22, #275 option G, the Arbiter's word). From 08-07 they rode in the
 suite everywhere, every shard of every run. Now `make test` still runs them, and CI runs them in
-its `method` job only — on a change to `vendor/` (a re-pin) or `scripts/`. What changes the method
-TCC runs is the pin, and the pin is under `vendor/`. Each carries its own timeout mark, the
-subprocess's bound plus 30 s, so pytest-timeout's general 120 s does not cut `joint_search.py`
-(600 s) or the installers check (360 s) short.
+its `method` job only — on a change to `vendor/` (a re-pin), `scripts/` or a dependency file. What
+changes the method TCC runs is the pin, and the pin is under `vendor/`. Each carries its own
+timeout mark, the subprocess's bound plus 30 s: a backstop above the bound `joint_search.py`
+(600 s) and the installers check (360 s) already have, never below it.
 
 The file also asserts that its own list is complete, by scanning the skill for modules that
 dispatch a `selftest` command. On its first run that found **two nobody had ever named** —

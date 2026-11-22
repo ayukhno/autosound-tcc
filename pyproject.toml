@@ -130,18 +130,17 @@ testpaths = ["tests"]
 #
 # `docs/TESTING.md` carries the numbers and what would have to be true to make it the default.
 #
-# A hang names its test (#275, option D): 120 s for the test function alone, its fixtures not
-# counted (`timeout_func_only`), so a slow teardown is not reported as the test's hang. Without it
-# a hung test ran to the CI job's limit and the run said "cancelled", test unknown. A test that is
-# slow by nature says so itself with `@pytest.mark.timeout(N)`.
-timeout = 120
-timeout_func_only = true
+# NO `timeout` here either (#275, option D). The 120 s per test is the CI shard's, and only the
+# shard's (`ci.yml`, handed to `scripts/ci_per_file.py`): a file there runs in its own process.
+# In one process for the whole suite -- `make test`, `ship.py`, the dispatch series -- a test pays
+# for every window before it, and the analysis measured single tests at 214, 117 and 108 s there.
+# A test slow by nature carries `@pytest.mark.timeout(N)`, which holds wherever it runs.
 # `method`: a test of another system, not of TCC's code — the vendored method's own self-tests,
 # its installers check, the bare-CLI writer race and the real `uv` export. CI's shards leave these
-# out (`-m "not method"`) and the `method` job runs exactly these, only when `vendor/` or `scripts/`
-# change (#275, option G; `docs/TESTING.md`). `make test` still runs everything.
+# out (`-m "not method"`) and the `method` job runs exactly these, only when `vendor/`, `scripts/`
+# or a dependency file changes (#275, option G; `docs/TESTING.md`). `make test` still runs everything.
 markers = [
-    "method: runs in CI's `method` job, not in the shards (vendor/ or scripts/ changed)",
+    "method: runs in CI's `method` job, not in the shards (vendor/, scripts/ or a dependency file changed)",
 ]
 
 # The linter. `select` is written out even though it is ruff's default: the default is a property

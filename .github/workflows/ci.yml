@@ -27,8 +27,8 @@
 #
 # THE METHOD JOB (#275 option G). The tests of other systems -- the method's own self-tests, its
 # installers check, the bare-CLI writer race, the real `uv` export: pytest's `method` marker -- run
-# in one job of their own, and only when the change touches `vendor/` or `scripts/` (`gate` works
-# that out from the compare API). The shards leave them out. No schedule.
+# in one job of their own, and only when the change touches `vendor/`, `scripts/` or a dependency file (`uv.lock`,
+# `pyproject.toml`, `constraints.txt`; `gate` works that out from the compare API). The shards leave them out. No schedule.
 #
 # The push to `main` runs the same shards, and only when no green pull-request run of this workflow
 # exists on that commit (`gate` below, as the skill's `checks.yml` does it). After `--ff-only` the
@@ -147,7 +147,8 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
       # Whether the `method` job runs: only where the suite runs at all, and only when the change
-      # touches `vendor/` (the pin is a gitlink there) or `scripts/`. A pull request is compared
+      # touches `vendor/` (the pin is a gitlink there), `scripts/`, or a dependency file the real
+      # `uv export` test reads (`uv.lock`, `pyproject.toml`, `constraints.txt`). A pull request is compared
       # from its base, a push from the commit before it. Fail open, as above: no base, no answer,
       # or a list GitHub may have cut short (300 files) runs the job.
       - id: method
@@ -171,11 +172,11 @@ jobs:
               || [ -z "$changed" ] || [ "$(printf '%s\n' "$changed" | grep -c .)" -ge 300 ]; then
             echo "the changed files are not known -- the method job runs"
             echo "method=true" >> "$GITHUB_OUTPUT"
-          elif printf '%s\n' "$changed" | grep -qE '^(vendor|scripts)/'; then
-            echo "vendor/ or scripts/ changed -- the method job runs"
+          elif printf '%s\n' "$changed" | grep -qE '^(vendor/|scripts/|uv\.lock$|pyproject\.toml$|constraints\.txt$)'; then
+            echo "vendor/, scripts/ or the dependencies changed -- the method job runs"
             echo "method=true" >> "$GITHUB_OUTPUT"
           else
-            echo "nothing under vendor/ or scripts/ changed -- no method job"
+            echo "nothing under vendor/ or scripts/ and no dependency file changed -- no method job"
             echo "method=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -284,10 +285,12 @@ jobs:
           echo "shard $GROUP of 4 on ${{ matrix.os }}: $count files"
           echo "shard **$GROUP/4** on \`${{ matrix.os }}\`: $count test files" >> "$GITHUB_STEP_SUMMARY"
           # One process per file; `-m "not method"` leaves the `method` job's tests to that job.
-          uv run --locked --extra dev --python 3.12 python scripts/ci_per_file.py $files -- -q -m "not method"
+          # 120 s per test function, fixtures not counted, so a hang names its test (#275, D):
+          # here only, where each file has a process of its own (`pyproject.toml` says why).
+          uv run --locked --extra dev --python 3.12 python scripts/ci_per_file.py $files -- -q -m "not method" --timeout=120 -o timeout_func_only=true
 
-  # The tests of other systems, once per platform, only when `vendor/` or `scripts/` changed
-  # (`gate`): the method's self-tests and installers check, the bare-CLI writer race, the real `uv`
+  # The tests of other systems, once per platform, only when `vendor/`, `scripts/` or a
+  # dependency file changed (`gate`): the method's self-tests and installers check, the bare-CLI writer race, the real `uv`
   # export -- pytest's `method` marker (`pyproject.toml`). They were about a quarter of every
   # shard's time (`docs/CI-ROOT-CAUSE-2026-11-10.md` RC5). One process: they are subprocess-bound
   # and build no windows, so there is nothing for them to accumulate.
