@@ -446,15 +446,20 @@ class FileCheck(QObject):
     def save(self) -> None:
         """«Зберегти як нову версію» on the dialog shown: `propose --from-file` on the file the
         comparison read, in a worker. Not while anything runs, and not on a read that moved: a file
-        whose bytes are not the ones compared, or another version on screen, banks nothing — the
-        rows the person saw are not what the method would read."""
+        whose bytes are not the ones compared, another version on screen, or a journal whose HEAD
+        is not the version compared, banks nothing — the rows the person saw are not what the
+        method would read. HEAD is read from the journal now, not from the window's last load:
+        `propose` builds on HEAD as it stands at its run, and another writer may have banked since
+        the watcher last re-read the window (#273 review). No `--on`: the method's door stays HEAD."""
         dialog = self.dialog
         if (dialog is None or not dialog.offers_save() or self._saving or self._busy or self._stopped
                 or (self._saver is not None and self._saver.isRunning())):
             return
         now = dsp_file.md5_of(self._asked_path)
         moved = bool(dialog.answer.md5) and now is not None and now != dialog.answer.md5
-        if moved or self._version() != self._asked or shown_version.key_of(self._window) is not None:
+        head = dsp_file.journal_head(self._asked_project, self._asked_preset)
+        if (moved or head != self._asked or self._version() != self._asked
+                or shown_version.key_of(self._window) is not None):
             dialog.show_saved(dsp_file.Saved("stale", None))
             return
         worker = _ProposeWorker(self._asked_project, self._asked_path, self._asked_preset)

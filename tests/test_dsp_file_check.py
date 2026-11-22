@@ -593,7 +593,17 @@ def _method(monkeypatch, compared: str, saved=(0, BANKED_OUT, ""), calls=None):
     monkeypatch.setattr(method_cli, "spawn", spawn)
 
 
+def _head(project: Path, version="v_001", preset="FULL") -> None:
+    """The journal's HEAD of `preset` on disk, as `slots.json` names it: what `propose` builds on."""
+    state = project / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "slots.json").write_text(json.dumps({"layout": "project-numbered", "active": None,
+                                                  "slots": {preset: {"version": version}}}), encoding="utf-8")
+
+
 def _saving_check(tmp_path, profile=HELIX, version="v_001"):
+    if not (tmp_path / "state" / "slots.json").is_file():
+        _head(tmp_path, version or "v_001")
     _app()
     i18n.set_language("en")
     host = _Saving(tmp_path)
@@ -787,6 +797,23 @@ def test_another_version_on_screen_since_the_comparison_is_not_banked(tmp_path, 
     assert "changed since" in check.dialog.saved_label.text()
 
 
+def test_a_journal_whose_head_moved_on_disk_since_the_comparison_is_not_banked(tmp_path, monkeypatch):
+    """#273 review: a session banked v_002 between the comparison and the click, before the watcher
+    re-read the window. The view still says v_001, and `propose` would build on v_002: the fields
+    the file does not give would be kept from a version nobody compared."""
+    calls = []
+    path = _saved_file(tmp_path)
+    _method(monkeypatch, _differing(path), calls=calls)
+    _host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    _head(tmp_path, "v_002")
+    check.dialog.save_button.click()
+    _settle()
+    assert [args[1] for args, _kw in calls] == ["compare-file"], "the journal's HEAD is not the version compared"
+    assert check.dialog.saved.kind == "stale" and "changed since" in check.dialog.saved_label.text()
+    assert not check.dialog.save_button.isEnabled()
+
+
 def test_no_comparison_starts_while_a_save_runs(tmp_path, monkeypatch):
     import threading
 
@@ -838,8 +865,9 @@ def test_a_save_still_running_at_quit_is_handed_over_and_its_answer_opens_nothin
     dialog.save_button.click()
     worker = check.saving()
     try:
+        assert worker.isRunning(), "held in the method's write until after stop()"
         check.stop()
-        assert worker in qt_shutdown.detached() or not worker.isRunning(), "handed over, not left"
+        assert worker in qt_shutdown.detached(), "handed over, not left for Qt to destroy running"
         check.stop()  # twice is safe
     finally:
         release.set()

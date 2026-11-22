@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional, Union
 
 from autosound_tcc.core import app_log, method_binding, method_cli, vendor_loader
-from autosound_tcc.state import preset_settings
+from autosound_tcc.state import ledger_line, preset_settings
 
 #: The method's declaration of its readers, relative to the skill folder (item 15), and its shape.
 DECLARATION = Path("knowledge") / "dsp" / "readers.json"
@@ -365,6 +365,20 @@ def md5_of(file_path: Union[str, os.PathLike]) -> Optional[str]:
     try:
         return hashlib.md5(Path(file_path).read_bytes()).hexdigest()
     except OSError:
+        return None
+
+
+def journal_head(project_dir: Union[str, os.PathLike], preset: Optional[str]) -> Optional[str]:
+    """HEAD of `preset` in the journal `propose` builds on, read now (`ledger_line.line_mark`):
+    `<project>/state`, the root `apply.py` takes from its project argument, whatever
+    `AUTOSOUND_STATE_ROOT` says. None where it cannot be read now, or no preset is named — the
+    caller takes that as a HEAD it cannot confirm, never as the version it compared."""
+    if not (isinstance(preset, str) and preset):
+        return None
+    try:
+        return ledger_line.line_mark(Path(project_dir) / "state", preset)[0]
+    except Exception:  # noqa: BLE001 - a journal that cannot be read now confirms nothing
+        app_log.logger().exception("dsp file: the journal's HEAD could not be read")
         return None
 
 
