@@ -321,7 +321,7 @@ def _send_offer(git: GitStatus, read: Read) -> tuple[Optional[str], bool]:
     if read.tuning is None or read.ahead is None:
         return None, False
     if not (_work(read) or read.ahead):
-        return i18n.t("gitSendTipNothing"), True
+        return i18n.t("gitSendTipNothingOffline" if read.fetch_error else "gitSendTipNothing"), True
     if git.behind:
         return i18n.t("gitSendTipPull").format(n=git.behind), True
     return i18n.t("gitSendTipSpare" if read.sends == "session" else "gitSendTip"), False

@@ -509,6 +509,8 @@ def test_a_gitignore_alone_is_no_unsaved_work(repo, host):
     assert _state(widget, panel)[0] != "bad"
     assert _sev(widget, i18n.t("gitChanges"))[0] != "bad"
     assert not _send_button(widget).isEnabled()
+    tip = _send_button(widget).hover_tip._text
+    assert tip == i18n.t("gitSendTipNothing") and "GitHub" not in tip, "the row says 1 change, so no claim that GitHub has all"
 
 
 def test_commits_not_on_github_are_amber(repo, host):
@@ -658,9 +660,9 @@ def _send_button(widget):
 
 
 def _sent(widget) -> bool:
-    """Nothing left to send: the button is gone or stands off saying so."""
+    """Nothing left to send: the button stands off saying so."""
     button = _send_button(widget)
-    return button is None or (not button.isEnabled() and button.hover_tip._text == i18n.t("gitSendTipNothing"))
+    return button is not None and not button.isEnabled() and button.hover_tip._text == i18n.t("gitSendTipNothing")
 
 
 def _answer(monkeypatch, *answers):
@@ -708,6 +710,22 @@ def test_the_button_stands_off_with_the_reason_when_there_is_nothing_to_send(rep
     _write(repo[0], "state/v_021.json")
     panel.request()
     assert _until(lambda: _send_button(widget) is not None and _send_button(widget).isEnabled())
+
+
+def test_the_off_tip_agrees_with_the_rows_when_only_service_files_changed(repo, host):
+    _write(repo[0], ".sessions.log")
+    widget, _panel = _painted(repo, host)
+    button = _send_button(widget)
+    assert not button.isEnabled() and "GitHub" not in button.hover_tip._text, button.hover_tip._text
+    assert button.hover_tip._text == i18n.t("gitSendTipNothing")
+
+
+def test_the_off_tip_does_not_claim_what_it_cannot_know_when_github_did_not_answer(repo, host, monkeypatch):
+    _status_stub(monkeypatch, changes={"tuning": [], "housekeeping": []}, ahead=[], fetch_error="no route")
+    widget, _panel = _painted(repo, host)
+    button = _send_button(widget)
+    assert not button.isEnabled()
+    assert button.hover_tip._text == i18n.t("gitSendTipNothingOffline"), button.hover_tip._text
 
 
 def test_the_button_stands_off_with_the_reason_when_the_project_has_no_remote(repo, host):
