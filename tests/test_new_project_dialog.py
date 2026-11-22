@@ -140,10 +140,10 @@ def _warnings(caplog) -> list[str]:
     return [record.getMessage() for record in caplog.records if record.levelname == "WARNING"]
 
 
-def test_the_picker_offers_the_skills_library_helix_then_musway_then_add_new():
+def test_the_picker_offers_the_skills_library_in_its_order_then_add_new():
     """#175 D-1 (F8): the picker read TCC's own folder, one older Helix file, so the method's
     Musway could not be picked at all. It offers the method's library now, in `list_bundled()`'s
-    order, with «Add new» last."""
+    order, with «Add new» last — the Mosconi PICO 6/8-2 among them from v3.3.2 (#271)."""
     from autosound_tcc.core import vendor_loader
 
     _app()
@@ -153,7 +153,8 @@ def test_the_picker_offers_the_skills_library_helix_then_musway_then_add_new():
     offered = _offered(dlg)
     assert offered == [(vendor, model) for vendor, model, _path in library] + [None]
     assert offered[0] == ("Audiotec-Fischer", "Helix DSP Ultra S")
-    assert offered[1][0] == "Musway" and offered[1][1].startswith("M6V4"), offered
+    assert ("Mosconi", "PICO 6/8-2 DSP") in offered, offered
+    assert any(entry and entry[0] == "Musway" and entry[1].startswith("M6V4") for entry in offered), offered
     assert offered[-1] is None
     assert dlg._profile_combo.itemText(len(offered) - 1) == npd.i18n.t("npAddNew")
 

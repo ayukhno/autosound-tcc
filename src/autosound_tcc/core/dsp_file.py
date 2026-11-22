@@ -4,9 +4,10 @@
 **What the method reads comes from the method** (the Arbiter, 2026-11-22). From v3.3.3 the method
 declares each saved-file reader in `knowledge/dsp/readers.json` (`readers.v1`, its CONTRACT.md item
 15): the vendor family, the file pattern, the verbs that read it, the models it was checked on. TCC
-reads that declaration from the copy of the method the project runs. A copy without it (v3.3.2)
-gets `FALLBACK`, TCC's own two rows — and a test fails when the vendored contract's item 13 names a
-file the table lacks. The table goes when the declaration is pinned.
+reads that declaration from the copy of the method the project runs, and keeps no table of its own:
+a copy without one (before v3.3.3), or with one TCC cannot read, declares no reader, so no DSP's
+file is offered there — no button, no mark. TCC's own two-row table stood in for the declaration
+until the pin carried it (v3.3.3), and went then (#272, «Decided»).
 
 **The declaration is advice, not a gate.** A DSP of a listed family has the button on whatever its
 model: another model is read at the person's own risk, and the method's answer says so. A refusal
@@ -63,8 +64,6 @@ class Reader(NamedTuple):
     pattern: str
     verbs: tuple[str, ...]
     models: tuple[str, ...] = ()
-    #: `declared` (the method's `readers.json`) or `fallback` (TCC's table, a pin without it).
-    source: str = "declared"
 
     def reads(self, verb: str) -> bool:
         return verb in self.verbs
@@ -73,15 +72,6 @@ class Reader(NamedTuple):
         """Whether a file of this name is one the reader reads, by its extension."""
         return _pattern_re(self.pattern).search(file_name or "") is not None
 
-
-#: Two rows, for a pin whose method declares nothing (v3.3.2): what its CONTRACT.md items 13 and 14
-#: say it reads. Its `attest --from-file` refuses a `.PR` file (item 14), so Mosconi's row lists the
-#: comparison alone. Goes when the declaration is pinned (#272, «Decided»).
-FALLBACK: tuple[Reader, ...] = (
-    Reader("helix_pct6", "Audiotec-Fischer", ".pct6", (COMPARE, ATTEST, PROPOSE),
-           ("HELIX DSP ULTRA S",), "fallback"),
-    Reader("mosconi_pr", "Mosconi", ".PR<n>", (COMPARE,), ("Mosconi PICO 6/8-2 DSP",), "fallback"),
-)
 
 #: Brands a family's DSPs are named by, where a profile may name the brand and not the vendor: a
 #: profile says `Helix` as often as `Audiotec-Fischer` (`preset_settings.is_audiotec`).
@@ -108,7 +98,7 @@ def _reader(item) -> Optional[Reader]:
             and all(isinstance(model, dict) and isinstance(model.get("name"), str) for model in models)):
         return None
     return Reader(str(item.get("id") or family), family.strip(), pattern.strip(), tuple(verbs),
-                  tuple(model["name"] for model in models), "declared")
+                  tuple(model["name"] for model in models))
 
 
 #: path -> (mtime_ns, size, readers or None): read again when the file changes.
@@ -133,20 +123,20 @@ def _say_edges(path: Path, found: tuple[Reader, ...]) -> None:
 
 def declared(skill_dir: Union[str, os.PathLike, None]) -> Optional[tuple[Reader, ...]]:
     """The readers the copy at `skill_dir` declares, or None where it declares none: no file (a
-    pin before v3.3.3), or one TCC cannot read as `readers.v1` — said in the log, and the fallback
-    answers, as on a pin without it."""
+    copy before v3.3.3), or one TCC cannot read as `readers.v1` — said in the log, and no reader
+    answers, as on a copy without it."""
     if skill_dir is None:
         return None
     path = Path(skill_dir) / DECLARATION
     try:
         info = path.stat()
     except FileNotFoundError:
-        return None  # a pin before v3.3.3: no declaration, nothing to say
+        return None  # a copy before v3.3.3: no declaration, nothing to say
     except OSError as exc:
         said = f"{path}: {exc}"
         if said not in _SAID:
             _SAID.add(said)
-            app_log.logger().warning("dsp file: %s cannot be looked at (%s); TCC's own table answers",
+            app_log.logger().warning("dsp file: %s cannot be looked at (%s); no DSP's file is read",
                                      path, exc)
         return None
     key = str(path)
@@ -163,10 +153,10 @@ def declared(skill_dir: Union[str, os.PathLike, None]) -> Optional[tuple[Reader,
             found = tuple(parsed)
             _say_edges(path, found)
         else:
-            app_log.logger().warning("dsp file: %s is not %s as TCC reads it; TCC's own table answers",
+            app_log.logger().warning("dsp file: %s is not %s as TCC reads it; no DSP's file is read",
                                      path, CONTRACT)
-    except Exception as exc:  # noqa: BLE001 - an unreadable declaration is the fallback, never a load that fails
-        app_log.logger().warning("dsp file: %s cannot be read (%s); TCC's own table answers", path, exc)
+    except Exception as exc:  # noqa: BLE001 - an unreadable declaration is no reader, never a load that fails
+        app_log.logger().warning("dsp file: %s cannot be read (%s); no DSP's file is read", path, exc)
     _CACHE[key] = (info.st_mtime_ns, info.st_size, found)
     return found
 
@@ -186,9 +176,9 @@ def skill_folder(project_dir: Union[str, os.PathLike, None] = None) -> Optional[
 
 
 def readers(project_dir: Union[str, os.PathLike, None] = None) -> tuple[Reader, ...]:
-    """The readers of the copy the project runs: its declaration, or `FALLBACK` without one."""
+    """The readers of the copy the project runs: its declaration, or none without one."""
     found = declared(skill_folder(project_dir))
-    return FALLBACK if found is None else found
+    return () if found is None else found
 
 
 def _words(text: str) -> str:

@@ -1,6 +1,7 @@
 """«Перевірити налаштування» (#272): which DSP files the method reads, what its `compare-file` answered,
-and the button and table the person sees. The method is faked on `method_cli.spawn` where its v3.3.2
-lacks an answer (`warning_uk`, `readers.json`), and run for real on the files it ships."""
+and the button and table the person sees. The method is faked on `method_cli.spawn` where a case needs
+an answer its shipped files do not give, and run for real on the files it ships: the pin's own
+`readers.json`, `warning_uk`, and both `--from-file` verbs on a `.pct6` and a `.PR15`."""
 
 from __future__ import annotations
 
@@ -36,8 +37,8 @@ TESTDATA = vendor_loader._SUBMODULE_DIR / "rew_tool" / "testdata"
 AYA = TESTDATA / "helix-pct6" / "AYA.pct6"
 PR15 = TESTDATA / "mosconi-pr" / "example_pico682.PR15"
 
-#: The method's v3.3.3 declaration (`knowledge/dsp/readers.json`, CONTRACT.md item 15), as its
-#: branch holds it: what the pin will carry, faked until it does.
+#: The method's v3.3.3 declaration (`knowledge/dsp/readers.json`, CONTRACT.md item 15), the base of
+#: the copies the tests declare: held to the pin's own below, `about` aside.
 DECLARATION = {
     "contract": "readers.v1",
     "about": "The DSP saved-file readers the method ships.",
@@ -68,11 +69,17 @@ def declare(monkeypatch, tmp_path, declaration=DECLARATION) -> Path:
     return skill
 
 
-def on_the_fallback(monkeypatch) -> None:
-    """The copy declares nothing, whatever the pin carries: the fallback table answers. A test of
-    v3.3.2's behaviour says so with this rather than read it from the pin, so the pin's move fails
-    the one sentinel below («drop FALLBACK») and nothing else (group review T1)."""
-    monkeypatch.setattr(dsp_file, "declared", lambda _skill_dir: None)
+def compare_only(monkeypatch, tmp_path) -> Path:
+    """A copy whose Mosconi reader compares and records nothing, as v3.3.2's did: no mark, no save."""
+    mosconi = dict(DECLARATION["readers"][1], verbs=["compare-file"])
+    return declare(monkeypatch, tmp_path, dict(DECLARATION, readers=[DECLARATION["readers"][0], mosconi]))
+
+
+def _pinned() -> tuple:
+    """The readers the pinned copy declares: the real `readers.json`, read as TCC reads it."""
+    found = dsp_file.declared(vendor_loader._SUBMODULE_DIR)
+    assert found is not None, f"the pinned method ({_pinned_version()}) declares no readers TCC reads"
+    return found
 
 
 def _pinned_version() -> str:
@@ -99,37 +106,46 @@ def _named_files(section: str) -> set[str]:
     return {name for name in found if re.search(r"\d|<", name)}
 
 
-def _unlisted(section: str) -> set[str]:
+def _unlisted(section: str, found) -> set[str]:
     sample = {name: re.sub(r"<[a-z]+>", "15", name) for name in _named_files(section)}
     return {name for name, as_file in sample.items()
-            if not any(reader.matches(f"preset{as_file}") for reader in dsp_file.FALLBACK)}
+            if not any(reader.matches(f"preset{as_file}") for reader in found)}
 
 
-def test_the_fallback_table_holds_every_file_contract_item_13_names():
+def test_the_pinned_declaration_holds_every_file_contract_item_13_names():
     section = _item_13(CONTRACT.read_text(encoding="utf-8"))
     named = _named_files(section)
     assert ".pct6" in named and ".PR15" in named, named
-    assert _unlisted(section) == set(), "item 13 names a file TCC's fallback table lacks"
+    assert _unlisted(section, _pinned()) == set(), "item 13 names a file the pin's readers.json lacks"
 
 
-def test_the_contract_check_goes_red_on_a_file_the_table_lacks():
+def test_the_contract_check_goes_red_on_a_file_the_declaration_lacks():
     """Green by design, so shown failing."""
     section = "## 13. compare-file\nA saved `.pct6`, a `.PR15`, and now a `.DSP8` too.\n## 14."
-    assert _unlisted(_item_13(section)) == {".DSP8"}
+    assert _unlisted(_item_13(section), _pinned()) == {".DSP8"}
 
 
-def test_a_pin_without_the_declaration_answers_with_the_fallback():
-    assert not (vendor_loader._SUBMODULE_DIR / dsp_file.DECLARATION).exists(), "the pin carries it: drop FALLBACK"
-    assert dsp_file.readers() == dsp_file.FALLBACK
-    helix, mosconi = dsp_file.reader_for(HELIX), dsp_file.reader_for(MOSCONI)
-    assert helix.reads(dsp_file.COMPARE) and helix.reads(dsp_file.ATTEST)
-    assert mosconi.reads(dsp_file.COMPARE) and not mosconi.reads(dsp_file.ATTEST), "v3.3.2 refuses a .PR there"
+def test_the_pin_declares_both_families_and_every_verb_on_each():
+    """v3.3.3 (hub #348-#350): TCC's own copy answers from its `readers.json`, and both readers
+    compare, record and bank from their file."""
+    assert (vendor_loader._SUBMODULE_DIR / dsp_file.DECLARATION).is_file()
+    assert dsp_file.readers() == _pinned()
+    for profile in (HELIX, MOSCONI):
+        reader = dsp_file.reader_for(profile)
+        assert reader is not None and all(reader.reads(verb) for verb in dsp_file.KNOWN_VERBS), reader
 
 
-def test_the_declaration_is_read_when_the_pin_carries_it(monkeypatch, tmp_path):
+def test_the_tests_declaration_is_the_pinned_one():
+    """The copies the tests declare are built on `DECLARATION`: it says what the pin says."""
+    pinned = json.loads((vendor_loader._SUBMODULE_DIR / dsp_file.DECLARATION).read_text(encoding="utf-8"))
+    assert {k: v for k, v in pinned.items() if k != "about"} == {
+        k: v for k, v in DECLARATION.items() if k != "about"}
+
+
+def test_the_declaration_is_read_from_the_copy_tcc_is_given(monkeypatch, tmp_path):
     declare(monkeypatch, tmp_path)
     mosconi = dsp_file.reader_for(MOSCONI)
-    assert mosconi.source == "declared" and mosconi.reads(dsp_file.ATTEST)
+    assert mosconi.reads(dsp_file.ATTEST)
     assert mosconi.matches("x.PR15") and mosconi.matches("x.pr7") and not mosconi.matches("x.pct6")
 
 
@@ -142,19 +158,19 @@ def test_a_reader_the_method_declares_turns_its_dsp_on_with_no_change_of_tcc(mon
     assert dsp_file.reader_for(OTHER).pattern == ".mwp"
 
 
-def test_a_declaration_tcc_cannot_read_falls_back_to_the_table(monkeypatch, tmp_path):
+def test_a_declaration_tcc_cannot_read_is_no_reader(monkeypatch, tmp_path):
     declare(monkeypatch, tmp_path, {"contract": "readers.v9", "readers": []})
-    assert dsp_file.readers() == dsp_file.FALLBACK
+    assert dsp_file.readers() == ()
+    assert dsp_file.reader_for(HELIX) is None and dsp_file.reader_for(MOSCONI) is None
 
 
-def test_the_pinned_copy_s_own_declaration_is_one_tcc_reads():
-    """The real `readers.json`, once the pin carries it: read as `readers.v1`, both families."""
-    if not (vendor_loader._SUBMODULE_DIR / dsp_file.DECLARATION).is_file():
-        pytest.skip(f"the pinned method ({_pinned_version()}) carries no {dsp_file.DECLARATION}")
-    found = dsp_file.declared(vendor_loader._SUBMODULE_DIR)
-    assert found is not None, "the pin's declaration is not readers.v1 as TCC reads it"
-    assert {r.family for r in found} >= {"Audiotec-Fischer", "Mosconi"}
-    assert dsp_file.reader_for(HELIX, found=found) and dsp_file.reader_for(MOSCONI, found=found)
+def test_a_copy_that_declares_nothing_has_no_reader(monkeypatch, tmp_path):
+    """No `readers.json` (a copy before v3.3.3): TCC keeps no table of its own (#272, «Decided»)."""
+    bare = tmp_path / "skill"
+    bare.mkdir()
+    monkeypatch.setattr(dsp_file, "skill_folder", lambda _project=None: bare)
+    assert dsp_file.readers() == ()
+    assert dsp_file.reader_for(HELIX) is None and dsp_file.reader_for(MOSCONI) is None
 
 
 def test_declaration_edges_are_said_in_the_log_and_change_nothing(monkeypatch, tmp_path, caplog):
@@ -185,8 +201,8 @@ def test_a_declaration_that_cannot_be_looked_at_is_said_once(monkeypatch, tmp_pa
 
     monkeypatch.setattr(Path, "stat", stat)
     with caplog.at_level(logging.WARNING, logger="autosound_tcc"):
-        assert dsp_file.readers() == dsp_file.FALLBACK
-        assert dsp_file.readers() == dsp_file.FALLBACK
+        assert dsp_file.readers() == ()
+        assert dsp_file.readers() == ()
     said = [r.getMessage() for r in caplog.records if "Permission denied" in r.getMessage()]
     assert len(said) == 1, said
 
@@ -344,8 +360,6 @@ def _tree_state(folder: Path) -> dict:
 
 @pytest.mark.parametrize("sample, checked", [(AYA, True), (PR15, False)], ids=["pct6", "PR15"])
 def test_the_real_compare_file_reads_a_shipped_file_and_writes_nothing_beside_it(tmp_path, sample, checked):
-    if not sample.is_file():
-        pytest.skip(f"the vendored method ships no {sample.name}")
     project, files = _real_project(tmp_path)
     path = files / sample.name
     shutil.copyfile(sample, path)
@@ -356,6 +370,7 @@ def test_the_real_compare_file_reads_a_shipped_file_and_writes_nothing_beside_it
 
     assert answer.kind == "compared", answer
     assert answer.checked_model is checked and answer.warning
+    assert answer.warning_uk and answer.warning_uk != answer.warning, "v3.3.3 says it in Ukrainian too"
     assert answer.file_name == sample.name and answer.md5 == before[sample.name]
     assert answer.rows and all(r.result in dsp_file.RESULTS for r in answer.rows)
     assert all(r.result == "unknown" for r in answer.rows), "the seed gives its channel no slot"
@@ -447,17 +462,16 @@ def test_no_version_or_another_version_looked_at_hides_it(tmp_path):
     assert check.button.isHidden()
 
 
-def test_mosconi_on_a_pin_that_does_not_record_its_comparison_says_why_there_is_no_mark(tmp_path, monkeypatch):
-    on_the_fallback(monkeypatch)
+def test_a_reader_that_does_not_record_its_comparison_says_why_there_is_no_mark(tmp_path, monkeypatch):
+    compare_only(monkeypatch, tmp_path / "method")
     _host, check = _check(tmp_path, MOSCONI)
     assert i18n.t("dspFileCheckNoMarkTip") in check.tip.text()
     _host, helix = _check(tmp_path, HELIX)
     assert i18n.t("dspFileCheckNoMarkTip") not in helix.tip.text()
 
     monkeypatch.undo()
-    declare(monkeypatch, tmp_path)
     check.sync(SimpleNamespace(version="v_001", file_version=None, preset="FULL"), MOSCONI)
-    assert i18n.t("dspFileCheckNoMarkTip") not in check.tip.text(), "v3.3.3 records it: the mark works"
+    assert i18n.t("dspFileCheckNoMarkTip") not in check.tip.text(), "the pin records it: the mark works"
 
 
 def test_a_click_asks_for_the_file_and_compares_the_version_on_screen_with_it(tmp_path, monkeypatch):
@@ -535,7 +549,7 @@ def test_the_ukrainian_window_shows_warning_uk_where_the_method_gives_one(tmp_pa
         assert _run(check).warning_label.text() == "Read at your own risk.", "English: the English"
         _fake(monkeypatch, out=_answer())
         i18n.set_language("uk")
-        assert _run(check).warning_label.text() == "Read at your own risk.", "v3.3.2 gives none: the English"
+        assert _run(check).warning_label.text() == "Read at your own risk.", "none given: the English"
     finally:
         i18n.set_language("en")
 
@@ -601,13 +615,13 @@ def test_the_real_method_through_the_button(tmp_path):
 @pytest.mark.parametrize("broken", [
     {"models": 1}, {"verbs": "compare-file"}, {"family": 7}, {"pattern": None},
 ], ids=["models", "verbs", "family", "pattern"])
-def test_a_declaration_with_a_field_of_the_wrong_type_is_unreadable_and_the_table_answers(
+def test_a_declaration_with_a_field_of_the_wrong_type_is_unreadable_and_no_reader_answers(
         monkeypatch, tmp_path, broken):
     readers = [dict(DECLARATION["readers"][0], **broken), DECLARATION["readers"][1]]
     declare(monkeypatch, tmp_path, dict(DECLARATION, readers=readers))
-    assert dsp_file.readers() == dsp_file.FALLBACK
+    assert dsp_file.readers() == ()
     _host, check = _check(tmp_path, HELIX)
-    assert check.button.isEnabled() and ".pct6" in check.tip.text()
+    assert not check.button.isEnabled() and check.tip.text() == i18n.t("dspFileCheckNoReadersTip")
 
 
 @pytest.mark.parametrize("rows", ["many", [1, _r("w-L", "gain_db", "match")], {"a": 1}],
@@ -732,19 +746,17 @@ def _save(check):
     return check.dialog
 
 
-@pytest.mark.parametrize("profile, declared, rows, offered", [
-    (HELIX, False, None, True),
-    (HELIX, False, [_r("w-L", "gain_db", "match"), _r("w-L", "mute", "unknown")], False),
+@pytest.mark.parametrize("profile, banks, rows, offered", [
+    (HELIX, True, None, True),
+    (HELIX, True, [_r("w-L", "gain_db", "match"), _r("w-L", "mute", "unknown")], False),
     (MOSCONI, False, None, False),
     (MOSCONI, True, None, True),
     (MOSCONI_OTHER, True, None, True),
-], ids=["helix-differs", "helix-no-difference", "mosconi-v3.3.2", "mosconi-declared", "mosconi-other-model"])
+], ids=["helix-differs", "helix-no-difference", "mosconi-compare-only", "mosconi-declared", "mosconi-other-model"])
 def test_the_save_is_offered_only_when_rows_differ_and_the_reader_banks_from_the_file(
-        tmp_path, monkeypatch, profile, declared, rows, offered):
-    if declared:
-        declare(monkeypatch, tmp_path)
-    else:
-        on_the_fallback(monkeypatch)
+        tmp_path, monkeypatch, profile, banks, rows, offered):
+    if not banks:
+        compare_only(monkeypatch, tmp_path / "method")
     path = _saved_file(tmp_path, "a.PR15" if profile is not HELIX else "AYA.pct6")
     _method(monkeypatch, _differing(path, rows))
     _host, check = _saving_check(tmp_path, profile)
@@ -1009,20 +1021,9 @@ def test_the_real_propose_from_file_banks_a_new_version_and_leaves_the_file_byte
     assert sorted(p.name for p in files.iterdir()) == [AYA.name], "nothing beside it"
 
 
-def _pinned_banks_a_pr15() -> bool:
-    """Whether the pinned method's own declaration lists `propose --from-file` for Mosconi."""
-    found = dsp_file.declared(vendor_loader._SUBMODULE_DIR)
-    mosconi = None if found is None else dsp_file.reader_for(MOSCONI, found=found)
-    return mosconi is not None and mosconi.reads(dsp_file.PROPOSE)
-
-
 def test_the_real_propose_from_file_banks_a_new_version_from_a_mosconi_file(tmp_path):
-    """Hub #349: from the release that declares it, `propose --from-file` banks from a `.PR15`."""
-    if not PR15.is_file():
-        pytest.skip(f"the pinned method ({_pinned_version()}) ships no {PR15.name}")
-    if not _pinned_banks_a_pr15():
-        pytest.skip(f"the pinned method ({_pinned_version()}) does not list propose --from-file for Mosconi: "
-                    "it refuses a .PR15 (the test below)")
+    """Hub #349 (v3.3.3): `propose --from-file` banks from a `.PR15`, and the pin declares it."""
+    assert dsp_file.reader_for(MOSCONI, found=_pinned()).reads(dsp_file.PROPOSE)
     project, files = _real_project(tmp_path)
     path = files / PR15.name
     shutil.copyfile(PR15, path)
@@ -1032,20 +1033,6 @@ def test_the_real_propose_from_file_banks_a_new_version_from_a_mosconi_file(tmp_
     banked = json.loads((project / "state" / "versions" / "v_002.json").read_text(encoding="utf-8"))
     assert (banked.get("provenance") or {}).get("kind") == "pr15", banked.get("provenance")
     assert path.read_bytes() == before, "the DSP's file is never written"
-
-
-def test_the_real_method_v3_3_2_banks_nothing_from_a_mosconi_file(tmp_path):
-    if not PR15.is_file():
-        pytest.skip(f"the pinned method ({_pinned_version()}) ships no {PR15.name}")
-    if _pinned_banks_a_pr15():
-        pytest.skip(f"the pinned method ({_pinned_version()}) banks from a .PR15 (the test above): "
-                    "this is v3.3.2's refusal")
-    project, files = _real_project(tmp_path)
-    path = files / PR15.name
-    shutil.copyfile(PR15, path)
-    saved = dsp_file.propose(project, path, "FULL")
-    assert (saved.kind, saved.code) == ("refused", 2) and "model" in saved.message, saved
-    assert sorted(p.name for p in (project / "state" / "versions").iterdir()) == ["v_001.json"]
 
 
 def test_the_real_method_through_the_save_button(tmp_path, monkeypatch):
@@ -1159,50 +1146,53 @@ def _declaring_copy(root: Path) -> Path:
     return skill
 
 
-def _follows(project: Path, declared: bool, monkeypatch) -> None:
-    """Button, mark and save for a Mosconi on `project`, as its bound copy declares (or not)."""
-    from autosound_tcc.ui.tcc import dsp_check
+def _bare_copy(root: Path) -> Path:
+    """A copy of the method without `readers.json`, as every copy before v3.3.3 is."""
+    from tests._method_copies import copy_of_the_method
 
-    reader = dsp_file.reader_for(MOSCONI, project)
-    assert reader is not None and reader.reads(dsp_file.ATTEST) is declared
-    assert dsp_check.reads_save_file(MOSCONI, project) is declared, "the mark"
-    path = _saved_file(project, "a.PR15")
-    _method(monkeypatch, _differing(path))
-    _head(project)
-    host, check = _saving_check(project, MOSCONI)
-    assert check.button.isEnabled(), "the button: Mosconi is compared on either"
-    assert (i18n.t("dspFileCheckNoMarkTip") in check.tip.text()) is not declared
-    dialog = _run(check, str(path))
-    assert (dialog.save_button is not None) is declared, "the save"
+    bare = copy_of_the_method(root)
+    if (bare / dsp_file.DECLARATION).exists():
+        (bare / dsp_file.DECLARATION).unlink()
+    return bare
 
 
 def test_the_declaration_is_read_from_the_project_s_bound_copy_not_tcc_s(tmp_path, monkeypatch):
     """T3: the project links a copy that declares its readers; TCC's own declares none."""
+    from autosound_tcc.ui.tcc import dsp_check
     from tests._method_copies import linked_and_approved
 
-    monkeypatch.delenv(vendor_loader.SKILL_DIR_ENV, raising=False)
-    if dsp_file.declared(vendor_loader.skill_dir()) is not None:
-        pytest.skip(f"TCC's own copy ({_pinned_version()}) declares its readers: the reverse case covers it")
+    monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, str(_bare_copy(tmp_path / "own")))
+    assert dsp_file.declared(vendor_loader.skill_dir()) is None
     project = tmp_path / "bound-project"
     project.mkdir()
     linked_and_approved(project, _declaring_copy(tmp_path / "declaring"))
-    _follows(project, True, monkeypatch)
+    reader = dsp_file.reader_for(MOSCONI, project)
+    assert reader is not None and reader.reads(dsp_file.ATTEST)
+    assert dsp_check.reads_save_file(MOSCONI, project), "the mark"
+    path = _saved_file(project, "a.PR15")
+    _method(monkeypatch, _differing(path))
+    _head(project)
+    _host, check = _saving_check(project, MOSCONI)
+    assert check.button.isEnabled() and i18n.t("dspFileCheckNoMarkTip") not in check.tip.text()
+    assert _run(check, str(path)).save_button is not None, "the save"
 
 
-def test_a_project_bound_to_a_copy_that_declares_nothing_gets_the_fallback_whatever_tcc_s_says(
+def test_a_project_bound_to_a_copy_that_declares_nothing_gets_no_reader_whatever_tcc_s_says(
         tmp_path, monkeypatch):
-    """T3, the reverse: TCC's own copy declares (`AUTOSOUND_SKILL_DIR`), the project's does not."""
-    from tests._method_copies import copy_of_the_method, linked_and_approved
+    """T3, the reverse: TCC's own copy declares (`AUTOSOUND_SKILL_DIR`), the project's does not —
+    no button, no mark, and the hover says why (#272: TCC keeps no table of its own)."""
+    from autosound_tcc.ui.tcc import dsp_check
+    from tests._method_copies import linked_and_approved
 
-    bare = copy_of_the_method(tmp_path / "bare")
-    if (bare / dsp_file.DECLARATION).exists():
-        (bare / dsp_file.DECLARATION).unlink()
     monkeypatch.setenv(vendor_loader.SKILL_DIR_ENV, str(_declaring_copy(tmp_path / "own")))
     assert dsp_file.declared(vendor_loader.skill_dir()) is not None
     project = tmp_path / "bound-project"
     project.mkdir()
-    linked_and_approved(project, bare)
-    _follows(project, False, monkeypatch)
+    linked_and_approved(project, _bare_copy(tmp_path / "bare"))
+    assert dsp_file.reader_for(MOSCONI, project) is None and dsp_file.reader_for(HELIX, project) is None
+    assert not dsp_check.reads_save_file(HELIX, project), "the mark"
+    _host, check = _saving_check(project, HELIX)
+    assert not check.button.isEnabled() and check.tip.text() == i18n.t("dspFileCheckNoReadersTip")
 
 
 def test_a_ukrainian_window_shows_warning_uk_on_a_refusal_too(tmp_path, monkeypatch):

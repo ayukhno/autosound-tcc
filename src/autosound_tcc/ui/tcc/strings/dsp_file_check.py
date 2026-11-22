@@ -22,6 +22,12 @@ STRINGS: dict[str, dict[str, str]] = {
         'pl': 'Znacznik „sprawdzono w DSP” nie jest ustawiony dla tego DSP: metoda przypięta tutaj porównuje jego plik, ale nie zapisuje porównania w dzienniku (attest --from-file), więc znacznik nie ma czego odczytać.',
         'de': 'Die Markierung „im DSP geprüft“ ist für diesen DSP nicht gesetzt: Die hier gebundene Methode vergleicht seine Datei, trägt den Vergleich jedoch nicht in das Journal ein (attest --from-file), sodass die Markierung nichts zum Lesen hat.',
     },
+    'dspFileCheckNoReadersTip': {
+        'en': 'The copy of the method this project runs does not list the DSP files it reads (knowledge/dsp/readers.json, which the method has from v3.3.3), so no saved file is compared here.',
+        'uk': 'Копія методу, яку запускає цей проєкт, не перелічує файли DSP, які вона читає (knowledge/dsp/readers.json, який у методі є з v3.3.3), тому жоден збережений файл тут не порівнюється.',
+        'pl': 'Kopia metody, którą uruchamia ten projekt, nie wymienia plików DSP, które odczytuje (knowledge/dsp/readers.json, który metoda ma od v3.3.3), więc żaden zapisany plik nie jest tutaj porównywany.',
+        'de': 'Die Kopie der Methode, die dieses Projekt ausführt, listet die DSP-Dateien nicht auf, die sie liest (knowledge/dsp/readers.json, die die Methode ab v3.3.3 hat), daher wird hier keine gespeicherte Datei verglichen.',
+    },
     'dspFileCheckOffTip': {
         'en': "The method cannot read this DSP's saved file, so there is nothing to compare it with. It reads: {readers}.",
         'uk': 'Метод не може прочитати збережений файл цього DSP, тому нема з чим порівнювати. Він читає: {readers}.',

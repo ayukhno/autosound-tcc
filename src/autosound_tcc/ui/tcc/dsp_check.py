@@ -3,9 +3,9 @@
 The Arbiter's rule (2026-11-09), by capability since #272 (2026-11-22): where the method reads a
 DSP's saved file and records its comparison in the journal (`attest --from-file`, its CONTRACT.md
 item 14), a version is checked when every channel row is entered and the file is on record. Which
-DSPs that is comes from the method (`dsp_file.reader_for`: its `readers.json`, or TCC's fallback
-table on a pin without one) — the Helix on every pin, the Mosconi once the method's `attest
---from-file` reads a `.PR15`. On any other DSP the rule is the person's explicit word, and the ledger
+DSPs that is comes from the method (`dsp_file.reader_for`: the `readers.json` of the copy the
+project runs) — from v3.3.3 the Helix and the Mosconi, whose `.PR15` `attest --from-file` reads; a
+copy that declares no reader shows no mark. On any other DSP the rule is the person's explicit word, and the ledger
 holds no such fact per version, so no mark is shown there. Reading the version files is
 `ledger_line`'s; this module says what they mean on screen.
 
@@ -38,7 +38,7 @@ def is_helix(vendor, name) -> bool:
 def reads_save_file(profile: dict, project_dir=None) -> bool:
     """Whether the method reads this DSP's saved file and records the comparison the mark reads
     (`attest --from-file`, item 14) — asked of the copy the project runs (#272). A vendor is not the
-    rule: on v3.3.2 the Mosconi's file is compared and not recorded, so it gets no mark."""
+    rule: a reader that only compares (v3.3.2's Mosconi did) records nothing, so it gets no mark."""
     try:
         reader = dsp_file.reader_for(profile, config.project_dir() if project_dir is None else project_dir)
     except Exception:  # noqa: BLE001 - a lookup that fails is no mark, never a list that fails to fill

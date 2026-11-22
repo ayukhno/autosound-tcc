@@ -534,19 +534,46 @@ PR15_MD5 = "88a9feb8f37986fe6c3846bcd30b5fa1"
 
 
 def _attested_pr15(root, version="v_001", compared="no difference"):
-    """What `attest --from-file a.PR15` writes from v3.3.3 (CONTRACT.md item 14, hub #348)."""
+    """What `attest --from-file a.PR15` writes from v3.3.3 (CONTRACT.md item 14, hub #348): its keys
+    are held to the real method's below."""
     _bank(root, version, preset_settings={"status": "applied", "source_file": {
         "name": "example_pico682.PR15", "path": "/presets/example_pico682.PR15", "md5": PR15_MD5,
         "saved": None, "pctool": None, "device": "Mosconi PICO 6/8-2 DSP (Dev 15)",
         "read_at": "2026-11-22T10:00:00", "compared": compared}})
 
 
-def test_a_mosconi_version_gets_no_mark_on_a_pin_whose_attest_does_not_read_its_file(tmp_path, monkeypatch):
-    """v3.3.2: compare-file reads a `.PR15`, `attest --from-file` refuses it (item 14). The fallback
-    forced, so the pin's move does not turn this red (group review T1)."""
-    from tests.test_dsp_file_check import on_the_fallback
+def test_the_real_attest_from_file_records_a_mosconi_file_as_the_fake_above_has_it(tmp_path):
+    """Hub #348 on the pin: `attest --from-file a.PR15` banks a version (v_002 on the seed) whose
+    `source_file` has the keys and the device line `_attested_pr15` writes; the file as it was."""
+    import shutil
 
-    on_the_fallback(monkeypatch)
+    from autosound_tcc.core import method_cli
+    from tests import _intake
+    from tests.test_dsp_file_check import PR15
+
+    project = tmp_path / "project"
+    _intake.seed(project)
+    path = tmp_path / PR15.name
+    shutil.copyfile(PR15, path)
+    before = path.read_bytes()
+    code, out, err = method_cli.spawn(project, "state/apply.py", [str(project), "attest", "v_001", "--from-file",
+                                                                  str(path), "--preset", "FULL"], timeout_s=60)
+    assert code == 0, (out, err)
+    banked = json.loads((project / "state" / "versions" / "v_002.json").read_text(encoding="utf-8"))
+    source = banked["preset_settings"]["source_file"]
+    fake = tmp_path / "fake"
+    _attested_pr15(fake)
+    faked = json.loads((fake / PRESET / "v_001.json").read_text(encoding="utf-8"))
+    assert set(source) == set(faked["preset_settings"]["source_file"]), source
+    assert source["device"] == "Mosconi PICO 6/8-2 DSP (Dev 15)" and source["saved"] is None, source
+    assert source["md5"] == PR15_MD5 and path.read_bytes() == before
+
+
+def test_a_mosconi_version_gets_no_mark_where_its_reader_only_compares(tmp_path, monkeypatch):
+    """A copy whose Mosconi reader compares and records nothing (v3.3.2's did): no mark."""
+    from tests.test_dsp_file_check import compare_only
+
+    compare_only(monkeypatch, tmp_path / "method")
     _attested_pr15(tmp_path)
     assert _row(_combo(tmp_path, profile=MOSCONI), "v_001") == (False, "")
     assert dsp_check.header(tmp_path, _head_view(), MOSCONI, "tip") == ("done", "tip")

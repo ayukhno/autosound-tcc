@@ -2,8 +2,8 @@
 preset file the DSP program saved, and the table the method's answer is shown in.
 
 The button sits in the DSP section's header beside «Збережено в DSP…». It is on for a DSP whose
-saved file the method reads (`dsp_file.reader_for`: the method's declaration, or TCC's fallback
-table on a pin without one); for any other DSP it is off, and its hover says why. A click asks for
+saved file the method reads (`dsp_file.reader_for`: the declaration of the copy the project runs);
+for any other DSP, and on a copy that declares no reader, it is off, and its hover says why. A click asks for
 the file and runs `state/apply.py <project> compare-file <version> FILE --json` in a worker
 (`dsp_file.compare`): TCC decodes nothing, writes nothing beside the file, and never writes it.
 
@@ -391,7 +391,10 @@ class FileCheck(QObject):
     def tip_text(self) -> str:
         reader = self.reader
         if reader is None:
-            known = "; ".join(f"{r.pattern} ({r.family})" for r in dsp_file.readers(self._project()))
+            found = dsp_file.readers(self._project())
+            if not found:  # a copy that declares no reader (before v3.3.3): no list to name
+                return i18n.t("dspFileCheckNoReadersTip")
+            known = "; ".join(f"{r.pattern} ({r.family})" for r in found)
             return i18n.t("dspFileCheckOffTip").format(readers=known)
         said = i18n.t("dspFileCheckTip").format(version=self._version() or "?", pattern=reader.pattern)
         if not reader.reads(dsp_file.ATTEST):
