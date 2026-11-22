@@ -19,12 +19,13 @@ import functools
 from typing import Callable, Optional
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QMenu, QPushButton, QWidget
 
 from autosound_tcc.core import app_log
 from autosound_tcc.state import ledger_line
 from autosound_tcc.ui.tcc import dsp_check, i18n, window_folder
 from autosound_tcc.ui.tcc.detail_pane import is_other_preset
+from autosound_tcc.ui.tcc.labels import ElidedLabel
 
 
 def key_of(window) -> Optional[str]:
@@ -115,9 +116,10 @@ def row(window) -> QWidget:
     layout = QHBoxLayout(widget)
     layout.setContentsMargins(12, 2, 8, 2)
     layout.setSpacing(6)
-    window._shown_mark = QLabel("")
+    # One line, cut to the room the buttons leave, the whole text on hover (#266 A2): a wrapping
+    # label took six lines at the default width and squeezed the buttons.
+    window._shown_mark = ElidedLabel("", min_width=24)
     window._shown_mark.setProperty("class", "phead-sub open-q")
-    window._shown_mark.setWordWrap(True)
     window._shown_back = QPushButton("")
     window._shown_back.setProperty("class", "link-btn")
     window._shown_back.setCursor(Qt.CursorShape.PointingHandCursor)

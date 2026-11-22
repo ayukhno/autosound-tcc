@@ -354,6 +354,14 @@ def test_the_dsp_header_names_the_configuration_in_the_processor(tmp_path, monke
     window._show_version(view, {"dsp_profile": {"vendor": "Audiotec", "name": "Helix"}})
     assert window._dsp_section.dot_status() == "checked"
     assert "md5 ee627ad6…" in window._dsp_section._dot.toolTip()
+    # #266 A4: after a cancelled project switch the header reads the window's own folder, as the
+    # strip does, not the process's (the one window build of this test is reused, not a new one).
+    own = tmp_path / "own-project"
+    monkeypatch.setattr(config, "state_root", lambda where=None, *_a, **_k: root if where is None else tmp_path / "no-ledger")
+    window._built_on = own
+    window._show_version(view, {"dsp_profile": {"vendor": "Audiotec", "name": "Helix"}})
+    assert window._dsp_section.sub_text() == "v_006", "the process's ledger named a slot the window's own does not"
+    assert window._cfg_btn.isHidden()
 
 
 def test_compare_offers_this_preset_first_then_the_others_on_the_old_layout(tmp_path):
@@ -1070,3 +1078,37 @@ def test_a_looked_at_version_is_named_from_the_windows_own_ledger(tmp_path, monk
     monkeypatch.setattr(shown_version.ledger_line, "label", lambda root, _version: str(root))
 
     assert shown_version._said(SimpleNamespace(_loaded_preset="FULL"), "v_001") == str(tmp_path)
+
+
+def test_the_strip_over_the_tree_keeps_its_buttons_whole_at_the_default_width():
+    """#266 A2: looking at another slot, the mark's text wrapped to six lines and cut «Show
+    version…». Measured by the widgets' geometry: each button keeps its own width, the mark is one
+    line, and the whole text is on hover."""
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+    from autosound_tcc.ui.tcc import i18n, shown_version
+
+    QApplication.instance() or QApplication([])
+    window = SimpleNamespace()
+    strip = shown_version.row(window)
+    host = QWidget()
+    column = QVBoxLayout(host)
+    column.addWidget(strip)
+    column.addStretch()
+    text = i18n.t("shownVersionMark").format(version="Daily drive with the rear fill off · v_004 · SQ-2")
+    window._shown_mark.setText(text)
+    window._shown_back.setText(i18n.t("shownVersionBack"))
+    window._shown_pick.setText(i18n.t("shownVersionPick"))
+    strip.setVisible(True)
+    host.resize(260, 200)
+    host.show()
+    QApplication.processEvents()
+    try:
+        for button in (window._shown_back, window._shown_pick):
+            assert button.width() >= button.sizeHint().width(), (button.text(), button.width())
+        assert window._shown_mark.height() <= 2 * window._shown_mark.fontMetrics().height()
+        assert window._shown_mark.toolTip() == text, "the cut text is whole on hover"
+    finally:
+        host.close()

@@ -36,6 +36,11 @@ from autosound_tcc.core.tuning_session import TuningSession
 
 try:  # The saved project choice lives in the window's settings store; a light install has none.
     from autosound_tcc.ui.tcc import app_settings  # noqa: F401 — hands that store to core.config
+    from autosound_tcc.ui.tcc import i18n
+
+    from autosound_tcc.core import self_check
+
+    self_check.use_translator(i18n.t)  # the core's sentences in words here too, not as keys (#266 A3)
 except ImportError:
     pass
 

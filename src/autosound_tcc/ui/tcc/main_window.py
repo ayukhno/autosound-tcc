@@ -2267,14 +2267,14 @@ class MainWindow(QMainWindow):
         prof = profile.get("dsp_profile", profile)
         processor = f"{prof.get('vendor', '?')} {prof.get('name', '?')}"
         self._cfg_btn.setVisible(bool(view.version) and shown_version.key_of(self) is None
-                                 and ledger_line.is_project_line(config.state_root()))
+                                 and ledger_line.is_project_line(window_folder.state_root(self)))
         if not view.version:
             self._dsp_section.set_sub(processor)
             self._dsp_section.set_dot(None)
             self._dsp_section.set_sub_tip("")
             return
         # By the name it was saved under in the device, when it was (hub #198): `SQ-2 · v_006`.
-        root = config.state_root()
+        root = window_folder.state_root(self)
         standing = ledger_line.config_of(root, view.version)
         said = f"{standing[0]} · {view.version}" if standing else view.version
         said, now = dsp_check.now_in_dsp(root, view, self._loaded_preset, said)

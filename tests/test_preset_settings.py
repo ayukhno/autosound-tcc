@@ -968,3 +968,16 @@ def test_a_dsp_named_only_helix_is_an_audiotec():
     from autosound_tcc.state import preset_settings
 
     assert preset_settings.is_audiotec(None, "Helix DSP Pro") and preset_settings.is_audiotec("Helix", None)
+
+
+def test_one_file_named_by_both_records_is_listed_once(ledger, tmp_path):
+    """#266 A1: `provenance.file` and `source_file` name one file; the hover lists it once."""
+    both = _bank(ledger, {"input_gain_db": -0.3, "status": "applied",
+                          "source_file": dict(SOURCE, name="a.pct6", md5="ee627ad6" + "0" * 24)},
+                 provenance={"file": "presets/a.pct6 (md5 ee627ad6…)"})
+    files = ledger_line.checked_files(tmp_path / "state", "FULL", both)
+    assert [f.name for f in files] == ["a.pct6"], files
+    assert files[0].saved, "and what only the second record says is not lost"
+    pair = (ledger_line.SavedFile("a.pct6", "ee627ad6", None, None),
+            ledger_line.SavedFile("a.pct6", "ee627ad6" + "0" * 24, "29.10.2026 12:32", None))
+    assert dsp_check.tip(pair).count("a.pct6") == 1

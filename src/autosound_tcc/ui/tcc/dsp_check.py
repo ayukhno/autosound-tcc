@@ -94,6 +94,7 @@ def _file_line(file: SavedFile) -> str:
 
 def tip(files: tuple[SavedFile, ...]) -> str:
     """The hover: what the mark says and does not, then each file with the same content."""
+    files = ledger_line.one_per_file(files)
     lines = [html.escape(i18n.t("dspCheckedTip"))]
     if len(files) > 1:
         lines.append(html.escape(i18n.t("dspCheckedSameFiles")))

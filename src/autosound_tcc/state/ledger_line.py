@@ -278,7 +278,23 @@ def _saved_files(data: dict) -> tuple[SavedFile, ...]:
     # form is `provenance.file`'s.
     found = (_saved_file(provenance.get("file"), created),
              _saved_file(source, created) if isinstance(source, dict) else None)
-    return tuple(f for f in found if f is not None)
+    return one_per_file(f for f in found if f is not None)
+
+
+def one_per_file(files) -> tuple[SavedFile, ...]:
+    """`files` with one entry for each file: the same name with the same content (an md5 and its
+    short form are one) is one file, whatever the two records of it are (#266 A1). The first one
+    stays, and takes from the later what it does not say itself."""
+    kept: list[SavedFile] = []
+    for file in files:
+        for at, have in enumerate(kept):
+            if have.name == file.name and same_content(have.md5, file.md5):
+                kept[at] = SavedFile(have.name, have.md5 if len(have.md5 or "") >= len(file.md5 or "") else file.md5,
+                                     have.saved or file.saved, have.recorded or file.recorded)
+                break
+        else:
+            kept.append(file)
+    return tuple(kept)
 
 
 def preset_waiting(status) -> bool:
@@ -438,7 +454,7 @@ def checked_files(root, preset: str, version: str,
 
     `every` is `all_saved_files`' answer, passed in as a list reads it once."""
     entry = _entry(version_path(root, preset, version))
-    own = list(dict.fromkeys(entry.files))
+    own = list(one_per_file(entry.files))
     if not entry.entered or not own:
         return ()
     md5 = own[0].md5
