@@ -508,7 +508,7 @@ def test_a_gitignore_alone_is_no_unsaved_work(repo, host):
 
     assert _state(widget, panel)[0] != "bad"
     assert _sev(widget, i18n.t("gitChanges"))[0] != "bad"
-    assert _send_button(widget) is None
+    assert not _send_button(widget).isEnabled()
 
 
 def test_commits_not_on_github_are_amber(repo, host):
@@ -657,6 +657,12 @@ def _send_button(widget):
     return found[0] if found else None
 
 
+def _sent(widget) -> bool:
+    """Nothing left to send: the button is gone or stands off saying so."""
+    button = _send_button(widget)
+    return button is None or (not button.isEnabled() and button.hover_tip._text == i18n.t("gitSendTipNothing"))
+
+
 def _answer(monkeypatch, *answers):
     """`QMessageBox.exec` answers in turn and keeps what it was asked; nothing is drawn."""
     asked = []
@@ -689,23 +695,31 @@ def _ready(repo, host):
     _write(project, "process/journal.jsonl")
     widget, panel = host()
     panel.show()
-    assert _until(lambda: _settled(panel) and _send_button(widget) is not None), (_rows(widget), panel._read)
+    assert _until(lambda: _settled(panel) and _send_button(widget) is not None and _send_button(widget).isEnabled()), (_rows(widget), panel._read)
     return widget, panel
 
 
-def test_the_button_says_no_when_there_is_nothing_to_send_or_nowhere(repo, host, monkeypatch, tmp_path):
+def test_the_button_stands_off_with_the_reason_when_there_is_nothing_to_send(repo, host):
+    widget, panel = _painted(repo, host)
+    button = _send_button(widget)
+    assert button is not None and not button.isEnabled(), "a clean project: the button stands, off"
+    assert button.hover_tip._text == i18n.t("gitSendTipNothing")
+
+    _write(repo[0], "state/v_021.json")
+    panel.request()
+    assert _until(lambda: _send_button(widget) is not None and _send_button(widget).isEnabled())
+
+
+def test_the_button_stands_off_with_the_reason_when_the_project_has_no_remote(repo, host):
     project, _bare = repo
     widget, panel = _painted(repo, host)
-    assert _send_button(widget) is None, "a clean project has nothing to send"
-
     _write(project, "state/v_021.json")
-    panel.request()
-    assert _until(lambda: _send_button(widget) is not None)
-
     _git(project, "remote", "remove", "origin")
     panel.show()
     assert _until(lambda: _settled(panel) and panel._read.remote is None)
-    assert _send_button(widget) is None, "no remote, nowhere to send"
+    button = _send_button(widget)
+    assert button is not None and not button.isEnabled(), "no remote, nowhere to send"
+    assert button.hover_tip._text == i18n.t("gitSendTipNoRemote")
 
 
 def test_no_button_for_a_read_that_could_not_be_read_or_a_detached_head(repo, host, monkeypatch):
@@ -782,7 +796,7 @@ def test_yes_sends_the_tuning_files_and_the_outcome_is_the_methods_words(repo, h
 
     _send_button(widget).click()
 
-    assert _until(lambda: _send_button(widget) is None and panel.idle()), widget._status_strip.said
+    assert _until(lambda: _sent(widget) and panel.idle()), widget._status_strip.said
     assert len(asked) == 1
     assert _git(bare, "rev-parse", "HEAD") == _git(project, "rev-parse", "HEAD")
     assert set(_on_remote(bare)) == before | {"state/v_020.json", "process/journal.jsonl"}
@@ -819,7 +833,7 @@ def test_the_key_the_link_and_the_logs_never_go(repo, host, monkeypatch):
     _answer(monkeypatch, YES)
 
     _send_button(widget).click()
-    assert _until(lambda: _send_button(widget) is None and panel.idle()), widget._status_strip.said
+    assert _until(lambda: _sent(widget) and panel.idle()), widget._status_strip.said
 
     assert set(_on_remote(bare)) == before | {"state/v_020.json", "state/v_022.json", "process/journal.jsonl"}
 
@@ -830,10 +844,10 @@ def test_asked_before_each_send(repo, host, monkeypatch):
     asked = _answer(monkeypatch, YES, NO)
 
     _send_button(widget).click()
-    assert _until(lambda: _send_button(widget) is None and panel.idle())
+    assert _until(lambda: _sent(widget) and panel.idle())
     _write(project, "state/v_023.json")
     panel.request()
-    assert _until(lambda: _settled(panel) and _send_button(widget) is not None)
+    assert _until(lambda: _settled(panel) and _send_button(widget) is not None and _send_button(widget).isEnabled())
     _send_button(widget).click()
     assert _until(lambda: len(asked) == 2 and panel.idle())
 
@@ -881,7 +895,7 @@ def test_a_second_press_starts_no_second_send(repo, host, monkeypatch):
     panel._on_send()
 
     release.set()
-    assert _until(lambda: _send_button(widget) is None and panel.idle())
+    assert _until(lambda: _sent(widget) and panel.idle())
     assert len(sends) == 1, sends
 
 
@@ -905,7 +919,7 @@ def test_what_changed_after_the_yes_is_said_and_not_sent(repo, host, monkeypatch
 
     assert _until(lambda: _settled(panel) and _send_button(widget) is not None and _send_button(widget).isEnabled())
     _send_button(widget).click()
-    assert _until(lambda: _send_button(widget) is None and panel.idle())
+    assert _until(lambda: _sent(widget) and panel.idle())
     assert len(asked) == 2
     assert set(_on_remote(bare)) == before | {"state/v_020.json", "process/journal.jsonl", "state/v_024.json"}
 
@@ -1468,7 +1482,7 @@ def test_a_yes_during_a_read_waits_without_saying_sending_and_still_sends(repo, 
     assert queued.text() == i18n.t("gitSendBtn") and not queued.isEnabled(), queued.text()
 
     release.set()
-    assert _until(lambda: _send_button(widget) is None and panel.idle(), 8), (panel._send, widget._status_strip.said)
+    assert _until(lambda: _sent(widget) and panel.idle(), 8), (panel._send, widget._status_strip.said)
     assert set(_on_remote(bare)) == before | {"state/v_020.json", "process/journal.jsonl"}
 
 

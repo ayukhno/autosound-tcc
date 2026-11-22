@@ -130,7 +130,7 @@ class ProjectGithub(QObject):
             slot = self._window._on_git_init if view.step == 0 else self._window._on_git_backup
             layout.addWidget(self._button(github_view.backup_label(view.step),
                                           i18n.t("gitInitTip" if view.step == 0 else "gitBackupTip"), slot))
-        elif view.send is not None or self._send is not None:
+        if view.send is not None or (view.step is None and self._send is not None):
             row = self._button(i18n.t("gitSendingBtn" if self._send == "sending" else "gitSendBtn"),
                                view.send or i18n.t("gitSendTip"), self._on_send)
             row.findChild(QPushButton).setEnabled(self._send is None and not view.send_off)

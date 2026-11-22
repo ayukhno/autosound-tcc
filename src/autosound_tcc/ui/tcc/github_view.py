@@ -308,15 +308,20 @@ def _verdict(git: GitStatus, read: Read, name: str) -> tuple[str, str, str]:
 
 def _send_offer(git: GitStatus, read: Read) -> tuple[Optional[str], bool]:
     """(the button's tip or None when it is not offered, whether it is offered but off): offered
-    only for a remote the method can send to, on a branch, with what is to go read and not empty;
-    off when the read shows the remote ahead, where `save` would refuse (a branch with no upstream
+    on a branch with a read that landed; off, with the reason, when there is nothing to send, when the
+    project has no remote, and when the read shows the remote ahead, where `save` would refuse (a branch with no upstream
     the read cannot tell, and the method's own refusal stands). Who sends is the method's word, and
     it does not take the button away: «the session; TCC's button is the spare» (`project_seed`, the
     Arbiter 2026-11-08); the panel says who sends in its own row, and the spare's tip says so."""
-    if not read.remote or read.failed or git.detached:
+    if read.failed or git.detached:
         return None, False
-    if read.tuning is None or read.ahead is None or not (_work(read) or read.ahead):
+    if not read.remote:
+        # no remote at all: the button stands, off, and says so (a remote the method does not count is not this)
+        return (i18n.t("gitSendTipNoRemote"), True) if not git.remote else (None, False)
+    if read.tuning is None or read.ahead is None:
         return None, False
+    if not (_work(read) or read.ahead):
+        return i18n.t("gitSendTipNothing"), True
     if git.behind:
         return i18n.t("gitSendTipPull").format(n=git.behind), True
     return i18n.t("gitSendTipSpare" if read.sends == "session" else "gitSendTip"), False
