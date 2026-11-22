@@ -117,6 +117,7 @@ DSP file is never written.
 
 | issue | state | implementer | commits | review | note |
 |---|---|---|---|---|---|
-| the plan | written 2026-11-22; the four decisions taken the same day; his «го» the same day | — | this | — | hub #348, #349, #350 to skill |
+| the plan | written 2026-11-22; the four decisions taken the same day; his «го» the same day; 2026-11-22 night: «Як не буде помилок - запускай PR, CI» (the PR and its CI on a clean wave, no separate ask) | — | this | — | hub #348, #349, #350 to skill |
 | #271 | done on the branch: the gitlink at v3.3.2 (`aaa3cec`), the guide's method links at the tag; the picker lists Mosconi offscreen; version, README, lock, CHANGELOG wait for step 9 | the session | `5c821c09` | the group's seats | hub #343 closed: 0 links at v3.3.2 (v3.3.1: 3), none in TCC's own files |
 | #274 | closed: no screen needed. A live run with `tuning_session`'s options: the chat asks the peak mode and the corner set at intake and records both through `set-dsp-setting`, `source: user` | the session | — | — | ~$1 of Opus, two turns; the proof is on the issue |
+| #272 | built: `core/dsp_file.py` (the readers: `readers.json` when the pin has it, else the two-row fallback), `ui/tcc/dsp_file_check.py` (the button, the worker, the dialog), the mark by `attest --from-file` in the family's verbs; real `compare-file` on the method's AYA.pct6 and example_pico682.PR15 | opus · high, 20 min, 98 tools | `c25db512` | task review next | red run: ImportError/AttributeError (no module before); `main_window.py` and the window-build count at their bounds, #273 moves something out first; two segfaults in early runs (.ips 005616, 005621), fixed by holding the worker |
