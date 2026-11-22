@@ -13,11 +13,16 @@ model: another model is read at the person's own risk, and the method's answer s
 is the method's to give and is shown as given. TCC decodes no DSP file itself: every read is
 `state/apply.py <project> compare-file`, read only (item 13), and the file is never written.
 
+A comparison with rows that differ, on a reader that lists `propose --from-file`, can be banked as a
+new version (#273): `propose` below, under the method's writer lock. The method writes the journal;
+TCC never does, and never writes the file.
+
 Qt-free: the window's button and table are `ui/tcc/dsp_file_check.py`.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -306,3 +311,93 @@ def compare(project_dir: Union[str, os.PathLike], version: str, file_path: Union
         return Answer("failed", None, message=str(exc))
     app_log.logger().info("compare-file %s against %s -> exit %s", version, Path(file_path).name, code)
     return interpret(code, out, err)
+
+
+# ---- a new version from the file (#273) -------------------------------------------------------
+
+#: `propose --from-file`'s exits (item 14): banked; the journal refused; the file cannot be read or
+#: interpreted, is a file the copy does not bank from (`model`), or usage; the file changed while it
+#: was read. Nothing is banked on 1-3. A held lock, 75, is `method_cli.Busy` before it gets here.
+EXIT_BANKED = 0
+#: The bound of one bank: the same read as a comparison, then one snapshot under the method's lock
+#: (whose wait `method_cli.spawn` adds on top).
+PROPOSE_TIMEOUT_S = 60.0
+#: The line that names the version banked: `🟡 proposed v_002 on FULL, read from AYA.pct6`, or
+#: `🟠 candidate v_002 …` (item 14 has no `--json`, so the text is what there is to read).
+_BANKED_LINE = re.compile(r"\b(?:proposed|candidate)\s+(v_\d+)\b")
+
+
+class Saved(NamedTuple):
+    """What one `propose --from-file` said.
+
+    `kind` is `banked` (exit 0), `refused` (exits 1-3: nothing banked), `busy` (exit 75 or TCC's
+    own lock past its wait: nothing written, the same call may go through later), `failed` (no
+    answer TCC can read: an exit the contract does not name), `timed_out` (the child was cut at its
+    bound: a write cut halfway may have landed) or `not_run` (no child: a copy TCC will not run, a
+    script not there). TCC's own `stale` is a save it did not start: the read moved. `text` is the method's stdout
+    as it printed it — the warning, the model line, the version, what it kept, did not take and
+    took short — and `message` its stderr, or TCC's sentence where the method said nothing."""
+
+    kind: str
+    code: Optional[int]
+    version: str = ""
+    text: str = ""
+    message: str = ""
+
+    @property
+    def may_have_written(self) -> bool:
+        """All but the answers that guarantee nothing was written: a refusal (1-3, item 14), a held
+        lock (75, item 8), a save TCC stopped before it started (`stale`) or could not start
+        (`not_run`). An exit the contract
+        does not name, or a child cut at its bound, may have banked: the window re-reads."""
+        return self.kind not in ("refused", "busy", "stale", "not_run")
+
+
+def differs(answer: Answer) -> bool:
+    """Whether a comparison has a row that differs: the one result a new version is offered on."""
+    return answer.kind == "compared" and any(row.result == "differs" for row in answer.rows)
+
+
+def md5_of(file_path: Union[str, os.PathLike]) -> Optional[str]:
+    """The file's md5, to tell whether it is the read a comparison showed (`compare-file`'s
+    `file.md5` is the same hash): its bytes hashed, never decoded. None where it cannot be read —
+    the method's own read says why."""
+    try:
+        return hashlib.md5(Path(file_path).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def interpret_propose(code: int, out: str, err: str) -> Saved:
+    """`(exit, stdout, stderr)` of `propose --from-file` as a `Saved` (item 14). A refusal is the
+    method's line on stderr, whole; an exit the table does not name is `failed`, never a bank."""
+    if code == EXIT_BANKED:
+        found = _BANKED_LINE.search(out or "")
+        return Saved("banked", code, found.group(1) if found else "", out, err)
+    if code in (EXIT_JOURNAL, EXIT_FILE, EXIT_CHANGED):
+        return Saved("refused", code, text=out, message=method_cli.tail(err, 20) or method_cli.tail(out))
+    return Saved("failed", code, text=out, message=method_cli.tail(err) or method_cli.tail(out))
+
+
+def propose(project_dir: Union[str, os.PathLike], file_path: Union[str, os.PathLike],
+            preset: Optional[str] = None) -> Saved:
+    """`state/apply.py <project> propose --from-file FILE [--preset P]`, through the project's copy
+    of the method and under the writer lock, one hold, as TCC's other ledger writers take it
+    (`config_writer`): TCC's thread lock around a child that takes the method's own. A new version
+    on HEAD; no banked version is rewritten, and the file is never written. Blocks — run it off
+    the GUI thread."""
+    args = [str(project_dir), "propose", "--from-file", str(file_path)]
+    if isinstance(preset, str) and preset:
+        args += ["--preset", preset]
+    try:
+        code, out, err = method_cli.spawn(project_dir, SCRIPT, args, timeout_s=PROPOSE_TIMEOUT_S, lock=True,
+                                          holds=1, cross_process=False)
+    except method_cli.Busy as exc:
+        return Saved("busy", method_cli.EXIT_BUSY, message=str(exc))
+    except method_cli.TimedOut as exc:
+        return Saved("timed_out", None, message=str(exc))
+    except method_cli.ProcessWriterError as exc:
+        # A copy TCC will not run, a script not there, an interpreter that would not start: no child.
+        return Saved("not_run", None, message=str(exc))
+    app_log.logger().info("propose --from-file %s -> exit %s", Path(file_path).name, code)
+    return interpret_propose(code, out, err)

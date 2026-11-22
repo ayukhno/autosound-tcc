@@ -530,3 +530,382 @@ def test_the_dialog_a_new_check_replaces_is_deleted_not_kept(tmp_path, monkeypat
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     assert not shiboken6.isValid(first), "one dialog per check stayed alive"
     assert shiboken6.isValid(second) and check.dialog is second
+
+
+# ---- «Зберегти як нову версію» (#273): propose --from-file from the comparison's result ----------
+
+#: What `propose --from-file` printed on AYA.pct6 over the seeded project (v3.3.2), cut short: the
+#: warning, the model line, the banked line, then the three lists under their own headings.
+BANKED_OUT = """Reading .pct6 has been checked on HELIX DSP ULTRA S only. Any other model is read at your own risk.
+model: HELIX DSP ULTRA S (Dev 39) -- checked
+
+🟡 proposed v_002 on FULL, read from AYA.pct6
+## APPLY THIS in Helix PC-Tool — FULL · v_002 (proposed)
+
+Kept as v_001 has them -- the file does not give them (1):
+  - w-L: project.json gives this channel no slot (every field kept)
+
+Not taken from the file (1):
+  - Output A: no name, muted: no row of this version is on this output
+
+Taken short (1):
+  - w-L hp: an all-pass invert"""
+
+
+class _Saving(_Host):
+    """A host that counts the window's re-read after a write of the method (`_reload_project_files`)."""
+
+    def __init__(self, project: Path) -> None:
+        super().__init__(project)
+        self.reloads = 0
+
+    def _reload_project_files(self) -> None:
+        self.reloads += 1
+
+
+def _saved_file(tmp_path, name="AYA.pct6", data=b"a saved preset") -> Path:
+    path = tmp_path / "files" / name
+    path.parent.mkdir(exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+def _differing(path: Path, rows=None, **top) -> str:
+    """compare-file's answer for `path` as it is now: its md5, one row that differs."""
+    rows = [_r("w-L", "gain_db", "differs", journal=-3.0, file=-3.5)] if rows is None else rows
+    file = {"name": path.name, "md5": hashlib.md5(path.read_bytes()).hexdigest(), "saved": None, "pctool": None}
+    return _answer(rows, file=file, **top)
+
+
+def _method(monkeypatch, compared: str, saved=(0, BANKED_OUT, ""), calls=None):
+    """`method_cli.spawn` faked by verb: compare-file answers `compared`, propose answers `saved` —
+    a `(code, out, err)`, or an exception it raises."""
+
+    def spawn(project, script, args, **kw):
+        if calls is not None:
+            calls.append((list(args), kw))
+        if args[1] == "compare-file":
+            return 0, compared, ""
+        if isinstance(saved, BaseException):
+            raise saved
+        return saved
+
+    monkeypatch.setattr(method_cli, "spawn", spawn)
+
+
+def _saving_check(tmp_path, profile=HELIX, version="v_001"):
+    _app()
+    i18n.set_language("en")
+    host = _Saving(tmp_path)
+    check = dsp_file_check.FileCheck(host)
+    _KEEP.append((host, check))
+    check.sync(SimpleNamespace(version=version, file_version=None, preset="FULL"), profile)
+    return host, check
+
+
+def _settle():
+    for _ in range(5):
+        QApplication.processEvents()
+
+
+def _save(check):
+    """Click «Зберегти як нову версію» and wait for the method's answer."""
+    check.dialog.save_button.click()
+    worker = check.saving()
+    assert worker is not None
+    assert worker.wait(10000)
+    _settle()
+    return check.dialog
+
+
+@pytest.mark.parametrize("profile, declared, rows, offered", [
+    (HELIX, False, None, True),
+    (HELIX, False, [_r("w-L", "gain_db", "match"), _r("w-L", "mute", "unknown")], False),
+    (MOSCONI, False, None, False),
+    (MOSCONI, True, None, True),
+    (MOSCONI_OTHER, True, None, True),
+], ids=["helix-differs", "helix-no-difference", "mosconi-v3.3.2", "mosconi-declared", "mosconi-other-model"])
+def test_the_save_is_offered_only_when_rows_differ_and_the_reader_banks_from_the_file(
+        tmp_path, monkeypatch, profile, declared, rows, offered):
+    if declared:
+        declare(monkeypatch, tmp_path)
+    path = _saved_file(tmp_path, "a.PR15" if profile is not HELIX else "AYA.pct6")
+    _method(monkeypatch, _differing(path, rows))
+    _host, check = _saving_check(tmp_path, profile)
+    dialog = _run(check, str(path))
+    if offered:
+        assert dialog.save_button is not None and not dialog.save_button.isHidden()
+        assert dialog.save_button.isEnabled() and dialog.save_button.text() == i18n.t("dspFileSave")
+    else:
+        assert dialog.save_button is None or dialog.save_button.isHidden()
+
+
+@pytest.mark.parametrize("code, out", [(1, _refusal("journal", "no version")), (2, _refusal()),
+                                       (3, _refusal("changed", "hash moved"))], ids=["1", "2", "3"])
+def test_a_refused_comparison_offers_no_save(tmp_path, monkeypatch, code, out):
+    def spawn(project, script, args, **kw):
+        return code, out, ""
+
+    monkeypatch.setattr(method_cli, "spawn", spawn)
+    _host, check = _saving_check(tmp_path)
+    dialog = _run(check, str(_saved_file(tmp_path)))
+    assert dialog.save_button is None or dialog.save_button.isHidden()
+
+
+def test_the_save_runs_propose_from_file_on_the_file_compared_under_the_method_s_writer_lock(tmp_path, monkeypatch):
+    calls = []
+    path = _saved_file(tmp_path)
+    _method(monkeypatch, _differing(path), calls=calls)
+    _host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    _save(check)
+    args, kw = calls[-1]
+    assert args == [str(tmp_path), "propose", "--from-file", str(path), "--preset", "FULL"]
+    assert "--json" not in args, "propose --from-file has no --json: its text is shown as printed"
+    assert kw.get("lock", True) is True and kw.get("holds", 1) == 1, "the writer lock, one hold"
+    assert "under_lock" not in kw
+
+
+def test_a_banked_version_is_shown_with_what_the_method_kept_did_not_take_and_took_short(tmp_path, monkeypatch):
+    path = _saved_file(tmp_path)
+    _method(monkeypatch, _differing(path))
+    _host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    dialog = _save(check)
+    assert "v_002" in dialog.saved_label.text() and not dialog.saved_label.isHidden()
+    said = dialog.saved_text.toPlainText()
+    assert said == BANKED_OUT, "the method's text as it printed it"
+    for heading in ("Kept as v_001 has them", "Not taken from the file", "Taken short"):
+        assert heading in said
+    assert said.startswith("Reading .pct6") and "model: HELIX DSP ULTRA S (Dev 39) -- checked" in said
+
+
+@pytest.mark.parametrize("code, err, said", [
+    (1, "error: --on v_009: no such version in slot 'FULL'", "the journal refused"),
+    (2, "error: AYA.pct6: container: not a known container", "could not be read"),
+    (2, "usage: apply.py <project-dir> propose …", "could not be read"),
+    (3, "error: AYA.pct6: changed: the file changed while it was read", "changed while it was read"),
+], ids=["journal", "file", "usage", "changed"])
+def test_a_refusal_is_shown_in_the_method_s_words_and_nothing_is_banked_or_reloaded(
+        tmp_path, monkeypatch, code, err, said):
+    path = _saved_file(tmp_path)
+    _method(monkeypatch, _differing(path), saved=(code, "", err))
+    host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    dialog = _save(check)
+    assert said in dialog.saved_label.text() and err in dialog.saved_label.text()
+    assert "Nothing was saved" in dialog.saved_label.text()
+    assert host.reloads == 0, "nothing banked: nothing to re-read"
+    assert not dialog.save_button.isEnabled(), "the same read is not offered again"
+    assert dialog.warning_label.text() == "Read at your own risk." and not dialog.warning_label.isHidden()
+
+
+def test_a_journal_held_by_another_writer_is_said_and_nothing_destructive_offered(tmp_path, monkeypatch):
+    path = _saved_file(tmp_path)
+    busy = method_cli.Busy("busy: /p/.autosound/write.lock is held by another writer -- nothing was written, "
+                           "safe to retry")
+    _method(monkeypatch, _differing(path), saved=busy)
+    host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    dialog = _save(check)
+    text = dialog.saved_label.text()
+    assert "another writer" in text and "held by another writer" in text and "Nothing was saved" in text
+    assert host.reloads == 0
+    assert dialog.save_button.isEnabled(), "nothing was written: the same save, once the writer is done"
+
+
+def test_an_exit_the_contract_does_not_name_is_no_save(tmp_path, monkeypatch):
+    path = _saved_file(tmp_path)
+    _method(monkeypatch, _differing(path), saved=(9, "", "Traceback … boom"))
+    _host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    dialog = _save(check)
+    assert "no answer TCC can read" in dialog.saved_label.text() and "boom" in dialog.saved_label.text()
+
+
+def test_a_timed_out_save_may_have_written_so_the_window_re_reads(tmp_path, monkeypatch):
+    path = _saved_file(tmp_path)
+    _method(monkeypatch, _differing(path), saved=method_cli.TimedOut("apply.py timed out after 120s", 120.0))
+    host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    dialog = _save(check)
+    assert "may have written" in dialog.saved_label.text()
+    _settle()
+    assert host.reloads == 1 and not dialog.save_button.isEnabled()
+
+
+def test_a_banked_version_re_reads_the_window_as_a_method_write_does(tmp_path, monkeypatch):
+    path = _saved_file(tmp_path)
+    _method(monkeypatch, _differing(path))
+    host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    _save(check)
+    _settle()
+    assert host.reloads == 1
+
+
+def test_a_second_click_on_the_same_read_banks_nothing_more(tmp_path, monkeypatch):
+    calls = []
+    path = _saved_file(tmp_path)
+    _method(monkeypatch, _differing(path), calls=calls)
+    _host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    dialog = _save(check)
+    assert not dialog.save_button.isEnabled()
+    check.save()
+    dialog.save_button.click()
+    _settle()
+    assert [args[1] for args, _kw in calls] == ["compare-file", "propose"], "one bank per read"
+
+    _run(check, str(path))
+    assert check.dialog is not dialog and check.dialog.save_button.isEnabled(), "a new read is a new offer"
+
+
+def test_a_file_changed_since_it_was_compared_is_not_banked(tmp_path, monkeypatch):
+    calls = []
+    path = _saved_file(tmp_path)
+    _method(monkeypatch, _differing(path), calls=calls)
+    host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    path.write_bytes(b"saved again, other values")
+    check.dialog.save_button.click()
+    _settle()
+    assert [args[1] for args, _kw in calls] == ["compare-file"], "the values shown are not the file's now"
+    assert "changed since" in check.dialog.saved_label.text() and host.reloads == 0
+
+
+def test_another_version_on_screen_since_the_comparison_is_not_banked(tmp_path, monkeypatch):
+    calls = []
+    path = _saved_file(tmp_path)
+    _method(monkeypatch, _differing(path), calls=calls)
+    _host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    check.sync(SimpleNamespace(version="v_002", file_version=None, preset="FULL"), HELIX)
+    check.dialog.save_button.click()
+    _settle()
+    assert [args[1] for args, _kw in calls] == ["compare-file"]
+    assert "changed since" in check.dialog.saved_label.text()
+
+
+def test_no_comparison_starts_while_a_save_runs(tmp_path, monkeypatch):
+    import threading
+
+    release = threading.Event()
+    path = _saved_file(tmp_path)
+    calls = []
+
+    def spawn(project, script, args, **kw):
+        calls.append(args[1])
+        if args[1] == "compare-file":
+            return 0, _differing(path), ""
+        release.wait(20)
+        return 0, BANKED_OUT, ""
+
+    monkeypatch.setattr(method_cli, "spawn", spawn)
+    _host, check = _saving_check(tmp_path)
+    _run(check, str(path))
+    check.dialog.save_button.click()
+    worker = check.saving()
+    try:
+        assert not check.button.isEnabled() and not check.dialog.save_button.isEnabled()
+        check.start(str(path))
+        assert check.running().isFinished(), "the comparison's worker is the old one"
+    finally:
+        release.set()
+        assert worker.wait(10000)
+    _settle()
+    assert calls == ["compare-file", "propose"]
+
+
+def test_a_save_still_running_at_quit_is_handed_over_and_its_answer_opens_nothing(tmp_path, monkeypatch):
+    import threading
+
+    from autosound_tcc.ui.tcc import qt_shutdown
+
+    release = threading.Event()
+    path = _saved_file(tmp_path)
+
+    def spawn(project, script, args, **kw):
+        if args[1] == "compare-file":
+            return 0, _differing(path), ""
+        release.wait(20)
+        return 0, BANKED_OUT, ""
+
+    monkeypatch.setattr(method_cli, "spawn", spawn)
+    monkeypatch.setattr(dsp_file_check, "STOP_WAIT_MS", 50)
+    host, check = _saving_check(tmp_path)
+    dialog = _run(check, str(path))
+    dialog.save_button.click()
+    worker = check.saving()
+    try:
+        check.stop()
+        assert worker in qt_shutdown.detached() or not worker.isRunning(), "handed over, not left"
+        check.stop()  # twice is safe
+    finally:
+        release.set()
+        assert worker.wait(10000)
+    _settle()
+    assert dialog.saved_label.isHidden() and host.reloads == 0, "nothing on a window on its way out"
+
+
+# ---- the real method: propose --from-file on a copy of a project --------------------------------
+
+
+def test_the_real_propose_from_file_banks_a_new_version_and_leaves_the_file_byte_identical(tmp_path):
+    project, files = _real_project(tmp_path)
+    path = files / AYA.name
+    shutil.copyfile(AYA, path)
+    before = path.read_bytes()
+    versions = project / "state" / "versions"
+    assert sorted(p.name for p in versions.iterdir()) == ["v_001.json"]
+
+    saved = dsp_file.propose(project, path, "FULL")
+
+    assert saved.kind == "banked" and saved.code == 0 and saved.version == "v_002", saved
+    assert sorted(p.name for p in versions.iterdir()) == ["v_001.json", "v_002.json"]
+    banked = json.loads((versions / "v_002.json").read_text(encoding="utf-8"))
+    provenance = banked.get("provenance") or {}
+    assert provenance.get("kind") == "pct6" and provenance.get("md5") == hashlib.md5(before).hexdigest(), provenance
+    assert saved.text.startswith("Reading .pct6") and "model: HELIX DSP ULTRA S (Dev 39) -- checked" in saved.text
+    assert "Kept as v_001 has them" in saved.text and "Not taken from the file" in saved.text
+    assert path.read_bytes() == before, "the DSP's file is never written"
+    assert sorted(p.name for p in files.iterdir()) == [AYA.name], "nothing beside it"
+
+
+def test_the_real_method_v3_3_2_banks_nothing_from_a_mosconi_file(tmp_path):
+    if not PR15.is_file():
+        pytest.skip("the vendored method ships no .PR15")
+    if dsp_file.reader_for(MOSCONI).reads(dsp_file.PROPOSE):
+        pytest.skip("the pin banks from a .PR15: this is v3.3.2's refusal")
+    project, files = _real_project(tmp_path)
+    path = files / PR15.name
+    shutil.copyfile(PR15, path)
+    saved = dsp_file.propose(project, path, "FULL")
+    assert (saved.kind, saved.code) == ("refused", 2) and "model" in saved.message, saved
+    assert sorted(p.name for p in (project / "state" / "versions").iterdir()) == ["v_001.json"]
+
+
+def test_the_real_method_through_the_save_button(tmp_path, monkeypatch):
+    """The comparison faked with a row that differs (the seed gives its channel no slot, so the
+    real one has none); the save is the vendored `propose --from-file`, from the button's worker."""
+    project, files = _real_project(tmp_path)
+    path = files / AYA.name
+    shutil.copyfile(AYA, path)
+    before = path.read_bytes()
+    real = method_cli.spawn
+
+    def spawn(project_dir, script, args, **kw):
+        if args[1] == "compare-file":
+            return 0, _differing(path), ""
+        return real(project_dir, script, args, **kw)
+
+    monkeypatch.setattr(method_cli, "spawn", spawn)
+    host, check = _saving_check(project)
+    _run(check, str(path))
+    dialog = _save(check)
+    assert "v_002" in dialog.saved_label.text(), dialog.saved_label.text()
+    assert "Not taken from the file" in dialog.saved_text.toPlainText()
+    assert (project / "state" / "versions" / "v_002.json").is_file()
+    assert path.read_bytes() == before
+    _settle()
+    assert host.reloads == 1 and not dialog.save_button.isEnabled()

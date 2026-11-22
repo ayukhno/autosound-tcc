@@ -13,6 +13,15 @@ a file that changed while it was read (exit 3), which is never a result. The met
 on every answer, in Ukrainian where the method gives one (`warning_uk`) and the window speaks it,
 and a model the method was not checked on says so above the table.
 
+Where the comparison has rows that differ and the family's reader lists `propose --from-file`, the
+dialog offers «Зберегти як нову версію» (#273): `state/apply.py <project> propose --from-file FILE
+--preset P` (`dsp_file.propose`) in a worker, under the method's writer lock, on the same file and
+preset as the comparison. The method banks the version and names what it kept, did not take and
+took short; TCC shows its text as printed and re-reads the window as after any write of the
+method's. A refusal (exits 1-3) and a journal held by another writer (75) bank nothing and are said
+in the method's words. One read is banked once: the button is not offered again after an answer,
+and a file or a version on screen that moved since the comparison is not banked at all.
+
 Out of `main_window.py`, which may not grow (`tests/test_structure_ratchet.py`): the window builds
 one `FileCheck` and tells it each version it shows.
 """
@@ -23,9 +32,9 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
-    QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget,
+    QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QPlainTextEdit, QPushButton, QTableWidget,
     QTableWidgetItem, QVBoxLayout,
 )
 
@@ -51,6 +60,25 @@ class _CompareWorker(QThread):
             app_log.logger().exception("compare-file could not run")
             answer = dsp_file.Answer("failed", None, message=f"{type(exc).__name__}: {exc}")
         self.result.emit(answer)
+
+
+class _ProposeWorker(QThread):
+    """One `propose --from-file`, off the GUI thread: a write of the method's, under its lock."""
+
+    result = Signal(object)  # dsp_file.Saved
+
+    def __init__(self, project_dir, file_path: str, preset: Optional[str]) -> None:
+        super().__init__()
+        self._args = (project_dir, file_path, preset)
+        qt_shutdown.watch(self)
+
+    def run(self) -> None:
+        try:
+            saved = dsp_file.propose(*self._args)
+        except Exception as exc:  # noqa: BLE001 - an answer to show, never a dead worker
+            app_log.logger().exception("propose --from-file could not run")
+            saved = dsp_file.Saved("failed", None, message=f"{type(exc).__name__}: {exc}")
+        self.result.emit(saved)
 
 
 def _globs(pattern: str) -> str:
@@ -99,13 +127,42 @@ def refusal_sentence(answer: dsp_file.Answer) -> str:
     return i18n.t("dspFileCheckRefusedFile").format(kind=answer.error_kind or "?", message=message)
 
 
+def saved_sentence(saved: dsp_file.Saved) -> str:
+    """What one `propose --from-file` came to, with the method's own line in it where it gave one."""
+    message = saved.message
+    if saved.kind == "banked":
+        return i18n.t("dspFileSaveBanked").format(version=saved.version or "?")
+    if saved.kind == "busy":
+        return i18n.t("dspFileSaveBusyWriter").format(message=message)
+    if saved.kind == "timed_out":
+        return i18n.t("dspFileSaveTimedOut").format(message=message)
+    if saved.kind == "stale":
+        return i18n.t("dspFileSaveStale")
+    if saved.kind == "not_run":
+        return i18n.t("dspFileSaveNotRun").format(message=message)
+    if saved.kind == "refused" and saved.code == dsp_file.EXIT_JOURNAL:
+        return i18n.t("dspFileSaveRefusedJournal").format(message=message)
+    if saved.kind == "refused" and saved.code == dsp_file.EXIT_CHANGED:
+        return i18n.t("dspFileSaveRefusedChanged").format(message=message)
+    if saved.kind == "refused":
+        return i18n.t("dspFileSaveRefusedFile").format(message=message)
+    return i18n.t("dspFileSaveFailed").format(message=message)
+
+
 class CompareDialog(QDialog):
     """What one `compare-file` answered: the warning, the at-your-own-risk line, the table — or the
-    refusal in its place. Not modal: it is read beside the DSP program's own screens."""
+    refusal in its place. Not modal: it is read beside the DSP program's own screens.
 
-    def __init__(self, answer: dsp_file.Answer, version: str, parent=None) -> None:
+    With `offer_save` and a row that differs, «Зберегти як нову версію» (#273): a click asks
+    (`save_requested`) and `FileCheck` runs the method; `show_saved` puts its answer here."""
+
+    save_requested = Signal()
+
+    def __init__(self, answer: dsp_file.Answer, version: str, parent=None, offer_save: bool = False) -> None:
         super().__init__(parent)
         self.answer = answer
+        #: The answer of the save asked from this read, once it is in.
+        self.saved: Optional[dsp_file.Saved] = None
         name = answer.file_name or "?"
         self.setWindowTitle(i18n.t("dspFileCheckTitle").format(version=version, file=name))
         self.resize(760, 560)
@@ -134,12 +191,47 @@ class CompareDialog(QDialog):
             layout.addWidget(self.table, 1)
         else:
             layout.addStretch(1)
+        self.saved_label = self._label("", layout, "warn")
+        self.saved_text = QPlainTextEdit(self)
+        self.saved_text.setReadOnly(True)
+        self.saved_text.setVisible(False)
+        layout.addWidget(self.saved_text, 1)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
+        self.save_button: Optional[QPushButton] = None
+        if offer_save and dsp_file.differs(answer):
+            self.save_button = QPushButton(i18n.t("dspFileSave"))
+            self.save_tip = attach_tip(self.save_button, i18n.t("dspFileSaveTip"))
+            self.save_button.clicked.connect(lambda _checked=False: self.save_requested.emit())
+            buttons.addWidget(self.save_button)
         close = QPushButton(i18n.t("dspFileCheckClose"))
         close.clicked.connect(self.close)
         buttons.addWidget(close)
         layout.addLayout(buttons)
+
+    def offers_save(self) -> bool:
+        """Whether this read may still be banked: offered, and no answer yet but a busy journal's,
+        which wrote nothing. One read is one bank: a second click banks nothing more."""
+        return self.save_button is not None and (self.saved is None or self.saved.kind == "busy")
+
+    def saving(self) -> None:
+        if self.save_button is not None:
+            self.save_button.setEnabled(False)
+            self.save_button.setText(i18n.t("dspFileSaving"))
+
+    def show_saved(self, saved: dsp_file.Saved) -> None:
+        """The method's answer to the save: the sentence, and its text as printed (on a bank: the
+        warning, the model line, the version, what it kept, did not take and took short)."""
+        self.saved = saved
+        self.saved_label.setProperty("class", "phead-sub" if saved.kind == "banked" else "warn")
+        self.saved_label.style().polish(self.saved_label)
+        self.saved_label.setText(saved_sentence(saved))
+        self.saved_label.setVisible(True)
+        self.saved_text.setPlainText(saved.text)
+        self.saved_text.setVisible(bool(saved.text))
+        if self.save_button is not None:
+            self.save_button.setText(i18n.t("dspFileSave"))
+            self.save_button.setEnabled(self.offers_save())
 
     @staticmethod
     def _label(text: str, layout, cls: str = "phead-sub") -> QLabel:
@@ -235,6 +327,17 @@ class FileCheck(QObject):
         #: and answer — `isRunning()` is still true while `run()` unwinds past the answer.
         self._worker: Optional[_CompareWorker] = None
         self._busy = False
+        #: What the comparison read, for its save (#273): the same project, file, preset and
+        #: reader, whatever the window shows by the time of the click.
+        self._asked_project: Optional[Path] = None
+        self._asked_path = ""
+        self._asked_preset: Optional[str] = None
+        self._asked_reader: Optional[dsp_file.Reader] = None
+        #: The save's worker, held as the comparison's is; `_saving` from its start to its answer,
+        #: and the dialog that asked, which the answer goes to.
+        self._saver: Optional[_ProposeWorker] = None
+        self._saving = False
+        self._saving_dialog: Optional[CompareDialog] = None
         #: Set by `stop`: the window is on its way out, and a late answer opens nothing.
         self._stopped = False
         self.dialog: Optional[CompareDialog] = None
@@ -263,7 +366,7 @@ class FileCheck(QObject):
             app_log.logger().exception("dsp file: the readers could not be looked up")
             self.reader = None
         self.button.setVisible(bool(getattr(view, "version", None)) and shown_version.key_of(self._window) is None)
-        self.button.setEnabled(self.reader is not None and not self._busy)
+        self.button.setEnabled(self.reader is not None and not self._busy and not self._saving)
         self.retranslate()
 
     def tip_text(self) -> str:
@@ -303,11 +406,13 @@ class FileCheck(QObject):
 
     def start(self, path: str) -> None:
         version = self._version()
-        if (not version or self._busy or self._stopped
+        if (not version or self._busy or self._stopped or self._saving
                 or (self._worker is not None and self._worker.isRunning())):
             return
         self._asked = version
-        worker = _CompareWorker(self._project(), version, path, self._preset())
+        self._asked_project, self._asked_path = self._project(), str(path)
+        self._asked_preset, self._asked_reader = self._preset(), self.reader
+        worker = _CompareWorker(self._asked_project, version, path, self._asked_preset)
         worker.result.connect(self._on_answer)
         self._worker = worker
         self._busy = True
@@ -328,19 +433,75 @@ class FileCheck(QObject):
                 # Deleted, not only closed: one dialog a check would otherwise stay for the session.
                 old.close()
                 old.deleteLater()
-            self.dialog = CompareDialog(answer, self._asked, self._window)
+            reader = self._asked_reader
+            self.dialog = CompareDialog(answer, self._asked, self._window,
+                                        offer_save=reader is not None and reader.reads(dsp_file.PROPOSE))
+            self.dialog.save_requested.connect(self.save)
             self.dialog.show()
         except RuntimeError:  # the window closed while the file was read
             return
 
+    # ---- the save (#273) -----------------------------------------------------------------------
+
+    def save(self) -> None:
+        """«Зберегти як нову версію» on the dialog shown: `propose --from-file` on the file the
+        comparison read, in a worker. Not while anything runs, and not on a read that moved: a file
+        whose bytes are not the ones compared, or another version on screen, banks nothing — the
+        rows the person saw are not what the method would read."""
+        dialog = self.dialog
+        if (dialog is None or not dialog.offers_save() or self._saving or self._busy or self._stopped
+                or (self._saver is not None and self._saver.isRunning())):
+            return
+        now = dsp_file.md5_of(self._asked_path)
+        moved = bool(dialog.answer.md5) and now is not None and now != dialog.answer.md5
+        if moved or self._version() != self._asked or shown_version.key_of(self._window) is not None:
+            dialog.show_saved(dsp_file.Saved("stale", None))
+            return
+        worker = _ProposeWorker(self._asked_project, self._asked_path, self._asked_preset)
+        worker.result.connect(self._on_saved)
+        self._saver, self._saving, self._saving_dialog = worker, True, dialog
+        self.button.setEnabled(False)
+        dialog.saving()
+        worker.start()
+
+    @Slot(object)
+    def _on_saved(self, saved) -> None:
+        self._saving = False
+        if self._stopped or getattr(self._window, "_closing", False):
+            return  # a window on its way out: nothing shown, nothing re-read
+        dialog, self._saving_dialog = self._saving_dialog, None
+        try:
+            self.button.setEnabled(self.reader is not None)
+            self.retranslate()
+            if dialog is not None:
+                dialog.show_saved(saved)
+                if dialog.isHidden():
+                    dialog.show()  # the answer to a write the person asked for is seen
+        except RuntimeError:  # the dialog or the window went while the method wrote
+            pass
+        if saved.may_have_written:
+            # As after the window's own write of the method's (`_open_save_config`): the ledger
+            # is watched, but the new version should not wait for the watcher's debounce.
+            reload = getattr(self._window, "_reload_project_files", None)
+            if callable(reload):
+                QTimer.singleShot(0, reload)
+
+    def saving(self) -> Optional[QThread]:
+        """The worker of the save asked for last, running or done; None before the first."""
+        return self._saver
+
     def stop(self) -> None:
-        """The window's `stop_workers`: a comparison still reading is asked to stop and handed over
-        (`qt_shutdown.stop_or_detach`) with its answer cut, never left for Qt to destroy running —
-        the worker has no parent, so no sweep of the window's widgets finds it. Safe to run twice."""
+        """The window's `stop_workers`: a comparison still reading, or a save still writing, is
+        asked to stop and handed over (`qt_shutdown.stop_or_detach`) with its answer cut, never
+        left for Qt to destroy running — neither worker has a parent, so no sweep of the window's
+        widgets finds it. A save handed over runs on to the method's answer: its child is the
+        method's, and is not cut. Safe to run twice: the second finds them handed over already."""
+        if self._stopped:
+            return
         self._stopped = True
-        worker = self._worker
-        if worker is not None:
-            qt_shutdown.stop_or_detach(worker, STOP_WAIT_MS, mute=(worker.result,))
+        for worker in (self._worker, self._saver):
+            if worker is not None:
+                qt_shutdown.stop_or_detach(worker, STOP_WAIT_MS, mute=(worker.result,))
 
     def running(self) -> Optional[QThread]:
         """The worker of the comparison asked for last, running or done; None before the first."""
