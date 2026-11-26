@@ -4239,6 +4239,8 @@ Not on it, the Arbiter 2026-11-22: the Claude API key group (#238–#242, #258, 
 
 ## W-15 — collection (from 2026-11-26)
 
+The Arbiter, 2026-11-26: 206 and 207 go into the nearest patch, already agreed — `ok` at the milestone, no second review.
+
 ### 206. The DSP section's new buttons: the header takes three lines, and the version list runs past the screen
 **What.** The Arbiter's screenshots, 2026-11-26 (v1.3.2, macOS): under «▾ DSP» the version (`● v_004`) sits on a line of
 its own, then «Перевірити налаштуван…» and «Показати версію…» each on their own line, both elided. «Показати версію…»

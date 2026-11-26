@@ -2082,7 +2082,7 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
 
 ### F-113 — W-15 collection: the pool so far
 
-**Статус**: open · 2026-11-26, «добраніч»: W-15 is in collection (`WAVES.md` §1 step 1), the milestone opens on his «збір
+**Статус**: open · 2026-11-26, his word: **206 and 207 go into the nearest patch, both already agreed** (at the milestone they get `ok` with no second review) · «добраніч»: W-15 is in collection (`WAVES.md` §1 step 1), the milestone opens on his «збір
 закінчено» · in the pool (`docs/TEST-FINDINGS.md`): 206 the DSP section's header in one line `▾ DSP ● v_004 ⋯`, its three
 actions behind `⋯` (icon and «Збережено в DSP…» in the menu: his OK), messages on a grey strip, «Назад до поточної» an
 orange button on that strip (his OK), the version list height-limited; 207 the housekeeping files not shown in the GitHub
