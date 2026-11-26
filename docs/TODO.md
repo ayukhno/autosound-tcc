@@ -2080,6 +2080,16 @@ non-audit items, TEST-FINDINGS 153–156) wait until the audit is done (the Arbi
   skill: TCC-054 (hub #269, the round's raw-title matching vs `name_key`). Resume:
   `hub/bin/role tcc --resume 530f0561-3f1c-4b26-a240-c7149565668c`.
 
+### F-113 — W-15 collection: the pool so far
+
+**Статус**: open · 2026-11-26, «добраніч»: W-15 is in collection (`WAVES.md` §1 step 1), the milestone opens on his «збір
+закінчено» · in the pool (`docs/TEST-FINDINGS.md`): 206 the DSP section's header in one line `▾ DSP ● v_004 ⋯`, its three
+actions behind `⋯` (icon and «Збережено в DSP…» in the menu: his OK), messages on a grey strip, «Назад до поточної» an
+orange button on that strip (his OK), the version list height-limited; 207 the housekeeping files not shown in the GitHub
+block (retires 203) · the mockup, not built: https://claude.ai/artifact/N6woDJRWiWLXKXj6oQwXWu (files in
+`hub/scratch/tcc/dsp-mock/`) · still waiting from F-112: 201–205 · no background tasks · resume:
+`hub/bin/role tcc --resume a4126806-0695-4f41-8c91-d83ccdbaca1b`
+
 ### F-112 — after v1.3.2: what waits for the next collection
 
 **Статус**: open · 2026-11-22, «добраніч» after v1.3.2: in the pool, findings 201–205 (`docs/TEST-FINDINGS.md`) — 201 the
