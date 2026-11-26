@@ -4236,3 +4236,20 @@ The Arbiter's «збір закінчено» (2026-11-22). The skill has no ope
 Not on it, the Arbiter 2026-11-22: the Claude API key group (#238–#242, #258, «ключі ні»); Windows CI work (#262, #263, #264,
 «все що по windows не беремо»); hub #264 (PAS-014) stays deferred.
 
+
+## W-15 — collection (from 2026-11-26)
+
+### 206. The DSP section's new buttons: the header takes three lines, and the version list runs past the screen
+**What.** The Arbiter's screenshots, 2026-11-26 (v1.3.2, macOS): under «▾ DSP» the version (`● v_004`) sits on a line of
+its own, then «Перевірити налаштуван…» and «Показати версію…» each on their own line, both elided. «Показати версію…»
+opens a menu of every version of every preset (here 9 presets, ~60 rows) taller than the screen; it scrolls by its edge
+arrows, and the scroll is unsure. His four asks, as a direction for the milestone:
+1. The version on the same line as «DSP», after it: `▾ DSP ● v_004`.
+2. The buttons go into one menu behind an icon at that line's right end (the session proposes `⋯`, «more actions»: the
+   gear reads as the app's settings). In it: «Перевірити налаштування…», «Показати версію…», and «Збережено в DSP…» when
+   it is shown (`_cfg_btn`, now in the same header).
+3. The messages these buttons leave stay under that line, on a grey strip, so a collapsed menu hides nothing important.
+4. The version list gets a height limit (well under the screen) and an ordinary scrollbar, so the scroll is sure.
+The mockup (not built): the session's artifact of 2026-11-26.
+**Weight.** Medium: daily-visible, the section's top. Also answers finding 202 (the header cut by 7–28 px).
+**Whose.** TCC (`dsp_file_check.py`, `shown_version.py`, `main_window.py` DSP section). To the milestone.
