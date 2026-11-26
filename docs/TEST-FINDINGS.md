@@ -4258,8 +4258,11 @@ version).
 **Weight.** Medium: daily-visible, the section's top. Also answers finding 202 (the header cut by 7–28 px).
 **Whose.** TCC (`dsp_file_check.py`, `shown_version.py`, `main_window.py` DSP section). To the milestone.
 
-### 207. The housekeeping files are shown in the GitHub block, though they are never sent
-**What.** The Arbiter's screenshot, 2026-11-26: «Незбережені зміни 1» in the project's GitHub block, and its hover reads
-«Службові (1), не надсилаються: .sessions.log». His proposal: what is excluded need not be shown in TCC at all.
-**Weight.** Low; it makes a change to send look pending. Would also retire finding 203 (the plural of «службових файлів»).
+### 207. «Незбережені зміни 1» warns about a file that is never sent
+**What.** The Arbiter's screenshot, 2026-11-26: the project's GitHub block shows the yellow warning «Незбережені зміни 1»,
+and its own hover says the one file is excluded: «Службові (1), не надсилаються: .sessions.log». His point: an excluded
+file is no unsaved change, so why warn. Neither the warning nor its count should come from excluded files; with only
+those, the block says nothing is unsaved.
+**Weight.** Medium: a false warning that the project is not backed up.
+Would also retire finding 203 (the plural of «службових файлів»).
 **Whose.** TCC (`project_github`, `gitSubHousekeeping`). To the milestone.
