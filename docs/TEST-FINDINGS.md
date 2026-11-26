@@ -4247,11 +4247,11 @@ arrows, and the scroll is unsure. His four asks, as a direction for the mileston
 1. The version on the same line as «DSP», after it: `▾ DSP ● v_004`.
 2. The buttons go into one menu behind an icon at that line's right end: `⋯`, «more actions» (the session's proposal, his
    OK 2026-11-26; the gear reads as the app's settings). In it: «Перевірити налаштування…», «Показати версію…», and
-   «Збережено в DSP…» when it is shown (`_cfg_btn`, now in the same header; the session's addition, his word pending).
+   «Збережено в DSP…» when it is shown (`_cfg_btn`, now in the same header; the session's addition, his OK 2026-11-26).
 3. The messages these buttons leave stay under that line, on a grey strip, so a collapsed menu hides nothing important.
 4. The version list gets a height limit (well under the screen) and an ordinary scrollbar, so the scroll is sure.
-5. While another version is shown, «Назад до поточної» is not in the menu: a white button on that grey strip, under its
-   message (his question, the session's proposal). Seen with it: the header reads «v_004 (показано v_004)» when the shown
+5. While another version is shown, «Назад до поточної» is not in the menu: a button on that grey strip, under its
+   message, in TCC's orange (his OK 2026-11-26, «тільки кнопка помаранчева»). Seen with it: the header reads «v_004 (показано v_004)» when the shown
    one is 5.P-punch's v_004 — which preset's, only the line below says.
 The mockup (not built): https://claude.ai/artifact/N6woDJRWiWLXKXj6oQwXWu (three boards: the row, the menu, the shown
 version).
