@@ -4245,11 +4245,21 @@ its own, then «Перевірити налаштуван…» and «Показ�
 opens a menu of every version of every preset (here 9 presets, ~60 rows) taller than the screen; it scrolls by its edge
 arrows, and the scroll is unsure. His four asks, as a direction for the milestone:
 1. The version on the same line as «DSP», after it: `▾ DSP ● v_004`.
-2. The buttons go into one menu behind an icon at that line's right end (the session proposes `⋯`, «more actions»: the
-   gear reads as the app's settings). In it: «Перевірити налаштування…», «Показати версію…», and «Збережено в DSP…» when
-   it is shown (`_cfg_btn`, now in the same header).
+2. The buttons go into one menu behind an icon at that line's right end: `⋯`, «more actions» (the session's proposal, his
+   OK 2026-11-26; the gear reads as the app's settings). In it: «Перевірити налаштування…», «Показати версію…», and
+   «Збережено в DSP…» when it is shown (`_cfg_btn`, now in the same header; the session's addition, his word pending).
 3. The messages these buttons leave stay under that line, on a grey strip, so a collapsed menu hides nothing important.
 4. The version list gets a height limit (well under the screen) and an ordinary scrollbar, so the scroll is sure.
-The mockup (not built): the session's artifact of 2026-11-26.
+5. While another version is shown, «Назад до поточної» is not in the menu: a white button on that grey strip, under its
+   message (his question, the session's proposal). Seen with it: the header reads «v_004 (показано v_004)» when the shown
+   one is 5.P-punch's v_004 — which preset's, only the line below says.
+The mockup (not built): https://claude.ai/artifact/N6woDJRWiWLXKXj6oQwXWu (three boards: the row, the menu, the shown
+version).
 **Weight.** Medium: daily-visible, the section's top. Also answers finding 202 (the header cut by 7–28 px).
 **Whose.** TCC (`dsp_file_check.py`, `shown_version.py`, `main_window.py` DSP section). To the milestone.
+
+### 207. The housekeeping files are shown in the GitHub block, though they are never sent
+**What.** The Arbiter's screenshot, 2026-11-26: «Незбережені зміни 1» in the project's GitHub block, and its hover reads
+«Службові (1), не надсилаються: .sessions.log». His proposal: what is excluded need not be shown in TCC at all.
+**Weight.** Low; it makes a change to send look pending. Would also retire finding 203 (the plural of «службових файлів»).
+**Whose.** TCC (`project_github`, `gitSubHousekeeping`). To the milestone.
